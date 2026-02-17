@@ -81,7 +81,7 @@ namespace ValheimVillages
                 _logger.LogInfo("Hot reload — re-registering items in ObjectDB");
                 Items.ItemFactory.RegisterAll(ObjectDB.instance);
                 Items.VirtualRecipes.VirtualRecipeLoader.RegisterAll(ObjectDB.instance);
-                Patches.MountainStride_ObjectDB_Patch.RegisterStatusEffect(ObjectDB.instance);
+                Abilities.MountainStride.MountainStride_ObjectDB_Patch.RegisterStatusEffect(ObjectDB.instance);
             }
 
             if (isHotReload && ZNetScene.instance != null)

@@ -1,8 +1,7 @@
 using HarmonyLib;
 using ValheimVillages.Items;
-using ValheimVillages.Items.Fragments;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.Items.Fragments
 {
     /// <summary>
     /// Intercepts item use for ransom note fragments.

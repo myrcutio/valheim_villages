@@ -113,7 +113,7 @@ namespace ValheimVillages.NPCs.AI.UI.Tabs
 
             SuppressNativeRecipeElements(gui);
             UpdateSelectionVisuals();
-            Patches.CraftingStationPatch.HideWorkOrderButton();
+            Items.WorkOrders.CraftingStationPatch.HideWorkOrderButton();
             PopulateDescription(gui, m_tabs[ci]);
             ReapplyChildHiding(gui);
         }

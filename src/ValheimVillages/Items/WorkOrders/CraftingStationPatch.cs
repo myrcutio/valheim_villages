@@ -6,7 +6,7 @@ using UnityEngine.UI;
 using ValheimVillages.Items;
 using ValheimVillages.Items.Icons;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.Items.WorkOrders
 {
     /// <summary>
     /// Adds a small "Order" button next to the Craft button in crafting

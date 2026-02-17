@@ -1,8 +1,7 @@
 using HarmonyLib;
 using ValheimVillages.Items;
-using ValheimVillages.Items.WorkOrders;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.Items.WorkOrders
 {
     /// <summary>
     /// Intercepts item use for work order items.

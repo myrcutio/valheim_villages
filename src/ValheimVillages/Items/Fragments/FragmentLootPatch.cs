@@ -3,7 +3,7 @@ using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.Items;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.Items.Fragments
 {
     /// <summary>
     /// Injects ransom note fragments into chest loot tables.

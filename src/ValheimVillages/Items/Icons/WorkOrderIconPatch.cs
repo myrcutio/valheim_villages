@@ -6,7 +6,7 @@ using ValheimVillages.Items.Icons;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work;
 
-namespace ValheimVillages.Patches.WorkOrders
+namespace ValheimVillages.Items.Icons
 {
     /// <summary>
     /// Re-applies production item overlays and status badges on work order

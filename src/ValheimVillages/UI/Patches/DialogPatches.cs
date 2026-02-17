@@ -4,7 +4,7 @@ using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.NPCs.AI;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.UI.Patches
 {
     /// <summary>
     /// Patches to support the villager dialog menu:

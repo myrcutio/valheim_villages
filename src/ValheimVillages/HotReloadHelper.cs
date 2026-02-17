@@ -5,7 +5,7 @@ using ValheimVillages.Items.Fragments;
 using ValheimVillages.NPCs;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work;
-using ValheimVillages.Patches;
+using ValheimVillages.Items.WorkOrders;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villages;

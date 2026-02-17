@@ -2,7 +2,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.Items.WorkOrders
 {
     /// <summary>
     /// Registers a Hugin tutorial for work orders and triggers it when the player

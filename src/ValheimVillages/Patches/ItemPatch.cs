@@ -1,6 +1,7 @@
 using HarmonyLib;
 using ValheimVillages.Items;
 using ValheimVillages.Items.VirtualRecipes;
+using ValheimVillages.NPCs;
 
 namespace ValheimVillages.Patches
 {

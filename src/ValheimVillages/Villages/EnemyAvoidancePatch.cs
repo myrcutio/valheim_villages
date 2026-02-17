@@ -1,8 +1,7 @@
 using HarmonyLib;
 using UnityEngine;
-using ValheimVillages.Villages;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.Villages
 {
     /// <summary>
     /// Harmony patch on BaseAI.RandomMovement to make enemies and wildlife

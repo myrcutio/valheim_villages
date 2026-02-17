@@ -1,7 +1,6 @@
 using HarmonyLib;
-using ValheimVillages.Items.Fragments;
 
-namespace ValheimVillages.Patches.Fragments
+namespace ValheimVillages.Items.Fragments
 {
     /// <summary>
     /// Patches EnvMan.SetForceEnvironment to detect when the player enters a dungeon.

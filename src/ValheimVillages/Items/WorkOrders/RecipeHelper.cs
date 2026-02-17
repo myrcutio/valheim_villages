@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.Items.WorkOrders
 {
     /// <summary>
     /// Helper for accessing the currently selected recipe from InventoryGui.

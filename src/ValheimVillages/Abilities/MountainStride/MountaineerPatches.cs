@@ -2,7 +2,7 @@ using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.Abilities;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.Abilities.MountainStride
 {
     /// <summary>
     /// Registers the SE_MountainStride status effect with ObjectDB

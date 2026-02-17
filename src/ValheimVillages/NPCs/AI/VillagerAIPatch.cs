@@ -1,7 +1,6 @@
 using HarmonyLib;
-using ValheimVillages.NPCs.AI;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.NPCs.AI
 {
     /// <summary>
     /// Harmony prefix on MonsterAI.UpdateAI that intercepts the game's AI loop

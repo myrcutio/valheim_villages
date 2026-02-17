@@ -3,11 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 using UnityEngine;
-using ValheimVillages.NPCs;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.NPCs
 {
     /// <summary>
     /// Handles using pawn items to spawn villagers at unclaimed beds.

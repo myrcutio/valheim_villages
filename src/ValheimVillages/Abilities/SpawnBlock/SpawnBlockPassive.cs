@@ -3,7 +3,7 @@ using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.Villages;
 
-namespace ValheimVillages.Patches
+namespace ValheimVillages.Abilities.SpawnBlock
 {
     /// <summary>
     /// Harmony patch on SpawnSystem.UpdateSpawnList to prevent non-raid enemy spawns
