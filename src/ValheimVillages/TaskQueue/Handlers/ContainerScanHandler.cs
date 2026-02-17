@@ -3,6 +3,7 @@ using System.Globalization;
 using UnityEngine;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.TaskQueue.ActivityLog;
 
@@ -13,6 +14,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Returns the count of containers found in the result data.
     /// Priority: Low (1).
     /// </summary>
+    [RegisterTaskHandler]
     public class ContainerScanHandler : ITaskHandler
     {
         public string TaskName => "container_scan";

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
@@ -10,6 +11,7 @@ namespace ValheimVillages.UI.Panels
     /// Extracted from InfoTab's guard-specific ability section.
     /// Discovered via NPC tag "listpanel:guardstatus".
     /// </summary>
+    [RegisterListPanel("guardstatus", "info")]
     public class GuardStatusPanel : IListPanel
     {
         public string Tag => "guardstatus";

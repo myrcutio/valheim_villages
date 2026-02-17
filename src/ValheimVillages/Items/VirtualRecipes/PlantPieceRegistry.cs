@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 
 namespace ValheimVillages.Items.VirtualRecipes
 {
@@ -44,6 +45,7 @@ namespace ValheimVillages.Items.VirtualRecipes
         /// <summary>
         /// Clear all registrations (for hot reload).
         /// </summary>
+        [RegisterCleanup]
         public static void Clear()
         {
             _outputToPiece.Clear();

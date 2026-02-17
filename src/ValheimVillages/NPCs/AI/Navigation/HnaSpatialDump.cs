@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.Villages;
 
 namespace ValheimVillages.NPCs.AI
@@ -19,6 +20,7 @@ namespace ValheimVillages.NPCs.AI
         private const float RaycastMaxDown = 8f;
         private static readonly int GroundMask = LayerMask.GetMask("Default", "static_solid", "terrain", "piece");
 
+        [DevCommand("Dump spatial data (beds, height grid, doors, pieces) to JSON for offline testing", Name = "hna_dump")]
         public static void Dump()
         {
             var player = Player.m_localPlayer;
@@ -229,6 +231,7 @@ namespace ValheimVillages.NPCs.AI
         private float _timer;
         private Vector3 _lastPos;
 
+        [DevCommand("Start recording player path for walkable ground truth", Name = "hna_record_start")]
         public static void StartRecording()
         {
             if (s_instance != null)
@@ -243,6 +246,7 @@ namespace ValheimVillages.NPCs.AI
             Console.instance?.Print("Recording player path. Walk around all walkable areas, then run: hna_record_stop");
         }
 
+        [DevCommand("Stop recording and save path to .cursor/hna_walkable_path.json", Name = "hna_record_stop")]
         public static void StopRecording()
         {
             if (s_instance == null)

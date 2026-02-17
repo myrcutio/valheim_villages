@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work;
 using ValheimVillages.UI.Interaction;
@@ -137,6 +138,7 @@ namespace ValheimVillages.NPCs
         /// Clear the restored-IDs tracking set. Called on hot reload
         /// so NPCs can be re-restored with fresh component types.
         /// </summary>
+        [RegisterCleanup]
         public static void ClearTracking()
         {
             s_restoredIds.Clear();

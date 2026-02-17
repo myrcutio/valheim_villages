@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ValheimVillages.Core.Attributes;
 
 namespace ValheimVillages.TaskQueue
 {
@@ -39,6 +40,7 @@ namespace ValheimVillages.TaskQueue
         /// <summary>
         /// Clear all registered handlers (e.g. on hot reload).
         /// </summary>
+        [RegisterCleanup]
         public static void Clear()
         {
             s_handlers.Clear();

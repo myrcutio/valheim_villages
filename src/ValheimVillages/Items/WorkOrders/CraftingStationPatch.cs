@@ -3,6 +3,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.UI;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.Items;
 using ValheimVillages.Items.Icons;
 
@@ -29,6 +30,7 @@ namespace ValheimVillages.Items.WorkOrders
         /// Reset all static state (hot reload / world unload).
         /// The button GameObject itself is destroyed by the stale object sweep.
         /// </summary>
+        [RegisterCleanup]
         public static void Clear()
         {
             _workOrderButton = null;

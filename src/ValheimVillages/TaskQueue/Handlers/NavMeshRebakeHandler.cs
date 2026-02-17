@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villages;
@@ -11,6 +12,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Low-priority task handler that rebakes NavMesh in village bounds using Unity's public APIs.
     /// Bounds can be supplied via task attributes or computed from VillageAreaManager + villager beds.
     /// </summary>
+    [RegisterTaskHandler]
     public class NavMeshRebakeHandler : ITaskHandler
     {
         // #region agent log

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
@@ -12,6 +13,7 @@ namespace ValheimVillages.UI.Tabs
     /// Tab showing villager information.  Provides favourite places as
     /// list items (left pane) and place details + "Mark" action (right pane).
     /// </summary>
+    [RegisterTab("info", Order = 0)]
     public class InfoTab : IVillagerTab
     {
         public string Name => "Info";

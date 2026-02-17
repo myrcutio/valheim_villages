@@ -1,3 +1,4 @@
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 
 namespace ValheimVillages.Behaviors.Patrol
@@ -7,6 +8,7 @@ namespace ValheimVillages.Behaviors.Patrol
     /// Tag: "patrol", Priority: 30. Wraps the existing GuardBehavior which handles
     /// patrol discovery, waypoints, circuit tracing, and stall recovery.
     /// </summary>
+    [RegisterBehavior("patrol")]
     public class PerimeterPatrolBehavior : IBehavior
     {
         private readonly VillagerAI m_ai;

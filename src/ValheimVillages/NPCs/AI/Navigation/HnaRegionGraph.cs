@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.Villages;
 
 namespace ValheimVillages.NPCs.AI
@@ -298,6 +299,7 @@ namespace ValheimVillages.NPCs.AI
         /// <summary>
         /// Clear the graph (e.g. on world unload).
         /// </summary>
+        [RegisterCleanup]
         public static void Clear()
         {
             s_regionIds.Clear();

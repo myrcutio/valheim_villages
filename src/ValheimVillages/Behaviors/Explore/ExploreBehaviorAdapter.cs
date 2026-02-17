@@ -1,3 +1,4 @@
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 
 namespace ValheimVillages.Behaviors.Explore
@@ -8,6 +9,7 @@ namespace ValheimVillages.Behaviors.Explore
     /// Exploration is currently handled by VillagerBehaviorLogic; this adapter marks
     /// the NPC as exploration-capable for tag-based discovery.
     /// </summary>
+    [RegisterBehavior("explore")]
     public class ExploreBehaviorAdapter : IBehavior
     {
         private readonly VillagerAI m_ai;

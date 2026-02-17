@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.TaskQueue.ActivityLog;
 
 namespace ValheimVillages.TaskQueue
@@ -219,6 +220,7 @@ namespace ValheimVillages.TaskQueue
         /// <summary>
         /// Clear all queues, pending keys, and dead letters (e.g. on world unload).
         /// </summary>
+        [RegisterCleanup]
         public static void Clear()
         {
             foreach (var q in s_queues.Values)

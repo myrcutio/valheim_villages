@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.Items.WorkOrders;
 using ValheimVillages.UI.Core;
 
@@ -11,6 +12,7 @@ namespace ValheimVillages.UI.ContextMenus
     /// Opens when a player right-clicks a work order item.
     /// Styled to match Valheim's native UI aesthetic via VillagerUIFactory.
     /// </summary>
+    [RegisterModObject("WorkOrderMenu")]
     public class WorkOrderMenu : MonoBehaviour
     {
         private static WorkOrderMenu s_instance;

@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using UnityEngine;
 using ValheimVillages.Behaviors.Patrol;
+using ValheimVillages.Core.Attributes;
 
 namespace ValheimVillages.NPCs.AI
 {
@@ -14,6 +15,7 @@ namespace ValheimVillages.NPCs.AI
     {
         private const string OutputPath = "/home/benny/Projects/valheim_villages/.cursor/hna_boundary_dump.json";
 
+        [DevCommand("Dump HNA boundary cells + edge-snapped positions to JSON for offline pipeline testing", Name = "hna_boundary_dump")]
         public static void Dump()
         {
             if (!HnaRegionGraph.IsAvailable)

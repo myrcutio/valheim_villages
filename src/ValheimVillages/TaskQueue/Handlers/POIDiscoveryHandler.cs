@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.TaskQueue.ActivityLog;
 
@@ -32,6 +33,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Note: The priority is set on the VillagerTask at enqueue time, not here.
     /// This handler processes both task names.
     /// </summary>
+    [RegisterTaskHandler]
     public class POIDiscoveryHandler : ITaskHandler
     {
         public const string DiscoveryTaskName = "poi_discovery";
@@ -125,6 +127,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Separate handler registration for "poi_validation" tasks.
     /// Delegates to POIDiscoveryHandler which handles both task names.
     /// </summary>
+    [RegisterTaskHandler]
     public class POIValidationHandler : ITaskHandler
     {
         private readonly POIDiscoveryHandler m_inner = new POIDiscoveryHandler();

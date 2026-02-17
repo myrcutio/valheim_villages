@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.UI.Core;
@@ -13,6 +14,7 @@ namespace ValheimVillages.UI.Tabs
     /// Tab showing debug commands for villager NPCs.
     /// Provides commands as list items with action buttons.
     /// </summary>
+    [RegisterTab("debug", Order = 1)]
     public class DebugTab : IVillagerTab
     {
         public string Name => "Debug";

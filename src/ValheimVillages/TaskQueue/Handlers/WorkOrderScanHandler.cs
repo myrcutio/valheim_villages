@@ -7,6 +7,7 @@ using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work;
 using ValheimVillages.NPCs.AI.Work.Farming;
 using ValheimVillages.Items.VirtualRecipes;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.TaskQueue.ActivityLog;
 
@@ -19,6 +20,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// context via callback.
     /// Priority: Medium (2).
     /// </summary>
+    [RegisterTaskHandler]
     public class WorkOrderScanHandler : ITaskHandler
     {
         public string TaskName => "work_order_scan";

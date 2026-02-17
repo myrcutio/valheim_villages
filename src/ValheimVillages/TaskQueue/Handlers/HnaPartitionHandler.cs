@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villages;
@@ -14,6 +15,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// any space within 15m of a villager's bed. Adds doors and stairs as links.
     /// Grid sampling, flood-fill, and link detection are delegated to <see cref="HnaGridBuilder"/>.
     /// </summary>
+    [RegisterTaskHandler]
     public class HnaPartitionHandler : ITaskHandler
     {
         public const string HnaPartitionTaskName = "hna_partition";

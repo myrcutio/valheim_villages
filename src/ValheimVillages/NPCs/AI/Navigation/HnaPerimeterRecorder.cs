@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 
 namespace ValheimVillages.NPCs.AI
 {
@@ -22,6 +23,7 @@ namespace ValheimVillages.NPCs.AI
         private float m_timer;
         private Vector3 m_lastPos;
 
+        [DevCommand("Start recording player's perimeter walk as reference path for pipeline testing", Name = "hna_perimeter_start")]
         public static void StartRecording()
         {
             if (s_instance != null)
@@ -37,6 +39,7 @@ namespace ValheimVillages.NPCs.AI
                 "Recording perimeter path. Walk the exact patrol route, then run: hna_perimeter_stop");
         }
 
+        [DevCommand("Stop recording and save perimeter path to .cursor/hna_perimeter_path.json", Name = "hna_perimeter_stop")]
         public static void StopRecording()
         {
             if (s_instance == null)

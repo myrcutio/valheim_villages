@@ -1,4 +1,5 @@
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 
 namespace ValheimVillages.Abilities
 {
@@ -10,7 +11,7 @@ namespace ValheimVillages.Abilities
     /// </summary>
     public static class VillagerAbilityManager
     {
-        private const string MountainStrideKey = "vv_ability_mountain_stride";
+        public const string MountainStrideKey = "vv_ability_mountain_stride";
         private static float s_cooldownRemaining;
         private static readonly KeyCode ActivationKey = KeyCode.R;
 
@@ -133,6 +134,7 @@ namespace ValheimVillages.Abilities
         /// <summary>
         /// Reset the cooldown to zero (debug command).
         /// </summary>
+        [DevCommand("Reset Mountain Stride cooldown", Name = "vv_reset_cooldown")]
         public static void ResetCooldown()
         {
             s_cooldownRemaining = 0f;
@@ -141,57 +143,8 @@ namespace ValheimVillages.Abilities
             Plugin.Log?.LogInfo("[Mountaineer] Cooldown reset via debug command");
         }
 
-        /// <summary>
-        /// Register debug console commands. Called once during plugin init.
-        /// </summary>
-        public static void RegisterConsoleCommands()
-        {
-            new Terminal.ConsoleCommand("vv_reset_cooldown",
-                "Reset Mountain Stride cooldown",
-                args => ResetCooldown());
-
-            new Terminal.ConsoleCommand("hna_debug_player",
-                "Log HNA attributes for current player position to .cursor/debug.log (region, bounds, heights)",
-                args => LogHnaPlayerPosition(args));
-
-            new Terminal.ConsoleCommand("hna_dump",
-                "Dump spatial data (beds, height grid, doors, pieces) to .cursor/hna_spatial_dump.json for offline testing",
-                args => NPCs.AI.HnaSpatialDump.Dump());
-
-            new Terminal.ConsoleCommand("hna_record_start",
-                "Start recording player path for walkable ground truth",
-                args => NPCs.AI.HnaPathRecorder.StartRecording());
-
-            new Terminal.ConsoleCommand("hna_record_stop",
-                "Stop recording and save path to .cursor/hna_walkable_path.json",
-                args => NPCs.AI.HnaPathRecorder.StopRecording());
-
-            new Terminal.ConsoleCommand("hna_markers",
-                "Toggle HNA debug markers (region/link torches) on or off",
-                args => NPCs.AI.HnaDebugVisualization.ToggleMarkers());
-
-            new Terminal.ConsoleCommand("hna_cleanup",
-                "Remove ALL persisted torch markers from the world (fixes leftover markers from previous sessions)",
-                args => NPCs.AI.HnaDebugVisualization.CleanupPersistedMarkers());
-
-            new Terminal.ConsoleCommand("hna_markers_dump",
-                "Save positions of all surviving markers to .cursor/hna_validated_markers.json (run after deleting invalid ones)",
-                args => NPCs.AI.HnaDebugVisualization.DumpSurvivingMarkers());
-
-            new Terminal.ConsoleCommand("hna_boundary_dump",
-                "Dump HNA boundary cells + edge-snapped positions to .cursor/hna_boundary_dump.json for offline pipeline testing",
-                args => NPCs.AI.HnaBoundaryDump.Dump());
-
-            new Terminal.ConsoleCommand("hna_perimeter_start",
-                "Start recording player's perimeter walk as reference path for pipeline testing",
-                args => NPCs.AI.HnaPerimeterRecorder.StartRecording());
-
-            new Terminal.ConsoleCommand("hna_perimeter_stop",
-                "Stop recording and save perimeter path to .cursor/hna_perimeter_path.json",
-                args => NPCs.AI.HnaPerimeterRecorder.StopRecording());
-        }
-
-        private static void LogHnaPlayerPosition(Terminal.ConsoleEventArgs args)
+        [DevCommand("Log HNA attributes for current player position to .cursor/debug.log (region, bounds, heights)", Name = "hna_debug_player")]
+        public static void LogHnaPlayerPosition(Terminal.ConsoleEventArgs args)
         {
             var player = Player.m_localPlayer;
             if (player == null || player.transform == null)

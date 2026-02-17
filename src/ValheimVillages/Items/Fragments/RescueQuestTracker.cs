@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs;
 
 namespace ValheimVillages.Items.Fragments
@@ -101,6 +102,7 @@ namespace ValheimVillages.Items.Fragments
         /// <summary>
         /// Clear all pending quests (e.g. on hot reload or world unload).
         /// </summary>
+        [RegisterCleanup]
         public static void Clear() => _pendingQuests.Clear();
 
         /// <summary>

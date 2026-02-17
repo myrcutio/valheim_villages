@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 
 namespace ValheimVillages.Villages
 {
@@ -90,6 +91,7 @@ namespace ValheimVillages.Villages
         /// <summary>
         /// Clear all registered areas (e.g. on world unload).
         /// </summary>
+        [RegisterCleanup]
         public static void Clear()
         {
             s_areas.Clear();

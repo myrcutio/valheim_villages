@@ -4,8 +4,8 @@ using BepInEx;
 using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.TaskQueue;
-using ValheimVillages.TaskQueue.Handlers;
 
 [assembly: AssemblyTitle("Valheim Villages")]
 [assembly: AssemblyDescription("A village-building and NPC management mod for Valheim")]
@@ -46,19 +46,12 @@ namespace ValheimVillages
             // Register custom localization tokens (SetupLanguage already ran)
             Patches.LocalizationPatch.RegisterTokens();
 
-            // Register task queue handlers
+            // Clear any stale task handlers before scanning
             TaskHandlerRegistry.Clear();
-            TaskHandlerRegistry.Register(new ContainerScanHandler());
-            TaskHandlerRegistry.Register(new WorkOrderScanHandler());
-            TaskHandlerRegistry.Register(new BreachCheckHandler());
-            TaskHandlerRegistry.Register(new POIDiscoveryHandler());
-            TaskHandlerRegistry.Register(new POIValidationHandler());
-            TaskHandlerRegistry.Register(new RecipeDiscoveryRefreshHandler());
-            TaskHandlerRegistry.Register(new HnaPartitionHandler());
-            TaskHandlerRegistry.Register(new NavMeshRebakeHandler());
 
-            // Register debug console commands
-            Abilities.VillagerAbilityManager.RegisterConsoleCommands();
+            // Scan assembly for all registration attributes
+            // (registers dev commands, task handlers, tabs, panels, abilities, etc.)
+            AttributeScanner.ScanAndRegister(typeof(Plugin).Assembly);
 
             // Hot reload support: if the game world is already loaded,
             // run full cleanup before re-registering anything.
@@ -70,13 +63,9 @@ namespace ValheimVillages
                 HotReloadHelper.FullCleanup();
             }
 
-            // Register villager UI tabs (after cleanup so the old
-            // VillagerTabManager singleton is gone)
-            UI.Core.VillagerTabManager.RegisterTab(new UI.Tabs.InfoTab());
-            UI.Core.VillagerTabManager.RegisterTab(new UI.Tabs.DebugTab());
-
-            // Register tag-driven list panels (manual in this phase; attribute-based in Phase 4)
-            UI.Tabs.InfoTab.RegisterPanel(new UI.Panels.GuardStatusPanel());
+            // Tabs, list panels, and context menus are now auto-registered via
+            // [RegisterTab], [RegisterListPanel], [RegisterContextMenu] attributes
+            // in AttributeScanner.ScanAndRegister() above.
 
             // Hot reload support: re-register items and prefabs
             if (isHotReload)
@@ -84,7 +73,7 @@ namespace ValheimVillages
                 _logger.LogInfo("Hot reload — re-registering items in ObjectDB");
                 Items.ItemFactory.RegisterAll(ObjectDB.instance);
                 Items.VirtualRecipes.VirtualRecipeLoader.RegisterAll(ObjectDB.instance);
-                Abilities.MountainStride.MountainStride_ObjectDB_Patch.RegisterStatusEffect(ObjectDB.instance);
+                AttributeScanner.InvokeObjectDBRegistrations(typeof(Plugin).Assembly, ObjectDB.instance);
             }
 
             if (isHotReload && ZNetScene.instance != null)

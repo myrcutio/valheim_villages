@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 
 namespace ValheimVillages.TaskQueue.ActivityLog
 {
@@ -198,6 +199,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         /// Reset the singleton instance (e.g. on hot reload so the new
         /// assembly gets a fresh instance).
         /// </summary>
+        [RegisterCleanup]
         public static void ResetInstance()
         {
             s_instance?.Clear();

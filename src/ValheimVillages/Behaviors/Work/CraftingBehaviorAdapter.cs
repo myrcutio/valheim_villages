@@ -1,3 +1,4 @@
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work;
 using ValheimVillages.NPCs.AI.Work.Farming;
@@ -8,6 +9,7 @@ namespace ValheimVillages.Behaviors.Work
     /// IBehavior adapter wrapping the existing CraftingBehavior for worker NPCs.
     /// Tag: "craft", Priority: 50.
     /// </summary>
+    [RegisterBehavior("craft")]
     public class CraftingBehaviorAdapter : IBehavior
     {
         private readonly VillagerAI m_ai;

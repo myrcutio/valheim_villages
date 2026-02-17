@@ -1,4 +1,5 @@
 using ValheimVillages.Behaviors.Patrol;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 
 namespace ValheimVillages.Behaviors.Alarm
@@ -8,6 +9,7 @@ namespace ValheimVillages.Behaviors.Alarm
     /// and takes control at priority 100 when a breach is detected.
     /// Tag: "alarm", Priority: 100.
     /// </summary>
+    [RegisterBehavior("alarm")]
     public class BreachAlarmBehavior : IBehavior
     {
         private readonly VillagerAI m_ai;

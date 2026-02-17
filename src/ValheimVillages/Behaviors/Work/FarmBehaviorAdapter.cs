@@ -1,3 +1,4 @@
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work.Farming;
 
@@ -9,6 +10,7 @@ namespace ValheimVillages.Behaviors.Work
     /// independently take control — farming is a sub-state of crafting.
     /// Tag: "farm", Priority: 50.
     /// </summary>
+    [RegisterBehavior("farm")]
     public class FarmBehaviorAdapter : IBehavior
     {
         private readonly VillagerAI m_ai;

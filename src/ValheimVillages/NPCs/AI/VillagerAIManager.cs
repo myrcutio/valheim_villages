@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ValheimVillages.Core.Attributes;
 
 namespace ValheimVillages.NPCs.AI
 {
@@ -98,6 +99,7 @@ namespace ValheimVillages.NPCs.AI
         /// <summary>
         /// Clear all registrations (e.g. on world unload).
         /// </summary>
+        [RegisterCleanup]
         public static void Clear()
         {
             ActiveVillagers.Clear();

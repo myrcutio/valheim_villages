@@ -1,6 +1,7 @@
 using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.Abilities;
+using ValheimVillages.Core.Attributes;
 
 namespace ValheimVillages.Abilities.MountainStride
 {
@@ -17,6 +18,7 @@ namespace ValheimVillages.Abilities.MountainStride
             RegisterStatusEffect(__instance);
         }
 
+        [RegisterObjectDB]
         public static void RegisterStatusEffect(ObjectDB db)
         {
             if (db == null) return;

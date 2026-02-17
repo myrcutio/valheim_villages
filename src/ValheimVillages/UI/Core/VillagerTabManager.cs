@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.UI.Interaction;
 
 namespace ValheimVillages.UI.Core
@@ -13,6 +14,7 @@ namespace ValheimVillages.UI.Core
     /// all backgrounds and chrome stay intact.
     /// Content rendering is in VillagerTabRenderer.cs (partial class).
     /// </summary>
+    [RegisterModObject("VillagerTabManager")]
     public partial class VillagerTabManager : MonoBehaviour
     {
         private static VillagerTabManager s_instance;

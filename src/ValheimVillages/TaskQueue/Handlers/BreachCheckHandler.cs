@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 using ValheimVillages.Behaviors.Alarm;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.TaskQueue.ActivityLog;
 
@@ -12,6 +13,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Returns breach status and outward direction in result data.
     /// Priority: High (3).
     /// </summary>
+    [RegisterTaskHandler]
     public class BreachCheckHandler : ITaskHandler
     {
         public string TaskName => "breach_check";

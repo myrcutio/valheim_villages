@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Core.Attributes;
 
 namespace ValheimVillages.NPCs.AI
 {
@@ -22,6 +23,7 @@ namespace ValheimVillages.NPCs.AI
         public static bool MarkersEnabled { get; private set; }
 
         /// <summary>Toggle marker visibility. Spawns if off → on, clears if on → off.</summary>
+        [DevCommand("Toggle HNA debug markers (region/link torches) on or off", Name = "hna_markers")]
         public static void ToggleMarkers()
         {
             if (MarkersEnabled)
@@ -64,6 +66,7 @@ namespace ValheimVillages.NPCs.AI
         /// Remove all marker prefabs from the scene (including any not in our list, e.g. after hot reload).
         /// Uses ZNetScene.Destroy to properly remove ZDOs so markers don't persist to the save file.
         /// </summary>
+        [RegisterCleanup]
         public static void ClearMarkers()
         {
             foreach (var go in s_spawnedLinkMarkers)
@@ -134,6 +137,7 @@ namespace ValheimVillages.NPCs.AI
         /// This removes markers persisted from previous sessions where Object.Destroy was used
         /// instead of ZNetScene.Destroy, leaving ZDOs in the save file.
         /// </summary>
+        [DevCommand("Remove ALL persisted torch markers from the world (fixes leftover markers from previous sessions)", Name = "hna_cleanup")]
         public static void CleanupPersistedMarkers()
         {
             if (ZNetScene.instance == null)
@@ -190,6 +194,7 @@ namespace ValheimVillages.NPCs.AI
         /// Dump positions of all surviving marker prefabs to a JSON file.
         /// Run after manually deleting invalid markers to capture the "validated" set.
         /// </summary>
+        [DevCommand("Save positions of all surviving markers to .cursor/hna_validated_markers.json", Name = "hna_markers_dump")]
         public static void DumpSurvivingMarkers()
         {
             string linkClone = LinkTorchPrefabName + "(Clone)";
