@@ -14,7 +14,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Priority: High (3).
     /// </summary>
     [RegisterTaskHandler]
-    public class BreachCheckHandler : ITaskHandler
+    public class BreachCheckHandler : ITaskHandlerWithLog
     {
         public string TaskName => "breach_check";
 

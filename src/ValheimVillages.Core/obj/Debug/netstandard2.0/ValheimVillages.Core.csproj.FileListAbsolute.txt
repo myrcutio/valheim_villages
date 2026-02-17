@@ -1,0 +1,8 @@
+/home/benny/Projects/valheim_villages/src/ValheimVillages.Core/bin/Debug/netstandard2.0/ValheimVillages.Core.deps.json
+/home/benny/Projects/valheim_villages/src/ValheimVillages.Core/bin/Debug/netstandard2.0/ValheimVillages.Core.dll
+/home/benny/Projects/valheim_villages/src/ValheimVillages.Core/bin/Debug/netstandard2.0/ValheimVillages.Core.pdb
+/home/benny/Projects/valheim_villages/src/ValheimVillages.Core/obj/Debug/netstandard2.0/ValheimVillages.Core.csproj.AssemblyReference.cache
+/home/benny/Projects/valheim_villages/src/ValheimVillages.Core/obj/Debug/netstandard2.0/ValheimVillages.Core.GeneratedMSBuildEditorConfig.editorconfig
+/home/benny/Projects/valheim_villages/src/ValheimVillages.Core/obj/Debug/netstandard2.0/ValheimVillages.Core.csproj.CoreCompileInputs.cache
+/home/benny/Projects/valheim_villages/src/ValheimVillages.Core/obj/Debug/netstandard2.0/ValheimVillages.Core.dll
+/home/benny/Projects/valheim_villages/src/ValheimVillages.Core/obj/Debug/netstandard2.0/ValheimVillages.Core.pdb

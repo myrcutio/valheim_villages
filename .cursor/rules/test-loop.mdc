@@ -1,0 +1,81 @@
+# Test Loop Workflow
+
+Agent workflow for the edit → build → test → verify cycle.
+
+## Two-Tier Testing
+
+### Tier 1: Unit Tests (no Valheim needed)
+
+Run after every code change:
+
+```bash
+dotnet build ValheimVillages.slnx && dotnet test tests/ValheimVillages.Tests/
+```
+
+- Tests algorithms, tag parser, data types, enums, contracts
+- Fast feedback (~2-3 seconds)
+- Must pass before proceeding to Tier 2
+
+### Tier 2: In-Game Integration Tests (needs Valheim running)
+
+After a successful build, ScriptEngine auto-reloads the DLL:
+
+1. `dotnet build` outputs to `BepInEx/scripts/` (hot reload mode)
+2. Wait 6 seconds for ScriptEngine auto-reload
+3. Read `BepInEx/config/vv_test_results.json`
+4. If `"result": "PASS"` → done
+5. If `"result": "FAIL"` → parse `failures` and `errors` arrays
+
+## Reading Test Results JSON
+
+```bash
+cat ~/.config/r2modmanPlus-local/Valheim/profiles/valheim-modding/BepInEx/config/vv_test_results.json
+```
+
+### Schema (v1)
+
+```json
+{
+  "v": 1,
+  "ts": "2026-02-17T...",
+  "result": "PASS|FAIL",
+  "summary": { "total": N, "passed": N, "failed": N, "errors": N, "skipped": N },
+  "failures": [
+    {
+      "test": "ClassName.MethodName",
+      "state": "FAIL",
+      "location": { "file": "path/to/file.cs", "line": 42, "class": "Namespace.ClassName" },
+      "message": "Assertion message",
+      "assertions": [{ "message": "...", "expected": "...", "actual": "..." }],
+      "stackTrace": "..."
+    }
+  ],
+  "errors": [...],
+  "skipped": []
+}
+```
+
+### Debugging Failures
+
+For each failure entry:
+1. Use `location.file` and `location.line` to navigate to the source
+2. Compare `assertions[].expected` vs `assertions[].actual`
+3. Check `stackTrace` for the call chain
+4. Fallback: `tail -30 ~/.config/r2modmanPlus-local/Valheim/profiles/valheim-modding/BepInEx/LogOutput.log`
+
+## Console Commands
+
+- `vv_runtests` — manually trigger all `[ModTest]` integration tests
+- `vv_snapshot` — capture current scene state to `vv_snapshot.json`
+- `vv_snapshot_verify` — compare current state against saved snapshot
+
+## Full Loop Cycle
+
+1. Make code changes
+2. `dotnet build ValheimVillages.slnx` (builds Core + mod)
+3. `dotnet test tests/ValheimVillages.Tests/` (unit tests)
+4. If Valheim is running: wait 6s for auto-reload
+5. Read `vv_test_results.json` for integration results
+6. Fix any failures and repeat
+
+Expected cycle time: ~8-10 seconds from edit to integration test feedback.

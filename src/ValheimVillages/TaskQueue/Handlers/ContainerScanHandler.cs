@@ -15,7 +15,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Priority: Low (1).
     /// </summary>
     [RegisterTaskHandler]
-    public class ContainerScanHandler : ITaskHandler
+    public class ContainerScanHandler : ITaskHandlerWithLog
     {
         public string TaskName => "container_scan";
 

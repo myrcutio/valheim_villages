@@ -34,7 +34,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// This handler processes both task names.
     /// </summary>
     [RegisterTaskHandler]
-    public class POIDiscoveryHandler : ITaskHandler
+    public class POIDiscoveryHandler : ITaskHandlerWithLog
     {
         public const string DiscoveryTaskName = "poi_discovery";
         public const string ValidationTaskName = "poi_validation";
@@ -97,9 +97,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                     foreach (var loc in ai.Memory.KnownLocations)
                     {
                         if (loc.Type == LocationType.CraftStation)
-                            craftStationsAfter.Add($"{loc.Position.x:F0},{loc.Position.y:F0},{loc.Position.z:F0}(q={loc.GetQualityScore():F0})");
+                            craftStationsAfter.Add($"{loc.Position.X:F0},{loc.Position.Y:F0},{loc.Position.Z:F0}(q={loc.GetQualityScore():F0})");
                         else if (loc.Type == LocationType.CookingStation)
-                            cookingStationsAfter.Add($"{loc.Position.x:F0},{loc.Position.y:F0},{loc.Position.z:F0}(q={loc.GetQualityScore():F0})");
+                            cookingStationsAfter.Add($"{loc.Position.X:F0},{loc.Position.Y:F0},{loc.Position.Z:F0}(q={loc.GetQualityScore():F0})");
                     }
                     DebugLog.Write("FH", "POIDiscoveryHandler:discovery", "AfterDiscover",
                         $"{{\"npc\":{DebugLog.Str(ai.NpcName)},\"discovered\":{DebugLog.Num(discovered)},\"totalLocs\":{DebugLog.Num(ai.Memory.KnownLocations.Count)},\"craftStationCount\":{DebugLog.Num(craftStationsAfter.Count)},\"craftStations\":{DebugLog.Str(string.Join("|", craftStationsAfter))},\"cookingStationCount\":{DebugLog.Num(cookingStationsAfter.Count)},\"cookingStations\":{DebugLog.Str(string.Join("|", cookingStationsAfter))}}}");
@@ -128,7 +128,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Delegates to POIDiscoveryHandler which handles both task names.
     /// </summary>
     [RegisterTaskHandler]
-    public class POIValidationHandler : ITaskHandler
+    public class POIValidationHandler : ITaskHandlerWithLog
     {
         private readonly POIDiscoveryHandler m_inner = new POIDiscoveryHandler();
 

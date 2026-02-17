@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using ValheimVillages;
 using ValheimVillages.Items.VirtualRecipes;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work;
@@ -31,7 +32,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             // Find a farm location in the NPC's memory
             var farmLoc = ai.Memory.KnownLocations
                 .Where(l => l.Type == LocationType.Farm)
-                .OrderBy(l => Vector3.Distance(ai.Memory.BedPosition, l.Position))
+                .OrderBy(l => Vector3.Distance(ai.Memory.BedPosition, l.Position.ToVector3()))
                 .FirstOrDefault();
 
             // Fallback: cultivated ground is terrain (Heightmap), not a discoverable object.
@@ -39,7 +40,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             Vector3 farmPosition;
             if (farmLoc != null)
             {
-                farmPosition = farmLoc.Position;
+                farmPosition = farmLoc.Position.ToVector3();
             }
             else
             {

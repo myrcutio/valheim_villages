@@ -3,19 +3,15 @@ using UnityEngine;
 namespace ValheimVillages.Abilities
 {
     /// <summary>
-    /// Interface for passive village effects that operate continuously
-    /// within village boundaries. Implementations are registered via
-    /// [RegisterPassive] and discovered by AttributeScanner.
+    /// Extension of the Core IPassiveEffect interface adding Vector3 overload.
+    /// The Core version uses Vec3; this provides a Unity-compatible overload.
     /// </summary>
-    public interface IPassiveEffect
+    public static class PassiveEffectExtensions
     {
-        /// <summary>Unique passive effect identifier (e.g. "spawnblock").</summary>
-        string Id { get; }
-
-        /// <summary>Display name shown in the UI.</summary>
-        string DisplayName { get; }
-
-        /// <summary>Check if this passive effect is active at the given world position.</summary>
-        bool IsActive(Vector3 position);
+        /// <summary>Check if this passive effect is active at the given Unity Vector3 position.</summary>
+        public static bool IsActive(this IPassiveEffect effect, Vector3 position)
+        {
+            return effect.IsActive(position.ToVec3());
+        }
     }
 }

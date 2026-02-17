@@ -21,6 +21,11 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
+  <!-- Core assembly reference -->
+  <ItemGroup>
+    <ProjectReference Include="..\ValheimVillages.Core\ValheimVillages.Core.csproj" />
+  </ItemGroup>
+
   <!-- BepInEx and Harmony -->
   <ItemGroup>
     <Reference Include="BepInEx">

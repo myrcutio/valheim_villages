@@ -11,7 +11,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Priority: Low (1).
     /// </summary>
     [RegisterTaskHandler]
-    public class RecipeDiscoveryRefreshHandler : ITaskHandler
+    public class RecipeDiscoveryRefreshHandler : ITaskHandlerWithLog
     {
         public string TaskName => "recipe_discovery_refresh";
 

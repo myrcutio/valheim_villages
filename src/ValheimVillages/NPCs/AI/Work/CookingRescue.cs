@@ -1,4 +1,5 @@
 using UnityEngine;
+using ValheimVillages;
 
 namespace ValheimVillages.NPCs.AI.Work
 {
@@ -20,10 +21,10 @@ namespace ValheimVillages.NPCs.AI.Work
 
             foreach (var loc in cookingLocations)
             {
-                float dist = Utils.DistanceXZ(m_ai.Position, loc.Position);
+                float dist = Utils.DistanceXZ(m_ai.Position, loc.Position.ToVector3());
                 if (dist > WorkSettings.ChestScanRadius) continue;
 
-                var station = FindCookingStationAt(loc.Position);
+                var station = FindCookingStationAt(loc.Position.ToVector3());
                 if (station == null) continue;
 
                 int slotCount = CookingStationHelper.GetSlotCount(station);
@@ -36,7 +37,7 @@ namespace ValheimVillages.NPCs.AI.Work
                     var context = new WorkOrderContext
                     {
                         CookingStationRef = station,
-                        CraftStationPosition = loc.Position,
+                        CraftStationPosition = loc.Position.ToVector3(),
                         IsRescue = true,
                         WorkOrder = new WorkOrderMatch
                         {

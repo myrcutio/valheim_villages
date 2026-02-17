@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using ValheimVillages;
 
 namespace ValheimVillages.NPCs.AI
 {
@@ -47,7 +48,7 @@ namespace ValheimVillages.NPCs.AI
 
             // Check for existing location of same type nearby
             var existing = m_locations.FirstOrDefault(l => 
-                l.Type == type && l.IsSameLocation(position));
+                l.Type == type && l.IsSameLocation(position.ToVec3()));
 
             if (existing != null)
             {
@@ -66,7 +67,7 @@ namespace ValheimVillages.NPCs.AI
             // Add new location
             m_locations.Add(new KnownLocation
             {
-                Position = position,
+                Position = position.ToVec3(),
                 Type = type,
                 HasShelter = hasShelter,
                 ComfortValue = comfortValue
@@ -101,7 +102,7 @@ namespace ValheimVillages.NPCs.AI
         /// </summary>
         public IEnumerable<KnownLocation> GetLocationsWithinRange(Vector3 from, float range)
         {
-            return m_locations.Where(l => Vector3.Distance(from, l.Position) <= range);
+            return m_locations.Where(l => Vector3.Distance(from, l.Position.ToVector3()) <= range);
         }
 
         /// <summary>
@@ -226,7 +227,7 @@ namespace ValheimVillages.NPCs.AI
         private string SerializeLocations()
         {
             var parts = m_locations.Select(l =>
-                $"{(int)l.Type},{l.Position.x:F1},{l.Position.y:F1},{l.Position.z:F1},{(l.HasShelter ? 1 : 0)},{l.ComfortValue:F1}");
+                $"{(int)l.Type},{l.Position.X:F1},{l.Position.Y:F1},{l.Position.Z:F1},{(l.HasShelter ? 1 : 0)},{l.ComfortValue:F1}");
             return string.Join("|", parts);
         }
 
@@ -246,7 +247,7 @@ namespace ValheimVillages.NPCs.AI
                     var loc = new KnownLocation
                     {
                         Type = (LocationType)int.Parse(fields[0]),
-                        Position = new Vector3(
+                        Position = new Vec3(
                             float.Parse(fields[1]),
                             float.Parse(fields[2]),
                             float.Parse(fields[3])),

@@ -21,7 +21,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Priority: Medium (2).
     /// </summary>
     [RegisterTaskHandler]
-    public class WorkOrderScanHandler : ITaskHandler
+    public class WorkOrderScanHandler : ITaskHandlerWithLog
     {
         public string TaskName => "work_order_scan";
 

@@ -16,7 +16,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Grid sampling, flood-fill, and link detection are delegated to <see cref="HnaGridBuilder"/>.
     /// </summary>
     [RegisterTaskHandler]
-    public class HnaPartitionHandler : ITaskHandler
+    public class HnaPartitionHandler : ITaskHandlerWithLog
     {
         public const string HnaPartitionTaskName = "hna_partition";
 

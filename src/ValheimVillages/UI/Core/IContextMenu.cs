@@ -1,15 +1,12 @@
 namespace ValheimVillages.UI.Core
 {
     /// <summary>
-    /// Interface for tag-driven context menus shown on NPC interaction.
-    /// Discovered via NPC definition tags (e.g. "contextmenu:workorder").
-    /// Registration is manual in this phase; attribute-based registration comes in Phase 4.
+    /// Extended IContextMenu interface with Unity-dependent UI methods.
+    /// Context menu implementations should implement this interface.
+    /// The Core IContextMenu provides the Unity-free base (Id).
     /// </summary>
-    public interface IContextMenu
+    public interface IContextMenuUI : IContextMenu
     {
-        /// <summary>Tag that identifies this context menu (e.g. "workorder").</summary>
-        string Id { get; }
-
         /// <summary>Whether this menu should be available for the current NPC.</summary>
         bool CanShow(Interaction.VillagerBehaviorBridge villager);
 

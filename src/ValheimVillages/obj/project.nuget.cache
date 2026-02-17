@@ -1,11 +1,11 @@
 {
   "version": 2,
-  "dgSpecHash": "KP5MMlUGGNU=",
+  "dgSpecHash": "albBADkaObE=",
   "success": true,
   "projectFilePath": "/home/benny/Projects/valheim_villages/src/ValheimVillages/ValheimVillages.csproj",
   "expectedPackageFiles": [
-    "/home/benny/.nuget/packages/microsoft.netframework.referenceassemblies/1.0.3/microsoft.netframework.referenceassemblies.1.0.3.nupkg.sha512",
-    "/home/benny/.nuget/packages/microsoft.netframework.referenceassemblies.net472/1.0.3/microsoft.netframework.referenceassemblies.net472.1.0.3.nupkg.sha512"
+    "/tmp/cursor-sandbox-cache/7eddd3665f8241428cc432c7b1246f02/nuget/microsoft.netframework.referenceassemblies/1.0.3/microsoft.netframework.referenceassemblies.1.0.3.nupkg.sha512",
+    "/tmp/cursor-sandbox-cache/7eddd3665f8241428cc432c7b1246f02/nuget/microsoft.netframework.referenceassemblies.net472/1.0.3/microsoft.netframework.referenceassemblies.net472.1.0.3.nupkg.sha512"
   ],
   "logs": []
 }

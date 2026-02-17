@@ -20,7 +20,7 @@ namespace ValheimVillages.UI.Core
             if (gui == null || ci < 0 || ci >= m_tabs.Count) return;
 
             var tab = m_tabs[ci];
-            var items = tab.GetListItems(m_villager);
+            var items = tab is IVillagerTabUI ui ? ui.GetListItems(m_villager) : new List<TabListItemUI>();
             PopulateRecipeList(gui, items);
 
             if (m_selectedListIndex < 0 && items.Count > 0)
@@ -30,7 +30,7 @@ namespace ValheimVillages.UI.Core
             PopulateDescription(gui, tab);
         }
 
-        private void PopulateRecipeList(InventoryGui gui, List<TabListItem> items)
+        private void PopulateRecipeList(InventoryGui gui, List<TabListItemUI> items)
         {
             foreach (var go in m_listElements)
             {
@@ -80,8 +80,9 @@ namespace ValheimVillages.UI.Core
                     var img = icon.GetComponent<Image>();
                     if (img != null)
                     {
-                        if (items[i].Icon != null)
-                            img.sprite = items[i].Icon;
+                        var iconSprite = items[i].Icon;
+                        if (iconSprite != null)
+                            img.sprite = iconSprite;
                         else
                             img.enabled = false;
                     }
@@ -109,8 +110,8 @@ namespace ValheimVillages.UI.Core
 
         private void PopulateDescription(InventoryGui gui, IVillagerTab tab)
         {
-            var detail = m_selectedListIndex >= 0
-                ? tab.GetDetail(m_selectedListIndex, m_villager)
+            var detail = m_selectedListIndex >= 0 && tab is IVillagerTabUI ui
+                ? ui.GetDetail(m_selectedListIndex, m_villager)
                 : null;
 
             if (gui.m_recipeIcon != null)
@@ -133,7 +134,7 @@ namespace ValheimVillages.UI.Core
                         descChild.gameObject, detail?.Description ?? "");
             }
 
-            UpdateMapImage(descPanel, detail?.MapTexture);
+            UpdateMapImage(descPanel, (detail as TabDetailDataUI)?.MapTexture);
 
             if (gui.m_craftButton != null)
             {

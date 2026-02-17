@@ -3,17 +3,12 @@ using ValheimVillages.TaskQueue.ActivityLog;
 namespace ValheimVillages.TaskQueue
 {
     /// <summary>
-    /// Interface for task handlers that process queued VillagerTasks.
-    /// Each handler is registered by its TaskName in the TaskHandlerRegistry.
+    /// Extended ITaskHandler interface with Handle method and VillagerActivityLog support.
+    /// Task handler implementations should implement this interface.
+    /// The Core ITaskHandler provides the Unity-free base (TaskName).
     /// </summary>
-    public interface ITaskHandler
+    public interface ITaskHandlerWithLog : ITaskHandler
     {
-        /// <summary>
-        /// The task name this handler processes (e.g. "container_scan", "breach_check").
-        /// Must match the VillagerTask.Name of tasks routed to this handler.
-        /// </summary>
-        string TaskName { get; }
-
         /// <summary>
         /// Process a task. Called synchronously on the main thread.
         /// Handlers should record any state-changing actions to the activity log.

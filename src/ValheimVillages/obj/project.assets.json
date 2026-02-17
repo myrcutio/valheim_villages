@@ -13,6 +13,16 @@
         "build": {
           "build/Microsoft.NETFramework.ReferenceAssemblies.net472.targets": {}
         }
+      },
+      "ValheimVillages.Core/1.0.0": {
+        "type": "project",
+        "framework": ".NETStandard,Version=v2.0",
+        "compile": {
+          "bin/placeholder/ValheimVillages.Core.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/ValheimVillages.Core.dll": {}
+        }
       }
     }
   },
@@ -407,15 +417,21 @@
         "microsoft.netframework.referenceassemblies.net472.1.0.3.nupkg.sha512",
         "microsoft.netframework.referenceassemblies.net472.nuspec"
       ]
+    },
+    "ValheimVillages.Core/1.0.0": {
+      "type": "project",
+      "path": "../ValheimVillages.Core/ValheimVillages.Core.csproj",
+      "msbuildProject": "../ValheimVillages.Core/ValheimVillages.Core.csproj"
     }
   },
   "projectFileDependencyGroups": {
     ".NETFramework,Version=v4.7.2": [
-      "Microsoft.NETFramework.ReferenceAssemblies >= 1.0.3"
+      "Microsoft.NETFramework.ReferenceAssemblies >= 1.0.3",
+      "ValheimVillages.Core >= 1.0.0"
     ]
   },
   "packageFolders": {
-    "/home/benny/.nuget/packages/": {}
+    "/tmp/cursor-sandbox-cache/7eddd3665f8241428cc432c7b1246f02/nuget": {}
   },
   "project": {
     "version": "1.0.0",
@@ -423,7 +439,7 @@
       "projectUniqueName": "/home/benny/Projects/valheim_villages/src/ValheimVillages/ValheimVillages.csproj",
       "projectName": "ValheimVillages",
       "projectPath": "/home/benny/Projects/valheim_villages/src/ValheimVillages/ValheimVillages.csproj",
-      "packagesPath": "/home/benny/.nuget/packages/",
+      "packagesPath": "/tmp/cursor-sandbox-cache/7eddd3665f8241428cc432c7b1246f02/nuget",
       "outputPath": "/home/benny/Projects/valheim_villages/src/ValheimVillages/obj/",
       "projectStyle": "PackageReference",
       "configFilePaths": [
@@ -438,7 +454,11 @@
       "frameworks": {
         "net472": {
           "targetAlias": "net472",
-          "projectReferences": {}
+          "projectReferences": {
+            "/home/benny/Projects/valheim_villages/src/ValheimVillages.Core/ValheimVillages.Core.csproj": {
+              "projectPath": "/home/benny/Projects/valheim_villages/src/ValheimVillages.Core/ValheimVillages.Core.csproj"
+            }
+          }
         }
       },
       "warningProperties": {

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using ValheimVillages;
 
 namespace ValheimVillages.NPCs.AI
 {
@@ -137,17 +138,17 @@ namespace ValheimVillages.NPCs.AI
             // Always start with bed (home base)
             var bed = locations.FirstOrDefault(l => l.Type == LocationType.Bed);
             if (bed != null)
-                route.Add(new MovementTestWaypoint(bed.Position, "Bed"));
+                route.Add(new MovementTestWaypoint(bed.Position.ToVector3(), "Bed"));
 
             // Add fire if known
             var fire = locations.FirstOrDefault(l => l.Type == LocationType.Fire);
             if (fire != null)
-                route.Add(new MovementTestWaypoint(fire.Position, "Fire"));
+                route.Add(new MovementTestWaypoint(fire.Position.ToVector3(), "Fire"));
 
             // Add chair if known
             var chair = locations.FirstOrDefault(l => l.Type == LocationType.Chair);
             if (chair != null)
-                route.Add(new MovementTestWaypoint(chair.Position, "Chair"));
+                route.Add(new MovementTestWaypoint(chair.Position.ToVector3(), "Chair"));
 
             // Return to start position
             route.Add(new MovementTestWaypoint(startPos, "Origin"));

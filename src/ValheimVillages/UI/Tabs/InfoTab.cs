@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using ValheimVillages;
 using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.UI.Core;
@@ -14,7 +15,7 @@ namespace ValheimVillages.UI.Tabs
     /// list items (left pane) and place details + "Mark" action (right pane).
     /// </summary>
     [RegisterTab("info", Order = 0)]
-    public class InfoTab : IVillagerTab
+    public class InfoTab : IVillagerTabUI
     {
         public string Name => "Info";
 
@@ -30,12 +31,12 @@ namespace ValheimVillages.UI.Tabs
 
         #region IVillagerTab — List + Detail
 
-        public List<TabListItem> GetListItems(VillagerBehaviorBridge villager)
+        public List<TabListItemUI> GetListItems(VillagerBehaviorBridge villager)
         {
-            var items = new List<TabListItem>();
+            var items = new List<TabListItemUI>();
             foreach (var loc in m_topLocations)
             {
-                items.Add(new TabListItem
+                items.Add(new TabListItemUI
                 {
                     Name = $"{GetLocationIcon(loc.Type)} {GetShortName(loc)}",
                     Icon = null // could map to real sprites later
@@ -47,7 +48,7 @@ namespace ValheimVillages.UI.Tabs
             return items;
         }
 
-        public TabDetailData GetDetail(
+        public TabDetailDataUI GetDetail(
             int index, VillagerBehaviorBridge villager)
         {
             // Place items
@@ -63,13 +64,13 @@ namespace ValheimVillages.UI.Tabs
 
         #region Place Data
 
-        private TabDetailData GetPlaceDetail(
+        private TabDetailDataUI GetPlaceDetail(
             int index, VillagerBehaviorBridge villager)
         {
             var loc = m_topLocations[index];
             float dist = villager != null
                 ? Vector3.Distance(
-                    villager.transform.position, loc.Position)
+                    villager.transform.position, loc.Position.ToVector3())
                 : 0f;
 
             string shelter = loc.HasShelter ? " (sheltered)" : "";
@@ -78,7 +79,7 @@ namespace ValheimVillages.UI.Tabs
                 $"Comfort: {loc.ComfortValue:F0}";
 
             var captured = loc;
-            return new TabDetailData
+            return new TabDetailDataUI
             {
                 Title = GetShortName(loc),
                 Description = desc,
@@ -103,28 +104,31 @@ namespace ValheimVillages.UI.Tabs
         private readonly List<(IListPanel panel, int startIdx, int count)> m_panelRanges = new();
 
         private void AddAbilityItems(
-            List<TabListItem> items, VillagerBehaviorBridge villager)
+            List<TabListItemUI> items, VillagerBehaviorBridge villager)
         {
             m_panelRanges.Clear();
             foreach (var panel in s_panels)
             {
-                var panelItems = panel.GetListItems(villager);
-                if (panelItems.Count > 0)
+                if (panel is IListPanelUI panelUI)
                 {
-                    m_panelRanges.Add((panel, items.Count, panelItems.Count));
-                    items.AddRange(panelItems);
+                    var panelItems = panelUI.GetListItems(villager);
+                    if (panelItems.Count > 0)
+                    {
+                        m_panelRanges.Add((panel, items.Count, panelItems.Count));
+                        foreach (var p in panelItems) items.Add(p);
+                    }
                 }
             }
         }
 
-        private TabDetailData GetAbilityDetail(
+        private TabDetailDataUI GetAbilityDetail(
             int abilityIdx, VillagerBehaviorBridge villager)
         {
             int globalIdx = m_topLocations.Count + abilityIdx;
             foreach (var (panel, startIdx, count) in m_panelRanges)
             {
                 if (globalIdx >= startIdx && globalIdx < startIdx + count)
-                    return panel.GetDetail(globalIdx - startIdx, villager);
+                    return panel is IListPanelUI panelUI ? panelUI.GetDetail(globalIdx - startIdx, villager) : null;
             }
             return null;
         }
@@ -226,7 +230,7 @@ namespace ValheimVillages.UI.Tabs
                     null);
                 method?.Invoke(minimap, new object[]
                 {
-                    loc.Position, Minimap.PinType.Icon3,
+                    loc.Position.ToVector3(), Minimap.PinType.Icon3,
                     $"{name}: {desc}", true, false
                 });
                 Player.m_localPlayer?.Message(

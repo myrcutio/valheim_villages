@@ -1,5 +1,6 @@
 using System.Linq;
 using UnityEngine;
+using ValheimVillages;
 
 namespace ValheimVillages.NPCs.AI
 {
@@ -73,12 +74,12 @@ namespace ValheimVillages.NPCs.AI
 
                 case BehaviorState.Patrolling:
                     var nextPatrol = ai.Memory.KnownLocations
-                        .Where(l => l.Type == LocationType.Patrol && !l.IsSameLocation(ai.Position))
+                        .Where(l => l.Type == LocationType.Patrol && !l.IsSameLocation(ai.Position.ToVec3()))
                         .OrderBy(_ => Random.value)
                         .FirstOrDefault();
                     if (nextPatrol != null)
                     {
-                        ai.SetState(BehaviorState.Patrolling, nextPatrol.Position);
+                        ai.SetState(BehaviorState.Patrolling, nextPatrol.Position.ToVector3());
                         Plugin.Log?.LogDebug($"[AI:{ai.NpcName}] Next patrol point");
                     }
                     else
@@ -108,7 +109,7 @@ namespace ValheimVillages.NPCs.AI
 
             return new BehaviorContext
             {
-                CurrentPosition = pos,
+                CurrentPosition = pos.ToVec3(),
                 TimeOfDay = GetTimeOfDay(dayFraction),
                 IsRaining = isRaining,
                 InShelter = CheckShelter(pos),
@@ -148,7 +149,7 @@ namespace ValheimVillages.NPCs.AI
         private static float ScoreLocation(VillagerAI ai, KnownLocation loc, BehaviorContext context)
         {
             float score = 0f;
-            float distance = Vector3.Distance(context.CurrentPosition, loc.Position);
+            float distance = Vector3.Distance(context.CurrentPosition.ToVector3(), loc.Position.ToVector3());
 
             if (context.TimeOfDay == TimeOfDay.Night)
             {
@@ -178,7 +179,7 @@ namespace ValheimVillages.NPCs.AI
             score -= distance * 0.3f;
             score += loc.ComfortValue * 5f;
 
-            if (ai.CurrentTarget.HasValue && loc.IsSameLocation(ai.CurrentTarget.Value))
+            if (ai.CurrentTarget.HasValue && loc.IsSameLocation(ai.CurrentTarget.Value.ToVec3()))
                 score -= 20f;
 
             return score;
@@ -187,7 +188,7 @@ namespace ValheimVillages.NPCs.AI
         private static void TransitionToLocation(VillagerAI ai, KnownLocation location, BehaviorContext context)
         {
             BehaviorState newState;
-            float distance = Vector3.Distance(ai.Position, location.Position);
+            float distance = Vector3.Distance(ai.Position, location.Position.ToVector3());
 
             if (context.TimeOfDay == TimeOfDay.Night && location.Type == LocationType.Bed)
                 newState = BehaviorState.Sleeping;
@@ -198,7 +199,7 @@ namespace ValheimVillages.NPCs.AI
             else
                 newState = BehaviorState.Idle;
 
-            ai.SetState(newState, location.Position);
+            ai.SetState(newState, location.Position.ToVector3());
         }
 
         /// <summary>

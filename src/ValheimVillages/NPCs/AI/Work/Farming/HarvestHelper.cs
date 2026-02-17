@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
+using ValheimVillages;
 
 namespace ValheimVillages.NPCs.AI.Work.Farming
 {
@@ -67,7 +68,7 @@ namespace ValheimVillages.NPCs.AI.Work.Farming
             {
                 if (loc.Type != LocationType.Farm) continue;
 
-                var crops = FindHarvestableCrops(loc.Position, radius, outputItemName);
+                var crops = FindHarvestableCrops(loc.Position.ToVector3(), radius, outputItemName);
                 foreach (var crop in crops)
                 {
                     float dist = Vector3.Distance(ai.Position, crop.transform.position);
@@ -109,7 +110,7 @@ namespace ValheimVillages.NPCs.AI.Work.Farming
             foreach (var loc in ai.Memory.KnownLocations)
             {
                 if (loc.Type != LocationType.Farm) continue;
-                count += FindHarvestableCrops(loc.Position, radius, outputItemName).Count;
+                count += FindHarvestableCrops(loc.Position.ToVector3(), radius, outputItemName).Count;
             }
             return count;
         }

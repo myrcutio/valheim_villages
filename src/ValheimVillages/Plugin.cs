@@ -86,6 +86,13 @@ namespace ValheimVillages
             }
 
             _logger.LogInfo($"{PluginName} loaded successfully!");
+
+            // Run integration tests after hot-reload cleanup if auto-run is enabled
+            if (isHotReload && Core.Testing.ModTestRunner.AutoRunEnabled)
+            {
+                _logger.LogInfo("Auto-running [ModTest] integration tests...");
+                Core.Testing.ModTestRunner.RunAll();
+            }
         }
 
         private void Update()

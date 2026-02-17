@@ -95,7 +95,7 @@ namespace ValheimVillages.UI.Core
 
             int ci = GetCustomIndex();
             if (ci < 0) return;
-            m_tabs[ci].OnUpdate(m_villager);
+            if (m_tabs[ci] is IVillagerTabUI ui) ui.OnUpdate(m_villager);
             RefreshCustomContent(ci);
         }
 
@@ -284,7 +284,7 @@ namespace ValheimVillages.UI.Core
             {
                 HideCraftingChildren();
                 m_selectedListIndex = -1;
-                m_tabs[ci].OnSelected(m_villager);
+                if (m_tabs[ci] is IVillagerTabUI ui) ui.OnSelected(m_villager);
                 RefreshCustomContent(ci);
             }
             else

@@ -135,7 +135,7 @@ namespace ValheimVillages.TaskQueue
                 // Execute handler
                 try
                 {
-                    var result = handler.Handle(task, VillagerActivityLog.Instance);
+                    var result = ((ITaskHandlerWithLog)handler).Handle(task, VillagerActivityLog.Instance);
 
                     if (result.Success)
                     {

@@ -60,7 +60,7 @@ namespace ValheimVillages.UI.Panels
                 desc += $"\n{inactiveCount} inactive (pruned)";
             desc += $"\nBed: ({guard.BedPosition.x:F0}, {guard.BedPosition.z:F0})";
 
-            return new TabDetailData
+            return new TabDetailDataUI
             {
                 Title = "Village Map",
                 Description = desc,

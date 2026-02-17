@@ -1,4 +1,5 @@
 using UnityEngine;
+using ValheimVillages;
 using ValheimVillages.Core.Attributes;
 using ValheimVillages.Villages;
 
@@ -20,9 +21,9 @@ namespace ValheimVillages.Abilities.SpawnBlock
         /// Returns true if the given world position is inside a protected village area
         /// where enemy spawns are suppressed.
         /// </summary>
-        public bool IsActive(Vector3 position)
+        public bool IsActive(Vec3 position)
         {
-            return VillageAreaManager.IsInsideAnyVillage(position);
+            return VillageAreaManager.IsInsideAnyVillage(position.ToVector3());
         }
     }
 }

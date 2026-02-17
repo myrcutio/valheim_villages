@@ -13,7 +13,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     /// Bounds can be supplied via task attributes or computed from VillageAreaManager + villager beds.
     /// </summary>
     [RegisterTaskHandler]
-    public class NavMeshRebakeHandler : ITaskHandler
+    public class NavMeshRebakeHandler : ITaskHandlerWithLog
     {
         // #region agent log
         private const string DebugLogPath = "/home/benny/Projects/valheim_villages/.cursor/debug.log";

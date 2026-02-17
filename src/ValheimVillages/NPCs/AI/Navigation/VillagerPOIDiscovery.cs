@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages;
 
 namespace ValheimVillages.NPCs.AI
 {
@@ -173,7 +174,7 @@ namespace ValheimVillages.NPCs.AI
 
         private static bool IsLocationStillValid(KnownLocation location)
         {
-            var colliders = Physics.OverlapSphere(location.Position, KnownLocation.SameLocationThreshold);
+            var colliders = Physics.OverlapSphere(location.Position.ToVector3(), KnownLocation.SameLocationThreshold);
             foreach (var collider in colliders)
             {
                 if (collider == null || collider.gameObject == null) continue;

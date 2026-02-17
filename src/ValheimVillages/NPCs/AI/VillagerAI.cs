@@ -10,6 +10,7 @@ using ValheimVillages.NPCs.AI.Work.Farming;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.TaskQueue.Handlers;
 using ValheimVillages.TaskQueue.ActivityLog;
+using ValheimVillages;
 
 namespace ValheimVillages.NPCs.AI
 {
@@ -96,8 +97,9 @@ namespace ValheimVillages.NPCs.AI
                 // Load persisted behavior state
                 if (NView?.GetZDO() != null)
                 {
+                    var zdo = NView.GetZDO();
                     foreach (var b in m_behaviors)
-                        b.Load(NView.GetZDO());
+                        if (b is IBehaviorPersistence bp) bp.Load(zdo);
                 }
             }
             else
@@ -438,7 +440,7 @@ namespace ValheimVillages.NPCs.AI
             VillagerActivityLog.Instance.TrimCommitted(m_uniqueId);
 
             foreach (var b in m_behaviors)
-                b.Save(zdo);
+                if (b is IBehaviorPersistence bp) bp.Save(zdo);
         }
 
         #endregion
@@ -451,15 +453,15 @@ namespace ValheimVillages.NPCs.AI
         {
             var location = m_memory.KnownLocations
                 .Where(l => l.Type == type)
-                .OrderBy(l => Vector3.Distance(Position, l.Position))
+                .OrderBy(l => Vector3.Distance(Position, l.Position.ToVector3()))
                 .FirstOrDefault();
 
             if (location != null)
             {
                 DebugLock();
-                SetState(BehaviorState.Traveling, location.Position);
+                SetState(BehaviorState.Traveling, location.Position.ToVector3());
                 Plugin.Log?.LogInfo($"[DEBUG:{NpcName}] Traveling to {type}");
-                return location.Position;
+                return location.Position.ToVector3();
             }
 
             Plugin.Log?.LogWarning($"[DEBUG:{NpcName}] No known {type} location");

@@ -1,5 +1,6 @@
 using System.Linq;
 using UnityEngine;
+using ValheimVillages;
 
 namespace ValheimVillages.NPCs.AI
 {
@@ -82,7 +83,7 @@ namespace ValheimVillages.NPCs.AI
                 var target = bedPos + direction * dist;
 
                 bool tooClose = ai.Memory.KnownLocations.Any(l =>
-                    Vector3.Distance(target, l.Position) < ExplorationSettings.MinDistanceFromKnown);
+                    Vector3.Distance(target, l.Position.ToVector3()) < ExplorationSettings.MinDistanceFromKnown);
 
                 if (!tooClose)
                 {

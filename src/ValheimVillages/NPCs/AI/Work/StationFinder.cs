@@ -30,12 +30,12 @@ namespace ValheimVillages.NPCs.AI.Work
 
             var craftStations = ai.Memory.KnownLocations
                 .Where(l => l.Type == LocationType.CraftStation || l.Type == LocationType.CookingStation)
-                .OrderBy(l => Vector3.Distance(ai.Memory.BedPosition, l.Position))
+                .OrderBy(l => Vector3.Distance(ai.Memory.BedPosition, l.Position.ToVector3()))
                 .ToList();
 
             foreach (var loc in craftStations)
             {
-                var c = PhysicsHelper.GetFirstInRadius<T>(loc.Position, StationLookupRadius);
+                var c = PhysicsHelper.GetFirstInRadius<T>(loc.Position.ToVector3(), StationLookupRadius);
                 if (c != null && (filter == null || filter(c)))
                 {
                     position = c.transform.position;

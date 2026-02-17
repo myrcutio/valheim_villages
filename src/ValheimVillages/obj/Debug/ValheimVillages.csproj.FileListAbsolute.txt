@@ -9,3 +9,4 @@
 /home/benny/.config/r2modmanPlus-local/Valheim/profiles/valheim-dedicated/BepInEx/scripts/ValheimVillages.pdb
 /home/benny/.config/r2modmanPlus-local/Valheim/profiles/valheim-modding/BepInEx/scripts/ValheimVillages.dll
 /home/benny/.config/r2modmanPlus-local/Valheim/profiles/valheim-modding/BepInEx/scripts/ValheimVillages.pdb
+/home/benny/Projects/valheim_villages/src/ValheimVillages/obj/Debug/ValheimV.B76B8423.Up2Date
