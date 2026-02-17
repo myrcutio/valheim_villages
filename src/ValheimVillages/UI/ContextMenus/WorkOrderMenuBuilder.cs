@@ -1,9 +1,10 @@
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
-using ValheimVillages.NPCs.AI.UI.Tabs;
+using ValheimVillages.Items.WorkOrders;
+using ValheimVillages.UI.Core;
 
-namespace ValheimVillages.Items.WorkOrders
+namespace ValheimVillages.UI.ContextMenus
 {
     /// <summary>
     /// Holds references to the interactive UI elements in the work order panel.

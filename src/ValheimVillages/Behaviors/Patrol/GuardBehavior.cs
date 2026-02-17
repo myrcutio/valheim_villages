@@ -7,7 +7,7 @@ using ValheimVillages.NPCs.AI;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.Villages;
 
-namespace ValheimVillages.NPCs.AI.Guards
+namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
     /// Guard-specific behavior state machine. Replaces VillagerBehaviorLogic for guards.

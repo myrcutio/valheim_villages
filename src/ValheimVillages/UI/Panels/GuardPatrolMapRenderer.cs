@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.NPCs.AI.Guards;
+using ValheimVillages.Behaviors.Patrol;
+using ValheimVillages.NPCs.AI;
 
-namespace ValheimVillages.NPCs.AI.UI.Tabs
+namespace ValheimVillages.UI.Panels
 {
     /// <summary>
     /// Renders a top-down patrol map to a Texture2D for the debug panel.

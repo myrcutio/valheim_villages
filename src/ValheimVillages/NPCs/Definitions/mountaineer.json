@@ -24,6 +24,8 @@
   "interdependenceDescription": "",
   "preferredPrefab": "",
   "equipment": ["Club"],
+  "behaviors": ["explore"],
+  "tags": ["teacher:ability", "ability:mountainstride", "tab:info", "tab:debug"],
   "randomTalk": [
     "The thing about mountains is, they're always taller than they look. And they already look tall.",
     "Rock and stone! ...Sorry, old habit.",

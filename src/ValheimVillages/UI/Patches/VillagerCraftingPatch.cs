@@ -1,6 +1,6 @@
 using HarmonyLib;
 using UnityEngine;
-using ValheimVillages.NPCs.AI.UI.Tabs;
+using ValheimVillages.UI.Core;
 
 namespace ValheimVillages.UI.Patches
 {

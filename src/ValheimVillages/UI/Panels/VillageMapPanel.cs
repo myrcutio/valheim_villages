@@ -1,41 +1,44 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.NPCs.AI.Guards;
+using ValheimVillages.Behaviors.Patrol;
+using ValheimVillages.NPCs;
+using ValheimVillages.NPCs.AI;
+using ValheimVillages.UI.Core;
+using ValheimVillages.UI.Interaction;
 
-namespace ValheimVillages.NPCs.AI.UI.Tabs
+namespace ValheimVillages.UI.Panels
 {
     /// <summary>
-    /// Guard-specific debug commands: village map visualization and remap.
+    /// List panel showing the village map visualization in the Debug tab.
+    /// Extracted from DebugTab.Guard's map command and detail rendering.
+    /// Discovered via NPC tag "listpanel:villagemap".
     /// </summary>
-    public partial class DebugTab
+    public class VillageMapPanel : IListPanel
     {
+        public string Tag => "villagemap";
+        public string ParentTab => "debug";
+
         private Texture2D m_cachedMapTexture;
         private int m_mapWaypointHash;
 
-        private void ClearMapCache()
+        public List<TabListItem> GetListItems(VillagerBehaviorBridge villager)
         {
-            m_cachedMapTexture = null;
-            m_mapWaypointHash = 0;
+            var items = new List<TabListItem>();
+            if (villager.NpcType != NpcType.Guard) return items;
+
+            var guard = villager.AI?.GuardBehavior;
+            if (guard == null) return items;
+
+            items.Add(new TabListItem { Name = "Village Map" });
+            return items;
         }
 
-        private void AddGuardCommands(VillagerBehaviorBridge villager)
+        public TabDetailData GetDetail(int index, VillagerBehaviorBridge villager)
         {
             var guard = villager.AI?.GuardBehavior;
-            if (guard == null) return;
+            if (guard == null) return null;
 
-            m_commands.Add(new DebugCommand
-            {
-                Name = "Village Map",
-                IsMapCommand = true,
-                Guard = guard,
-                GuardPosition = villager.transform.position,
-            });
-        }
-
-        private TabDetailData GetMapDetail(DebugCommand cmd)
-        {
-            var guard = cmd.Guard;
-            var waypoints = guard?.PatrolWaypoints;
+            var waypoints = guard.PatrolWaypoints;
             int count = waypoints?.Count ?? 0;
 
             int hash = ComputeWaypointHash(waypoints);
@@ -43,7 +46,7 @@ namespace ValheimVillages.NPCs.AI.UI.Tabs
             {
                 m_mapWaypointHash = hash;
                 m_cachedMapTexture = GuardPatrolMapRenderer.Render(
-                    waypoints, guard.BedPosition, cmd.GuardPosition);
+                    waypoints, guard.BedPosition, villager.transform.position);
             }
 
             int activeCount = guard.ActiveWaypointCount;
@@ -67,10 +70,18 @@ namespace ValheimVillages.NPCs.AI.UI.Tabs
                 {
                     guard.ResetDiscovery();
                     ClearMapCache();
-                    Msg("Guard will re-map the village");
+                    Player.m_localPlayer?.Message(
+                        MessageHud.MessageType.TopLeft,
+                        "Guard will re-map the village");
                     InventoryGui.instance?.Hide();
                 }
             };
+        }
+
+        public void ClearMapCache()
+        {
+            m_cachedMapTexture = null;
+            m_mapWaypointHash = 0;
         }
 
         private static int ComputeWaypointHash(

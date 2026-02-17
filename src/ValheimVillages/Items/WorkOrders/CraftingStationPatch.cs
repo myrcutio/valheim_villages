@@ -214,7 +214,7 @@ namespace ValheimVillages.Items.WorkOrders
 
             // Custom tabs (Info, Debug) manage the craft button area themselves;
             // hide the work order button so it doesn't cover the tab's action button.
-            if (ValheimVillages.NPCs.AI.UI.Tabs.VillagerTabManager.IsCustomTabActive)
+            if (ValheimVillages.UI.Core.VillagerTabManager.IsCustomTabActive)
             {
                 _workOrderButton.SetActive(false);
                 return;

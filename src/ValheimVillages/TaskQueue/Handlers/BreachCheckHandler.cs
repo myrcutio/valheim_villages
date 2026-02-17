@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
-using ValheimVillages.NPCs.AI.Guards;
+using ValheimVillages.Behaviors.Alarm;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.TaskQueue.ActivityLog;
 

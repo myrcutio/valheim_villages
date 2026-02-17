@@ -3,6 +3,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.NPCs.AI;
+using ValheimVillages.UI.Interaction;
 
 namespace ValheimVillages.UI.Patches
 {
@@ -54,40 +55,6 @@ namespace ValheimVillages.UI.Patches
                     return false;
                 }
                 return true;
-            }
-        }
-
-        /// <summary>
-        /// Patch TextInput.IsVisible to return true when our dialog is open.
-        /// This tells the game's camera system that text input is active.
-        /// </summary>
-        [HarmonyPatch(typeof(TextInput), nameof(TextInput.IsVisible))]
-        public static class TextInput_IsVisible_Patch
-        {
-            [HarmonyPostfix]
-            public static void Postfix(ref bool __result)
-            {
-                if (VillagerDialogMenu.IsVisible)
-                {
-                    __result = true;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Patch Menu.IsVisible to return true when our dialog is open.
-        /// This tells various game systems that a menu is active.
-        /// </summary>
-        [HarmonyPatch(typeof(Menu), nameof(Menu.IsVisible))]
-        public static class Menu_IsVisible_Patch
-        {
-            [HarmonyPostfix]
-            public static void Postfix(ref bool __result)
-            {
-                if (VillagerDialogMenu.IsVisible)
-                {
-                    __result = true;
-                }
             }
         }
 

@@ -72,8 +72,11 @@ namespace ValheimVillages
 
             // Register villager UI tabs (after cleanup so the old
             // VillagerTabManager singleton is gone)
-            NPCs.AI.UI.Tabs.VillagerTabManager.RegisterTab(new NPCs.AI.UI.Tabs.InfoTab());
-            NPCs.AI.UI.Tabs.VillagerTabManager.RegisterTab(new NPCs.AI.UI.Tabs.DebugTab());
+            UI.Core.VillagerTabManager.RegisterTab(new UI.Tabs.InfoTab());
+            UI.Core.VillagerTabManager.RegisterTab(new UI.Tabs.DebugTab());
+
+            // Register tag-driven list panels (manual in this phase; attribute-based in Phase 4)
+            UI.Tabs.InfoTab.RegisterPanel(new UI.Panels.GuardStatusPanel());
 
             // Hot reload support: re-register items and prefabs
             if (isHotReload)

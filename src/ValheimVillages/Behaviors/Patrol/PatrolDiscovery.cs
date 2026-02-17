@@ -4,7 +4,7 @@ using UnityEngine.AI;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.Villages;
 
-namespace ValheimVillages.NPCs.AI.Guards
+namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
     /// Manages the guard's patrol route discovery.

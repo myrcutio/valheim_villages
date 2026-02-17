@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
 
-namespace ValheimVillages.NPCs.AI.UI.Tabs
+namespace ValheimVillages.UI.Core
 {
     /// <summary>
     /// Extension of VillagerUIFactory with interactive control builders

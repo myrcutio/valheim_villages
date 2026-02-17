@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using UnityEngine;
-using ValheimVillages.NPCs.AI.Guards;
+using ValheimVillages.Behaviors;
+using ValheimVillages.Behaviors.Alarm;
+using ValheimVillages.Behaviors.Patrol;
+using ValheimVillages.Behaviors.Work;
 using ValheimVillages.NPCs.AI.Work;
 using ValheimVillages.NPCs.AI.Work.Farming;
 using ValheimVillages.TaskQueue;
@@ -15,8 +17,9 @@ namespace ValheimVillages.NPCs.AI
     /// Core villager AI that replaces the game's MonsterAI.UpdateAI.
     /// Inspired by MobAILib's MobAIBase pattern: holds a BaseAI reference and
     /// drives movement via reflection, avoiding fights with the game's random movement system.
+    /// Sleep animation and movement tests are in VillagerAISleep.cs (partial class).
     /// </summary>
-    public class VillagerAI
+    public partial class VillagerAI
     {
         private readonly MonsterAI m_instance;
         private readonly string m_uniqueId;
@@ -47,23 +50,9 @@ namespace ValheimVillages.NPCs.AI
         private float m_lastLogTime;
         private float m_lastPathTelemetryTime;
 
-        // Movement test (null when no test is running)
-        private VillagerMovementTest m_activeTest;
-
-        // Guard-specific behavior (null for non-guard NPCs)
-        private GuardBehavior m_guardBehavior;
-        // Crafting behavior (null for non-worker NPCs)
-        private CraftingBehavior m_craftingBehavior;
+        // Composable behaviors (populated by BehaviorFactory from NPC definition)
+        private List<IBehavior> m_behaviors = new();
         private NpcType? m_npcType;
-
-        // Sleep animation state
-        private bool m_isSleepAnimationActive;
-        private float m_savedViewRange;
-        private float m_savedHearRange;
-        private static readonly MethodInfo s_sleepMethod =
-            typeof(MonsterAI).GetMethod("Sleep", BindingFlags.NonPublic | BindingFlags.Instance);
-        private static readonly MethodInfo s_wakeupMethod =
-            typeof(MonsterAI).GetMethod("Wakeup", BindingFlags.NonPublic | BindingFlags.Instance);
 
         public VillagerAI(MonsterAI instance, Vector3 bedPosition, string uniqueId)
         {
@@ -81,36 +70,66 @@ namespace ValheimVillages.NPCs.AI
                 VillagerActivityLog.Instance.LoadFromZDO(uniqueId, NView.GetZDO());
                 NView.GetZDO().Set("vv_bed_position", bedPosition);
 
-                // Detect NPC type for specialized behavior
                 int typeInt = NView.GetZDO().GetInt("vv_npc_type", -1);
                 if (typeInt >= 0)
                     m_npcType = (NpcType)typeInt;
             }
 
-            // Initialize guard-specific behavior and restore persisted patrol state
-            if (m_npcType == NPCs.NpcType.Guard)
+            // Create behaviors from NPC type definition
+            var npcTypeDef = m_npcType.HasValue ? NpcTypeRegistry.Get(m_npcType.Value) : null;
+            var behaviorTags = npcTypeDef?.behaviors;
+            if (behaviorTags != null && behaviorTags.Count > 0)
             {
-                m_guardBehavior = new GuardBehavior(this);
+                m_behaviors = BehaviorFactory.CreateBehaviors(this, behaviorTags);
+
+                // Wire up cross-behavior references
+                var patrol = GetBehavior<PerimeterPatrolBehavior>();
+                var alarm = GetBehavior<BreachAlarmBehavior>();
+                if (patrol != null && alarm != null)
+                    alarm.SetPatrolBehavior(patrol);
+
+                var craftAdapter = GetBehavior<CraftingBehaviorAdapter>();
+                var farmAdapter = GetBehavior<FarmBehaviorAdapter>();
+                if (craftAdapter != null && farmAdapter != null)
+                    farmAdapter.LinkToCraftingAdapter(craftAdapter);
+
+                // Load persisted behavior state
                 if (NView?.GetZDO() != null)
-                    Guards.GuardPersistence.Load(m_guardBehavior, NView.GetZDO());
-            }
-
-            // Initialize crafting behavior for worker NPCs
-            if (StationMatcher.IsWorkerType(m_npcType))
-            {
-                m_craftingBehavior = new CraftingBehavior(this);
-
-                // Farmer NPCs also get a farming behavior for planting/harvesting
-                if (m_npcType == NPCs.NpcType.Farmer)
                 {
-                    var farmingBehavior = new FarmingBehavior(this);
-                    m_craftingBehavior.SetFarmingBehavior(farmingBehavior);
+                    foreach (var b in m_behaviors)
+                        b.Load(NView.GetZDO());
+                }
+            }
+            else
+            {
+                // Fallback for NPCs without behavior definitions (legacy path)
+                if (m_npcType == NPCs.NpcType.Guard)
+                {
+                    var patrol = new PerimeterPatrolBehavior(this);
+                    var alarm = new BreachAlarmBehavior(this);
+                    alarm.SetPatrolBehavior(patrol);
+                    m_behaviors.Add(alarm);
+                    m_behaviors.Add(patrol);
+                    if (NView?.GetZDO() != null)
+                    {
+                        patrol.Load(NView.GetZDO());
+                        alarm.Load(NView.GetZDO());
+                    }
+                }
+                else if (StationMatcher.IsWorkerType(m_npcType))
+                {
+                    var craft = new CraftingBehaviorAdapter(this);
+                    m_behaviors.Add(craft);
+                    if (m_npcType == NPCs.NpcType.Farmer)
+                    {
+                        var farm = new FarmBehaviorAdapter(this);
+                        farm.LinkToCraftingAdapter(craft);
+                        m_behaviors.Add(farm);
+                    }
                 }
             }
 
-            // Stagger behavior ticks so NPCs spawned together don't all evaluate
-            // at the same time (prevents them from picking up the same work order
-            // simultaneously and traveling in a clump).
+            // Stagger behavior ticks so NPCs spawned together don't all evaluate at the same time
             m_lastBehaviorUpdateTime = Time.time - Random.Range(0f, VillagerSettings.BehaviorTickJitter);
 
             Plugin.Log?.LogInfo($"[VillagerAI] Initialized for {NpcName} (type={m_npcType}) at bed {bedPosition}");
@@ -129,64 +148,28 @@ namespace ValheimVillages.NPCs.AI
         public string NpcName => Character?.m_name ?? m_instance?.gameObject.name ?? "Unknown";
         public Vector3 Position => m_instance.transform.position;
         public NpcType? NpcType => m_npcType;
+        public IReadOnlyList<IBehavior> Behaviors => m_behaviors;
+
+        /// <summary>Find a behavior by concrete type. Used by UI code (cleaned up in Phase 3i).</summary>
+        public T GetBehavior<T>() where T : class, IBehavior
+        {
+            foreach (var b in m_behaviors)
+                if (b is T typed) return typed;
+            return null;
+        }
+
+        /// <summary>Find a behavior by tag string. Used by tag-driven UI components.</summary>
+        public IBehavior GetBehavior(string tag)
+        {
+            foreach (var b in m_behaviors)
+                if (b.Tag == tag) return b;
+            return null;
+        }
+
+        // Backward-compatible accessors (used by existing UI, cleaned up in step 3i)
         public bool IsGuard => m_npcType == NPCs.NpcType.Guard;
-        public GuardBehavior GuardBehavior => m_guardBehavior;
-        public CraftingBehavior CraftingBehavior => m_craftingBehavior;
-        public bool IsSleepAnimationActive => m_isSleepAnimationActive;
-
-        #endregion
-
-        #region Sleep Animation
-
-        /// <summary>
-        /// Trigger the MonsterAI sleep animation (NPC lays down, ZDO synced).
-        /// Safe to call multiple times; no-ops if already sleeping.
-        /// </summary>
-        public void EnterSleepAnimation()
-        {
-            if (m_isSleepAnimationActive) return;
-            m_isSleepAnimationActive = true;
-
-            // Zero out detection ranges so sleeping NPCs don't react to players/enemies
-            m_savedViewRange = m_instance.m_viewRange;
-            m_savedHearRange = m_instance.m_hearRange;
-            m_instance.m_viewRange = 0f;
-            m_instance.m_hearRange = 0f;
-
-            try
-            {
-                s_sleepMethod?.Invoke(m_instance, null);
-                Plugin.Log?.LogDebug($"[AI:{NpcName}] Entered sleep animation (detection disabled)");
-            }
-            catch (System.Exception ex)
-            {
-                Plugin.Log?.LogWarning($"[AI:{NpcName}] Failed to enter sleep animation: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Clear the sleep animation (NPC stands up, ZDO synced).
-        /// Safe to call multiple times; no-ops if not sleeping.
-        /// </summary>
-        public void ExitSleepAnimation()
-        {
-            if (!m_isSleepAnimationActive) return;
-            m_isSleepAnimationActive = false;
-
-            // Restore detection ranges on waking
-            m_instance.m_viewRange = m_savedViewRange;
-            m_instance.m_hearRange = m_savedHearRange;
-
-            try
-            {
-                s_wakeupMethod?.Invoke(m_instance, null);
-                Plugin.Log?.LogDebug($"[AI:{NpcName}] Exited sleep animation (detection restored)");
-            }
-            catch (System.Exception ex)
-            {
-                Plugin.Log?.LogWarning($"[AI:{NpcName}] Failed to exit sleep animation: {ex.Message}");
-            }
-        }
+        public GuardBehavior GuardBehavior => GetBehavior<PerimeterPatrolBehavior>()?.Guard;
+        public CraftingBehavior CraftingBehavior => GetBehavior<CraftingBehaviorAdapter>()?.Crafting;
 
         #endregion
 
@@ -238,18 +221,25 @@ namespace ValheimVillages.NPCs.AI
 
             // Behavior decisions (skip during debug lock or active movement tests)
             float behaviorInterval = VillagerSettings.UpdateInterval;
-            if (m_craftingBehavior != null && m_state == BehaviorState.Working && m_craftingBehavior.IsWaitingForCooking)
+            if (CraftingBehavior != null && m_state == BehaviorState.Working && CraftingBehavior.IsWaitingForCooking)
                 behaviorInterval = WorkSettings.CookingPollInterval;
             if (Time.time - m_lastBehaviorUpdateTime > behaviorInterval)
             {
                 m_lastBehaviorUpdateTime = Time.time;
                 if (Time.time >= m_debugLockUntil && !IsMovementTestActive)
                 {
-                    if (m_guardBehavior != null)
-                        m_guardBehavior.UpdateGuardAI(dt);
-                    else if (m_craftingBehavior != null && m_state == BehaviorState.Working)
-                        m_craftingBehavior.UpdateWorkAI(dt);
-                    else
+                    bool handled = false;
+                    var ctx = new BehaviorContext();
+                    foreach (var b in m_behaviors)
+                    {
+                        if (b.WantsControl(ctx))
+                        {
+                            b.Update(dt);
+                            handled = true;
+                            break;
+                        }
+                    }
+                    if (!handled)
                         VillagerBehaviorLogic.UpdateBehavior(this);
                 }
             }
@@ -265,16 +255,16 @@ namespace ValheimVillages.NPCs.AI
                     m_lastPathTelemetryTime = Time.time;
                     float d3 = Vector3.Distance(Position, targetPos);
                     float dxz = Utils.DistanceXZ(Position, targetPos);
-                    string subState = (m_craftingBehavior?.FarmingBehavior?.IsWorking == true)
-                        ? m_craftingBehavior.FarmingBehavior.SubState.ToString()
-                        : (m_craftingBehavior?.SubState.ToString() ?? "—");
+                    string subState = (CraftingBehavior?.FarmingBehavior?.IsWorking == true)
+                        ? CraftingBehavior.FarmingBehavior.SubState.ToString()
+                        : (CraftingBehavior?.SubState.ToString() ?? "—");
                     ValheimVillages.PathTelemetry.LogFarmerPathing(
                         NpcName, Position, targetPos, d3, dxz, subState);
                 }
                 // #endregion
 
-                // Workers: on stuck pathing, cycle to next strategy or give up when wrapped to base
-                if (m_state == BehaviorState.Working && m_craftingBehavior != null)
+                // Workers: on stuck pathing, cycle to next strategy or give up
+                if (m_state == BehaviorState.Working && CraftingBehavior != null)
                 {
                     float workThreshold = WorkSettings.WorkArrivalThreshold;
                     float dist3D = Vector3.Distance(Position, targetPos);
@@ -294,7 +284,7 @@ namespace ValheimVillages.NPCs.AI
                         if (wrapped)
                         {
                             Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"{NpcName}: I can't get there!");
-                            m_craftingBehavior.GiveUpStuckWork(
+                            CraftingBehavior.GiveUpStuckWork(
                                 "stuck pathing " + WorkSettings.WorkStuckTimeoutSeconds + "s (not within " + workThreshold + "m)");
                             return;
                         }
@@ -352,11 +342,11 @@ namespace ValheimVillages.NPCs.AI
                 BehaviorState.Traveling => true,
                 BehaviorState.Exploring => true,
                 BehaviorState.Wandering => true,
-                BehaviorState.Sleeping => true,        // Move to bed first, then stop
-                BehaviorState.Patrolling => true,       // Move to patrol point
-                BehaviorState.Working => true,          // Crafting: move to chests/stations
-                BehaviorState.Scouting => true,         // Guard: move outward to find walls
-                BehaviorState.CircuitTracing => true,    // Guard: trace circle around bed
+                BehaviorState.Sleeping => true,
+                BehaviorState.Patrolling => true,
+                BehaviorState.Working => true,
+                BehaviorState.Scouting => true,
+                BehaviorState.CircuitTracing => true,
                 _ => false
             };
         }
@@ -414,11 +404,18 @@ namespace ValheimVillages.NPCs.AI
             Plugin.Log?.LogInfo($"[AI:{NpcName}] Arrived at destination (state={m_state})");
             m_stallStartTime = 0f;
 
-            if (m_guardBehavior != null)
-                m_guardBehavior.HandleArrival();
-            else if (m_craftingBehavior != null && m_state == BehaviorState.Working)
-                m_craftingBehavior.HandleWorkArrival();
-            else
+            bool arrivalHandled = false;
+            var arrCtx = new BehaviorContext();
+            foreach (var b in m_behaviors)
+            {
+                if (b.WantsControl(arrCtx))
+                {
+                    b.OnArrival();
+                    arrivalHandled = true;
+                    break;
+                }
+            }
+            if (!arrivalHandled)
                 VillagerBehaviorLogic.HandleArrival(this);
 
             if (m_activeTest != null && m_activeTest.IsActive)
@@ -436,13 +433,12 @@ namespace ValheimVillages.NPCs.AI
             var zdo = NView.GetZDO();
             m_memory.SaveToZDO(zdo);
 
-            // Persist and commit activity log entries
             VillagerActivityLog.Instance.SaveToZDO(m_uniqueId, zdo);
             VillagerActivityLog.Instance.MarkCommitted(m_uniqueId);
             VillagerActivityLog.Instance.TrimCommitted(m_uniqueId);
 
-            if (m_guardBehavior != null)
-                Guards.GuardPersistence.Save(m_guardBehavior, zdo);
+            foreach (var b in m_behaviors)
+                b.Save(zdo);
         }
 
         #endregion
@@ -468,40 +464,6 @@ namespace ValheimVillages.NPCs.AI
 
             Plugin.Log?.LogWarning($"[DEBUG:{NpcName}] No known {type} location");
             return null;
-        }
-
-        #endregion
-
-        #region Movement Tests
-
-        public bool IsMovementTestActive => m_activeTest != null && m_activeTest.IsActive;
-
-        /// <summary>
-        /// Start a multi-waypoint movement test.
-        /// </summary>
-        public bool StartMovementTest()
-        {
-            if (IsMovementTestActive) return false;
-            m_activeTest = new VillagerMovementTest(this);
-            return m_activeTest.Start();
-        }
-
-        /// <summary>
-        /// Cancel a running movement test.
-        /// </summary>
-        public void CancelMovementTest()
-        {
-            m_activeTest?.Cancel();
-            m_activeTest = null;
-        }
-
-        /// <summary>
-        /// Get current test progress info for the UI.
-        /// </summary>
-        public (int completed, int total, string label) GetTestProgress()
-        {
-            if (m_activeTest == null) return (0, 0, "");
-            return (m_activeTest.WaypointsCompleted, m_activeTest.WaypointsTotal, m_activeTest.CurrentLabel);
         }
 
         #endregion

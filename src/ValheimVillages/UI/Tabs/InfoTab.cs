@@ -2,10 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using ValheimVillages.Abilities;
-using ValheimVillages.NPCs;
+using ValheimVillages.NPCs.AI;
+using ValheimVillages.UI.Core;
+using ValheimVillages.UI.Interaction;
 
-namespace ValheimVillages.NPCs.AI.UI.Tabs
+namespace ValheimVillages.UI.Tabs
 {
     /// <summary>
     /// Tab showing villager information.  Provides favourite places as
@@ -86,107 +87,44 @@ namespace ValheimVillages.NPCs.AI.UI.Tabs
 
         #endregion
 
-        #region Ability Data
+        #region Panel-Driven Ability Data
+
+        private static readonly List<IListPanel> s_panels = new();
+
+        /// <summary>Register an IListPanel for this tab. Called from Plugin startup.</summary>
+        public static void RegisterPanel(IListPanel panel)
+        {
+            if (panel.ParentTab == "info" && !s_panels.Contains(panel))
+                s_panels.Add(panel);
+        }
+
+        private readonly List<(IListPanel panel, int startIdx, int count)> m_panelRanges = new();
 
         private void AddAbilityItems(
             List<TabListItem> items, VillagerBehaviorBridge villager)
         {
-            if (villager.NpcType == NpcType.Guard &&
-                villager.AI?.GuardBehavior != null)
+            m_panelRanges.Clear();
+            foreach (var panel in s_panels)
             {
-                items.Add(new TabListItem { Name = "[Guard] Patrol Status" });
-            }
-            else if (villager.NpcType == NpcType.Mountaineer)
-            {
-                items.Add(new TabListItem { Name = "[Technique] Mountain Stride" });
+                var panelItems = panel.GetListItems(villager);
+                if (panelItems.Count > 0)
+                {
+                    m_panelRanges.Add((panel, items.Count, panelItems.Count));
+                    items.AddRange(panelItems);
+                }
             }
         }
 
         private TabDetailData GetAbilityDetail(
             int abilityIdx, VillagerBehaviorBridge villager)
         {
-            if (abilityIdx == 0 &&
-                villager.NpcType == NpcType.Guard)
-                return GetGuardDetail(villager);
-
-            if (abilityIdx == 0 &&
-                villager.NpcType == NpcType.Mountaineer)
-                return GetMountaineerDetail(villager);
-
+            int globalIdx = m_topLocations.Count + abilityIdx;
+            foreach (var (panel, startIdx, count) in m_panelRanges)
+            {
+                if (globalIdx >= startIdx && globalIdx < startIdx + count)
+                    return panel.GetDetail(globalIdx - startIdx, villager);
+            }
             return null;
-        }
-
-        private TabDetailData GetGuardDetail(VillagerBehaviorBridge villager)
-        {
-            var guard = villager.AI?.GuardBehavior;
-            if (guard == null) return null;
-
-            if (!guard.IsDiscoveryComplete)
-            {
-                return new TabDetailData
-                {
-                    Title = "Guard Duty",
-                    Description = "Mapping the village perimeter...",
-                };
-            }
-
-            if (guard.IsAlarmed)
-            {
-                return new TabDetailData
-                {
-                    Title = "Guard Duty — BREACH",
-                    Description = "A breach has been detected!\n" +
-                        "Repair the wall gap to resume patrol.",
-                    ActionText = "Show Breach",
-                    OnAction = () =>
-                    {
-                        guard.WalkToBreach();
-                        Player.m_localPlayer?.Message(
-                            MessageHud.MessageType.TopLeft,
-                            "The guard will walk to the breach.");
-                    }
-                };
-            }
-
-            return new TabDetailData
-            {
-                Title = "Guard Duty",
-                Description = $"Patrolling ({guard.WaypointCount} waypoints).\n" +
-                    "No breaches detected."
-            };
-        }
-
-        private TabDetailData GetMountaineerDetail(
-            VillagerBehaviorBridge villager)
-        {
-            bool learned = VillagerAbilityManager.HasLearnedMountainStride();
-
-            if (!learned)
-            {
-                return new TabDetailData
-                {
-                    Title = "Mountain Stride",
-                    Description = "The Mountaineer can teach you to " +
-                        "traverse steep terrain without sliding.",
-                    ActionText = "Learn",
-                    OnAction = () =>
-                        VillagerAbilityManager.LearnMountainStride()
-                };
-            }
-
-            bool active = VillagerAbilityManager.IsActive();
-            float cd = VillagerAbilityManager.GetCooldownRemaining();
-            string status = active
-                ? "Active — you won't slide."
-                : cd > 0f
-                    ? $"Ready in {Mathf.CeilToInt(cd / 60f)}m. Press R."
-                    : "Press R to activate (5 min).";
-
-            return new TabDetailData
-            {
-                Title = "Mountain Stride",
-                Description = status
-            };
         }
 
         #endregion

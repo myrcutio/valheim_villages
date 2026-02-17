@@ -23,6 +23,8 @@
   "providesLevelTo": [],
   "receivesLevelFrom": [],
   "interdependenceDescription": "",
+  "behaviors": ["patrol", "explore"],
+  "tags": ["tab:info", "tab:debug"],
   "randomTalk": [
     "Running away gets a bad reputation. I prefer to think of it as scouting in the opposite direction.",
     "I classify threats on a scale from 'concerning' to 'tell my mother I loved her.' Most of the Plains is a solid 'tell my mother.'",

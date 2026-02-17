@@ -36,7 +36,6 @@ namespace ValheimVillages
         private static readonly HashSet<string> ModGameObjectNames = new()
         {
             "VillagerTabManager",
-            "VillagerDialogMenu",
             "WorkOrderMenu"
         };
 

@@ -1,4 +1,5 @@
 using UnityEngine;
+using ValheimVillages.UI.Interaction;
 
 namespace ValheimVillages.NPCs.AI
 {

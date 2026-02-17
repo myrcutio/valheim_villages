@@ -1,7 +1,8 @@
 using UnityEngine;
 using ValheimVillages.NPCs;
+using ValheimVillages.NPCs.AI;
 
-namespace ValheimVillages.NPCs.AI
+namespace ValheimVillages.UI.Interaction
 {
     /// <summary>
     /// MonoBehaviour bridge that exposes VillagerAI to the UI layer.
@@ -51,7 +52,7 @@ namespace ValheimVillages.NPCs.AI
             }
         }
 
-        #region Public API (used by VillagerInteract and VillagerDialogMenu)
+        #region Public API (used by VillagerInteract)
 
         /// <summary>
         /// Get the NPC type from ZDO (e.g. Mountaineer, Guard, etc.).

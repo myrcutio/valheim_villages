@@ -5,6 +5,7 @@ using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work;
+using ValheimVillages.UI.Interaction;
 
 namespace ValheimVillages.NPCs
 {

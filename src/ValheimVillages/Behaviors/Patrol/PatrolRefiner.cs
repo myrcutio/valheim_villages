@@ -4,7 +4,7 @@ using UnityEngine.AI;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.Villages;
 
-namespace ValheimVillages.NPCs.AI.Guards
+namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
     /// Refines the guard patrol route over successive laps using timing heuristics:

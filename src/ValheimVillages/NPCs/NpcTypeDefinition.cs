@@ -40,6 +40,10 @@ namespace ValheimVillages.NPCs
         public string skinColor = "";
         public string weaponRotationFix = "";
 
+        // Behavior composition
+        public List<string> behaviors = new();
+        public List<string> tags = new();
+
         // Dialog lines (override Dverger defaults on NpcTalk component)
         public List<string> randomTalk = new();
         public List<string> randomGreets = new();

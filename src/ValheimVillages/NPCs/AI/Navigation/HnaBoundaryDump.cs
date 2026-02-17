@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
-using ValheimVillages.NPCs.AI.Guards;
+using ValheimVillages.Behaviors.Patrol;
 
 namespace ValheimVillages.NPCs.AI
 {

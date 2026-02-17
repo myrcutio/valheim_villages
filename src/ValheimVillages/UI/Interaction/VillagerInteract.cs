@@ -1,8 +1,12 @@
 using UnityEngine;
-using ValheimVillages.NPCs.AI.UI.Tabs;
+using ValheimVillages.Behaviors;
+using ValheimVillages.Behaviors.Alarm;
+using ValheimVillages.NPCs;
+using ValheimVillages.NPCs.AI;
 using ValheimVillages.NPCs.AI.Work;
+using ValheimVillages.UI.Core;
 
-namespace ValheimVillages.NPCs.AI
+namespace ValheimVillages.UI.Interaction
 {
     /// <summary>
     /// Enables player interaction with villager NPCs.
@@ -86,7 +90,8 @@ namespace ValheimVillages.NPCs.AI
         }
 
         /// <summary>
-        /// Gets a short description of the NPC's current state.
+        /// Gets a short description of the NPC's current state using the behavior system.
+        /// Iterates behaviors by priority and returns the first non-empty status.
         /// </summary>
         private string GetStateInfo()
         {
@@ -95,20 +100,15 @@ namespace ValheimVillages.NPCs.AI
             var ai = Bridge.AI;
             if (ai == null) return "";
 
-            // Guard-specific state info
-            if (ai.IsGuard && ai.GuardBehavior != null)
-                return GetGuardStateInfo(ai);
+            // Ask behaviors for status (highest priority first)
+            foreach (var b in ai.Behaviors)
+            {
+                string status = b.GetStatusText();
+                if (!string.IsNullOrEmpty(status))
+                    return $"<color=grey>{status}</color>";
+            }
 
-            // Worker crafting state info
-            if (ai.CraftingBehavior != null && ai.CraftingBehavior.IsWorking)
-                return GetWorkStateInfo(ai.CraftingBehavior);
-
-            // General villager state
-            return GetGeneralStateInfo(ai);
-        }
-
-        private string GetGeneralStateInfo(VillagerAI ai)
-        {
+            // Fallback: general state
             return ai.CurrentState switch
             {
                 BehaviorState.Idle => "<color=grey>Idle</color>",
@@ -116,51 +116,16 @@ namespace ValheimVillages.NPCs.AI
                 BehaviorState.Wandering => "<color=grey>Wandering around</color>",
                 BehaviorState.Exploring => "<color=grey>Exploring the area</color>",
                 BehaviorState.Sleeping => "<color=grey>Sleeping</color>",
-                BehaviorState.Working => GetWorkStateInfo(ai.CraftingBehavior),
                 _ => $"<color=grey>{ai.CurrentState}</color>"
-            };
-        }
-
-        private string GetWorkStateInfo(CraftingBehavior craft)
-        {
-            if (craft == null) return "<color=grey>Working</color>";
-
-            return craft.SubState switch
-            {
-                WorkSubState.GatheringIngredients =>
-                    "<color=grey>Gathering ingredients...</color>",
-                WorkSubState.TravelingToStation =>
-                    "<color=grey>Heading to crafting station...</color>",
-                WorkSubState.Crafting =>
-                    "<color=grey>Crafting...</color>",
-                WorkSubState.ReturningToChest =>
-                    "<color=grey>Returning with goods...</color>",
-                WorkSubState.Depositing =>
-                    "<color=grey>Storing crafted items...</color>",
-                _ => "<color=grey>Working</color>"
-            };
-        }
-
-        private string GetGuardStateInfo(VillagerAI ai)
-        {
-            var guard = ai.GuardBehavior;
-            var state = ai.CurrentState;
-
-            return state switch
-            {
-                BehaviorState.Scouting => "<color=grey>Scouting the perimeter...</color>",
-                BehaviorState.CircuitTracing => "<color=grey>Mapping the village boundary...</color>",
-                BehaviorState.Patrolling => $"<color=grey>Patrolling ({guard.WaypointCount} waypoints)</color>",
-                BehaviorState.Alarmed => "<color=red>BREACH DETECTED</color>",
-                BehaviorState.Sleeping => "<color=grey>Sleeping</color>",
-                _ => "<color=grey>On duty</color>"
             };
         }
 
         private bool IsGuardAlarmed()
         {
             var ai = Bridge?.AI;
-            return ai != null && ai.IsGuard && ai.GuardBehavior?.IsAlarmed == true;
+            if (ai == null) return false;
+            var alarm = ai.GetBehavior<BreachAlarmBehavior>();
+            return alarm?.IsActive == true;
         }
 
         private bool IsSleeping()

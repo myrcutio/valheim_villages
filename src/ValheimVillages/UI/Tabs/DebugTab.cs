@@ -2,16 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using ValheimVillages.NPCs.AI.Guards;
+using ValheimVillages.NPCs.AI;
 using ValheimVillages.TaskQueue.ActivityLog;
+using ValheimVillages.UI.Core;
+using ValheimVillages.UI.Interaction;
 
-namespace ValheimVillages.NPCs.AI.UI.Tabs
+namespace ValheimVillages.UI.Tabs
 {
     /// <summary>
     /// Tab showing debug commands for villager NPCs.
     /// Provides commands as list items with action buttons.
     /// </summary>
-    public partial class DebugTab : IVillagerTab
+    public class DebugTab : IVillagerTab
     {
         public string Name => "Debug";
 
@@ -23,7 +25,6 @@ namespace ValheimVillages.NPCs.AI.UI.Tabs
         public void OnDeselected()
         {
             m_commands.Clear();
-            ClearMapCache();
         }
 
         public void OnUpdate(VillagerBehaviorBridge villager) =>
@@ -45,9 +46,6 @@ namespace ValheimVillages.NPCs.AI.UI.Tabs
         {
             if (index < 0 || index >= m_commands.Count) return null;
             var cmd = m_commands[index];
-
-            if (cmd.IsMapCommand)
-                return GetMapDetail(cmd);
 
             return new TabDetailData
             {
@@ -72,7 +70,6 @@ namespace ValheimVillages.NPCs.AI.UI.Tabs
             AddProblems(villager);
             AddMovementCommands(villager);
             AddNavigationCommands(villager);
-            AddGuardCommands(villager);
         }
 
         private void AddStateInfo(VillagerBehaviorBridge villager)
@@ -221,9 +218,6 @@ namespace ValheimVillages.NPCs.AI.UI.Tabs
             public string Description;
             public string ActionText;
             public Action OnAction;
-            public bool IsMapCommand;
-            public GuardBehavior Guard;
-            public Vector3? GuardPosition;
         }
     }
 }

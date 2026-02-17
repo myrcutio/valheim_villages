@@ -3,7 +3,7 @@ using System.Globalization;
 using UnityEngine;
 using ValheimVillages.NPCs.AI;
 
-namespace ValheimVillages.NPCs.AI.Guards
+namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
     /// Handles saving and loading guard patrol state to/from ZDO.

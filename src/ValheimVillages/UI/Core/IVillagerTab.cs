@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.UI.Interaction;
 
-namespace ValheimVillages.NPCs.AI.UI.Tabs
+namespace ValheimVillages.UI.Core
 {
     /// <summary>
     /// Interface for a tab in the villager interaction UI.

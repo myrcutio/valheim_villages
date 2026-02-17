@@ -1,9 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-using ValheimVillages.NPCs.AI.UI.Tabs;
+using ValheimVillages.Items.WorkOrders;
+using ValheimVillages.UI.Core;
 
-namespace ValheimVillages.Items.WorkOrders
+namespace ValheimVillages.UI.ContextMenus
 {
     /// <summary>
     /// Unity UI menu for configuring work order production quotas (min, max).

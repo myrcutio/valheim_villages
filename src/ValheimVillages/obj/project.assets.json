@@ -415,7 +415,7 @@
     ]
   },
   "packageFolders": {
-    "/home/benny/.nuget/packages/": {}
+    "/tmp/cursor-sandbox-cache/7eddd3665f8241428cc432c7b1246f02/nuget": {}
   },
   "project": {
     "version": "1.0.0",
@@ -423,7 +423,7 @@
       "projectUniqueName": "/home/benny/Projects/valheim_villages/src/ValheimVillages/ValheimVillages.csproj",
       "projectName": "ValheimVillages",
       "projectPath": "/home/benny/Projects/valheim_villages/src/ValheimVillages/ValheimVillages.csproj",
-      "packagesPath": "/home/benny/.nuget/packages/",
+      "packagesPath": "/tmp/cursor-sandbox-cache/7eddd3665f8241428cc432c7b1246f02/nuget",
       "outputPath": "/home/benny/Projects/valheim_villages/src/ValheimVillages/obj/",
       "projectStyle": "PackageReference",
       "configFilePaths": [

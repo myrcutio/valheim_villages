@@ -1,7 +1,7 @@
 using UnityEngine;
 using ValheimVillages.Villages;
 
-namespace ValheimVillages.NPCs.AI.Guards
+namespace ValheimVillages.Behaviors.Alarm
 {
     /// <summary>
     /// Detects breaches in the village wall at patrol waypoints.
