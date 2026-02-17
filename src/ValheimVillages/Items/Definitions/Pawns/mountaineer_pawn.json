@@ -1,0 +1,10 @@
+{
+  "name": "vv_mountaineer_pawn",
+  "source": "clone",
+  "basePrefab": "DragonEgg",
+  "displayName": "Mountaineer",
+  "description": "A mountaineer villager packaged for transport. Teaches Mountain Stride technique.",
+  "maxStackSize": 1,
+  "weight": 10.0,
+  "variants": 0
+}

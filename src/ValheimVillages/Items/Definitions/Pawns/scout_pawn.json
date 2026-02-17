@@ -1,0 +1,11 @@
+{
+  "name": "vv_scout_pawn",
+  "source": "clone",
+  "basePrefab": "DragonEgg",
+  "displayName": "Scout",
+  "description": "A scout villager packaged for transport. Provides exploration benefits and map information.",
+  "maxStackSize": 1,
+  "weight": 10.0,
+  "variants": 0,
+  "itemType": "pawn"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "vv_workorder_artisan",
+  "source": "clone",
+  "basePrefab": "DragonEgg",
+  "displayName": "Artisan Table Work Order",
+  "description": "A work order scroll for artisan table tasks. Right-click to set production quotas.",
+  "maxStackSize": 1,
+  "weight": 0.3,
+  "variants": 0,
+  "itemType": "workorder",
+  "biome": "",
+  "stationType": "ArtisanTable"
+}

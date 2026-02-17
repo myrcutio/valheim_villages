@@ -1,0 +1,11 @@
+{
+  "name": "vv_farmer_pawn",
+  "source": "clone",
+  "basePrefab": "DragonEgg",
+  "displayName": "Farmer",
+  "description": "A farmer villager packaged for transport. Produces food and tends crops.",
+  "maxStackSize": 1,
+  "weight": 10.0,
+  "variants": 0,
+  "itemType": "pawn"
+}

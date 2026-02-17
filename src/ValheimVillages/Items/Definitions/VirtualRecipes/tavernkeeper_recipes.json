@@ -1,0 +1,35 @@
+{
+  "station": "$vv_tavernkeeper",
+  "recipes": [
+    {
+      "output": "CookedMeat",
+      "outputAmount": 1,
+      "inputs": [{ "item": "RawMeat", "amount": 1 }],
+      "minStationLevel": 1
+    },
+    {
+      "output": "NeckTailGrilled",
+      "outputAmount": 1,
+      "inputs": [{ "item": "NeckTail", "amount": 1 }],
+      "minStationLevel": 1
+    },
+    {
+      "output": "CookedDeerMeat",
+      "outputAmount": 1,
+      "inputs": [{ "item": "DeerMeat", "amount": 1 }],
+      "minStationLevel": 1
+    },
+    {
+      "output": "CookedLoxMeat",
+      "outputAmount": 1,
+      "inputs": [{ "item": "LoxMeat", "amount": 1 }],
+      "minStationLevel": 2
+    },
+    {
+      "output": "BarleyFlour",
+      "outputAmount": 1,
+      "inputs": [{ "item": "Barley", "amount": 1 }],
+      "minStationLevel": 2
+    }
+  ]
+}

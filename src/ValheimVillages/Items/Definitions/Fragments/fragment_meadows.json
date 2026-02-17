@@ -1,0 +1,13 @@
+{
+  "name": "vv_fragment_meadows",
+  "source": "clone",
+  "basePrefab": "DragonEgg",
+  "displayName": "Meadows Ransom Fragment",
+  "description": "A torn piece of parchment stained with green ink. The scrawled text hints at a captive held somewhere in the meadows. Combine three to reveal their location.",
+  "maxStackSize": 3,
+  "weight": 0.1,
+  "variants": 0,
+  "itemType": "fragment",
+  "biome": "Meadows",
+  "stationType": ""
+}

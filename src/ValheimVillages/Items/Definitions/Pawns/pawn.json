@@ -1,0 +1,11 @@
+{
+  "name": "vv_pawn",
+  "source": "clone",
+  "basePrefab": "DragonEgg",
+  "displayName": "Villager",
+  "description": "A villager packaged for transport.",
+  "maxStackSize": 1,
+  "weight": 10.0,
+  "variants": 0
+}
+

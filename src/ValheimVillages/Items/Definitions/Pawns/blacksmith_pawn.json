@@ -1,0 +1,11 @@
+{
+  "name": "vv_blacksmith_pawn",
+  "source": "clone",
+  "basePrefab": "DragonEgg",
+  "displayName": "Blacksmith",
+  "description": "A blacksmith villager packaged for transport. Forges metals and crafts equipment.",
+  "maxStackSize": 1,
+  "weight": 10.0,
+  "variants": 0,
+  "itemType": "pawn"
+}

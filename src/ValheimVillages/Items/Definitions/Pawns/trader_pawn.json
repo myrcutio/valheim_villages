@@ -1,0 +1,11 @@
+{
+  "name": "vv_trader_pawn",
+  "source": "clone",
+  "basePrefab": "DragonEgg",
+  "displayName": "Trader",
+  "description": "A trader villager packaged for transport. Establishes trade routes between settlements.",
+  "maxStackSize": 1,
+  "weight": 10.0,
+  "variants": 0,
+  "itemType": "pawn"
+}

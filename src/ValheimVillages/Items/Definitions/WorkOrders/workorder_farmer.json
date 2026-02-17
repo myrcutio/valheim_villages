@@ -1,0 +1,13 @@
+{
+  "name": "vv_workorder_farmer",
+  "source": "clone",
+  "basePrefab": "DragonEgg",
+  "displayName": "Farmer Work Order",
+  "description": "A work order scroll for farming and cooking tasks. Right-click to set production quotas.",
+  "maxStackSize": 1,
+  "weight": 0.3,
+  "variants": 0,
+  "itemType": "workorder",
+  "biome": "",
+  "stationType": "Farmer"
+}

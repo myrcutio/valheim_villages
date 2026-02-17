@@ -1,0 +1,119 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <AssemblyName>ValheimVillages</AssemblyName>
+    <RootNamespace>ValheimVillages</RootNamespace>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+
+    <R2ModmanProfile>valheim-modding</R2ModmanProfile>
+    
+    <!-- Paths - adjust if needed -->
+    <ValheimDir>$(HOME)/.local/share/Steam/steamapps/common/Valheim</ValheimDir>
+    <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles/$(R2ModmanProfile)/BepInEx</BepInExDir>
+    
+    <!-- Hot reload: set to 'true' to output to scripts folder for F6 reload -->
+    <HotReload>true</HotReload>
+    
+    <!-- Output path switches based on HotReload setting -->
+    <OutputPath Condition="'$(HotReload)' == 'true'">$(BepInExDir)/scripts/</OutputPath>
+    <OutputPath Condition="'$(HotReload)' != 'true'">$(BepInExDir)/plugins/ValheimVillages/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <!-- BepInEx and Harmony -->
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExDir)/core/BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExDir)/core/0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Valheim Game Assemblies -->
+  <ItemGroup>
+    <Reference Include="assembly_valheim">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/assembly_valheim.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="assembly_utils">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/assembly_utils.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="assembly_guiutils">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/assembly_guiutils.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Unity Engine Assemblies -->
+  <ItemGroup>
+    <Reference Include="UnityEngine">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AIModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.AIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Unity JSON serialization module -->
+  <ItemGroup>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.JSONSerializeModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Embed definitions and icons as resources -->
+  <ItemGroup>
+    <EmbeddedResource Include="Items\Definitions\Pawns\*.json" />
+    <EmbeddedResource Include="Items\Definitions\Fragments\*.json" />
+    <EmbeddedResource Include="Items\Definitions\WorkOrders\*.json" />
+    <EmbeddedResource Include="Items\Definitions\VirtualRecipes\*.json" />
+    <EmbeddedResource Include="Items\Icons\WorkOrders\*.png" />
+    <EmbeddedResource Include="NPCs\Definitions\*.json" />
+  </ItemGroup>
+
+  <!-- Suppress common warnings for game modding -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CS0649;CS0169</NoWarn>
+  </PropertyGroup>
+</Project>
+
