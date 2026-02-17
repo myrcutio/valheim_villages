@@ -1,14 +1,8 @@
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
-using ValheimVillages.Items.Fragments;
 using ValheimVillages.NPCs;
 using ValheimVillages.NPCs.AI;
-using ValheimVillages.NPCs.AI.Work;
-using ValheimVillages.Items.WorkOrders;
-using ValheimVillages.TaskQueue;
-using ValheimVillages.TaskQueue.ActivityLog;
-using ValheimVillages.Villages;
 
 namespace ValheimVillages
 {
@@ -27,17 +21,6 @@ namespace ValheimVillages
     public static class HotReloadHelper
     {
         private static readonly Assembly CurrentAssembly = typeof(HotReloadHelper).Assembly;
-
-        /// <summary>
-        /// Names of mod-created GameObjects that live outside NPC hierarchies
-        /// (e.g. DontDestroyOnLoad singletons, UI objects).  Used to detect
-        /// orphaned GameObjects after all stale components have been removed.
-        /// </summary>
-        private static readonly HashSet<string> ModGameObjectNames = new()
-        {
-            "VillagerTabManager",
-            "WorkOrderMenu"
-        };
 
         /// <summary>
         /// Prefix used by mod-created GameObjects (station templates,
@@ -79,16 +62,7 @@ namespace ValheimVillages
         /// </summary>
         private static void ResetAllStaticState()
         {
-            VillagerAIManager.Clear();
-            VillagerRestoration.ClearTracking();
-            GlobalTaskQueue.Clear();
-            VillageAreaManager.Clear();
-            NPCs.AI.HnaDebugVisualization.ClearMarkers();
-            NPCs.AI.HnaRegionGraph.Clear();
-            RescueQuestTracker.Clear();
-            VillagerActivityLog.ResetInstance();
-            CraftingStationPatch.Clear();
-
+            Core.Attributes.AttributeScanner.InvokeAllCleanup(CurrentAssembly);
             Plugin.Log?.LogDebug("[HotReload] All static registries cleared.");
         }
 
@@ -165,7 +139,7 @@ namespace ValheimVillages
                 string name = go.name;
 
                 bool isModObject =
-                    ModGameObjectNames.Contains(name) ||
+                    Core.Attributes.AttributeScanner.GetModObjectNames(CurrentAssembly).Contains(name) ||
                     name.StartsWith(ModPrefix) ||
                     name.StartsWith(ModPrefabPrefix);
 
