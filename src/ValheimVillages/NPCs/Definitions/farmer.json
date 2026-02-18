@@ -15,7 +15,7 @@
   "skinColor": "1.15,1.85,1.55",
   "equipment": ["cultivator"],
   "behaviors": ["craft", "farm"],
-  "tags": ["tab:info", "tab:debug", "contextmenu:workorder"],
+  "tags": ["tab:info", "tab:debug", "tab:workorder"],
   "dependentOnNpcType": "",
   "tieredBenefits": [],
   "productions": [

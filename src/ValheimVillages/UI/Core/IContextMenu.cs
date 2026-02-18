@@ -2,7 +2,8 @@ namespace ValheimVillages.UI.Core
 {
     /// <summary>
     /// Extended IContextMenu interface with Unity-dependent UI methods.
-    /// Context menu implementations should implement this interface.
+    /// For inventory item context menus (e.g. right-click work order settings).
+    /// Not for NPC interaction side-panel tabs (those use IVillagerTabUI).
     /// The Core IContextMenu provides the Unity-free base (Id).
     /// </summary>
     public interface IContextMenuUI : IContextMenu

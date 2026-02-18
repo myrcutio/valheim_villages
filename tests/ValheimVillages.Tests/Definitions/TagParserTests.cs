@@ -11,7 +11,7 @@ public class TagParserTests
     [Theory]
     [InlineData("behavior:patrol", "behavior", "patrol")]
     [InlineData("listpanel:guardstatus", "listpanel", "guardstatus")]
-    [InlineData("contextmenu:workorder", "contextmenu", "workorder")]
+    [InlineData("tab:workorder", "tab", "workorder")]
     [InlineData("ability:mountainstride", "ability", "mountainstride")]
     public void TryParse_ValidTag_ReturnsCorrectNamespaceAndValue(
         string tag, string expectedNs, string expectedValue)

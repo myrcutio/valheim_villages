@@ -24,7 +24,7 @@
   "receivesLevelFrom": [],
   "interdependenceDescription": "",
   "behaviors": ["craft"],
-  "tags": ["tab:info", "tab:debug", "contextmenu:workorder"],
+  "tags": ["tab:info", "tab:debug", "tab:workorder"],
   "randomTalk": [
     "Rule one of tavern keeping: the customer is always right. Rule two: the customer is frequently drunk and therefore not to be trusted. These rules coexist.",
     "I've been told my mead could strip paint. I've also been told it could raise the dead. Both reviews were positive.",

@@ -23,7 +23,7 @@
   "receivesLevelFrom": [],
   "interdependenceDescription": "",
   "behaviors": ["craft"],
-  "tags": ["tab:info", "tab:debug", "contextmenu:workorder"],
+  "tags": ["tab:info", "tab:debug", "tab:workorder"],
   "randomTalk": [
     "I don't rip people off. I facilitate aggressive value redistribution.",
     "The beauty of trade is that everyone walks away happy. Or at least, I walk away happy. That's fifty percent.",

@@ -23,7 +23,7 @@
   "receivesLevelFrom": ["Farmer", "Blacksmith", "Carpenter"],
   "interdependenceDescription": "Requires Farmer for base level; Blacksmith enables tin; Carpenter improves tools",
   "behaviors": ["craft"],
-  "tags": ["tab:info", "tab:debug", "contextmenu:workorder"],
+  "tags": ["tab:info", "tab:debug", "tab:workorder"],
   "randomTalk": [
     "You know what they say about copper deposits: where there's copper, there's... probably more copper.",
     "I don't have claustrophobia. I have a healthy respect for loose rocks above my head.",

@@ -30,8 +30,8 @@
 - [ ] Add `behaviors` array field to `NPCs/NpcTypeDefinition.cs`
 - [ ] Add `tags` array field to `NPCs/NpcTypeDefinition.cs`
 - [ ] Update `NPCs/Definitions/guard.json`: `"behaviors": ["patrol", "alarm"], "tags": ["passive:spawnblock", "tab:info", "tab:debug", "listpanel:guardstatus", "listpanel:villagemap"]`
-- [ ] Update `NPCs/Definitions/farmer.json`: `"behaviors": ["craft", "farm"], "tags": ["tab:info", "tab:debug", "contextmenu:workorder"]`
-- [ ] Update `NPCs/Definitions/blacksmith.json`: `"behaviors": ["craft"], "tags": ["tab:info", "tab:debug", "contextmenu:workorder"]`
+- [ ] Update `NPCs/Definitions/farmer.json`: `"behaviors": ["craft", "farm"], "tags": ["tab:info", "tab:debug", "tab:workorder"]`
+- [ ] Update `NPCs/Definitions/blacksmith.json`: `"behaviors": ["craft"], "tags": ["tab:info", "tab:debug", "tab:workorder"]`
 - [ ] Update `NPCs/Definitions/carpenter.json`: `"behaviors": ["craft"], "tags": [...]`
 - [ ] Update `NPCs/Definitions/miner.json`: `"behaviors": ["craft"], "tags": [...]`
 - [ ] Update `NPCs/Definitions/scout.json`: `"behaviors": ["patrol", "explore"], "tags": [...]`

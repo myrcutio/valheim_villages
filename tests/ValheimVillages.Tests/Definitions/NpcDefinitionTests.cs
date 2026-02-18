@@ -62,7 +62,7 @@ public class NpcDefinitionTests
                 "behavior:patrol",
                 "behavior:craft",
                 "listpanel:guardstatus",
-                "contextmenu:workorder"
+                "tab:workorder"
             }
         };
 
@@ -71,7 +71,7 @@ public class NpcDefinitionTests
         Assert.Contains("patrol", behaviors);
         Assert.Contains("craft", behaviors);
 
-        Assert.True(TagParser.HasTag(def.tags, "contextmenu", "workorder"));
+        Assert.True(TagParser.HasTag(def.tags, "tab", "workorder"));
         Assert.False(TagParser.HasTag(def.tags, "ability", "mountainstride"));
     }
 }

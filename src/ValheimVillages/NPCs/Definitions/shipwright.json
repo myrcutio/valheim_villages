@@ -23,7 +23,7 @@
   "receivesLevelFrom": [],
   "interdependenceDescription": "",
   "behaviors": ["craft"],
-  "tags": ["tab:info", "tab:debug", "contextmenu:workorder"],
+  "tags": ["tab:info", "tab:debug", "tab:workorder"],
   "randomTalk": [
     "The sea is a harsh mistress. Well, I say 'mistress.' More of a salty wench who occasionally tries to murder you.",
     "I've been building boats for twenty years. The trick is knowing which end goes in the water. You'd be SURPRISED how many people get that wrong.",

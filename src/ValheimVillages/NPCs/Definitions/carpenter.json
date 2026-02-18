@@ -21,7 +21,7 @@
   "receivesLevelFrom": [],
   "interdependenceDescription": "Adds levels to all production villagers through better tools",
   "behaviors": ["craft"],
-  "tags": ["tab:info", "tab:debug", "contextmenu:workorder"],
+  "tags": ["tab:info", "tab:debug", "tab:workorder"],
   "randomTalk": [
     "Wood is honest. It tells you exactly where it wants to split. Usually through your thumbnail.",
     "People think carpentry is simple. 'Just nail bits of wood together,' they say. Then their house falls down and suddenly I'm the expert.",
