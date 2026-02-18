@@ -18,13 +18,23 @@ dotnet build ValheimVillages.slnx && dotnet test tests/ValheimVillages.Tests/
 
 ### Tier 2: In-Game Integration Tests (needs Valheim running)
 
-After a successful build, ScriptEngine auto-reloads the DLL:
+After a successful build, ScriptEngine auto-reloads the DLL (requires `EnableFileSystemWatcher = true` in `BepInEx/config/com.bepis.bepinex.scriptengine.cfg`; otherwise press F6 in-game):
 
-1. `dotnet build` outputs to `BepInEx/scripts/` (hot reload mode)
-2. Wait 6 seconds for ScriptEngine auto-reload
-3. Read `BepInEx/config/vv_test_results.json`
-4. If `"result": "PASS"` → done
-5. If `"result": "FAIL"` → parse `failures` and `errors` arrays
+1. Build **and** wait for test results in a single command (see below)
+2. Read `BepInEx/config/vv_test_results.json`
+3. If `"result": "PASS"` → done
+4. If `"result": "FAIL"` → parse `failures` and `errors` arrays
+
+#### Build + Wait Command
+
+Start `inotifywait` **before** the build so it is already watching when ScriptEngine reloads and tests write results. This must be a single shell invocation to avoid a race where the file changes between two separate commands:
+
+```bash
+TEST_RESULTS=~/.config/r2modmanPlus-local/Valheim/profiles/valheim-modding/BepInEx/config/vv_test_results.json
+inotifywait -e modify -t 30 -qq "$TEST_RESULTS" & WAIT_PID=$! && dotnet build ValheimVillages.slnx && wait $WAIT_PID
+```
+
+**Why a single command?** If `dotnet build` and `inotifywait` are issued as separate shell calls, the test results file may already be written before the watch starts — `inotifywait` then blocks forever (or until timeout) waiting for a change that already happened.
 
 ## Reading Test Results JSON
 
@@ -72,10 +82,13 @@ For each failure entry:
 ## Full Loop Cycle
 
 1. Make code changes
-2. `dotnet build ValheimVillages.slnx` (builds Core + mod)
-3. `dotnet test tests/ValheimVillages.Tests/` (unit tests)
-4. If Valheim is running: wait 6s for auto-reload
-5. Read `vv_test_results.json` for integration results
-6. Fix any failures and repeat
+2. `dotnet test tests/ValheimVillages.Tests/` (unit tests — must pass first)
+3. If Valheim is running, build and wait for integration results in one command:
+   ```bash
+   TEST_RESULTS=~/.config/r2modmanPlus-local/Valheim/profiles/valheim-modding/BepInEx/config/vv_test_results.json
+   inotifywait -e modify -t 30 -qq "$TEST_RESULTS" & WAIT_PID=$! && dotnet build ValheimVillages.slnx && wait $WAIT_PID
+   ```
+4. Read `vv_test_results.json` for integration results
+5. Fix any failures and repeat
 
 Expected cycle time: ~8-10 seconds from edit to integration test feedback.

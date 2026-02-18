@@ -1,8 +1,0 @@
-is_global = true
-build_property.RootNamespace = ValheimVillages
-build_property.ProjectDir = /home/benny/Projects/valheim_villages/src/ValheimVillages.Core/
-build_property.EnableComHosting = 
-build_property.EnableGeneratedComInterfaceComImportInterop = 
-build_property.CsWinRTUseWindowsUIXamlProjections = false
-build_property.EffectiveAnalysisLevelStyle = 
-build_property.EnableCodeStyleSeverity = 

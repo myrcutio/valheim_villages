@@ -1,0 +1,62 @@
+---
+description: Prefer inotifywait over sleep loops when waiting for file changes
+alwaysApply: true
+---
+
+# Prefer inotifywait Over sleep
+
+When waiting for a file to change before continuing (e.g., waiting for a build output, log update, or config reload), use `inotifywait` from inotify-tools instead of polling with `sleep`.
+
+## Why
+
+- `inotifywait` reacts instantly to filesystem events — no wasted time or CPU
+- `sleep` loops introduce arbitrary delays and can miss rapid changes or wait too long
+
+## Examples
+
+```bash
+# ❌ BAD — polling with sleep
+while [ ! -f /tmp/build-done ]; do
+  sleep 2
+done
+
+# ✅ GOOD — block until the file appears
+inotifywait -e create --include 'build-done' /tmp/
+
+# ❌ BAD — sleep loop waiting for file modification
+while true; do
+  sleep 5
+  check_if_changed && break
+done
+
+# ✅ GOOD — block until the file is modified
+inotifywait -e modify /path/to/file.log
+```
+
+## Common Flags
+
+| Flag | Purpose |
+|------|---------|
+| `-e EVENT` | Watch for specific events: `modify`, `create`, `delete`, `move` |
+| `-r` | Watch directories recursively |
+| `-t SECONDS` | Timeout (exit with code 2 if no event occurs) |
+| `--include PATTERN` | Only match filenames matching a regex |
+| `-q` | Quiet mode — suppress informational output |
+
+## Avoiding Race Conditions
+
+When a build or action triggers an external process that writes a file, start `inotifywait` **before** the trigger — all in a single shell invocation. If you split them into separate commands, the file may change before the watch starts.
+
+```bash
+# ❌ BAD — two separate shell calls; file may change in between
+dotnet build MyProject.slnx          # call 1
+inotifywait -e modify -t 30 results.json  # call 2 (too late!)
+
+# ✅ GOOD — watch starts before build, single command
+inotifywait -e modify -t 30 -qq results.json & WAIT_PID=$! && dotnet build MyProject.slnx && wait $WAIT_PID
+```
+
+## When sleep Is Still Appropriate
+
+- Waiting for a **duration** rather than a file event (e.g., rate-limiting, cooldown)
+- Environments where inotify-tools is unavailable and cannot be installed

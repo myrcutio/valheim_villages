@@ -1,0 +1,18 @@
+---
+description: Prefer built-in agent tools over shell commands for file operations and searching
+alwaysApply: true
+---
+
+# Prefer Built-in Tools Over Shell Commands
+
+Always use the agent's built-in tools instead of shelling out to terminal commands:
+
+| Task | Use This | NOT This |
+|------|----------|----------|
+| Search file contents | **Grep** tool | `rg`, `grep`, `ag` in Shell |
+| Find files by name | **Glob** tool | `find`, `fd`, `ls -R` in Shell |
+| Read file contents | **Read** tool | `cat`, `head`, `tail`, `less` in Shell |
+| Edit files | **StrReplace** tool | `sed`, `awk`, `perl -i` in Shell |
+| Semantic code search | **SemanticSearch** tool | `rg` with complex patterns in Shell |
+
+Reserve the **Shell** tool for actual system operations: `git`, `dotnet build`, `npm`, running scripts, etc.
