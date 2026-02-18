@@ -13,7 +13,7 @@ namespace ValheimVillages.Core.Attributes
     /// <summary>
     /// Scans the mod assembly for registration attributes and wires up
     /// console commands, task handlers, cleanup hooks, abilities, passives,
-    /// UI tabs, list panels, context menus, and behaviors automatically.
+    /// UI tabs, list panels, context menus, and behaviors matching annotations.
     /// </summary>
     public static class AttributeScanner
     {
@@ -349,6 +349,8 @@ namespace ValheimVillages.Core.Attributes
                 // Wire panel into its parent tab's static registration
                 if (panel.ParentTab == "info")
                     UI.Tabs.InfoTab.RegisterPanel(panel);
+                else if (panel.ParentTab == "debug")
+                    UI.Tabs.DebugTab.RegisterPanel(panel);
             }
         }
 

@@ -250,9 +250,11 @@ namespace ValheimVillages
                 if (monsterAI != null)
                     VillagerRestoration.Restore(monsterAI, zdo);
 
-                // Register with AI manager (AI instance created on next
-                // UpdateAI tick)
+                // Register and eagerly create AI so it's available immediately
+                // (tests and other Awake-time consumers need it before UpdateAI)
                 VillagerAIManager.Register(uniqueId, bedPos);
+                if (monsterAI != null)
+                    VillagerAIManager.GetOrCreate(uniqueId, monsterAI);
 
                 fixedCount++;
                 Plugin.Log?.LogDebug(

@@ -11,11 +11,12 @@ using ValheimVillages.UI.Interaction;
 namespace ValheimVillages.UI.Tabs
 {
     /// <summary>
-    /// Tab showing debug commands for villager NPCs.
-    /// Provides commands as list items with action buttons.
+    /// Tab showing debug commands and registered panels for villager NPCs.
+    /// Provides commands as list items with action buttons, plus panel-driven
+    /// items (e.g. Village Map for guards) via [RegisterListPanel].
     /// </summary>
     [RegisterTab("debug", Order = 1)]
-    public class DebugTab : IVillagerTab
+    public class DebugTab : IVillagerTabUI
     {
         public string Name => "Debug";
 
@@ -27,35 +28,88 @@ namespace ValheimVillages.UI.Tabs
         public void OnDeselected()
         {
             m_commands.Clear();
+            m_panelRanges.Clear();
         }
 
         public void OnUpdate(VillagerBehaviorBridge villager) =>
             BuildCommands(villager);
 
-        #region IVillagerTab — List + Detail
+        #region IVillagerTabUI — List + Detail
 
-        public List<TabListItem> GetListItems(
+        public List<TabListItemUI> GetListItems(
             VillagerBehaviorBridge villager)
         {
-            var items = new List<TabListItem>();
+            var items = new List<TabListItemUI>();
             foreach (var cmd in m_commands)
-                items.Add(new TabListItem { Name = cmd.Name });
+                items.Add(new TabListItemUI { Name = cmd.Name });
+
+            AddPanelItems(items, villager);
             return items;
         }
 
-        public TabDetailData GetDetail(
+        public TabDetailDataUI GetDetail(
             int index, VillagerBehaviorBridge villager)
         {
-            if (index < 0 || index >= m_commands.Count) return null;
-            var cmd = m_commands[index];
-
-            return new TabDetailData
+            // Command items
+            if (index >= 0 && index < m_commands.Count)
             {
-                Title = cmd.Name,
-                Description = cmd.Description,
-                ActionText = cmd.ActionText,
-                OnAction = cmd.OnAction
-            };
+                var cmd = m_commands[index];
+                return new TabDetailDataUI
+                {
+                    Title = cmd.Name,
+                    Description = cmd.Description,
+                    ActionText = cmd.ActionText,
+                    OnAction = cmd.OnAction
+                };
+            }
+
+            // Panel items (after commands)
+            return GetPanelDetail(index, villager);
+        }
+
+        #endregion
+
+        #region Panel Integration
+
+        private static readonly List<IListPanel> s_panels = new();
+        private readonly List<(IListPanel panel, int startIdx, int count)> m_panelRanges = new();
+
+        /// <summary>Register an IListPanel for this tab. Called from AttributeScanner.</summary>
+        public static void RegisterPanel(IListPanel panel)
+        {
+            if (panel.ParentTab == "debug" && !s_panels.Contains(panel))
+                s_panels.Add(panel);
+        }
+
+        private void AddPanelItems(
+            List<TabListItemUI> items, VillagerBehaviorBridge villager)
+        {
+            m_panelRanges.Clear();
+            foreach (var panel in s_panels)
+            {
+                if (panel is IListPanelUI panelUI)
+                {
+                    var panelItems = panelUI.GetListItems(villager);
+                    if (panelItems.Count > 0)
+                    {
+                        m_panelRanges.Add((panel, items.Count, panelItems.Count));
+                        foreach (var p in panelItems) items.Add(p);
+                    }
+                }
+            }
+        }
+
+        private TabDetailDataUI GetPanelDetail(
+            int index, VillagerBehaviorBridge villager)
+        {
+            foreach (var (panel, startIdx, count) in m_panelRanges)
+            {
+                if (index >= startIdx && index < startIdx + count)
+                    return panel is IListPanelUI panelUI
+                        ? panelUI.GetDetail(index - startIdx, villager)
+                        : null;
+            }
+            return null;
         }
 
         #endregion

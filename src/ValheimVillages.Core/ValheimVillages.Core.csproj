@@ -5,6 +5,17 @@
     <AssemblyName>ValheimVillages.Core</AssemblyName>
     <RootNamespace>ValheimVillages</RootNamespace>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+
+    <R2ModmanProfile>valheim-modding</R2ModmanProfile>
+
+    <!-- Paths - must match ValheimVillages.csproj -->
+    <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles/$(R2ModmanProfile)/BepInEx</BepInExDir>
+
+    <!-- Core always deploys to plugins/ so BepInEx's assembly resolver can find it.
+         ScriptEngine (hot-reload) only probes scripts/ for loading, not for dependency
+         resolution, so the Core DLL must live in a BepInEx-probed directory. -->
+    <OutputPath>$(BepInExDir)/plugins/ValheimVillages/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
   <!-- Suppress common warnings -->

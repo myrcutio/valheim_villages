@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Behaviors.Patrol;
+using ValheimVillages.Core.Attributes;
 using ValheimVillages.NPCs;
 using ValheimVillages.NPCs.AI;
 using ValheimVillages.UI.Core;
@@ -13,7 +14,8 @@ namespace ValheimVillages.UI.Panels
     /// Extracted from DebugTab.Guard's map command and detail rendering.
     /// Discovered via NPC tag "listpanel:villagemap".
     /// </summary>
-    public class VillageMapPanel : IListPanel
+    [RegisterListPanel("villagemap", "debug")]
+    public class VillageMapPanel : IListPanelUI
     {
         public string Tag => "villagemap";
         public string ParentTab => "debug";
@@ -21,19 +23,19 @@ namespace ValheimVillages.UI.Panels
         private Texture2D m_cachedMapTexture;
         private int m_mapWaypointHash;
 
-        public List<TabListItem> GetListItems(VillagerBehaviorBridge villager)
+        public List<TabListItemUI> GetListItems(VillagerBehaviorBridge villager)
         {
-            var items = new List<TabListItem>();
+            var items = new List<TabListItemUI>();
             if (villager.NpcType != NpcType.Guard) return items;
 
             var guard = villager.AI?.GuardBehavior;
             if (guard == null) return items;
 
-            items.Add(new TabListItem { Name = "Village Map" });
+            items.Add(new TabListItemUI { Name = "Village Map" });
             return items;
         }
 
-        public TabDetailData GetDetail(int index, VillagerBehaviorBridge villager)
+        public TabDetailDataUI GetDetail(int index, VillagerBehaviorBridge villager)
         {
             var guard = villager.AI?.GuardBehavior;
             if (guard == null) return null;

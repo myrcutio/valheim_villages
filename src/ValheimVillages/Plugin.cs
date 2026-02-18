@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using BepInEx;
@@ -46,22 +47,26 @@ namespace ValheimVillages
             // Register custom localization tokens (SetupLanguage already ran)
             Patches.LocalizationPatch.RegisterTokens();
 
-            // Clear any stale task handlers before scanning
-            TaskHandlerRegistry.Clear();
-
-            // Scan assembly for all registration attributes
-            // (registers dev commands, task handlers, tabs, panels, abilities, etc.)
-            AttributeScanner.ScanAndRegister(typeof(Plugin).Assembly);
-
             // Hot reload support: if the game world is already loaded,
-            // run full cleanup before re-registering anything.
+            // run full cleanup BEFORE re-registering anything.
+            // FullCleanup invokes [RegisterCleanup] methods (e.g. TaskHandlerRegistry.Clear)
+            // so it must run before ScanAndRegister to avoid wiping freshly-registered handlers.
             bool isHotReload = ObjectDB.instance != null &&
                                ObjectDB.instance.m_items.Count > 0;
+
             if (isHotReload)
             {
                 _logger.LogInfo("Hot reload detected — running full cleanup");
                 HotReloadHelper.FullCleanup();
             }
+
+            // Clear any stale task handlers before scanning
+            // (redundant after FullCleanup on hot reload, but needed on first load)
+            TaskHandlerRegistry.Clear();
+
+            // Scan assembly for all registration attributes
+            // (registers dev commands, task handlers, tabs, panels, abilities, etc.)
+            AttributeScanner.ScanAndRegister(typeof(Plugin).Assembly);
 
             // Tabs, list panels, and context menus are now auto-registered via
             // [RegisterTab], [RegisterListPanel], [RegisterContextMenu] attributes
