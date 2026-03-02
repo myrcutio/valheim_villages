@@ -1,5 +1,6 @@
 using System.Collections.Generic;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
+using ValheimVillages.Interfaces;
 
 namespace ValheimVillages.TaskQueue
 {

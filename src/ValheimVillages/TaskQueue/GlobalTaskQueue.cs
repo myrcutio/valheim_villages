@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
+using ValheimVillages.Enums;
+using ValheimVillages.Schemas;
 using ValheimVillages.TaskQueue.ActivityLog;
 
 namespace ValheimVillages.TaskQueue
@@ -15,6 +17,7 @@ namespace ValheimVillages.TaskQueue
     /// </summary>
     public static class GlobalTaskQueue
     {
+
         // One FIFO queue per priority tier
         private static readonly Dictionary<TaskPriority, Queue<VillagerTask>> s_queues = new()
         {
@@ -106,10 +109,20 @@ namespace ValheimVillages.TaskQueue
         {
             var queue = s_queues[tier];
             int processed = 0;
+            int inspected = 0;
+            int initialCount = queue.Count;
 
-            while (processed < maxCount && queue.Count > 0)
+            while (processed < maxCount && queue.Count > 0 && inspected < initialCount)
             {
+                inspected++;
                 var task = queue.Dequeue();
+
+                if (task.NotBefore > 0f && Time.time < task.NotBefore)
+                {
+                    queue.Enqueue(task);
+                    continue;
+                }
+
                 RemovePendingKey(task);
 
                 // Check timeout

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
 
 namespace ValheimVillages.Items.VirtualRecipes
 {

@@ -1,7 +1,6 @@
 using HarmonyLib;
 using UnityEngine;
-using ValheimVillages.Abilities;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
 
 namespace ValheimVillages.Abilities.MountainStride
 {

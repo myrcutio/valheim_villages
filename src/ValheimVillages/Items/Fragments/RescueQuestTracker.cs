@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.Core.Attributes;
-using ValheimVillages.NPCs;
+using ValheimVillages.Attributes;
 
 namespace ValheimVillages.Items.Fragments
 {
@@ -25,7 +24,7 @@ namespace ValheimVillages.Items.Fragments
         public class PendingQuest
         {
             public Vector3 Position;
-            public NpcType NpcType;
+            public string VillagerType;
             public string Biome;
         }
 
@@ -35,17 +34,17 @@ namespace ValheimVillages.Items.Fragments
         /// Registers a new pending rescue quest. The pawn will be spawned when
         /// the player enters the dungeon at this position.
         /// </summary>
-        public static void AddQuest(Vector3 position, NpcType npcType, string biome)
+        public static void AddQuest(Vector3 position, string villagerType, string biome)
         {
             _pendingQuests.Add(new PendingQuest
             {
                 Position = position,
-                NpcType = npcType,
+                VillagerType = villagerType,
                 Biome = biome
             });
 
             Plugin.Log?.LogInfo(
-                $"Registered pending rescue quest: {npcType} at {position} ({biome}). " +
+                $"Registered pending rescue quest: {villagerType} at {position} ({biome}). " +
                 $"Pawn will spawn when player enters dungeon within {QuestDungeonRadius}m.");
         }
 
@@ -76,7 +75,7 @@ namespace ValheimVillages.Items.Fragments
                 float horizontalDistance = Mathf.Sqrt(dx * dx + dz * dz);
 
                 Plugin.Log?.LogInfo(
-                    $"  Quest {i}: {quest.NpcType} at {quest.Position}, " +
+                    $"  Quest {i}: {quest.VillagerType} at {quest.Position}, " +
                     $"horizontal distance: {horizontalDistance:F0}m");
 
                 if (horizontalDistance <= QuestDungeonRadius)
@@ -84,10 +83,10 @@ namespace ValheimVillages.Items.Fragments
                     Plugin.Log?.LogInfo(
                         $"Player entered dungeon (env: {environmentName}) within " +
                         $"{horizontalDistance:F0}m (horizontal) of rescue quest for " +
-                        $"{quest.NpcType} — spawning captive pawn in dungeon room.");
+                        $"{quest.VillagerType} — spawning captive pawn in dungeon room.");
 
                     var spawnPos = FindDungeonRoomPosition(playerPos);
-                    SpawnCaptivePawn(spawnPos, quest.NpcType);
+                    SpawnCaptivePawn(spawnPos, quest.VillagerType);
                     _pendingQuests.RemoveAt(i);
                     return; // Only handle one quest per dungeon entry
                 }
@@ -178,33 +177,19 @@ namespace ValheimVillages.Items.Fragments
         }
 
         /// <summary>
-        /// Maps NPC types to their corresponding pawn item prefab names.
+        /// Derives the pawn item prefab name from the villager type.
+        /// Convention: vv_{type}_pawn (e.g., "Farmer" -> "vv_farmer_pawn").
         /// </summary>
-        private static readonly Dictionary<NpcType, string> NpcPawnMap = new()
-        {
-            { NpcType.Farmer, "vv_farmer_pawn" },
-            { NpcType.Miner, "vv_miner_pawn" },
-            { NpcType.Blacksmith, "vv_blacksmith_pawn" },
-            { NpcType.Carpenter, "vv_carpenter_pawn" },
-            { NpcType.Scout, "vv_scout_pawn" },
-            { NpcType.Trader, "vv_trader_pawn" },
-            { NpcType.Guard, "vv_guard_pawn" },
-            { NpcType.Mountaineer, "vv_mountaineer_pawn" },
-            { NpcType.Shipwright, "vv_shipwright_pawn" },
-            { NpcType.TavernKeeper, "vv_tavernkeeper_pawn" }
-        };
+        private static string GetPawnName(string villagerType)
+            => $"vv_{villagerType.ToLower()}_pawn";
 
         /// <summary>
         /// Spawns the type-specific pawn item as a proper world-dropped pickable
         /// item using ItemDrop.DropItem.
         /// </summary>
-        private static void SpawnCaptivePawn(Vector3 position, NpcType npcType)
+        private static void SpawnCaptivePawn(Vector3 position, string villagerType)
         {
-            if (!NpcPawnMap.TryGetValue(npcType, out var pawnName))
-            {
-                Plugin.Log?.LogWarning($"No pawn item mapped for NPC type: {npcType}");
-                return;
-            }
+            var pawnName = GetPawnName(villagerType);
 
             if (ZNetScene.instance == null)
             {

@@ -1,11 +1,12 @@
+using System;
 using System.Linq;
-using UnityEngine;
-using ValheimVillages.Core.Attributes;
-using ValheimVillages.Core.Testing;
-using ValheimVillages.NPCs;
+using ValheimVillages.Attributes;
+using ValheimVillages.Behaviors.Patrol;
+using ValheimVillages.Testing;
 using ValheimVillages.Tags;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
+using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.IntegrationTests
 {
@@ -15,12 +16,12 @@ namespace ValheimVillages.IntegrationTests
     /// </summary>
     public static class DebugTabTests
     {
-        [ModTest(Name = "Guard_DebugTab_HasVillageMapPanel", Order = 100)]
-        public static void Guard_DebugTab_HasVillageMapPanel()
+        [ModTest(Name = "Patroller_DebugTab_HasVillageMapPanel", Order = 100)]
+        public static void Patroller_DebugTab_HasVillageMapPanel()
         {
-            // 1. Guard definition declares the right tags
-            var def = NpcTypeRegistry.Get(NpcType.Guard);
-            ModAssert.NotNull(def, "Guard NpcTypeDefinition should exist in NpcTypeRegistry");
+            // 1. Guard definition declares the right tags (any villager with patrol works)
+            var def = VillagerRegistry.Get("Guard");
+            ModAssert.NotNull(def, "Guard VillagerDef should exist in VillagerRegistry");
 
             ModAssert.True(
                 TagParser.HasTag(def.tags, "tab", "debug"),
@@ -38,35 +39,35 @@ namespace ValheimVillages.IntegrationTests
 
             // 3. DebugTab implements IVillagerTabUI so the renderer can display items
             var debugTab = AttributeScanner.GetRegisteredTabs()
-                .FirstOrDefault(t => t.Name == "Debug");
+                .FirstOrDefault(t => t.TabName == "Debug");
             ModAssert.NotNull(debugTab, "Debug tab should be registered");
             ModAssert.True(debugTab is IVillagerTabUI,
                 "DebugTab must implement IVillagerTabUI for the renderer to display items");
 
-            // 4. Find a guard NPC and verify Village Map appears in the tab's items
+            // 4. Find a patroller NPC (guard or scout) and verify Village Map appears
 #pragma warning disable CS0618
-            var guards = Object.FindObjectsOfType<VillagerBehaviorBridge>()
-                .Where(v => v.NpcType == NpcType.Guard)
+            var patrollers = UnityEngine.Object.FindObjectsOfType<VillagerBehaviorBridge>()
+                .Where(v => v.AI?.GetBehavior<PerimeterPatrolBehavior>() != null)
                 .ToArray();
 #pragma warning restore CS0618
 
-            if (guards.Length == 0)
+            if (patrollers.Length == 0)
             {
                 Plugin.Log?.LogWarning(
-                    "[ModTest] No guard NPC in world — skipping live item check");
+                    "[ModTest] No patroller NPC in world — skipping live item check");
                 return;
             }
 
-            var guard = guards[0];
-            ModAssert.NotNull(guard.AI,
-                "Guard NPC exists but has no VillagerAI — hot reload or tagging bug");
+            var patroller = patrollers[0];
+            ModAssert.NotNull(patroller.AI,
+                "Patroller NPC exists but has no VillagerAI — hot reload or tagging bug");
 
             var tabUI = (IVillagerTabUI)debugTab;
-            tabUI.OnSelected(guard);
-            var items = tabUI.GetListItems(guard);
+            tabUI.OnSelected(patroller);
+            var items = tabUI.GetListItems(patroller);
 
-            ModAssert.True(items.Any(i => i.Name == "Village Map"),
-                "Guard debug tab items should include 'Village Map'");
+            ModAssert.True(items.Any(i => i.TabName == "Village Map"),
+                "Patroller debug tab items should include 'Village Map'");
         }
     }
 }

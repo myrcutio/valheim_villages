@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
-using ValheimVillages.NPCs;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Villager;
+using ValheimVillages.Villager.AI;
 
 namespace ValheimVillages
 {
@@ -55,14 +55,14 @@ namespace ValheimVillages
                 $"{orphanedObjects} orphaned GameObject(s) destroyed.");
         }
 
-        /// <summary>
+        /// <summary>d
         /// Clear all static registries that hold per-session state.
         /// Called before any object scanning so callbacks don't fire
         /// on stale references during destruction.
         /// </summary>
         private static void ResetAllStaticState()
         {
-            Core.Attributes.AttributeScanner.InvokeAllCleanup(CurrentAssembly);
+            Attributes.AttributeScanner.InvokeAllCleanup(CurrentAssembly);
             Plugin.Log?.LogDebug("[HotReload] All static registries cleared.");
         }
 
@@ -139,7 +139,7 @@ namespace ValheimVillages
                 string name = go.name;
 
                 bool isModObject =
-                    Core.Attributes.AttributeScanner.GetModObjectNames(CurrentAssembly).Contains(name) ||
+                    Attributes.AttributeScanner.GetModObjectNames(CurrentAssembly).Contains(name) ||
                     name.StartsWith(ModPrefix) ||
                     name.StartsWith(ModPrefabPrefix);
 
@@ -218,8 +218,8 @@ namespace ValheimVillages
                 if (zdo == null) continue;
 
                 // Check if this is one of our NPCs
-                int npcType = zdo.GetInt("vv_npc_type", -1);
-                if (npcType < 0) continue;
+                string villagerType = zdo.GetString("vv_villager_type", "");
+                if (string.IsNullOrEmpty(villagerType)) continue;
 
                 // Get bed position from ZDO
                 Vector3 bedPos = zdo.GetVec3("vv_bed_position", Vector3.zero);
@@ -245,16 +245,11 @@ namespace ValheimVillages
                 // sweep can't detect.  We identify ours by station name prefix.
                 RemoveOrphanedCraftingStations(nview.gameObject);
 
-                // Restore NPC state using shared restoration logic
-                var monsterAI = nview.gameObject.GetComponent<MonsterAI>();
-                if (monsterAI != null)
-                    VillagerRestoration.Restore(monsterAI, zdo);
+                // Restore NPC state: strips native components, adds mod components
+                VillagerRestoration.Restore(nview.gameObject, zdo);
 
-                // Register and eagerly create AI so it's available immediately
-                // (tests and other Awake-time consumers need it before UpdateAI)
+                // Register with Villager.AI manager (pending; active when VillagerAI component exists)
                 VillagerAIManager.Register(uniqueId, bedPos);
-                if (monsterAI != null)
-                    VillagerAIManager.GetOrCreate(uniqueId, monsterAI);
 
                 fixedCount++;
                 Plugin.Log?.LogDebug(

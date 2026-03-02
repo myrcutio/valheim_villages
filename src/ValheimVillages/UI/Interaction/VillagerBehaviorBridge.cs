@@ -1,6 +1,8 @@
 using UnityEngine;
-using ValheimVillages.NPCs;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Enums;
+using ValheimVillages.Villager.AI.Pathfinding;
+using VillagerAI = ValheimVillages.Villager.AI.VillagerAI;
+using VillagerMemory = ValheimVillages.Villager.AI.Memory.VillagerMemory;
 
 namespace ValheimVillages.UI.Interaction
 {
@@ -11,122 +13,52 @@ namespace ValheimVillages.UI.Interaction
     /// </summary>
     public class VillagerBehaviorBridge : MonoBehaviour
     {
-        private string m_uniqueId;
         private VillagerAI m_cachedAI;
         private float m_lastLookupTime;
 
         /// <summary>
-        /// Initialize the bridge with a unique ID.
-        /// </summary>
-        public void Initialize(string uniqueId)
-        {
-            m_uniqueId = uniqueId;
-        }
-
-        /// <summary>
         /// Resolve the VillagerAI instance (cached with periodic refresh).
         /// </summary>
-        public VillagerAI AI
-        {
-            get
-            {
-                // Try to resolve unique ID from ZDO if not set
-                if (string.IsNullOrEmpty(m_uniqueId))
-                {
-                    var nview = GetComponent<ZNetView>();
-                    if (nview != null && nview.GetZDO() != null)
-                        m_uniqueId = nview.GetZDO().GetString("vv_villager_id", "");
-                }
+        public Villager.Villager villagerInstance;
 
-                if (string.IsNullOrEmpty(m_uniqueId))
-                    return null;
-
-                // Refresh cache every 2 seconds
-                if (m_cachedAI == null || Time.time - m_lastLookupTime > 2f)
-                {
-                    m_lastLookupTime = Time.time;
-                    VillagerAIManager.ActiveVillagers.TryGetValue(m_uniqueId, out m_cachedAI);
-                }
-
-                return m_cachedAI;
-            }
-        }
+        /// <summary>Called after spawn/restore to set the unique ID (for compatibility; resolution uses villagerInstance).</summary>
+        public void Initialize(string uniqueId) { }
 
         #region Public API (used by VillagerInteract)
 
         /// <summary>
-        /// Get the NPC type from ZDO (e.g. Mountaineer, Guard, etc.).
-        /// </summary>
-        public NpcType? NpcType
-        {
-            get
-            {
-                var nview = GetComponent<ZNetView>();
-                if (nview == null || nview.GetZDO() == null) return null;
-                int typeInt = nview.GetZDO().GetInt("vv_npc_type", -1);
-                if (typeInt < 0) return null;
-                return (NpcType)typeInt;
-            }
-        }
-
-        /// <summary>
         /// Access to the NPC's memory.
         /// </summary>
-        public VillagerMemory Memory => AI?.Memory;
+        public VillagerMemory Memory => villagerInstance.villagerAI.GetMemory();
 
         /// <summary>
         /// Current behavior state.
         /// </summary>
-        public BehaviorState CurrentState => AI?.CurrentState ?? BehaviorState.Idle;
+        public BehaviorState CurrentState => villagerInstance.villagerAI?.CurrentState ?? BehaviorState.Idle;
 
         /// <summary>
         /// Current target position.
         /// </summary>
-        public Vector3? CurrentTarget => AI?.CurrentTarget;
+        public VillagerWaypoint CurrentWaypoint => villagerInstance.villagerAI.GetCurrentWaypoint();
 
         /// <summary>
         /// Unique villager ID (for activity log / debug).
         /// </summary>
-        public string UniqueId => !string.IsNullOrEmpty(m_uniqueId) ? m_uniqueId : (AI?.UniqueId ?? "");
+        public string UniqueId => villagerInstance.uid;
+
+        /// <summary>VillagerAI instance (for UI and tests).</summary>
+        public VillagerAI AI => villagerInstance?.villagerAI;
+
+        /// <summary>Villager type string from JSON definition (for filtering/tests).</summary>
+        public string VillagerType => villagerInstance?.villagerType ?? "";
 
         /// <summary>
         /// Pause/unpause the villager AI.
         /// </summary>
         public void SetPaused(bool paused)
         {
-            AI?.SetPaused(paused);
+            villagerInstance.villagerAI?.SetPaused(paused);
         }
-
-        /// <summary>
-        /// Force the villager to travel to a specific location type.
-        /// </summary>
-        public Vector3? DebugWanderToLocationType(LocationType type)
-        {
-            return AI?.DebugWanderToLocationType(type);
-        }
-
-        /// <summary>
-        /// Start a multi-waypoint movement test (bed -> fire -> chair -> origin).
-        /// </summary>
-        public bool RunMovementTests()
-        {
-            var ai = AI;
-            if (ai == null) return false;
-            return ai.StartMovementTest();
-        }
-
-        /// <summary>
-        /// Cancel a running movement test.
-        /// </summary>
-        public void CancelMovementTest()
-        {
-            AI?.CancelMovementTest();
-        }
-
-        /// <summary>
-        /// Whether a movement test is currently running.
-        /// </summary>
-        public bool IsTestRunning => AI?.IsMovementTestActive ?? false;
 
         #endregion
     }

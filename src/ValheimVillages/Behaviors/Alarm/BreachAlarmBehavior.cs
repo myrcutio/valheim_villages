@@ -1,6 +1,8 @@
 using ValheimVillages.Behaviors.Patrol;
-using ValheimVillages.Core.Attributes;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Attributes;
+using ValheimVillages.Interfaces;
+using ValheimVillages.Schemas;
+using ValheimVillages.Villager.AI;
 
 namespace ValheimVillages.Behaviors.Alarm
 {
@@ -19,10 +21,10 @@ namespace ValheimVillages.Behaviors.Alarm
         public int Priority => 100;
 
         /// <summary>True when a breach has been detected and not yet cleared.</summary>
-        public bool IsActive => m_patrolBehavior?.Guard?.IsAlarmed == true;
+        public bool IsActive => m_patrolBehavior?.IsAlarmed == true;
 
         /// <summary>The breach position, if any.</summary>
-        public UnityEngine.Vector3? BreachPosition => m_patrolBehavior?.Guard?.BreachPosition;
+        public UnityEngine.Vector3? BreachPosition => m_patrolBehavior?.BreachPosition;
 
         public BreachAlarmBehavior(VillagerAI ai)
         {
@@ -45,36 +47,35 @@ namespace ValheimVillages.Behaviors.Alarm
 
         public void Update(float dt)
         {
-            // Alarm state is managed by the GuardBehavior internally.
-            // When alarmed, the guard stops patrolling (handled by WantsControl priorities).
+            // Alarm state is managed by the PatrolStateMachine internally.
+            // When alarmed, the patroller stops patrolling (handled by WantsControl priorities).
             // The UI shows the alarm and provides "Show me" / "Dismiss" actions.
         }
 
         public void OnArrival()
         {
-            // Walking to breach complete
         }
 
         public void Save(ZDO zdo)
         {
-            // Breach state is persisted by the patrol behavior's GuardPersistence
+            // Breach state is persisted by PatrolPersistence
         }
 
         public void Load(ZDO zdo)
         {
-            // Breach state is loaded by the patrol behavior's GuardPersistence
+            // Breach state is loaded by PatrolPersistence
         }
 
-        /// <summary>Send the guard to the breach location.</summary>
+        /// <summary>Send the patroller to the breach location.</summary>
         public void WalkToBreach()
         {
-            m_patrolBehavior?.Guard?.WalkToBreach();
+            m_patrolBehavior?.WalkToBreach();
         }
 
         /// <summary>Clear breach alarm and resume patrol.</summary>
         public void ClearBreach()
         {
-            m_patrolBehavior?.Guard?.ClearBreach();
+            m_patrolBehavior?.ClearBreach();
         }
 
         public string GetStatusText()

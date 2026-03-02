@@ -2,7 +2,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using UnityEngine;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
+using ValheimVillages.Schemas;
 
 namespace ValheimVillages.TaskQueue.ActivityLog
 {

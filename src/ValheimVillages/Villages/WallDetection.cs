@@ -4,7 +4,7 @@ namespace ValheimVillages.Villages
 {
     /// <summary>
     /// Utility for identifying wall and door pieces in the game world.
-    /// Used by guards to detect village boundaries during patrol route discovery.
+    /// Used by patrollers to detect village boundaries during patrol route discovery.
     /// </summary>
     public static class WallDetection
     {

@@ -1,9 +1,10 @@
 using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
-using ValheimVillages.NPCs.AI;
-using ValheimVillages.NPCs.AI.Work;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
+using ValheimVillages.Villager.AI.Work;
+using ValheimVillages.Schemas;
+using ValheimVillages.Settings;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.TaskQueue.ActivityLog;
 

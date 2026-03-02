@@ -2,9 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using ValheimVillages;
-using ValheimVillages.Core.Attributes;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Attributes;
+using ValheimVillages.Enums;
+using ValheimVillages.Interfaces;
+using ValheimVillages.Schemas;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
 
@@ -17,7 +18,7 @@ namespace ValheimVillages.UI.Tabs
     [RegisterTab("info", Order = 0)]
     public class InfoTab : IVillagerTabUI
     {
-        public string Name => "Info";
+        public string TabName => "Info";
 
         private List<KnownLocation> m_topLocations = new();
 
@@ -38,7 +39,7 @@ namespace ValheimVillages.UI.Tabs
             {
                 items.Add(new TabListItemUI
                 {
-                    Name = $"{GetLocationIcon(loc.Type)} {GetShortName(loc)}",
+                    TabName = $"{GetLocationIcon(loc.Type)} {GetShortName(loc)}",
                     Icon = null // could map to real sprites later
                 });
             }
@@ -70,7 +71,7 @@ namespace ValheimVillages.UI.Tabs
             var loc = m_topLocations[index];
             float dist = villager != null
                 ? Vector3.Distance(
-                    villager.transform.position, loc.Position.ToVector3())
+                    villager.transform.position, loc.Position)
                 : 0f;
 
             string shelter = loc.HasShelter ? " (sheltered)" : "";
@@ -154,9 +155,8 @@ namespace ValheimVillages.UI.Tabs
             float s = loc.Type switch
             {
                 LocationType.Bed => 100f, LocationType.Fire => 50f,
-                LocationType.Chair => 40f, LocationType.Table => 35f,
                 LocationType.Farm => 30f, LocationType.Animals => 30f,
-                LocationType.Shelter => 10f, LocationType.Patrol => 5f,
+                LocationType.Shelter => 10f,
                 _ => 0f
             };
             if (loc.HasShelter) s += 15f;
@@ -168,12 +168,10 @@ namespace ValheimVillages.UI.Tabs
         {
             LocationType.Bed => "Cozy Bed",
             LocationType.Fire => loc.HasShelter ? "Warm Hearth" : "Campfire",
-            LocationType.Chair => "Comfortable Seat",
             LocationType.Table => "Gathering Table",
             LocationType.Shelter => "Dry Spot",
             LocationType.Farm => "Open Fields",
             LocationType.Animals => "Friendly Creatures",
-            LocationType.Patrol => "Scenic Path",
             _ => "Interesting Spot"
         };
 
@@ -181,12 +179,10 @@ namespace ValheimVillages.UI.Tabs
         {
             LocationType.Bed => "[Bed]",
             LocationType.Fire => "[Fire]",
-            LocationType.Chair => "[Seat]",
             LocationType.Table => "[Table]",
             LocationType.Shelter => "[Roof]",
             LocationType.Farm => "[Field]",
             LocationType.Animals => "[Beasts]",
-            LocationType.Patrol => "[Path]",
             _ => "[?]"
         };
 
@@ -196,12 +192,10 @@ namespace ValheimVillages.UI.Tabs
                 LocationType.Bed => "A cozy bed",
                 LocationType.Fire =>
                     loc.HasShelter ? "A warm hearth" : "A campfire",
-                LocationType.Chair => "A comfortable seat",
                 LocationType.Table => "A gathering table",
                 LocationType.Shelter => "A dry spot",
                 LocationType.Farm => "Open fields",
                 LocationType.Animals => "Friendly creatures",
-                LocationType.Patrol => "A scenic path",
                 _ => "An interesting spot"
             };
 
@@ -230,7 +224,7 @@ namespace ValheimVillages.UI.Tabs
                     null);
                 method?.Invoke(minimap, new object[]
                 {
-                    loc.Position.ToVector3(), Minimap.PinType.Icon3,
+                    loc.Position, Minimap.PinType.Icon3,
                     $"{name}: {desc}", true, false
                 });
                 Player.m_localPlayer?.Message(

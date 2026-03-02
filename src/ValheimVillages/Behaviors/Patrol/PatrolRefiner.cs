@@ -1,19 +1,20 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villages;
+using VillagerWaypoint = ValheimVillages.Villager.AI.Pathfinding.VillagerWaypoint;
 
 namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
-    /// Refines the guard patrol route over successive laps using timing heuristics:
+    /// Refines a patrol route over successive laps using timing heuristics:
     /// - Quick arrival (less than 2s): waypoint is redundant, remove it
     /// - Mid-traverse (15s+ and still moving): insert waypoint at current position
     /// - Stuck (15s+ and no movement): relocate unreachable waypoint to current position
     /// - Post-circuit: prune nearly-collinear waypoints that don't add meaningful perimeter coverage
     /// </summary>
-    public class GuardPatrolRefiner
+    public class PatrolRefiner
     {
         /// <summary>Arrivals faster than this indicate the waypoint is redundant.</summary>
         public const float QuickArrivalThreshold = 2f;
@@ -50,14 +51,14 @@ namespace ValheimVillages.Behaviors.Patrol
         private float m_segmentStartTime;
         private bool m_midTraverseInserted;
 
-        /// <summary>Call when the guard begins moving toward a new waypoint.</summary>
+        /// <summary>Call when the patroller begins moving toward a new waypoint.</summary>
         public void OnSegmentStart()
         {
             m_segmentStartTime = Time.time;
             m_midTraverseInserted = false;
         }
 
-        /// <summary>Returns true if the guard arrived faster than the quick arrival threshold.</summary>
+        /// <summary>Returns true if the patroller arrived faster than the quick arrival threshold.</summary>
         public bool IsQuickArrival()
         {
             return (Time.time - m_segmentStartTime) < QuickArrivalThreshold;
@@ -65,9 +66,9 @@ namespace ValheimVillages.Behaviors.Patrol
 
         /// <summary>
         /// Evaluate patrol progress at each behavior tick.
-        /// Called once per tick (~15s) while the guard is patrolling.
+        /// Called once per tick (~15s) while the patroller is patrolling.
         /// </summary>
-        /// <param name="hasMoved">True if the guard moved significantly since the last tick.</param>
+        /// <param name="hasMoved">True if the patroller moved significantly since the last tick.</param>
         public PatrolRefinement CheckProgress(bool hasMoved)
         {
             if (!hasMoved)
@@ -121,7 +122,7 @@ namespace ValheimVillages.Behaviors.Patrol
             if (gap < MinNudgeGap) return false;
 
             // Nudge toward the wall, staying WallInsetDistance inside
-            var candidate = wallHit.point + inward * GuardPatrolDiscovery.WallInsetDistance;
+            var candidate = wallHit.point + inward * PatrolDiscovery.WallInsetDistance;
             candidate.y = waypointPos.y;
 
             // Snap to NavMesh probing from above to prefer wall tops / elevated paths
@@ -164,7 +165,7 @@ namespace ValheimVillages.Behaviors.Patrol
 
             float angleDeg = Vector3.Angle(dirPrev, dirNext);
             float arcLength = angleDeg * Mathf.Deg2Rad * avgRadius;
-            float maxArc = GuardPatrolDiscovery.WaypointSpacing * MaxArcGapMultiplier;
+            float maxArc = PatrolDiscovery.WaypointSpacing * MaxArcGapMultiplier;
 
             return arcLength > maxArc;
         }
@@ -186,7 +187,7 @@ namespace ValheimVillages.Behaviors.Patrol
 
         /// <summary>
         /// Sort waypoints clockwise (top-down) around the bed position by their XZ angle.
-        /// This ensures the guard walks a consistent perimeter loop instead of doubling back.
+        /// This ensures the patroller walks a consistent perimeter loop instead of doubling back.
         /// </summary>
         public static void SortClockwise(List<VillagerWaypoint> waypoints, Vector3 bedPosition)
         {
@@ -256,7 +257,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 totalDist += offset.magnitude;
             }
             float patrolRadius = totalDist / activeIndices.Count;
-            float maxArc = GuardPatrolDiscovery.WaypointSpacing * MaxArcGapMultiplier;
+            float maxArc = PatrolDiscovery.WaypointSpacing * MaxArcGapMultiplier;
             float maxAngle = maxArc / Mathf.Max(patrolRadius, 1f);
 
             int added = 0;
@@ -302,7 +303,7 @@ namespace ValheimVillages.Behaviors.Patrol
                         if (!WallDetection.RaycastForWall(origin, inward, probeDist + NudgeProbeOffset, out var wallHit))
                             continue;
 
-                        var pos = wallHit.point + inward * GuardPatrolDiscovery.WallInsetDistance;
+                        var pos = wallHit.point + inward * PatrolDiscovery.WallInsetDistance;
                         pos.y = bedPosition.y;
 
                         var filter = new NavMeshQueryFilter();
@@ -313,7 +314,7 @@ namespace ValheimVillages.Behaviors.Patrol
                             continue;
 
                         waypoints.Insert(insertPos + actualInserts, new VillagerWaypoint(
-                            navHit.position, PathingStrategyRegistry.GuardPatrolId));
+                            navHit.position, VillagerWaypoint.DefaultStrategyId));
                         actualInserts++;
                         added++;
                     }
@@ -384,7 +385,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 {
                     float angleDeg = Vector3.Angle(dirPrev, dirNext);
                     float arcLength = angleDeg * Mathf.Deg2Rad * avgRadius;
-                    float maxArc = GuardPatrolDiscovery.WaypointSpacing * MaxArcGapMultiplier;
+                    float maxArc = PatrolDiscovery.WaypointSpacing * MaxArcGapMultiplier;
                     if (arcLength > maxArc) continue;
                 }
 

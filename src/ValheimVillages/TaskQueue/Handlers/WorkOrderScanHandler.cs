@@ -2,12 +2,12 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using UnityEngine;
-using ValheimVillages.NPCs;
-using ValheimVillages.NPCs.AI;
-using ValheimVillages.NPCs.AI.Work;
-using ValheimVillages.NPCs.AI.Work.Farming;
+using ValheimVillages.Schemas;
 using ValheimVillages.Items.VirtualRecipes;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
+using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.AI.Work;
+using ValheimVillages.Settings;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.TaskQueue.ActivityLog;
 
@@ -33,13 +33,11 @@ namespace ValheimVillages.TaskQueue.Handlers
                 return TaskResult.Fail("Missing villager_id");
             }
 
-            if (!task.Attributes.TryGetValue("npc_type", out var npcTypeStr) ||
-                !int.TryParse(npcTypeStr, out int npcTypeInt))
+            if (!task.Attributes.TryGetValue("villager_type", out var villagerType) ||
+                string.IsNullOrEmpty(villagerType))
             {
-                return TaskResult.Fail("Missing or invalid npc_type");
+                return TaskResult.Fail("Missing villager_type");
             }
-
-            var npcType = (NpcType)npcTypeInt;
 
             if (!TaskAttributeParser.TryParsePosition(task.Attributes, "bed", out var bedPos))
             {
@@ -62,7 +60,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             }
 
             // Find all matching work orders and try each until one can be fulfilled
-            var allMatches = ContainerScanner.FindAllWorkOrders(containers, npcType);
+            var allMatches = ContainerScanner.FindAllWorkOrders(containers, villagerType);
             
             if (allMatches == null || allMatches.Count == 0)
             {
@@ -84,7 +82,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
 
                 // Find recipe
-                var recipe = StationMatcher.FindRecipeForNpc(match.ItemPrefabName, npcType);
+                var recipe = StationMatcher.FindRecipeForNpc(match.ItemPrefabName, villagerType);
                 if (recipe == null)
                 {
                     lastFailReason = $"No recipe for '{match.ItemPrefabName}'";

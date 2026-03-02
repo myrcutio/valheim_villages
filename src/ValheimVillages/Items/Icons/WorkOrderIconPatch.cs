@@ -3,8 +3,8 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.Items.Icons;
-using ValheimVillages.NPCs.AI;
-using ValheimVillages.NPCs.AI.Work;
+using ValheimVillages.Villager.AI.Work;
+using ValheimVillages.Settings;
 
 namespace ValheimVillages.Items.Icons
 {

@@ -51,8 +51,8 @@ TaskQueue/
 
 ## Integration
 
-- **NPCs/** -- `VillagerAI` enqueues `poi_discovery`; `CraftingBehavior` enqueues `work_order_scan`.
-- **Behaviors/** -- Guards enqueue `breach_check` via `BreachAlarmBehavior`.
+- **Villager/** -- `VillagerAI` (Villager.AI) enqueues `poi_discovery`; **Behaviors/** `CraftingBehavior` enqueues `work_order_scan`.
+- **Behaviors/** -- Patrollers enqueue `breach_check` via `BreachAlarmBehavior`.
 - **Villages/** -- `NavMeshRebakeHandler` and `HnaPartitionHandler` use `VillageAreaManager.TryGetCombinedBounds()`.
 - **Items/** -- `RecipeDiscoveryRefreshHandler` calls `VirtualRecipeLoader.RecheckDiscoveredRecipes()`.
 - **UI/** -- `DebugTab` displays `VillagerActivityLog` entries.

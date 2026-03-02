@@ -1,4 +1,5 @@
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
+using ValheimVillages.Interfaces;
 
 namespace ValheimVillages.Abilities.MountainStride
 {

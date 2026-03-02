@@ -1,0 +1,59 @@
+{
+  "type": "Carpenter",
+  "category": "Villager",
+  "displayName": "Carpenter",
+  "description": "Skilled in woodworking, construction, and toolmaking",
+  "workbenches": [
+    { "name": "Workbench", "minLevel": 1 }
+  ],
+  "requiredBiomes": [],
+  "preferredBiomes": [],
+  "requiresCoastal": false,
+  "minComfortLevel": 3,
+  "materialRequirements": "Wood and stone for workshop structures",
+  "scalingType": "VillagerVariety",
+  "dependentOnNpcType": "",
+  "tieredBenefits": [],
+  "productions": [
+    { "requiredLevel": 1, "outputItem": "Wood", "description": "Produces tools and crafted items daily" }
+  ],
+  "providesLevelTo": ["Farmer", "Miner", "Blacksmith"],
+  "receivesLevelFrom": [],
+  "interdependenceDescription": "Adds levels to all production villagers through better tools",
+  "stationName": "",
+  "stationIcon": "Hammer",
+  "workStations": ["$piece_workbench"],
+  "behaviors": ["craft"],
+  "tags": ["tab:info", "tab:debug", "tab:workorder"],
+  "randomTalk": [
+    "Wood is honest. It tells you exactly where it wants to split. Usually through your thumbnail.",
+    "People think carpentry is simple. 'Just nail bits of wood together,' they say. Then their house falls down and suddenly I'm the expert.",
+    "Every plank was a tree once. Every tree was a seed. Every seed was a... look, I think about this too much.",
+    "The grain of this wood is magnificent. You don't care, do you? Nobody ever cares about the grain.",
+    "I've built more workbenches than I can count. Each one slightly better than the last. It's like a metaphor for something.",
+    "Splinters are just the wood's way of coming home with you.",
+    "They asked me to build a round table. Do you have any idea how hard round is? Everything WANTS to be square.",
+    "A good joint needs no nails. A great joint needs no glue. A perfect joint needs a Carpenter who hasn't slept in three days.",
+    "I could build you a chair that lasts a thousand years. Or I could build you one that's comfortable. Pick one.",
+    "Sometimes I look at a tree and see a beautiful home. The tree looks at me and sees a maniac with an axe. Perspective.",
+    "I'm not saying I'm the backbone of this village, but have you tried sitting down without furniture?",
+    "Yes, I can hear the walls creaking. No, it's not structural. Probably.",
+    "Look, I just really like walnut."
+  ],
+  "randomGreets": [
+    "Come in! Mind the sawdust--it's everywhere.",
+    "Ah, hello! I was just having a word with this oak plank. Don't ask.",
+    "Welcome to the workshop! Everything you see, I built. Including the floor you're standing on.",
+    "Need something built? Knocked down? Artfully rearranged?",
+    "Well met! You're looking a bit... unvarnished today.",
+    "Pull up a chair! I made it myself. Obviously."
+  ],
+  "randomGoodbye": [
+    "Off you go. These shelves won't build themselves. Believe me, I've asked.",
+    "Safe travels! Be wary of blacksmiths and anyone named 'Olaf'",
+    "Right, back to work.",
+    "Take care! And if you find any good timber out there, you know where I am.",
+    "May your roof never leak. Unless you want it to!"
+  ]
+}
+

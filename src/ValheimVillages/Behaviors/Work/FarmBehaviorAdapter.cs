@@ -1,6 +1,8 @@
-using ValheimVillages.Core.Attributes;
-using ValheimVillages.NPCs.AI;
-using ValheimVillages.NPCs.AI.Work.Farming;
+using ValheimVillages.Behaviors.Farming;
+using ValheimVillages.Attributes;
+using ValheimVillages.Interfaces;
+using ValheimVillages.Schemas;
+using ValheimVillages.Villager.AI;
 
 namespace ValheimVillages.Behaviors.Work
 {
@@ -8,15 +10,15 @@ namespace ValheimVillages.Behaviors.Work
     /// IBehavior adapter for farming. This adapter creates a FarmingBehavior and injects
     /// it into the sibling CraftingBehaviorAdapter. The farm behavior itself does not
     /// independently take control — farming is a sub-state of crafting.
-    /// Tag: "farm", Priority: 50.
+    /// Tag: "farming", Priority: 50.
     /// </summary>
-    [RegisterBehavior("farm")]
+    [RegisterBehavior("farming")]
     public class FarmBehaviorAdapter : IBehavior
     {
         private readonly VillagerAI m_ai;
         private FarmingBehavior m_farming;
 
-        public string Tag => "farm";
+        public string Tag => "farming";
         public int Priority => 50;
 
         /// <summary>Direct access to the underlying FarmingBehavior.</summary>

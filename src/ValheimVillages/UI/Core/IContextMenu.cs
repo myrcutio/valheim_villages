@@ -1,3 +1,5 @@
+using ValheimVillages.Interfaces;
+
 namespace ValheimVillages.UI.Core
 {
     /// <summary>

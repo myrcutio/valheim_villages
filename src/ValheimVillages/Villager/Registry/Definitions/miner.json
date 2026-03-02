@@ -1,0 +1,61 @@
+{
+  "type": "Miner",
+  "category": "Villager",
+  "displayName": "Miner",
+  "description": "Specialized in mining, ore extraction, and underground operations",
+  "workbenches": [
+    { "name": "Workbench", "minLevel": 1 },
+    { "name": "Stonecutter", "minLevel": 1 }
+  ],
+  "requiredBiomes": [],
+  "preferredBiomes": ["BlackForest", "Mountain", "Swamp"],
+  "requiresCoastal": false,
+  "minComfortLevel": 2,
+  "materialRequirements": "Wood for mining camp, proximity to ore deposits",
+  "scalingType": "VillagerVariety",
+  "dependentOnNpcType": "",
+  "tieredBenefits": [],
+  "productions": [
+    { "requiredLevel": 1, "outputItem": "CopperOre", "description": "Produces copper ore daily (requires Farmer)" },
+    { "requiredLevel": 2, "outputItem": "TinOre", "description": "Produces tin ore (requires Blacksmith support)" }
+  ],
+  "providesLevelTo": ["Blacksmith"],
+  "receivesLevelFrom": ["Farmer", "Blacksmith", "Carpenter"],
+  "interdependenceDescription": "Requires Farmer for base level; Blacksmith enables tin; Carpenter improves tools",
+  "stationName": "",
+  "stationIcon": "Pickaxe",
+  "workStations": [],
+  "behaviors": ["craft"],
+  "tags": ["tab:info", "tab:debug", "tab:workorder"],
+  "randomTalk": [
+    "You know what they say about copper deposits: where there's copper, there's... probably more copper.",
+    "I don't have claustrophobia. I have a healthy respect for loose rocks above my head.",
+    "Tin is just copper's shy friend. Always hiding in the riverbank.",
+    "I found a perfectly round stone today. Kept it. Don't tell anyone. It's my stone.",
+    "Mining is simple. You hit rock. Rock breaks. Repeat.",
+    "The deeper you dig, the more the earth pushes back. I respect that. Then I dig deeper anyway.",
+    "Rock and stone! ...to the bone? I forget how it goes.",
+    "I've been underground so long my eyes have forgotten what the sun looks like. Bright, was it? Yellowish?",
+    "Every ore vein runs out eventually. It's the saddest lesson mining teaches you. That and 'wear a helmet.'",
+    "The Blacksmith thinks this is easy? Lets see him shoe a lox with dirt up his nose.",
+    "Some miners whistle while they work. I prefer heavy metal.",
+    "Off I go then. Hi ho. Hi ho.",
+    "They say diamonds are forever. I say that's because nobody's hit em hard enough yet."
+  ],
+  "randomGreets": [
+    "Ah, surface dweller! Welcome to the real world. The dirt one.",
+    "Hello! Watch your step, the floor is... well, it's rock. It's all rock down here.",
+    "Welcome! Your eyes will adjust. Probably. Eventually.",
+    "Greetings from below! I'd offer you a seat but it's just more rock.",
+    "Hey there! Come to see how the other half lives? The lower half?",
+    "Well met! You look like someone who appreciates a good vein of copper."
+  ],
+  "randomGoodbye": [
+    "Back to the depths for me. The rock won't mine itself. It won't will it?",
+    "Safe travels up top! Must be nice, having a sky and all.",
+    "Take care on the surface! I hear it rains up there. Water just... falling from the sky. Yuck.",
+    "May your pickaxe stay sharp and your ceiling stay up.",
+    "Don't forget to put a little dirt under your pillow for the Dirt Man!"
+  ]
+}
+

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 using ValheimVillages.Algorithms;
 using Xunit;
 using Barrier = ValheimVillages.Algorithms.Barrier;
@@ -14,7 +15,7 @@ public class FloodFillTests
     [Fact]
     public void Run_SingleBed_FloodsFlatTerrain()
     {
-        var beds = new[] { new Vec3(0, 0, 0) };
+        var beds = new[] { new Vector3(0, 0, 0) };
         var barriers = new List<Barrier>();
 
         // Flat terrain: always return Y=0
@@ -38,7 +39,7 @@ public class FloodFillTests
     [Fact]
     public void Run_NoBeds_ReturnsEmpty()
     {
-        var beds = Array.Empty<Vec3>();
+        var beds = Array.Empty<Vector3>();
         var barriers = new List<Barrier>();
         HeightLookup heightLookup = (float wx, float wz, float refY, out float hitY) =>
         {
@@ -55,7 +56,7 @@ public class FloodFillTests
     [Fact]
     public void Run_RadiusLimitsCellSpread()
     {
-        var beds = new[] { new Vec3(15, 0, 15) };
+        var beds = new[] { new Vector3(15, 0, 15) };
         var barriers = new List<Barrier>();
         HeightLookup heightLookup = (float wx, float wz, float refY, out float hitY) =>
         {
@@ -80,7 +81,7 @@ public class FloodFillTests
     [Fact]
     public void Run_SteepSlope_BlocksExpansion()
     {
-        var beds = new[] { new Vec3(5, 0, 5) };
+        var beds = new[] { new Vector3(5, 0, 5) };
         var barriers = new List<Barrier>();
 
         // Height jumps dramatically at x=8 (simulates cliff)

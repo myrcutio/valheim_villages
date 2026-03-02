@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Villager.AI.Navigation;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {

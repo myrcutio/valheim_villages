@@ -2,10 +2,13 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using ValheimVillages;
+using ValheimVillages.Behaviors;
+using ValheimVillages.Behaviors.Farming;
+using ValheimVillages.Schemas;
+using ValheimVillages.Enums;
 using ValheimVillages.Items.VirtualRecipes;
-using ValheimVillages.NPCs.AI;
-using ValheimVillages.NPCs.AI.Work;
-using ValheimVillages.NPCs.AI.Work.Farming;
+using ValheimVillages.Interfaces;
+using ValheimVillages.Villager.AI.Work;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
@@ -21,18 +24,19 @@ namespace ValheimVillages.TaskQueue.Handlers
         /// Returns null if no farming action is possible (no farm location, etc.).
         /// </summary>
         public static FarmingContext BuildFarmingContext(
-            VillagerAI ai,
+            IVillagerWorkContext ai,
             WorkOrderMatch match,
             Recipe recipe,
             List<IngredientSource> ingredients,
             int existingCount)
         {
             string outputItem = match.ItemPrefabName;
+            var bedPos = ai.BedPosition;
 
             // Find a farm location in the NPC's memory
-            var farmLoc = ai.Memory.KnownLocations
+            var farmLoc = ai.KnownLocations
                 .Where(l => l.Type == LocationType.Farm)
-                .OrderBy(l => Vector3.Distance(ai.Memory.BedPosition, l.Position.ToVector3()))
+                .OrderBy(l => Vector3.Distance(bedPos, l.Position))
                 .FirstOrDefault();
 
             // Fallback: cultivated ground is terrain (Heightmap), not a discoverable object.
@@ -40,11 +44,11 @@ namespace ValheimVillages.TaskQueue.Handlers
             Vector3 farmPosition;
             if (farmLoc != null)
             {
-                farmPosition = farmLoc.Position.ToVector3();
+                farmPosition = farmLoc.Position;
             }
             else
             {
-                var cultivatedPos = FindCultivatedGroundNearBed(ai.Memory.BedPosition);
+                var cultivatedPos = FindCultivatedGroundNearBed(bedPos);
                 if (!cultivatedPos.HasValue)
                 {
                     Plugin.Log?.LogDebug(
@@ -58,7 +62,7 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             // Check for harvestable crops first
             var harvestTarget = HarvestHelper.FindNearestHarvestableCrop(
-                ai, outputItem, HarvestHelper.HarvestScanRadius);
+                ai, ai.Position, outputItem, HarvestHelper.HarvestScanRadius);
 
             if (harvestTarget != null)
             {

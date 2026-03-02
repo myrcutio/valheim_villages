@@ -1,0 +1,63 @@
+{
+  "type": "Shipwright",
+  "category": "Specialist",
+  "displayName": "Shipwright",
+  "description": "Specialized in shipbuilding, boat repair, and maritime navigation",
+  "workbenches": [
+    { "name": "Workbench", "minLevel": 1 }
+  ],
+  "requiredBiomes": [],
+  "preferredBiomes": [],
+  "requiresCoastal": true,
+  "minComfortLevel": 3,
+  "materialRequirements": "Wood for shipyard structures, access to deep water",
+  "scalingType": "Comfort",
+  "dependentOnNpcType": "",
+  "tieredBenefits": [
+    { "minLevel": 3, "maxLevel": 5, "description": "10% faster sailing, better wind handling, basic ship repair", "effectMultiplier": 1.1 },
+    { "minLevel": 6, "maxLevel": 8, "description": "20% faster sailing, can tack at wider angles", "effectMultiplier": 1.2 },
+    { "minLevel": 9, "maxLevel": 99, "description": "30% faster sailing, excellent wind handling, smaller turning radius", "effectMultiplier": 1.3 }
+  ],
+  "productions": [],
+  "providesLevelTo": [],
+  "receivesLevelFrom": [],
+  "interdependenceDescription": "",
+  "stationName": "",
+  "stationIcon": "Hammer",
+  "workStations": [],
+  "behaviors": ["craft"],
+  "tags": ["tab:info", "tab:debug", "tab:workorder"],
+  "randomTalk": [
+    "The sea is a harsh mistress. Well, I say 'mistress.' More of a salty wench who occasionally tries to murder you.",
+    "I've been building boats for twenty years. The trick is knowing which end goes in the water. You'd be SURPRISED how many people get that wrong.",
+    "Serpents? Oh, serpents are fine. It's the bit between you and the serpent I worry about. That's the water. And I've MENTIONED the water.",
+    "My father was a shipwright. His father was a shipwright. His father was a duck. We don't talk about Sven.",
+    "People say the sea is calling them. The sea isn't calling anyone. The sea is ignoring you very loudly.",
+    "I named my last ship 'Nigh Unsinkable.' Before that I named one 'Surely Unsinkable.' I'm running out of adjectives.",
+    "Port. Starboard. Bow. Stern. Four words. If you need more than four words, you're overcomplicating it.",
+    "The Carpenter thinks wood is about joinery. Wood is about TRUST. You have to trust the plank. If the plank doesn't want to be a boat, you can't MAKE it be a boat.",
+    "A boat is just a hole in the water you pour money into. I'm the one holding the bucket.",
+    "They say a captain goes down with his ship. As a shipwright, my responsibility ends at the pier.",
+    "I waterproofed a longship so well once, it leaked on the OUTSIDE. Still not sure how it happened.",
+    "Stop touching the hull! ...Sorry. Reflex. Last person who touched a hull without asking lost a finger. Not to me. To the hull.",
+    "I talk to the wood. The wood talks back. If it screams, that's a bad plank.",
+    "There's a saying: 'Red sky at night, sailor's delight.' There's another saying: 'Red sky in morning, serpent swallowed the sun.' Both equally useful.",
+    "Every plank I nail is a promise to someone that they won't drown. No pressure. Literally. Don't pressure the planks."
+  ],
+  "randomGreets": [
+    "Ahoy! Mind the— too late. That's tar. That's tar forever now.",
+    "Welcome to the shipyard! Touch nothing, admire everything.",
+    "Oh good, someone who ISN'T on fire. Come in, come in.",
+    "You! You look like you've got all your fingers. Interested in keeping them? Stay away from the saw.",
+    "Greetings! You here for a boat or just wandering? We get a lot of wanderers. Most leave with boats. Funny how that works.",
+    "Hello! Are those dry boots? Enjoy that while it lasts."
+  ],
+  "randomGoodbye": [
+    "Fair winds! Or at minimum, winds that don't cheat very much.",
+    "Off you go then. Try not to drown on land. It IS possible. I've seen it.",
+    "Smooth sailing! That's a wish, not a guarantee. I provide boats, not weather.",
+    "May your keel stay straight and your mast stay upright! Beyond that, you're on your own.",
+    "Come back when you need a boat! Come back BEFORE you need a boat, really. Emergencies cost extra."
+  ]
+}
+

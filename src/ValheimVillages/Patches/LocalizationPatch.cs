@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.Patches
 {
@@ -9,6 +10,7 @@ namespace ValheimVillages.Patches
     /// Valheim's Localization system resolves "$token" by looking up "token"
     /// in m_translations; unregistered tokens display as "[Token]".
     ///
+    /// Tokens for virtual stations are generated from VillagerRegistry at runtime.
     /// The Harmony postfix handles language changes / hot reloads.
     /// <see cref="RegisterTokens"/> is called from Plugin.Awake to cover the
     /// common case where SetupLanguage has already run before our plugin loads.
@@ -16,12 +18,28 @@ namespace ValheimVillages.Patches
     [HarmonyPatch(typeof(Localization), nameof(Localization.SetupLanguage))]
     public static class LocalizationPatch
     {
-        private static readonly Dictionary<string, string> Tokens = new()
+        private static Dictionary<string, string> s_tokens;
+
+        /// <summary>
+        /// Generic station token plus one per villager type with a virtual station.
+        /// </summary>
+        private static Dictionary<string, string> Tokens
         {
-            { "vv_farmer", "Farmer" },
-            { "vv_tavernkeeper", "Tavern Keeper" },
-            { "vv_villager", "Villager" }
-        };
+            get
+            {
+                if (s_tokens != null) return s_tokens;
+                s_tokens = new Dictionary<string, string> { { "vv_villager", "Villager" } };
+                foreach (var kv in VillagerRegistry.Definitions)
+                {
+                    if (!string.IsNullOrEmpty(kv.Value.stationName))
+                    {
+                        var token = kv.Value.stationName.TrimStart('$');
+                        s_tokens[token] = kv.Value.displayName;
+                    }
+                }
+                return s_tokens;
+            }
+        }
 
         private static MethodInfo s_addWord;
 

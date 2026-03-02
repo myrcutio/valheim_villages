@@ -2,7 +2,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 using ValheimVillages.Behaviors.Alarm;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
+using ValheimVillages.Schemas;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.TaskQueue.ActivityLog;
 

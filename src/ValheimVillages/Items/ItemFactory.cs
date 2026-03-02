@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 using ValheimVillages.Items.Icons;
+using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.Items
 {
@@ -94,7 +95,152 @@ namespace ValheimVillages.Items
                 }
             }
 
+            GenerateRegistryItems(_definitions);
+
             return _definitions;
+        }
+
+        /// <summary>
+        /// Physical Valheim station → (work order key, display name, stationType for icon).
+        /// These are engine constants; virtual station work orders come from VillagerRegistry.
+        /// </summary>
+        private static readonly (string station, string key, string displayName, string stationType)[]
+            PhysicalStations =
+        {
+            ("$piece_workbench",       "workbench",    "Workbench",      "Workbench"),
+            ("$piece_forge",           "forge",        "Forge",          "Forge"),
+            ("$piece_cauldron",        "cauldron",     "Cauldron",       "Cauldron"),
+            ("$piece_artisanstation",  "artisan",      "Artisan Table",  "ArtisanTable"),
+            ("$piece_stonecutter",     "stonecutter",  "Stonecutter",    "Stonecutter"),
+        };
+
+        /// <summary>
+        /// Biome fragments: (Heightmap.Biome enum, item key, biome ID, display name, ink color).
+        /// Used to generate fragment items and the BiomeFragmentMap for loot injection.
+        /// </summary>
+        public static readonly (int biomeEnum, string key, string biomeId, string displayName, string inkColor)[]
+            FragmentBiomes =
+        {
+            ((int)Heightmap.Biome.Meadows,     "meadows",      "Meadows",      "Meadows",      "green"),
+            ((int)Heightmap.Biome.BlackForest,  "blackforest",  "BlackForest",  "Black Forest", "dark blue"),
+            ((int)Heightmap.Biome.Swamp,        "swamp",        "Swamp",        "Swamp",        "sickly brown"),
+            ((int)Heightmap.Biome.Mountain,     "mountains",    "Mountain",     "Mountains",    "blue"),
+            ((int)Heightmap.Biome.Plains,       "plains",       "Plains",       "Plains",       "golden"),
+            ((int)Heightmap.Biome.Mistlands,    "mistlands",    "Mistlands",    "Mistlands",    "purple"),
+            ((int)Heightmap.Biome.AshLands,     "ashlands",     "Ashlands",     "Ashlands",     "crimson"),
+        };
+
+        /// <summary>
+        /// Returns the station name → work order item name mapping for all stations
+        /// (physical + virtual). Used by CraftingStationPatch to build its lookup.
+        /// </summary>
+        public static Dictionary<string, string> BuildStationWorkOrderMap()
+        {
+            var map = new Dictionary<string, string>();
+            foreach (var (station, key, _, _) in PhysicalStations)
+                map[station] = $"vv_workorder_{key}";
+            foreach (var kv in VillagerRegistry.Definitions)
+            {
+                if (!string.IsNullOrEmpty(kv.Value.stationName))
+                    map[kv.Value.stationName] = $"vv_workorder_{kv.Key.ToLower()}";
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// Generates all programmatic item definitions: pawns and work orders.
+        /// </summary>
+        private static void GenerateRegistryItems(List<ItemDefinition> definitions)
+        {
+            // Generic pawn (random villager type)
+            AddIfMissing(definitions, new ItemDefinition
+            {
+                name = "vv_pawn",
+                source = "clone",
+                basePrefab = "DragonEgg",
+                displayName = "Villager",
+                description = "A villager packaged for transport.",
+                maxStackSize = 1,
+                weight = 10f,
+                itemType = "pawn"
+            });
+
+            // Per-type pawns + virtual station work orders from VillagerRegistry
+            foreach (var kv in VillagerRegistry.Definitions)
+            {
+                var def = kv.Value;
+                var typeKey = def.type.ToLower();
+
+                AddIfMissing(definitions, new ItemDefinition
+                {
+                    name = $"vv_{typeKey}_pawn",
+                    source = "clone",
+                    basePrefab = "DragonEgg",
+                    displayName = def.displayName,
+                    description = $"A {def.displayName.ToLower()} villager packaged for transport. {def.description}",
+                    maxStackSize = 1,
+                    weight = 10f,
+                    itemType = "pawn"
+                });
+
+                if (!string.IsNullOrEmpty(def.stationName))
+                {
+                    AddIfMissing(definitions, new ItemDefinition
+                    {
+                        name = $"vv_workorder_{typeKey}",
+                        source = "clone",
+                        basePrefab = "DragonEgg",
+                        displayName = $"{def.displayName} Work Order",
+                        description = $"A work order scroll for {def.displayName.ToLower()} tasks. Right-click to set production quotas.",
+                        maxStackSize = 1,
+                        weight = 0.3f,
+                        itemType = "workorder",
+                        stationType = def.type
+                    });
+                }
+            }
+
+            // Physical station work orders
+            foreach (var (_, key, displayName, stationType) in PhysicalStations)
+            {
+                AddIfMissing(definitions, new ItemDefinition
+                {
+                    name = $"vv_workorder_{key}",
+                    source = "clone",
+                    basePrefab = "DragonEgg",
+                    displayName = $"{displayName} Work Order",
+                    description = $"A work order scroll for {displayName.ToLower()} tasks. Right-click to set production quotas.",
+                    maxStackSize = 1,
+                    weight = 0.3f,
+                    itemType = "workorder",
+                    stationType = stationType
+                });
+            }
+
+            // Biome fragment items
+            foreach (var (_, key, biomeId, displayName, inkColor) in FragmentBiomes)
+            {
+                AddIfMissing(definitions, new ItemDefinition
+                {
+                    name = $"vv_fragment_{key}",
+                    source = "clone",
+                    basePrefab = "DragonEgg",
+                    displayName = $"{displayName} Ransom Fragment",
+                    description = $"A torn piece of parchment stained with {inkColor} ink. " +
+                                  $"The scrawled text hints at a captive held somewhere in the {displayName.ToLower()}. " +
+                                  "Combine three to reveal their location.",
+                    maxStackSize = 3,
+                    weight = 0.1f,
+                    itemType = "fragment",
+                    biome = biomeId
+                });
+            }
+        }
+
+        private static void AddIfMissing(List<ItemDefinition> defs, ItemDefinition def)
+        {
+            if (!defs.Exists(d => d.name == def.name))
+                defs.Add(def);
         }
 
         /// <summary>

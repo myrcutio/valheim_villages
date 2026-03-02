@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ValheimVillages.Interfaces;
 using ValheimVillages.UI.Interaction;
 
 namespace ValheimVillages.UI.Core

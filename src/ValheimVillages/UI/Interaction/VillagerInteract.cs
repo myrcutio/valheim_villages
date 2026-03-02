@@ -1,17 +1,16 @@
 using UnityEngine;
 using ValheimVillages.Behaviors;
 using ValheimVillages.Behaviors.Alarm;
-using ValheimVillages.NPCs;
-using ValheimVillages.NPCs.AI;
-using ValheimVillages.NPCs.AI.Work;
+using ValheimVillages.Enums;
 using ValheimVillages.UI.Core;
+using ValheimVillages.Villager.Station;
 
 namespace ValheimVillages.UI.Interaction
 {
     /// <summary>
     /// Enables player interaction with villager NPCs.
     /// Implements Hoverable for hover text and Interactable for E-key interaction.
-    /// Opens the crafting UI for NPC types with virtual stations (Farmer, TavernKeeper),
+    /// Opens the crafting UI with work order tabs for NPCs tagged "tab:workorder",
     /// or the dialog menu for other types.
     /// </summary>
     public class VillagerInteract : MonoBehaviour, Hoverable, Interactable
@@ -72,12 +71,6 @@ namespace ValheimVillages.UI.Interaction
         {
             string name = GetHoverName();
 
-            // Sleeping: show sleep state, no interaction prompt
-            if (IsSleeping())
-            {
-                return $"{name}\n<color=grey>Sleeping</color>";
-            }
-
             string stateInfo = GetStateInfo();
 
             // Guard breach alert
@@ -97,16 +90,12 @@ namespace ValheimVillages.UI.Interaction
         {
             if (Bridge == null) return "";
 
-            var ai = Bridge.AI;
+            var ai = Bridge.villagerInstance.villagerAI;
             if (ai == null) return "";
 
-            // Ask behaviors for status (highest priority first)
-            foreach (var b in ai.Behaviors)
-            {
-                string status = b.GetStatusText();
-                if (!string.IsNullOrEmpty(status))
-                    return $"<color=grey>{status}</color>";
-            }
+            string status = ai.CurrentState.ToString();
+            if (!string.IsNullOrEmpty(status))
+                return $"<color=grey>{status}</color>";
 
             // Fallback: general state
             return ai.CurrentState switch
@@ -122,16 +111,10 @@ namespace ValheimVillages.UI.Interaction
 
         private bool IsGuardAlarmed()
         {
-            var ai = Bridge?.AI;
+            var ai = Bridge?.villagerInstance.villagerAI;
             if (ai == null) return false;
             var alarm = ai.GetBehavior<BreachAlarmBehavior>();
             return alarm?.IsActive == true;
-        }
-
-        private bool IsSleeping()
-        {
-            var ai = Bridge?.AI;
-            return ai != null && ai.CurrentState == BehaviorState.Sleeping && ai.IsSleepAnimationActive;
         }
 
         /// <summary>
@@ -143,12 +126,6 @@ namespace ValheimVillages.UI.Interaction
         {
             if (hold) return false;
             if (user is not Player player) return false;
-
-            // Don't allow interaction while sleeping
-            if (IsSleeping())
-            {
-                return false;
-            }
 
             if (Bridge == null)
             {
@@ -172,8 +149,8 @@ namespace ValheimVillages.UI.Interaction
 
         /// <summary>
         /// Opens Valheim's crafting UI with this NPC's virtual station.
-        /// For NPC types with recipes (Farmer, TavernKeeper), shows the full
-        /// crafting panel with Tasks/Upgrade/Info/Debug tabs. For others,
+        /// For NPC types with the "tab:workorder" tag, shows the full
+        /// crafting panel with Orders/Upgrade/Info/Debug tabs. For others,
         /// hides the native tabs and shows only Info/Debug.
         /// </summary>
         private bool OpenCraftingUI(Player player, VillagerStation villagerStation)
@@ -192,8 +169,8 @@ namespace ValheimVillages.UI.Interaction
 
             // Determine if this NPC type has crafting recipes
             var bridge = Bridge;
-            bool hasCrafting = bridge?.NpcType != null &&
-                VillagerStation.HasCraftingRecipes(bridge.NpcType.Value);
+            bool hasCrafting = bridge?.villagerInstance.villagerType != null &&
+                VillagerStation.HasCraftingRecipes(bridge.villagerInstance.villagerType);
 
             // Activate the tab system
             VillagerTabManager.Activate(Bridge, hasCrafting);

@@ -1,5 +1,5 @@
 using UnityEngine;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
 
 namespace ValheimVillages.Abilities
 {

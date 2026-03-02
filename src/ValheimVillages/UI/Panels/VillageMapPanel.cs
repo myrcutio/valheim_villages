@@ -1,18 +1,17 @@
 using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Behaviors.Patrol;
-using ValheimVillages.Core.Attributes;
-using ValheimVillages.NPCs;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Attributes;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
+using ValheimVillages.Villager.AI.Pathfinding;
 
 namespace ValheimVillages.UI.Panels
 {
     /// <summary>
     /// List panel showing the village map visualization in the Debug tab.
-    /// Extracted from DebugTab.Guard's map command and detail rendering.
     /// Discovered via NPC tag "listpanel:villagemap".
+    /// Shows for any villager with the patrol behavior.
     /// </summary>
     [RegisterListPanel("villagemap", "debug")]
     public class VillageMapPanel : IListPanelUI
@@ -26,41 +25,40 @@ namespace ValheimVillages.UI.Panels
         public List<TabListItemUI> GetListItems(VillagerBehaviorBridge villager)
         {
             var items = new List<TabListItemUI>();
-            if (villager.NpcType != NpcType.Guard) return items;
 
-            var guard = villager.AI?.GuardBehavior;
-            if (guard == null) return items;
-
-            items.Add(new TabListItemUI { Name = "Village Map" });
+            if (villager.villagerInstance)
+            {
+                items.Add(new TabListItemUI { TabName = "Village Map" });
+            }
             return items;
         }
 
         public TabDetailDataUI GetDetail(int index, VillagerBehaviorBridge villager)
         {
-            var guard = villager.AI?.GuardBehavior;
-            if (guard == null) return null;
+            var patrol = villager.AI?.GetBehavior<PerimeterPatrolBehavior>();
+            if (patrol == null) return null;
 
-            var waypoints = guard.PatrolWaypoints;
+            var waypoints = patrol.PatrolWaypoints;
             int count = waypoints?.Count ?? 0;
 
             int hash = ComputeWaypointHash(waypoints);
             if (m_cachedMapTexture == null || hash != m_mapWaypointHash)
             {
                 m_mapWaypointHash = hash;
-                m_cachedMapTexture = GuardPatrolMapRenderer.Render(
-                    waypoints, guard.BedPosition, villager.transform.position);
+                m_cachedMapTexture = PatrolMapRenderer.Render(
+                    waypoints, patrol.BedPosition, villager.transform.position);
             }
 
-            int activeCount = guard.ActiveWaypointCount;
+            int activeCount = patrol.ActiveWaypointCount;
             int inactiveCount = count - activeCount;
 
-            string source = guard.IsHnaRoute ? "HNA boundary" : "Discovery";
-            string desc = guard.IsDiscoveryComplete
+            string source = patrol.IsHnaRoute ? "HNA boundary" : "Discovery";
+            string desc = patrol.IsDiscoveryComplete
                 ? $"{activeCount} active waypoints | {source}"
                 : $"{activeCount} active waypoints | Mapping...";
             if (inactiveCount > 0)
                 desc += $"\n{inactiveCount} inactive (pruned)";
-            desc += $"\nBed: ({guard.BedPosition.x:F0}, {guard.BedPosition.z:F0})";
+            desc += $"\nBed: ({patrol.BedPosition.x:F0}, {patrol.BedPosition.z:F0})";
 
             return new TabDetailDataUI
             {
@@ -70,11 +68,11 @@ namespace ValheimVillages.UI.Panels
                 ActionText = "Remap",
                 OnAction = () =>
                 {
-                    guard.ResetDiscovery();
+                    patrol.ResetDiscovery();
                     ClearMapCache();
                     Player.m_localPlayer?.Message(
                         MessageHud.MessageType.TopLeft,
-                        "Guard will re-map the village");
+                        "Villager will re-map the village");
                     InventoryGui.instance?.Hide();
                 }
             };

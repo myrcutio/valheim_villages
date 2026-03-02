@@ -4,18 +4,18 @@ Keywords: item, pawn, fragment, work order, ItemFactory, ItemDefinition, prefab,
 
 ## Purpose
 
-Item registration and management for three item types: pawns (summon NPCs), biome fragments (combine into rescue quests), and work orders (assign crafting tasks to villagers). Also handles virtual recipe discovery for farmer/tavernkeeper stations.
+Item registration and management for three item types: pawns (summon villagers), biome fragments (combine into rescue quests), and work orders (assign crafting tasks to villagers). Also handles virtual recipe discovery for stations with a `stationName`.
 
 ## Directory Structure
 
 ```
 Items/
-  ItemFactory.cs                       -- Loads JSON definitions, clones base prefabs, registers in ObjectDB/ZNetScene
+  ItemFactory.cs                       -- Loads JSON defs + generates pawn/work-order items from VillagerRegistry
   ItemDefinition.cs                    -- JSON-serializable item data (name, itemType, biome, stationType)
   Definitions/
-    Pawns/*.json                       -- Pawn item definitions (farmer_pawn, guard_pawn, etc.)
+    Pawns/pawn.json                    -- Generic (random-type) pawn; per-type pawns generated from VillagerRegistry
     Fragments/*.json                   -- Biome fragment definitions (fragment_meadows, fragment_swamp, etc.)
-    WorkOrders/*.json                  -- Work order definitions (workorder_workbench, workorder_forge, etc.)
+    WorkOrders/*.json                  -- Physical station work orders; virtual station work orders generated from VillagerRegistry
     VirtualRecipes/*.json              -- Recipe definitions (farmer_recipes, tavernkeeper_recipes)
   VirtualRecipes/
     VirtualRecipeLoader.cs             -- Registers virtual recipes in ObjectDB; cultivator/cooking discovery
@@ -48,7 +48,7 @@ Items/
 
 | Type | Role |
 |------|------|
-| `ItemFactory` | Registers pawn, fragment, and work order prefabs in ObjectDB and ZNetScene |
+| `ItemFactory` | Loads JSON items + generates per-type pawns/work-orders from VillagerRegistry; registers in ObjectDB/ZNetScene |
 | `VirtualRecipeLoader` | Registers virtual recipes; runs cultivator/cooking recipe discovery |
 | `CraftingStationPatch` | Adds "Order" button to crafting UI for stations that have work orders |
 | `FragmentCombiner` | Combines 3 same-biome fragments into a rescue quest |
@@ -58,14 +58,15 @@ Items/
 ## Entry Points and Registration
 
 - `ItemFactory.RegisterAll(ObjectDB)` called from `Patches/ItemPatch.cs` (ObjectDB.Awake/CopyOtherDB) and hot reload.
+- `ItemFactory.GenerateRegistryItems()` creates pawn items (`vv_{type}_pawn`) and virtual station work orders (`vv_workorder_{type}`) from `VillagerRegistry.Definitions`.
 - `ItemFactory.RegisterAllInZNetScene(ZNetScene)` called from `Patches/ItemPatch.cs` (ZNetScene.Awake).
 - `VirtualRecipeLoader.RegisterAll(ObjectDB)` called from ObjectDB patches.
 - Harmony patches (`CraftingStationPatch`, `WorkOrderUsePatch`, `FragmentUsePatch`, `FragmentLootPatch`) applied via `Harmony.PatchAll()`.
-- JSON definitions are embedded resources under `ValheimVillages.Items.Definitions.*`.
+- JSON definitions are embedded resources under `ValheimVillages.Items.Definitions.*`; per-type items are generated at runtime.
 
 ## Integration
 
-- **NPCs/** -- Pawns spawn villagers via `VillagerPawnPatch`; work orders drive `CraftingBehavior`/`FarmingBehavior`.
+- **Villager/** -- Pawns spawn villagers via `Villager/SpawnPatch` (VillagerPawnPatch); work orders drive **Behaviors/** `CraftingBehavior`/`FarmingBehavior`.
 - **TaskQueue/** -- `RecipeDiscoveryRefreshHandler` calls `VirtualRecipeLoader.RecheckDiscoveredRecipes()`.
 - **UI/** -- `WorkOrderMenu` configures work order min/max quotas.
 - **Patches/** -- `ItemPatch` triggers `ItemFactory.RegisterAll` and `VirtualRecipeLoader.RegisterAll`.

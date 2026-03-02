@@ -1,18 +1,20 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Enums;
+using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.AI.Pathfinding;
 using ValheimVillages.Villages;
 
 namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
-    /// Manages the guard's patrol route discovery.
+    /// Manages patrol route discovery.
     /// Phase 1 (Scouting): Detect perimeter instantly via exterior-inward raycasts, then walk toward wall.
     /// Phase 2 (CircuitTracing): Trace circle around bed creating waypoints, raycasting from exterior
     /// inward at each angle so the first wall hit is always the outermost perimeter wall.
     /// </summary>
-    public class GuardPatrolDiscovery
+    public class PatrolDiscovery
     {
         public const float MaxScoutDistance = 15f;
         public const float MinPatrolRadius = 15f;
@@ -35,7 +37,7 @@ namespace ValheimVillages.Behaviors.Patrol
         private readonly List<Vector3> m_waypoints = new();
         private bool m_circuitStarted;
 
-        public GuardPatrolDiscovery(VillagerAI ai, Vector3 bedPosition)
+        public PatrolDiscovery(VillagerAI ai, Vector3 bedPosition)
         {
             m_ai = ai;
             m_bedPosition = bedPosition;
@@ -57,19 +59,19 @@ namespace ValheimVillages.Behaviors.Patrol
                 var wallXZ = new Vector3(hit.point.x, 0f, hit.point.z);
                 var bedXZ = new Vector3(m_bedPosition.x, 0f, m_bedPosition.z);
                 m_patrolRadius = Mathf.Max(Vector3.Distance(bedXZ, wallXZ), MinPatrolRadius);
-                Plugin.Log?.LogInfo($"[Guard:{m_ai.NpcName}] Outer wall at {hit.point}, radius={m_patrolRadius:F1}m");
+                Plugin.Log?.LogInfo($"[Patrol:{m_ai.NpcName}] Outer wall at {hit.point}, radius={m_patrolRadius:F1}m");
             }
             else
             {
                 m_patrolRadius = MaxScoutDistance;
-                Plugin.Log?.LogInfo($"[Guard:{m_ai.NpcName}] No outer wall found, using max radius {m_patrolRadius:F1}m");
+                Plugin.Log?.LogInfo($"[Patrol:{m_ai.NpcName}] No outer wall found, using max radius {m_patrolRadius:F1}m");
             }
 
             m_perimeterDetected = true;
 
-            // Still send guard walking outward so they move away from the bed
+            // Still send patroller walking outward so they move away from the bed
             m_ai.SetState(BehaviorState.Scouting, m_bedPosition + m_scoutDirection * m_patrolRadius);
-            Plugin.Log?.LogInfo($"[Guard:{m_ai.NpcName}] Scouting in direction {m_scoutDirection}");
+            Plugin.Log?.LogInfo($"[Patrol:{m_ai.NpcName}] Scouting in direction {m_scoutDirection}");
         }
 
         /// <summary>Returns true when scouting is complete. Perimeter is detected instantly
@@ -88,7 +90,7 @@ namespace ValheimVillages.Behaviors.Patrol
             var offset = m_ai.Position - m_bedPosition;
             offset.y = 0f;
 
-            // Guard against arrival before UpdateScouting had a tick to set the radius
+            // Safeguard against arrival before UpdateScouting had a tick to set the radius
             if (m_patrolRadius < MinPatrolRadius)
                 m_patrolRadius = Mathf.Max(offset.magnitude, MinPatrolRadius);
 
@@ -100,7 +102,7 @@ namespace ValheimVillages.Behaviors.Patrol
 
             CreateWaypointAtCurrentAngle();
             AdvanceToNextArcPoint();
-            Plugin.Log?.LogInfo($"[Guard:{m_ai.NpcName}] Circuit tracing at radius {m_patrolRadius:F1}m");
+            Plugin.Log?.LogInfo($"[Patrol:{m_ai.NpcName}] Circuit tracing at radius {m_patrolRadius:F1}m");
         }
 
         /// <summary>Returns true when the circuit is complete.</summary>
@@ -108,8 +110,8 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             CreateWaypointAtCurrentAngle();
 
-            // Validate the just-added waypoint is reachable from the guard
-            if (m_waypoints.Count > 0 && !IsReachableFromGuard(m_waypoints[m_waypoints.Count - 1]))
+            // Validate the just-added waypoint is reachable from the patroller
+            if (m_waypoints.Count > 0 && !IsReachableFromPatroller(m_waypoints[m_waypoints.Count - 1]))
                 m_waypoints.RemoveAt(m_waypoints.Count - 1);
 
             if (m_circuitStarted && m_waypoints.Count >= 3)
@@ -121,7 +123,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 if (distToFirst < CircuitCloseThreshold)
                 {
                     IsCircuitComplete = true;
-                    Plugin.Log?.LogInfo($"[Guard:{m_ai.NpcName}] Circuit complete, {m_waypoints.Count} waypoints");
+                    Plugin.Log?.LogInfo($"[Patrol:{m_ai.NpcName}] Circuit complete, {m_waypoints.Count} waypoints");
                     return true;
                 }
             }
@@ -133,14 +135,14 @@ namespace ValheimVillages.Behaviors.Patrol
 
         /// <summary>
         /// Skip to the next arc point without creating a waypoint.
-        /// Used for stall recovery when the guard can't reach the current target.
+        /// Used for stall recovery when the patroller can't reach the current target.
         /// </summary>
         public void SkipToNextArcPoint()
         {
-            // The guard's current position is known to be pathable — record it as a waypoint
+            // The current position is known to be pathable — record it as a waypoint
             m_waypoints.Add(m_ai.Position);
             Plugin.Log?.LogWarning(
-                $"[Guard:{m_ai.NpcName}] Unreachable arc point, added waypoint at guard position" +
+                $"[Patrol:{m_ai.NpcName}] Unreachable arc point, added waypoint at current position" +
                 $" ({m_ai.Position.x:F0},{m_ai.Position.z:F0}), advancing angle");
             m_circuitStarted = true;
             AdvanceToNextArcPoint();
@@ -149,7 +151,7 @@ namespace ValheimVillages.Behaviors.Patrol
         private void CreateWaypointAtCurrentAngle()
         {
             var direction = new Vector3(Mathf.Cos(m_currentAngle), 0f, Mathf.Sin(m_currentAngle));
-            var guardPos = m_ai.Position;
+            var currentPos = m_ai.Position;
 
             Vector3 candidate;
             bool nearPerimeter = false;
@@ -163,13 +165,13 @@ namespace ValheimVillages.Behaviors.Patrol
                 inward.y = 0f;
                 inward = inward.normalized;
                 candidate = hit.point + inward * WallInsetDistance;
-                candidate.y = guardPos.y;
+                candidate.y = currentPos.y;
                 nearPerimeter = true;
             }
             else
             {
                 candidate = m_bedPosition + direction * m_patrolRadius;
-                candidate.y = guardPos.y;
+                candidate.y = currentPos.y;
             }
 
             if (SnapToNavMesh(candidate, nearPerimeter, out var snapped))
@@ -203,7 +205,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 if (SnapToNavMesh(target, false, out var snapped))
                 {
                     m_ai.SetState(BehaviorState.CircuitTracing,
-                        new VillagerWaypoint(snapped, PathingStrategyRegistry.GuardPatrolId));
+                        new VillagerWaypoint(snapped, VillagerWaypoint.DefaultStrategyId));
                     return;
                 }
             }
@@ -216,7 +218,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 fallback.y = height;
 
             m_ai.SetState(BehaviorState.CircuitTracing,
-                new VillagerWaypoint(fallback, PathingStrategyRegistry.GuardPatrolId));
+                new VillagerWaypoint(fallback, VillagerWaypoint.DefaultStrategyId));
         }
 
         /// <summary>
@@ -252,7 +254,7 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             snapped = candidate;
             var filter = new NavMeshQueryFilter();
-            filter.agentTypeID = VillageNavMeshBake.ResolveValheimHumanoidAgentTypeID();
+            filter.agentTypeID = ValheimVillages.Villager.AI.Navigation.VillageNavMeshBake.ResolveValheimHumanoidAgentTypeID();
             filter.areaMask = NavMesh.AllAreas;
 
             float probeY = preferElevated ? candidate.y + NavMeshProbeHeight : candidate.y;
@@ -266,12 +268,12 @@ namespace ValheimVillages.Behaviors.Patrol
         }
 
         /// <summary>
-        /// Check if a target position is reachable from the guard via a complete NavMesh path.
+        /// Check if a target position is reachable from the patroller via a complete NavMesh path.
         /// </summary>
-        private bool IsReachableFromGuard(Vector3 target)
+        private bool IsReachableFromPatroller(Vector3 target)
         {
             var filter = new NavMeshQueryFilter();
-            filter.agentTypeID = VillageNavMeshBake.ResolveValheimHumanoidAgentTypeID();
+            filter.agentTypeID = ValheimVillages.Villager.AI.Navigation.VillageNavMeshBake.ResolveValheimHumanoidAgentTypeID();
             filter.areaMask = NavMesh.AllAreas;
 
             if (!NavMesh.SamplePosition(m_ai.Position, out NavMeshHit srcHit, 5f, filter)) return false;

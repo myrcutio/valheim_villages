@@ -3,7 +3,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.UI;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
 using ValheimVillages.Items;
 using ValheimVillages.Items.Icons;
 
@@ -50,16 +50,16 @@ namespace ValheimVillages.Items.WorkOrders
                 _workOrderButton.SetActive(false);
         }
 
-        private static readonly Dictionary<string, string> StationWorkOrderMap = new()
+        private static Dictionary<string, string> s_stationWorkOrderMap;
+
+        /// <summary>
+        /// Station name → work order item name, built from ItemFactory
+        /// (physical stations + virtual stations from VillagerRegistry).
+        /// </summary>
+        private static Dictionary<string, string> StationWorkOrderMap
         {
-            { "$piece_workbench", "vv_workorder_workbench" },
-            { "$piece_forge", "vv_workorder_forge" },
-            { "$piece_cauldron", "vv_workorder_cauldron" },
-            { "$piece_artisanstation", "vv_workorder_artisan" },
-            { "$piece_stonecutter", "vv_workorder_stonecutter" },
-            { "$vv_farmer", "vv_workorder_farmer" },
-            { "$vv_tavernkeeper", "vv_workorder_tavernkeeper" }
-        };
+            get => s_stationWorkOrderMap ??= ItemFactory.BuildStationWorkOrderMap();
+        }
 
         /// <summary>Virtual stations: show only Order button in place of Craft (no direct crafting).</summary>
         private static bool IsVirtualStation(string stationName) =>

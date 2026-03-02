@@ -2,23 +2,25 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using ValheimVillages.Core.Attributes;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Attributes;
+using ValheimVillages.Enums;
+using ValheimVillages.Interfaces;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
+using ValheimVillages.Villager.AI.Pathfinding;
 
 namespace ValheimVillages.UI.Tabs
 {
     /// <summary>
     /// Tab showing debug commands and registered panels for villager NPCs.
     /// Provides commands as list items with action buttons, plus panel-driven
-    /// items (e.g. Village Map for guards) via [RegisterListPanel].
+    /// items (e.g. Village Map for patrollers) via [RegisterListPanel].
     /// </summary>
     [RegisterTab("debug", Order = 1)]
     public class DebugTab : IVillagerTabUI
     {
-        public string Name => "Debug";
+        public string TabName => "Debug";
 
         private readonly List<DebugCommand> m_commands = new();
 
@@ -41,7 +43,7 @@ namespace ValheimVillages.UI.Tabs
         {
             var items = new List<TabListItemUI>();
             foreach (var cmd in m_commands)
-                items.Add(new TabListItemUI { Name = cmd.Name });
+                items.Add(new TabListItemUI { TabName = cmd.CommandName });
 
             AddPanelItems(items, villager);
             return items;
@@ -56,7 +58,7 @@ namespace ValheimVillages.UI.Tabs
                 var cmd = m_commands[index];
                 return new TabDetailDataUI
                 {
-                    Title = cmd.Name,
+                    Title = cmd.CommandName,
                     Description = cmd.Description,
                     ActionText = cmd.ActionText,
                     OnAction = cmd.OnAction
@@ -124,18 +126,17 @@ namespace ValheimVillages.UI.Tabs
             AddStateInfo(villager);
             AddRecentTasks(villager);
             AddProblems(villager);
-            AddMovementCommands(villager);
             AddNavigationCommands(villager);
         }
 
         private void AddStateInfo(VillagerBehaviorBridge villager)
         {
             string info = $"State: {villager.CurrentState}";
-            if (villager.CurrentTarget.HasValue)
+            var waypoint = villager.villagerInstance?.villagerAI?.GetCurrentWaypoint();
+            if (waypoint != null)
             {
                 float dist = Vector3.Distance(
-                    villager.transform.position,
-                    villager.CurrentTarget.Value);
+                    villager.transform.position, waypoint.Position);
                 info += $"\nTarget: {dist:F0}m away";
             }
             int variety = villager.Memory?.GetLocationTypeVariety() ?? 0;
@@ -143,7 +144,7 @@ namespace ValheimVillages.UI.Tabs
 
             m_commands.Add(new DebugCommand
             {
-                Name = "Current State",
+                CommandName = "Current State",
                 Description = info,
                 ActionText = null,
                 OnAction = null
@@ -169,7 +170,7 @@ namespace ValheimVillages.UI.Tabs
 
             m_commands.Add(new DebugCommand
             {
-                Name = "Recent tasks (10)",
+                CommandName = "Recent tasks",
                 Description = description,
                 ActionText = null,
                 OnAction = null
@@ -188,38 +189,10 @@ namespace ValheimVillages.UI.Tabs
 
             m_commands.Add(new DebugCommand
             {
-                Name = "Problems (abandoned)",
+                CommandName = $"Work Issues ({problems.Count})",
                 Description = description,
                 ActionText = null,
                 OnAction = null
-            });
-        }
-
-        private void AddMovementCommands(VillagerBehaviorBridge villager)
-        {
-            var v = villager;
-            m_commands.Add(new DebugCommand
-            {
-                Name = "Run Movement Tests",
-                Description = "Execute a sequence of movement tests " +
-                    "(~17 seconds). The UI will close.",
-                ActionText = "Run",
-                OnAction = () =>
-                {
-                    if (v.IsTestRunning)
-                    {
-                        Msg("Tests already running...");
-                    }
-                    else if (v.RunMovementTests())
-                    {
-                        Msg("Starting movement tests (~17s)...");
-                        InventoryGui.instance?.Hide();
-                    }
-                    else
-                    {
-                        Msg("Could not start movement tests");
-                    }
-                }
             });
         }
 
@@ -228,19 +201,6 @@ namespace ValheimVillages.UI.Tabs
             var v = villager;
             AddNavCommand(v, "Go to Bed", LocationType.Bed);
             AddNavCommand(v, "Find Fire", LocationType.Fire);
-            AddNavCommand(v, "Find Chair", LocationType.Chair);
-
-            m_commands.Add(new DebugCommand
-            {
-                Name = "Cancel Test",
-                Description = "Cancel the currently running movement test.",
-                ActionText = "Cancel",
-                OnAction = () =>
-                {
-                    v.CancelMovementTest();
-                    Msg("Movement test cancelled");
-                }
-            });
         }
 
         private void AddNavCommand(
@@ -248,15 +208,26 @@ namespace ValheimVillages.UI.Tabs
         {
             m_commands.Add(new DebugCommand
             {
-                Name = name,
+                CommandName = name,
                 Description = $"Send villager to the nearest known {type}.",
                 ActionText = "Go",
                 OnAction = () =>
                 {
-                    var t = v.DebugWanderToLocationType(type);
-                    Msg(t.HasValue
-                        ? $"Going to {type}"
-                        : $"No {type} known");
+                    var memory = v.villagerInstance?.villagerAI?.GetMemory();
+                    if (memory == null)
+                    {
+                        Msg($"No memory available.");
+                        return;
+                    }
+                    var nearestKnownLocation = memory.FirstLocationByType(type);
+                    if (nearestKnownLocation == null)
+                    {
+                        Msg($"No {type} location known.");
+                        return;
+                    }
+                    var newDestination = new VillagerWaypoint(nearestKnownLocation.Position, "default", $"{name} destination");
+                    v.villagerInstance.villagerAI.FindPath(newDestination);
+                    Msg($"Going to {type}");
                     InventoryGui.instance?.Hide();
                 }
             });
@@ -270,7 +241,7 @@ namespace ValheimVillages.UI.Tabs
 
         private class DebugCommand
         {
-            public string Name;
+            public string CommandName;
             public string Description;
             public string ActionText;
             public Action OnAction;

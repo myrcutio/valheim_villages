@@ -1,12 +1,15 @@
-using System;
 using System.Collections.Generic;
 using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
+using ValheimVillages.Enums;
+using ValheimVillages.Schemas;
+using ValheimVillages.Settings;
 using ValheimVillages.TaskQueue;
+using ValheimVillages.Villager.AI;
 
 [assembly: AssemblyTitle("Valheim Villages")]
 [assembly: AssemblyDescription("A village-building and NPC management mod for Valheim")]
@@ -28,7 +31,6 @@ namespace ValheimVillages
         private static ManualLogSource _logger;
         private Harmony _harmony;
         private static bool _recipeRefreshEnqueued;
-        private static bool _navMeshRebakeEnqueued;
         private static bool _hnaPartitionEnqueued;
 
         public static ManualLogSource Log => _logger;
@@ -92,11 +94,18 @@ namespace ValheimVillages
 
             _logger.LogInfo($"{PluginName} loaded successfully!");
 
-            // Run integration tests after hot-reload cleanup if auto-run is enabled
-            if (isHotReload && Core.Testing.ModTestRunner.AutoRunEnabled)
+            // Schedule integration tests via task queue so they run after fixtures are ready
+            if (isHotReload && Testing.ModTestRunner.AutoRunEnabled)
             {
-                _logger.LogInfo("Auto-running [ModTest] integration tests...");
-                Core.Testing.ModTestRunner.RunAll();
+                _logger.LogInfo("Scheduling integration tests (will defer until fixtures are ready)...");
+                GlobalTaskQueue.Enqueue(new VillagerTask
+                {
+                    Name = TaskQueue.Handlers.IntegrationTestHandler.TaskNameConst,
+                    SourceId = "system",
+                    Priority = TaskPriority.Low,
+                    TimeoutSeconds = 120f,
+                    Attributes = new System.Collections.Generic.Dictionary<string, string>()
+                });
             }
         }
 
@@ -120,24 +129,6 @@ namespace ValheimVillages
                 _logger?.LogDebug("[Valheim Villages] Enqueued recipe_discovery_refresh (post–world load)");
             }
 
-            // NavMesh rebake (low priority) for village pathfinding using Unity's public APIs
-            if (!_navMeshRebakeEnqueued &&
-                ObjectDB.instance != null &&
-                ZNetScene.instance != null &&
-                Time.realtimeSinceStartup > 5f)
-            {
-                _navMeshRebakeEnqueued = true;
-                GlobalTaskQueue.Enqueue(new VillagerTask
-                {
-                    Name = NavMeshRebakeTaskContract.TaskName,
-                    SourceId = "village",
-                    Priority = TaskPriority.Low,
-                    TimeoutSeconds = TaskSettings.DefaultTimeoutSeconds,
-                    Attributes = new Dictionary<string, string>()
-                });
-                _logger?.LogInfo("[Valheim Villages] Enqueued navmesh_rebake (low priority)");
-            }
-
             // Enqueue HNA partition (low priority) so village region graph is built without overwhelming other tasks
             if (!_hnaPartitionEnqueued &&
                 ObjectDB.instance != null &&
@@ -157,6 +148,13 @@ namespace ValheimVillages
             }
 
             GlobalTaskQueue.ProcessBatch();
+
+            // Tick Villager.AI.VillagerAI instances (BaseAI path; no MonsterAI)
+            foreach (var ai in VillagerAIManager.ActiveVillagers.Values)
+            {
+                if (ai != null)
+                    ai.UpdateAI(Time.deltaTime);
+            }
         }
     }
 }

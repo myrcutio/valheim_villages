@@ -1,6 +1,7 @@
 using System.Collections.Generic;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
 using ValheimVillages.Items.VirtualRecipes;
+using ValheimVillages.Schemas;
 using ValheimVillages.TaskQueue.ActivityLog;
 
 namespace ValheimVillages.TaskQueue.Handlers

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
 using ValheimVillages.UI.Interaction;
 
 namespace ValheimVillages.UI.Core
@@ -224,12 +224,12 @@ namespace ValheimVillages.UI.Core
             for (int i = 0; i < m_tabs.Count; i++)
             {
                 var btnGO = CloneButton(template);
-                btnGO.name = $"VV_Tab_{m_tabs[i].Name}";
+                btnGO.name = $"VV_Tab_{m_tabs[i].TabName}";
                 var rect = btnGO.GetComponent<RectTransform>();
                 if (rect != null && refRect != null)
                     rect.anchoredPosition = refRect.anchoredPosition
                         + new Vector2(spacing * (i + posOffset), 0f);
-                VillagerUIFactory.SetTMPText(btnGO, m_tabs[i].Name);
+                VillagerUIFactory.SetTMPText(btnGO, m_tabs[i].TabName);
                 var sel = btnGO.transform.Find("Selected");
                 if (sel != null) Object.Destroy(sel.gameObject);
                 m_clonedButtons.Add(btnGO);

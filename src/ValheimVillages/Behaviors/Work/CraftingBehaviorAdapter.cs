@@ -1,7 +1,10 @@
-using ValheimVillages.Core.Attributes;
-using ValheimVillages.NPCs.AI;
-using ValheimVillages.NPCs.AI.Work;
-using ValheimVillages.NPCs.AI.Work.Farming;
+using ValheimVillages.Behaviors.Crafting;
+using ValheimVillages.Behaviors.Farming;
+using ValheimVillages.Attributes;
+using ValheimVillages.Enums;
+using ValheimVillages.Interfaces;
+using ValheimVillages.Schemas;
+using ValheimVillages.Villager.AI;
 
 namespace ValheimVillages.Behaviors.Work
 {
@@ -10,7 +13,7 @@ namespace ValheimVillages.Behaviors.Work
     /// Tag: "craft", Priority: 50.
     /// </summary>
     [RegisterBehavior("craft")]
-    public class CraftingBehaviorAdapter : IBehavior
+    public class CraftingBehaviorAdapter : IBehavior, IWorkScanBehavior
     {
         private readonly VillagerAI m_ai;
         private CraftingBehavior m_crafting;
@@ -20,6 +23,9 @@ namespace ValheimVillages.Behaviors.Work
 
         /// <summary>Direct access to the underlying CraftingBehavior for UI and state queries.</summary>
         public CraftingBehavior Crafting => m_crafting;
+
+        /// <summary>Try to find a work order and begin working. Delegates to CraftingBehavior.</summary>
+        public bool TryScanForWork(bool ignoreScanInterval = false) => m_crafting?.TryScanForWork(ignoreScanInterval) ?? false;
 
         public CraftingBehaviorAdapter(VillagerAI ai)
         {

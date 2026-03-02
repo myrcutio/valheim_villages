@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
 using ValheimVillages.UI.Core;
 using Xunit;
 
@@ -12,13 +12,13 @@ namespace ValheimVillages.Tests.Contracts;
 /// </summary>
 public class TabContractTests
 {
-    private static readonly Assembly CoreAssembly = typeof(IVillagerTab).Assembly;
+    private static readonly Assembly TargetAssembly = typeof(IVillagerTab).Assembly;
 
     [Fact]
     public void RegisterTabAttribute_ClassesMustImplementIVillagerTab()
     {
-        var violations = CoreAssembly.GetTypes()
-            .Where(t => t.GetCustomAttribute<RegisterTabAttribute>() != null)
+        var violations = AssemblyHelper.GetLoadableTypes(TargetAssembly)
+            .Where(t => AssemblyHelper.TryGetCustomAttribute<RegisterTabAttribute>(t) != null)
             .Where(t => !typeof(IVillagerTab).IsAssignableFrom(t))
             .Select(t => t.FullName)
             .ToList();
@@ -29,8 +29,8 @@ public class TabContractTests
     [Fact]
     public void RegisterTabAttribute_IdMustNotBeEmpty()
     {
-        var emptyIds = CoreAssembly.GetTypes()
-            .Select(t => (type: t, attr: t.GetCustomAttribute<RegisterTabAttribute>()))
+        var emptyIds = AssemblyHelper.GetLoadableTypes(TargetAssembly)
+            .Select(t => (type: t, attr: AssemblyHelper.TryGetCustomAttribute<RegisterTabAttribute>(t)))
             .Where(x => x.attr != null && string.IsNullOrWhiteSpace(x.attr.Id))
             .Select(x => x.type.FullName)
             .ToList();

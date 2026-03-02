@@ -68,7 +68,7 @@ Research and explain:
 When invoked:
 
 1. **Clarify the question** — restate the specific research question being asked.
-2. **Search the codebase** — look in `src/ValheimVillages/NPCs/AI/Navigation/` and related files for existing implementations.
+2. **Search the codebase** — look in `src/ValheimVillages/Villager/AI/Navigation/` and related Villager.AI files for existing implementations.
 3. **Search for Valheim internals** — use `monodis` IL dumps or decompiled references to verify Valheim API signatures:
    ```bash
    VALHEIM_DLL="$HOME/.local/share/Steam/steamapps/common/Valheim/valheim_Data/Managed/assembly_valheim.dll"

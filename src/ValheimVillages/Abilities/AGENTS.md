@@ -10,8 +10,8 @@ Player abilities and passive village effects. Abilities are teachable skills (e.
 
 ```
 Abilities/
-  IAbility.cs                          -- IPlayerAbility interface (extends Core IAbility with Learn/Activate)
-  IPassiveEffect.cs                    -- PassiveEffectExtensions (Unity Vector3 adapter for Core IPassiveEffect)
+  IAbility.cs                          -- IPlayerAbility interface (extends IAbility with Learn/Activate)
+  IPassiveEffect.cs                    -- PassiveEffectExtensions (Unity Vector3 adapter for IPassiveEffect)
   VillagerAbilityManager.cs            -- Manages Mountain Stride keybind (R), cooldown, persistence via Player.HaveUniqueKey
   SE_MountainStride.cs                 -- StatusEffect: 5 min duration, 20 min cooldown, sliding immunity
   MountainStride/
@@ -42,4 +42,4 @@ Abilities/
 
 - **Villages/** -- `SpawnBlockPassiveEffect.IsActive` calls `VillageAreaManager.IsInsideAnyVillage`.
 - **UI/** -- InfoTab panels display abilities/passives via `AttributeScanner.GetAbility()` / `GetPassive()`.
-- **NPCs/** -- NPC definitions list passive/ability tags in JSON `benefits` arrays.
+- **Villager/** -- Villager type definitions (Villager/Registry/Definitions/*.json) list passive/ability tags in `benefits` arrays.

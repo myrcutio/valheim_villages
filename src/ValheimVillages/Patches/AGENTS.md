@@ -34,5 +34,5 @@ Patches/
 ## Integration
 
 - **Items/** -- `ItemPatch` triggers `ItemFactory.RegisterAll` and `VirtualRecipeLoader.RegisterAll`.
-- **NPCs/** -- `VillagerPawnPatch.LogAvailableDvergrPrefabs` called from `ZNetSceneAwakePatch`.
-- **Core/** -- `AttributeScanner.InvokeObjectDBRegistrations()` called during hot reload alongside these patches.
+- **Villager/** -- `VillagerPawnPatch.LogAvailableDvergrPrefabs` (in `Villager/SpawnPatch.cs`) called from `ZNetSceneAwakePatch`.
+- **Attributes/** -- `AttributeScanner.InvokeObjectDBRegistrations()` called during hot reload alongside these patches.

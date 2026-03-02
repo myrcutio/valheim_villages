@@ -11,15 +11,15 @@ namespace ValheimVillages.Villages
     public class VillageArea
     {
         private readonly List<Vector3> m_waypoints;
-        private readonly string m_guardId;
+        private readonly string m_patrollerId;
         private readonly Vector3 m_bedPosition;
 
         /// <summary>Cached 2D polygon vertices (XZ projection).</summary>
         private readonly List<Vector2> m_polygon2D;
 
-        public VillageArea(string guardId, Vector3 bedPosition, List<Vector3> waypoints)
+        public VillageArea(string patrollerId, Vector3 bedPosition, List<Vector3> waypoints)
         {
-            m_guardId = guardId;
+            m_patrollerId = patrollerId;
             m_bedPosition = bedPosition;
             m_waypoints = new List<Vector3>(waypoints);
 
@@ -31,7 +31,7 @@ namespace ValheimVillages.Villages
             }
         }
 
-        public string GuardId => m_guardId;
+        public string PatrollerId => m_patrollerId;
         public Vector3 BedPosition => m_bedPosition;
         public IReadOnlyList<Vector3> Waypoints => m_waypoints;
 

@@ -2,8 +2,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using UnityEngine;
-using ValheimVillages.Core.Attributes;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Attributes;
+using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Schemas;
+using ValheimVillages.TaskQueue;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villages;
 
@@ -11,7 +13,7 @@ namespace ValheimVillages.TaskQueue.Handlers
 {
     /// <summary>
     /// Low-priority task that builds the HNA region graph for village pathfinding.
-    /// Partitions only non-spawnable areas: guard patrol polygons and, at minimum,
+    /// Partitions only non-spawnable areas: patrol polygons and, at minimum,
     /// any space within 15m of a villager's bed. Adds doors and stairs as links.
     /// Grid sampling, flood-fill, and link detection are delegated to <see cref="HnaGridBuilder"/>.
     /// </summary>
@@ -35,18 +37,18 @@ namespace ValheimVillages.TaskQueue.Handlers
 
         public TaskResult Handle(VillagerTask task, VillagerActivityLog activityLog)
         {
-            var allBeds = VillagerAIManager.GetAllBedPositions();
+            var allBeds = ValheimVillages.Villager.AI.VillagerAIManager.GetAllBedPositions();
             var beds = FilterBedsByAnchor(allBeds, task);
-            bool hasGuardBounds = VillageAreaManager.TryGetCombinedBounds(
-                out float guardMinX, out float guardMinZ, out float guardMaxX, out float guardMaxZ);
+            bool hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(
+                out float patrolMinX, out float patrolMinZ, out float patrolMaxX, out float patrolMaxZ);
 
             float minX, minZ, maxX, maxZ;
-            if (hasGuardBounds && beds != null && beds.Count > 0)
+            if (hasPatrolBounds && beds != null && beds.Count > 0)
             {
-                minX = guardMinX;
-                minZ = guardMinZ;
-                maxX = guardMaxX;
-                maxZ = guardMaxZ;
+                minX = patrolMinX;
+                minZ = patrolMinZ;
+                maxX = patrolMaxX;
+                maxZ = patrolMaxZ;
                 foreach (var bed in beds)
                 {
                     if (bed.x - RegionBuildRadius < minX) minX = bed.x - RegionBuildRadius;
@@ -55,12 +57,12 @@ namespace ValheimVillages.TaskQueue.Handlers
                     if (bed.z + RegionBuildRadius > maxZ) maxZ = bed.z + RegionBuildRadius;
                 }
             }
-            else if (hasGuardBounds)
+            else if (hasPatrolBounds)
             {
-                minX = guardMinX;
-                minZ = guardMinZ;
-                maxX = guardMaxX;
-                maxZ = guardMaxZ;
+                minX = patrolMinX;
+                minZ = patrolMinZ;
+                maxX = patrolMaxX;
+                maxZ = patrolMaxZ;
             }
             else if (beds != null && beds.Count > 0)
             {
@@ -104,10 +106,6 @@ namespace ValheimVillages.TaskQueue.Handlers
             string regionCentersStr = BuildRegionCentersString(originX, originZ, regionIds, cellHeights);
             string linksStr = BuildLinksSummaryString(links);
             ValheimVillages.PathTelemetry.LogHnaGraph(regionIds.Count, links.Count, minX, minZ, maxX, maxZ, regionCentersStr, linksStr);
-
-            // Place NavMeshLinks between floor islands if NavMesh has been baked
-            if (VillageNavMeshBake.HasBakedInstance)
-                NavMeshLinkPlacer.PlaceLinks();
 
             // Only refresh markers if they were already toggled on
             if (HnaDebugVisualization.MarkersEnabled)
@@ -160,7 +158,7 @@ namespace ValheimVillages.TaskQueue.Handlers
         }
 
         /// <summary>
-        /// If the task includes an anchor position (from the requesting guard's bed),
+        /// If the task includes an anchor position (from the requesting patroller's bed),
         /// filter beds to only those within VillageClusterRadius.
         /// </summary>
         private static List<Vector3> FilterBedsByAnchor(List<Vector3> allBeds, VillagerTask task)

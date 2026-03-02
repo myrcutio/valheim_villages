@@ -1,12 +1,12 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Villager.AI.Navigation;
 
 namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
-    /// Computes guard patrol waypoints from HNA region graph boundary cells.
+    /// Computes patrol waypoints from HNA region graph boundary cells.
     /// Pipeline: edge snap -> clockwise sort -> Chaikin smooth -> NavMesh re-snap -> RDP -> sharp angle prune.
     /// Pure geometry operations are delegated to <see cref="BoundaryGeometry"/>.
     /// </summary>

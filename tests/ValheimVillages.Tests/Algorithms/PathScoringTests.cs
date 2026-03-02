@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 using ValheimVillages.Algorithms;
 using Xunit;
 
@@ -25,7 +26,7 @@ public class PathScoringTests
     public void Score_EmptyPipeline_ReturnsMaxValues()
     {
         var reference = MakeCircle(10f, 20);
-        var result = PathScoring.Score(new List<Vec3>(), reference);
+        var result = PathScoring.Score(new List<Vector3>(), reference);
 
         Assert.Equal(float.MaxValue, result.Hausdorff);
         Assert.Equal(0f, result.Coverage);
@@ -62,12 +63,12 @@ public class PathScoringTests
     public void ScoreSegments_BetterThanPointScore_ForSparsePolygon()
     {
         // Sparse pipeline (4 points, square) vs dense reference (circle)
-        var pipeline = new List<Vec3>
+        var pipeline = new List<Vector3>
         {
-            new Vec3(10, 0, 10),
-            new Vec3(-10, 0, 10),
-            new Vec3(-10, 0, -10),
-            new Vec3(10, 0, -10)
+            new Vector3(10, 0, 10),
+            new Vector3(-10, 0, 10),
+            new Vector3(-10, 0, -10),
+            new Vector3(10, 0, -10)
         };
         var reference = MakeCircle(10f, 100);
 
@@ -93,13 +94,13 @@ public class PathScoringTests
 
     #region Helpers
 
-    private static List<Vec3> MakeCircle(float radius, int points)
+    private static List<Vector3> MakeCircle(float radius, int points)
     {
-        var result = new List<Vec3>(points);
+        var result = new List<Vector3>(points);
         for (int i = 0; i < points; i++)
         {
             float angle = 2f * MathF.PI * i / points;
-            result.Add(new Vec3(
+            result.Add(new Vector3(
                 radius * MathF.Cos(angle), 0,
                 radius * MathF.Sin(angle)));
         }

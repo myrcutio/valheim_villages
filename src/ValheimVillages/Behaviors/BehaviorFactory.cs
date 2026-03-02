@@ -4,7 +4,8 @@ using ValheimVillages.Behaviors.Patrol;
 using ValheimVillages.Behaviors.Alarm;
 using ValheimVillages.Behaviors.Work;
 using ValheimVillages.Behaviors.Explore;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Interfaces;
+using ValheimVillages.Villager.AI;
 
 namespace ValheimVillages.Behaviors
 {
@@ -19,7 +20,7 @@ namespace ValheimVillages.Behaviors
             { "patrol", ai => new PerimeterPatrolBehavior(ai) },
             { "alarm", ai => new BreachAlarmBehavior(ai) },
             { "craft", ai => new CraftingBehaviorAdapter(ai) },
-            { "farm", ai => new FarmBehaviorAdapter(ai) },
+            { "farming", ai => new FarmBehaviorAdapter(ai) },
             { "explore", ai => new ExploreBehaviorAdapter(ai) },
         };
 

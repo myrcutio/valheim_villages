@@ -1,12 +1,12 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
 
 namespace ValheimVillages.Villages
 {
     /// <summary>
     /// Static manager for all active village areas.
-    /// Guards register their patrol polygons here after completing a circuit.
+    /// Patrollers register their patrol polygons here after completing a circuit.
     /// Spawn protection and enemy avoidance patches query this manager.
     /// </summary>
     public static class VillageAreaManager
@@ -14,23 +14,23 @@ namespace ValheimVillages.Villages
         private static readonly Dictionary<string, VillageArea> s_areas = new();
 
         /// <summary>
-        /// Register a village area (keyed by guard's unique ID).
-        /// Replaces any existing area for the same guard.
+        /// Register a village area (keyed by patroller's unique ID).
+        /// Replaces any existing area for the same patroller.
         /// </summary>
         public static void RegisterArea(VillageArea area)
         {
             if (area == null) return;
-            s_areas[area.GuardId] = area;
-            Plugin.Log?.LogInfo($"[VillageArea] Registered area for guard {area.GuardId} with {area.Waypoints.Count} waypoints");
+            s_areas[area.PatrollerId] = area;
+            Plugin.Log?.LogInfo($"[VillageArea] Registered area for patroller {area.PatrollerId} with {area.Waypoints.Count} waypoints");
         }
 
         /// <summary>
-        /// Remove a village area by guard ID.
+        /// Remove a village area by patroller ID.
         /// </summary>
-        public static void UnregisterArea(string guardId)
+        public static void UnregisterArea(string patrollerId)
         {
-            if (s_areas.Remove(guardId))
-                Plugin.Log?.LogInfo($"[VillageArea] Unregistered area for guard {guardId}");
+            if (s_areas.Remove(patrollerId))
+                Plugin.Log?.LogInfo($"[VillageArea] Unregistered area for patroller {patrollerId}");
         }
 
         /// <summary>

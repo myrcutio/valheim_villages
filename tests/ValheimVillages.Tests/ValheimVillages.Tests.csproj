@@ -17,7 +17,19 @@
     </PackageReference>
   </ItemGroup>
 
+  <PropertyGroup>
+    <ValheimDir>$(HOME)/.local/share/Steam/steamapps/common/Valheim</ValheimDir>
+  </PropertyGroup>
+
   <ItemGroup>
-    <ProjectReference Include="..\..\src\ValheimVillages.Core\ValheimVillages.Core.csproj" />
+    <ProjectReference Include="..\..\src\ValheimVillages\ValheimVillages.csproj" />
+  </ItemGroup>
+
+  <!-- Unity assemblies needed at runtime for algorithm tests using Vector3 -->
+  <ItemGroup>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 </Project>

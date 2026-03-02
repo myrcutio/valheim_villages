@@ -1,7 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.NPCs.AI;
-using ValheimVillages.NPCs.AI.Work;
+using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.AI.Work;
+using ValheimVillages.Settings;
 
 namespace ValheimVillages.Items.Icons
 {
@@ -52,7 +53,7 @@ namespace ValheimVillages.Items.Icons
             if (containers == null && containerPos.HasValue)
             {
                 containers = ContainerScanner.FindNearbyContainers(
-                    containerPos.Value, WorkSettings.ChestScanRadius);
+                    containerPos.Value, ValheimVillages.Settings.WorkSettings.ChestScanRadius);
             }
 
             if (containers != null && containers.Count > 0)
@@ -79,7 +80,8 @@ namespace ValheimVillages.Items.Icons
         {
             foreach (var kvp in VillagerAIManager.ActiveVillagers)
             {
-                var cb = kvp.Value?.CraftingBehavior;
+                var adapter = kvp.Value?.CraftingBehavior;
+                var cb = adapter?.Crafting;
                 if (cb == null || !cb.IsWorking) continue;
                 if (cb.CurrentItemPrefab == itemPrefab)
                     return true;

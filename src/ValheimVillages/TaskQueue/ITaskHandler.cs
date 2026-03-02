@@ -1,3 +1,5 @@
+using ValheimVillages.Interfaces;
+using ValheimVillages.Schemas;
 using ValheimVillages.TaskQueue.ActivityLog;
 
 namespace ValheimVillages.TaskQueue

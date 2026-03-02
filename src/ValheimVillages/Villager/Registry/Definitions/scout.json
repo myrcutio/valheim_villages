@@ -1,0 +1,63 @@
+{
+  "type": "Scout",
+  "category": "Specialist",
+  "displayName": "Scout",
+  "description": "Provides exploration benefits, map information, and navigation assistance",
+  "workbenches": [
+    { "name": "Workbench", "minLevel": 1 }
+  ],
+  "requiredBiomes": [],
+  "preferredBiomes": [],
+  "requiresCoastal": false,
+  "minComfortLevel": 2,
+  "materialRequirements": "Wood for watchtower/outpost structures",
+  "scalingType": "Comfort",
+  "dependentOnNpcType": "",
+  "tieredBenefits": [
+    { "minLevel": 2, "maxLevel": 3, "description": "Basic exploration bonuses, reveals nearby points of interest", "effectMultiplier": 1.0 },
+    { "minLevel": 4, "maxLevel": 6, "description": "Wider discovery radius, marks resource locations and enemy camps", "effectMultiplier": 1.5 },
+    { "minLevel": 7, "maxLevel": 9, "description": "Marks dungeons/spawners, 1.5x wisplight radius in Mistlands", "effectMultiplier": 2.0 },
+    { "minLevel": 10, "maxLevel": 99, "description": "Maximum discovery, all dungeons marked, 2x wisplight radius", "effectMultiplier": 3.0 }
+  ],
+  "productions": [],
+  "providesLevelTo": [],
+  "receivesLevelFrom": [],
+  "interdependenceDescription": "",
+  "stationName": "",
+  "stationIcon": "Feathers",
+  "workStations": [],
+  "behaviors": ["patrol"],
+  "tags": ["tab:info", "tab:debug", "listpanel:patrolstatus", "listpanel:villagemap"],
+  "randomTalk": [
+    "Running away gets a bad reputation. I prefer to think of it as scouting in the opposite direction.",
+    "I classify threats on a scale from 'concerning' to 'tell my mother I loved her.' Most of the Plains is a solid 'tell my mother.'",
+    "I spent three days in a tree once, waiting for a troll to leave. The troll spent three days under the tree, waiting for me to come down. On day four he picked up the tree and I went home.",
+    "Everyone thinks the dark is scary. The dark is FINE. It's what's UNDER the dark that gets you.",
+    "I've developed a classification system for bushes. 'Safe bush.' 'Probably safe bush.' 'Bush with eyes.' You learn to spot the difference.",
+    "The trick to surviving out there is simple: don't be the slowest person in the group. I keep a mental ranking. Don't ask where you are on it.",
+    "People think scouting is about what you find. It's not. Scouting is about what doesn't find YOU.",
+    "My reports are very thorough. Page one: terrain. Page two: weather. Page three: reasons not to go there. Page three is usually the longest.",
+    "A greydwarf alone is nothing. Two greydwarfs are a nuisance. Forty greydwarfs are a Tuesday. I have SEEN some Tuesdays.",
+    "I once hid so well I forgot where I was. I missed dinner.",
+    "The guard says 'protect the village.' The warrior says 'fight the enemy.' The scout says 'have you SEEN the enemy? Because I have. And I have CONCERNS.'",
+    "I can move through a forest without making a sound. The forest, however, makes PLENTY of sounds. Most of them are threats. Some of them are specific.",
+    "Bravery is just ignorance with better publicity. Cowardice requires genuine intelligence about what's out there. I am VERY intelligent.",
+    "People romanticize the lone wolf. You know what happens to lone wolves? Other wolves eat them. I'm more of a lone hiding-behind-a-rock. Less romantic. More alive."
+  ],
+  "randomGreets": [
+    "Shh! ...Oh, it's just you. Sorry, I've been on edge. On edge of what, you ask? EVERYTHING.",
+    "Back from patrol! I have a detailed report. Summary: don't go out there. Extended version: REALLY don't go out there.",
+    "Ah! There you are. I knew you were coming. I know everything that moves within half a league. Except squirrels. Squirrels are CHAOS.",
+    "Good news! I'm alive. That IS the good news. I'll let you know when I have other kinds.",
+    "You won't BELIEVE what I've seen. Well, you might. You've got that look. The look of someone who's going to go see for themselves no matter WHAT I say.",
+    "Don't mind the twitching. It goes away after a few minutes indoors. Usually."
+  ],
+  "randomGoodbye": [
+    "Right. Off into the wilderness. If I'm not back in three days, avenge me. Or don't. The wilderness won't care either way.",
+    "Time to disappear. And I mean that literally, not the 'oh he's dead' way. Although keep both options open.",
+    "I'll be the one in the bushes. If you see someone ELSE in the bushes, that's not me, and you should run.",
+    "Stay safe! Specifically, stay inside. With the doors locked. And something heavy against the doors.",
+    "Off to scout! Remember: if you hear screaming in the distance, it's probably not me. Probably."
+  ]
+}
+

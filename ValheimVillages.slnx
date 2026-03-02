@@ -1,6 +1,5 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/ValheimVillages.Core/ValheimVillages.Core.csproj" />
     <Project Path="src/ValheimVillages/ValheimVillages.csproj" />
   </Folder>
   <Folder Name="/tests/">

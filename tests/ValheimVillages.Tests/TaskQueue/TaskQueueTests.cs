@@ -1,5 +1,6 @@
 using System.Collections.Generic;
-using ValheimVillages.TaskQueue;
+using ValheimVillages.Enums;
+using ValheimVillages.Schemas;
 using Xunit;
 
 namespace ValheimVillages.Tests.TaskQueue;

@@ -14,19 +14,23 @@ namespace ValheimVillages.Items.Fragments
     {
         private const float FragmentDropWeight = 0.15f;
 
+        private static Dictionary<Heightmap.Biome, string> s_biomeFragmentMap;
+
         /// <summary>
-        /// Maps Heightmap.Biome values to fragment item names.
+        /// Maps Heightmap.Biome values to fragment item names,
+        /// derived from ItemFactory.FragmentBiomes.
         /// </summary>
-        private static readonly Dictionary<Heightmap.Biome, string> BiomeFragmentMap = new()
+        private static Dictionary<Heightmap.Biome, string> BiomeFragmentMap
         {
-            { Heightmap.Biome.Meadows, "vv_fragment_meadows" },
-            { Heightmap.Biome.BlackForest, "vv_fragment_blackforest" },
-            { Heightmap.Biome.Swamp, "vv_fragment_swamp" },
-            { Heightmap.Biome.Mountain, "vv_fragment_mountains" },
-            { Heightmap.Biome.Plains, "vv_fragment_plains" },
-            { Heightmap.Biome.Mistlands, "vv_fragment_mistlands" },
-            { Heightmap.Biome.AshLands, "vv_fragment_ashlands" }
-        };
+            get
+            {
+                if (s_biomeFragmentMap != null) return s_biomeFragmentMap;
+                s_biomeFragmentMap = new Dictionary<Heightmap.Biome, string>();
+                foreach (var (biomeEnum, key, _, _, _) in ItemFactory.FragmentBiomes)
+                    s_biomeFragmentMap[(Heightmap.Biome)biomeEnum] = $"vv_fragment_{key}";
+                return s_biomeFragmentMap;
+            }
+        }
 
         /// <summary>
         /// Patch Container.Awake to inject biome-appropriate fragment into chest drop tables.

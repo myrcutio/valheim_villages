@@ -47,7 +47,7 @@ namespace ValheimVillages
             Write("farmer_pathing", JsonUtility.ToJson(data), "farmer");
         }
 
-        /// <summary>Log pathing strategy event (stuck detected, strategy cycle, or give up).</summary>
+        /// <summary>Log pathing event (stuck detected or give up). Strategy cycle removed with pathing strategy system.</summary>
         public static void LogStrategyEvent(string eventType, string npcName, string fromStrategy, string toStrategy, float dist3D, float threshold, bool wrapped)
         {
             var data = new StrategyEventData
@@ -86,16 +86,16 @@ namespace ValheimVillages
             float px = (float)Math.Round(position.x, 2);
             float py = (float)Math.Round(position.y, 2);
             float pz = (float)Math.Round(position.z, 2);
-            string regionId = NPCs.AI.HnaRegionGraph.PointToRegionId(position);
-            bool graphAvailable = NPCs.AI.HnaRegionGraph.GetOrigin(out _, out _);
-            bool regionValid = !string.IsNullOrEmpty(regionId) && NPCs.AI.HnaRegionGraph.IsValidRegion(regionId);
+            string regionId = Villager.AI.Navigation.HnaRegionGraph.PointToRegionId(position);
+            bool graphAvailable = Villager.AI.Navigation.HnaRegionGraph.GetOrigin(out _, out _);
+            bool regionValid = !string.IsNullOrEmpty(regionId) && Villager.AI.Navigation.HnaRegionGraph.IsValidRegion(regionId);
             float solidHeightAtPosition = 0f;
             if (ZoneSystem.instance != null)
                 ZoneSystem.instance.GetSolidHeight(new Vector3(position.x, 0f, position.z), out solidHeightAtPosition, 500);
             float cellMinX = 0f, cellMaxX = 0f, cellMinZ = 0f, cellMaxZ = 0f;
             float centerY = 0f, minY = 0f, maxY = 0f;
             float mx = 0f, mx2 = 0f, mz = 0f, mz2 = 0f;
-            if (regionValid && NPCs.AI.HnaRegionGraph.GetRegionBounds(regionId, out mx, out mx2, out mz, out mz2))
+            if (regionValid && Villager.AI.Navigation.HnaRegionGraph.GetRegionBounds(regionId, out mx, out mx2, out mz, out mz2))
             {
                 cellMinX = (float)Math.Round(mx, 2);
                 cellMaxX = (float)Math.Round(mx2, 2);
@@ -103,7 +103,7 @@ namespace ValheimVillages
                 cellMaxZ = (float)Math.Round(mz2, 2);
             }
             float cy = 0f, mnY = 0f, mxY = 0f;
-            if (regionValid && NPCs.AI.HnaRegionGraph.GetRegionSampleHeights(regionId, out cy, out mnY, out mxY))
+            if (regionValid && Villager.AI.Navigation.HnaRegionGraph.GetRegionSampleHeights(regionId, out cy, out mnY, out mxY))
             {
                 centerY = (float)Math.Round(cy, 2);
                 minY = (float)Math.Round(mnY, 2);

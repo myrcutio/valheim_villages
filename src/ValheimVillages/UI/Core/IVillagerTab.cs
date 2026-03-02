@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Schemas;
 using ValheimVillages.UI.Interaction;
 
 namespace ValheimVillages.UI.Core

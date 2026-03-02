@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-using ValheimVillages.Core.Attributes;
+using ValheimVillages.Attributes;
 using ValheimVillages.Items.WorkOrders;
 using ValheimVillages.UI.Core;
 

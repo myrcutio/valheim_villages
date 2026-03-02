@@ -1,6 +1,6 @@
 # UI
 
-Keywords: UI, user interface, tab, info tab, debug tab, InfoTab, DebugTab, VillagerTabManager, VillagerTabRenderer, VillagerUIFactory, IVillagerTab, IListPanel, IContextMenu, RegisterTab, RegisterListPanel, RegisterContextMenu, VillagerInteract, VillagerBehaviorBridge, interaction, hover text, crafting UI, InventoryGui, work order menu, WorkOrderMenu, WorkOrderMenuBuilder, context menu, list panel, guard status, patrol map, GuardStatusPanel, GuardPatrolMapRenderer, VillageMapPanel, DialogPatches, VillagerCraftingPatch, TMPro, crafting panel, tab switching
+Keywords: UI, user interface, tab, info tab, debug tab, InfoTab, DebugTab, VillagerTabManager, VillagerTabRenderer, VillagerUIFactory, IVillagerTab, IListPanel, IContextMenu, RegisterTab, RegisterListPanel, RegisterContextMenu, VillagerInteract, VillagerBehaviorBridge, interaction, hover text, crafting UI, InventoryGui, work order menu, WorkOrderMenu, WorkOrderMenuBuilder, context menu, list panel, patrol status, patrol map, PatrolStatusPanel, PatrolMapRenderer, VillageMapPanel, DialogPatches, VillagerCraftingPatch, TMPro, crafting panel, tab switching
 
 ## Purpose
 
@@ -22,12 +22,12 @@ UI/
     VillagerInteract.cs                -- Implements Hoverable + Interactable; opens crafting UI on E key
     VillagerBehaviorBridge.cs          -- MonoBehaviour bridge from NPC GameObject to VillagerAI
   Tabs/
-    InfoTab.cs                         -- [RegisterTab("info", Order=0)] shows locations, abilities, guard status
+    InfoTab.cs                         -- [RegisterTab("info", Order=0)] shows locations, abilities, patrol status
     DebugTab.cs                        -- [RegisterTab("debug", Order=1)] shows state, tasks, movement tests
   Panels/
-    GuardStatusPanel.cs                -- [RegisterListPanel("guardstatus", "info")] patrol status, breach alert
-    GuardPatrolMapRenderer.cs          -- Renders 256x256 top-down patrol map texture
-    VillageMapPanel.cs                 -- [RegisterListPanel] debug panel with patrol map and "Remap" action
+    PatrolStatusPanel.cs               -- [RegisterListPanel("patrolstatus", "info")] patrol status, breach alert
+    PatrolMapRenderer.cs               -- Renders 256x256 top-down patrol map texture
+    VillageMapPanel.cs                 -- [RegisterListPanel("villagemap", "debug")] patrol map and "Remap" action
   Patches/
     DialogPatches.cs                   -- Patches Character.GetHoverText, Tameable.Interact, InventoryGui.Hide, NpcTalk
     VillagerCraftingPatch.cs           -- Hides crafting panel for non-crafters via CanvasGroup.alpha
@@ -59,8 +59,7 @@ UI/
 
 ## Integration
 
-- **NPCs/** -- `VillagerBehaviorBridge` resolves AI via `VillagerAIManager.ActiveVillagers`.
-- **NPCs/AI/Work/** -- `VillagerStation.HasCraftingRecipes` determines if Orders tab appears.
-- **Behaviors/** -- `GuardStatusPanel` reads `GuardBehavior` state for patrol/breach info.
+- **Villager/** -- `VillagerBehaviorBridge` resolves AI via `VillagerAIManager.ActiveVillagers`; `VillagerStation.HasCraftingRecipes` checks the `tab:workorder` tag to determine if Orders tab appears.
+- **Behaviors/** -- `PatrolStatusPanel` reads `PerimeterPatrolBehavior` state for patrol/breach info.
 - **TaskQueue/** -- `DebugTab` displays `VillagerActivityLog` entries.
 - **Items/** -- `WorkOrderMenu` reads/writes `ItemDrop.ItemData.m_customData`.

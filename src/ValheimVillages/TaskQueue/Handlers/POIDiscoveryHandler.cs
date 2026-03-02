@@ -1,7 +1,10 @@
 using System.Collections.Generic;
 using System.IO;
-using ValheimVillages.Core.Attributes;
-using ValheimVillages.NPCs.AI;
+using ValheimVillages.Attributes;
+using ValheimVillages.Enums;
+using ValheimVillages.Interfaces;
+using ValheimVillages.Schemas;
+using ValheimVillages.Villager.AI;
 using ValheimVillages.TaskQueue.ActivityLog;
 
 namespace ValheimVillages.TaskQueue.Handlers
@@ -46,19 +49,20 @@ namespace ValheimVillages.TaskQueue.Handlers
             if (!task.Attributes.TryGetValue("villager_id", out var villagerId))
                 return TaskResult.Fail("Missing villager_id");
 
-            if (!VillagerAIManager.ActiveVillagers.TryGetValue(villagerId, out var ai))
+            if (!ValheimVillages.Villager.AI.VillagerAIManager.ActiveVillagers.TryGetValue(villagerId, out var ai))
                 return TaskResult.Fail($"Villager {villagerId} not found");
 
-            if (ai.Instance == null)
-                return TaskResult.Fail("VillagerAI instance is null");
+            var memory = ai.GetMemory();
+            if (memory == null)
+                return TaskResult.Fail("VillagerAI memory is null");
 
             bool isValidation = task.Name == ValidationTaskName;
 
             if (isValidation)
             {
-                int beforeCount = ai.Memory.KnownLocations.Count;
-                VillagerPOIDiscovery.ValidateKnownLocations(ai.Memory);
-                int removed = beforeCount - ai.Memory.KnownLocations.Count;
+                int beforeCount = memory.KnownLocations.Count;
+                VillagerPOIDiscovery.ValidateKnownLocations(memory);
+                int removed = beforeCount - memory.KnownLocations.Count;
 
                 if (removed > 0)
                 {
@@ -76,43 +80,46 @@ namespace ValheimVillages.TaskQueue.Handlers
             }
             else
             {
-                int beforeCount = ai.Memory.KnownLocations.Count;
+                int beforeCount = memory.KnownLocations.Count;
 
-                // Near-range discovery
-                VillagerPOIDiscovery.DiscoverNearbyPOIs(ai.Instance, ai.Memory);
+                // Near-range discovery (Villager.AI path: transform + IVillagerMemory)
+                var transform = ai.Villager != null ? ai.Villager.transform : null;
+                if (transform != null)
+                    VillagerPOIDiscovery.DiscoverNearbyPOIs(transform, memory);
 
                 // Extended LOS discovery while exploring
                 bool isExploring = task.Attributes.TryGetValue("is_exploring", out var exp)
                     && exp == "true";
-                if (isExploring)
-                    VillagerPOIDiscovery.DiscoverVisiblePOIs(ai.Instance, ai.Memory);
+                if (isExploring && transform != null)
+                    VillagerPOIDiscovery.DiscoverVisiblePOIs(transform, memory);
 
-                int discovered = ai.Memory.KnownLocations.Count - beforeCount;
+                int discovered = memory.KnownLocations.Count - beforeCount;
 
                 // #region agent log
-                if (ai.NpcType == NPCs.NpcType.Farmer)
+                if (string.Equals(ai.VillagerType, "Farmer", System.StringComparison.OrdinalIgnoreCase))
                 {
                     var craftStationsAfter = new System.Collections.Generic.List<string>();
                     var cookingStationsAfter = new System.Collections.Generic.List<string>();
-                    foreach (var loc in ai.Memory.KnownLocations)
+                    foreach (var loc in memory.KnownLocations)
                     {
                         if (loc.Type == LocationType.CraftStation)
-                            craftStationsAfter.Add($"{loc.Position.X:F0},{loc.Position.Y:F0},{loc.Position.Z:F0}(q={loc.GetQualityScore():F0})");
+                            craftStationsAfter.Add($"{loc.Position.x:F0},{loc.Position.y:F0},{loc.Position.z:F0}(q={loc.GetQualityScore():F0})");
                         else if (loc.Type == LocationType.CookingStation)
-                            cookingStationsAfter.Add($"{loc.Position.X:F0},{loc.Position.Y:F0},{loc.Position.Z:F0}(q={loc.GetQualityScore():F0})");
+                            cookingStationsAfter.Add($"{loc.Position.x:F0},{loc.Position.y:F0},{loc.Position.z:F0}(q={loc.GetQualityScore():F0})");
                     }
                     DebugLog.Write("FH", "POIDiscoveryHandler:discovery", "AfterDiscover",
-                        $"{{\"npc\":{DebugLog.Str(ai.NpcName)},\"discovered\":{DebugLog.Num(discovered)},\"totalLocs\":{DebugLog.Num(ai.Memory.KnownLocations.Count)},\"craftStationCount\":{DebugLog.Num(craftStationsAfter.Count)},\"craftStations\":{DebugLog.Str(string.Join("|", craftStationsAfter))},\"cookingStationCount\":{DebugLog.Num(cookingStationsAfter.Count)},\"cookingStations\":{DebugLog.Str(string.Join("|", cookingStationsAfter))}}}");
+                        $"{{\"npc\":{DebugLog.Str(ai.NpcName)},\"discovered\":{DebugLog.Num(discovered)},\"totalLocs\":{DebugLog.Num(memory.KnownLocations.Count)},\"craftStationCount\":{DebugLog.Num(craftStationsAfter.Count)},\"craftStations\":{DebugLog.Str(string.Join("|", craftStationsAfter))},\"cookingStationCount\":{DebugLog.Num(cookingStationsAfter.Count)},\"cookingStations\":{DebugLog.Str(string.Join("|", cookingStationsAfter))}}}");
                 }
                 // #endregion
 
                 if (discovered > 0)
                 {
+                    var pos = ai.Position;
                     activityLog.Record(
                         villagerId,
                         task.Name,
                         "discover_pois",
-                        $"discovered {discovered} new POI(s) near ({ai.Position.x:F0},{ai.Position.z:F0})");
+                        $"discovered {discovered} new POI(s) near ({pos.x:F0},{pos.z:F0})");
                 }
 
                 return TaskResult.Ok(new Dictionary<string, string>

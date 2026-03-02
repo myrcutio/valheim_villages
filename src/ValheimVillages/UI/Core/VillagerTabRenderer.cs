@@ -12,6 +12,13 @@ namespace ValheimVillages.UI.Core
     /// </summary>
     public partial class VillagerTabManager
     {
+        private const string ListItemPrefix = "VV_ListItem_";
+
+        /// <summary>Saved m_recipeListRoot layout so we can restore after custom tabs.</summary>
+        private Vector2? m_savedListRootAnchorMin;
+        private Vector2? m_savedListRootAnchorMax;
+        private Vector2? m_savedListRootPivot;
+
         #region Custom Content (populates native RecipeList + Decription)
 
         private void RefreshCustomContent(int ci)
@@ -49,8 +56,13 @@ namespace ValheimVillages.UI.Core
             if (gui.m_recipeElementPrefab == null || gui.m_recipeListRoot == null)
                 return;
 
-            // Ensure list root anchors from the top
             var rootRT = gui.m_recipeListRoot;
+            if (!m_savedListRootAnchorMin.HasValue)
+            {
+                m_savedListRootAnchorMin = rootRT.anchorMin;
+                m_savedListRootAnchorMax = rootRT.anchorMax;
+                m_savedListRootPivot = rootRT.pivot;
+            }
             rootRT.anchorMin = new Vector2(rootRT.anchorMin.x, 1f);
             rootRT.anchorMax = new Vector2(rootRT.anchorMax.x, 1f);
             rootRT.pivot = new Vector2(rootRT.pivot.x, 1f);
@@ -60,6 +72,7 @@ namespace ValheimVillages.UI.Core
             {
                 var elem = Instantiate(
                     gui.m_recipeElementPrefab, gui.m_recipeListRoot);
+                elem.name = $"{ListItemPrefix}{i}";
                 var rt = elem.GetComponent<RectTransform>();
                 if (rt != null)
                 {
@@ -72,7 +85,7 @@ namespace ValheimVillages.UI.Core
                 var nameField = elem.transform.Find("name");
                 if (nameField != null)
                     VillagerUIFactory.SetTMPText(
-                        nameField.gameObject, items[i].Name);
+                        nameField.gameObject, items[i].TabName);
 
                 var icon = elem.transform.Find("icon");
                 if (icon != null)
@@ -322,8 +335,8 @@ namespace ValheimVillages.UI.Core
             var gui = InventoryGui.instance;
             if (gui?.m_recipeListRoot != null)
             {
-                foreach (Transform child in gui.m_recipeListRoot)
-                    child.gameObject.SetActive(true);
+                DestroyOrphanedListItems(gui.m_recipeListRoot);
+                RestoreListRootLayout(gui.m_recipeListRoot);
             }
 
             foreach (var kvp in m_childSnapshot)
@@ -332,6 +345,34 @@ namespace ValheimVillages.UI.Core
 
             if (gui?.m_craftButton != null)
                 gui.m_craftButton.gameObject.SetActive(true);
+        }
+
+        /// <summary>
+        /// Destroy any children of m_recipeListRoot that we created but lost
+        /// track of (e.g. after re-activation without deactivation).
+        /// </summary>
+        private static void DestroyOrphanedListItems(RectTransform listRoot)
+        {
+            for (int i = listRoot.childCount - 1; i >= 0; i--)
+            {
+                var child = listRoot.GetChild(i);
+                if (child.name.StartsWith(ListItemPrefix))
+                {
+                    child.SetParent(null);
+                    Destroy(child.gameObject);
+                }
+            }
+        }
+
+        private void RestoreListRootLayout(RectTransform rootRT)
+        {
+            if (!m_savedListRootAnchorMin.HasValue) return;
+            rootRT.anchorMin = m_savedListRootAnchorMin.Value;
+            rootRT.anchorMax = m_savedListRootAnchorMax.Value;
+            rootRT.pivot = m_savedListRootPivot.Value;
+            m_savedListRootAnchorMin = null;
+            m_savedListRootAnchorMax = null;
+            m_savedListRootPivot = null;
         }
 
         #endregion

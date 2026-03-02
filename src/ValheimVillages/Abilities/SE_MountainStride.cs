@@ -38,6 +38,7 @@ namespace ValheimVillages.Abilities
         /// </summary>
         private static Sprite CreateBuffIcon()
         {
+            // TODO: this is gross and bad, and the AI should feel bad.
             int size = 32;
             var tex = new Texture2D(size, size);
             var pixels = new Color[size * size];

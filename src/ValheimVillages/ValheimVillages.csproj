@@ -21,14 +21,6 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
-  <!-- Core assembly reference — Private=false prevents copying Core.dll to scripts/
-       since Core deploys itself to plugins/ where BepInEx's resolver finds it -->
-  <ItemGroup>
-    <ProjectReference Include="..\ValheimVillages.Core\ValheimVillages.Core.csproj">
-      <Private>false</Private>
-    </ProjectReference>
-  </ItemGroup>
-
   <!-- BepInEx and Harmony -->
   <ItemGroup>
     <Reference Include="BepInEx">
@@ -114,9 +106,17 @@
     <EmbeddedResource Include="Items\Definitions\Pawns\*.json" />
     <EmbeddedResource Include="Items\Definitions\Fragments\*.json" />
     <EmbeddedResource Include="Items\Definitions\WorkOrders\*.json" />
-    <EmbeddedResource Include="Items\Definitions\VirtualRecipes\*.json" />
     <EmbeddedResource Include="Items\Icons\WorkOrders\*.png" />
-    <EmbeddedResource Include="NPCs\Definitions\*.json" />
+    <EmbeddedResource Include="Villager\Registry\Definitions\blacksmith.json" />
+    <EmbeddedResource Include="Villager\Registry\Definitions\carpenter.json" />
+    <EmbeddedResource Include="Villager\Registry\Definitions\farmer.json" />
+    <EmbeddedResource Include="Villager\Registry\Definitions\guard.json" />
+    <EmbeddedResource Include="Villager\Registry\Definitions\miner.json" />
+    <EmbeddedResource Include="Villager\Registry\Definitions\mountaineer.json" />
+    <EmbeddedResource Include="Villager\Registry\Definitions\scout.json" />
+    <EmbeddedResource Include="Villager\Registry\Definitions\shipwright.json" />
+    <EmbeddedResource Include="Villager\Registry\Definitions\tavernkeeper.json" />
+    <EmbeddedResource Include="Villager\Registry\Definitions\trader.json" />
   </ItemGroup>
 
   <!-- Suppress common warnings for game modding -->

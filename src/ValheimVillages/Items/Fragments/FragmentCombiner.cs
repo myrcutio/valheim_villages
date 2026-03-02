@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
-using ValheimVillages.NPCs;
 
 namespace ValheimVillages.Items.Fragments
 {
@@ -16,15 +15,15 @@ namespace ValheimVillages.Items.Fragments
         /// <summary>
         /// Maps biome identifiers to the NPC type that can be rescued there.
         /// </summary>
-        private static readonly Dictionary<string, NpcType> BiomeNpcMap = new()
+        private static readonly Dictionary<string, string> BiomeNpcMap = new()
         {
-            { "Meadows", NpcType.Farmer },
-            { "BlackForest", NpcType.Miner },
-            { "Swamp", NpcType.Miner },
-            { "Mountain", NpcType.Mountaineer },
-            { "Plains", NpcType.Farmer },
-            { "Mistlands", NpcType.Scout },
-            { "Ashlands", NpcType.Guard }
+            { "Meadows", "Farmer" },
+            { "BlackForest", "Miner" },
+            { "Swamp", "Miner" },
+            { "Mountain", "Mountaineer" },
+            { "Plains", "Farmer" },
+            { "Mistlands", "Scout" },
+            { "Ashlands", "Guard" }
         };
 
         /// <summary>
@@ -94,10 +93,10 @@ namespace ValheimVillages.Items.Fragments
             }
 
             // Determine NPC type for this biome
-            if (!BiomeNpcMap.TryGetValue(biome, out var npcType))
+            if (!BiomeNpcMap.TryGetValue(biome, out var villagerType))
             {
                 Plugin.Log?.LogWarning($"No NPC type mapped for biome: {biome}");
-                npcType = NpcType.Farmer;
+                villagerType = "Farmer";
             }
 
             // Find a location in the target biome and place a map marker.
@@ -106,23 +105,23 @@ namespace ValheimVillages.Items.Fragments
             var questPos = FindPositionInBiome(biome, player.transform.position);
             if (questPos.HasValue)
             {
-                AddQuestMarker(questPos.Value, npcType, biome);
-                RescueQuestTracker.AddQuest(questPos.Value, npcType, biome);
+                AddQuestMarker(questPos.Value, villagerType, biome);
+                RescueQuestTracker.AddQuest(questPos.Value, villagerType, biome);
                 player.Message(MessageHud.MessageType.Center,
-                    $"Rescue quest revealed! A captive {npcType} awaits in the {biome}.");
+                    $"Rescue quest revealed! A captive {villagerType} awaits in the {biome}.");
             }
             else
             {
                 // Fallback: place marker at a random offset from player
                 var fallbackPos = player.transform.position + Random.insideUnitSphere * 500f;
                 fallbackPos.y = 0f;
-                AddQuestMarker(fallbackPos, npcType, biome);
-                RescueQuestTracker.AddQuest(fallbackPos, npcType, biome);
+                AddQuestMarker(fallbackPos, villagerType, biome);
+                RescueQuestTracker.AddQuest(fallbackPos, villagerType, biome);
                 player.Message(MessageHud.MessageType.Center,
-                    $"Rescue quest revealed! A captive {npcType} may be found in the {biome}.");
+                    $"Rescue quest revealed! A captive {villagerType} may be found in the {biome}.");
             }
 
-            Plugin.Log?.LogInfo($"Combined {RequiredFragments} {biome} fragments -> rescue quest for {npcType}");
+            Plugin.Log?.LogInfo($"Combined {RequiredFragments} {biome} fragments -> rescue quest for {villagerType}");
             return true;
         }
 
@@ -216,7 +215,7 @@ namespace ValheimVillages.Items.Fragments
             return chosen;
         }
 
-        private static void AddQuestMarker(Vector3 position, NpcType npcType, string biome)
+        private static void AddQuestMarker(Vector3 position, string villagerType, string biome)
         {
             var minimap = Minimap.instance;
             if (minimap == null)
@@ -225,7 +224,7 @@ namespace ValheimVillages.Items.Fragments
                 return;
             }
 
-            string pinName = $"Rescue: Captive {npcType} ({biome})";
+            string pinName = $"Rescue: Captive {villagerType} ({biome})";
 
             try
             {

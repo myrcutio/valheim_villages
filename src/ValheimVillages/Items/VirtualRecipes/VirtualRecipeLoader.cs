@@ -1,20 +1,22 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.NPCs.AI.Work;
+using ValheimVillages.Schemas;
+using ValheimVillages.Tags;
+using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.Items.VirtualRecipes
 {
     /// <summary>
     /// Registers virtual recipe definitions as real Recipe objects in ObjectDB.
-    /// JSON parsing and station templates are delegated to <see cref="VirtualRecipeParser"/>.
+    /// Reads station recipes and discovery tags from VillagerRegistry definitions
+    /// instead of separate JSON files.
     /// </summary>
     public static class VirtualRecipeLoader
     {
         private static readonly List<Recipe> _registeredRecipes = new();
         private static readonly Dictionary<string, string> _physicalStationMap = new();
 
-        /// <summary>Output item names to exclude from the villager craft/orders menu.</summary>
         private static bool IsExcludedFromCraftMenu(string output)
         {
             return string.Equals(output, "AncientSeed", StringComparison.OrdinalIgnoreCase);
@@ -22,7 +24,8 @@ namespace ValheimVillages.Items.VirtualRecipes
 
         /// <summary>
         /// Register all virtual recipes with ObjectDB.
-        /// Called from ObjectDB.Awake / CopyOtherDB patches.
+        /// Iterates VillagerRegistry definitions for station recipes and
+        /// uses recipe:cultivator / recipe:cooking tags for discovery.
         /// </summary>
         public static void RegisterAll(ObjectDB objectDB)
         {
@@ -40,63 +43,29 @@ namespace ValheimVillages.Items.VirtualRecipes
 
             RemoveOurRecipesFrom(objectDB);
 
-            var files = VirtualRecipeParser.LoadDefinitions();
             int count = 0;
 
-            foreach (var file in files)
+            foreach (var kv in VillagerRegistry.Definitions)
             {
-                if (string.IsNullOrEmpty(file.station) || file.station == "$vv_unknown")
-                    continue;
+                var def = kv.Value;
+                if (string.IsNullOrEmpty(def?.stationName)) continue;
 
-                var station = VirtualRecipeParser.GetOrCreateStationTemplate(file.station);
+                var station = VirtualRecipeParser.GetOrCreateStationTemplate(def.stationName);
                 var existingOutputs = new HashSet<string>();
 
-                if (file.recipes != null)
+                count += RegisterStationRecipes(objectDB, station, def.stationRecipes, existingOutputs);
+
+                if (def.tags != null && TagParser.HasTag(def.tags, "recipe", "cultivator"))
                 {
-                    foreach (var entry in file.recipes)
-                    {
-                        if (IsExcludedFromCraftMenu(entry.output)) continue;
-                        if (!string.IsNullOrEmpty(entry.output))
-                            existingOutputs.Add(entry.output);
-                        var recipe = CreateRecipe(objectDB, station, entry);
-                        if (recipe != null)
-                        {
-                            objectDB.m_recipes.Add(recipe);
-                            _registeredRecipes.Add(recipe);
-                            count++;
-                        }
-                    }
+                    var exclusions = GetCultivatorExclusionsLower(def);
+                    var cultivatorEntries = CultivatorRecipeDiscovery.GetPlantingRecipes(existingOutputs, exclusions);
+                    count += RegisterDiscoveredEntries(objectDB, station, cultivatorEntries, existingOutputs);
                 }
 
-                // Farmer: add planting recipes from the cultivator
-                if (file.station == "$vv_farmer")
+                if (def.tags != null && TagParser.HasTag(def.tags, "recipe", "cooking"))
                 {
-                    var exclusions = VirtualRecipeParser.GetCultivatorExclusionsLower(file);
-                    var cultivatorEntries = CultivatorRecipeDiscovery.GetPlantingRecipes(existingOutputs, exclusions);
-                    foreach (var entry in cultivatorEntries)
-                    {
-                        if (IsExcludedFromCraftMenu(entry.output)) continue;
-                        if (!string.IsNullOrEmpty(entry.output)) existingOutputs.Add(entry.output);
-                        var recipe = CreateRecipe(objectDB, station, entry);
-                        if (recipe != null)
-                        {
-                            objectDB.m_recipes.Add(recipe);
-                            _registeredRecipes.Add(recipe);
-                            count++;
-                        }
-                    }
-                    // Farmer: add cooking recipes
                     var cookingEntries = CookingRecipeDiscovery.GetCookingRecipes(existingOutputs);
-                    foreach (var entry in cookingEntries)
-                    {
-                        var recipe = CreateRecipe(objectDB, station, entry);
-                        if (recipe != null)
-                        {
-                            objectDB.m_recipes.Add(recipe);
-                            _registeredRecipes.Add(recipe);
-                            count++;
-                        }
-                    }
+                    count += RegisterDiscoveredEntries(objectDB, station, cookingEntries, existingOutputs);
                 }
             }
 
@@ -105,33 +74,31 @@ namespace ValheimVillages.Items.VirtualRecipes
         }
 
         /// <summary>
-        /// When ZNetScene becomes available, add cooking-discovered recipes for the farmer.
+        /// When ZNetScene becomes available, add cooking-discovered recipes
+        /// for any station with the recipe:cooking tag.
         /// </summary>
         public static void RegisterCookingRecipesIfNeeded(ObjectDB objectDB)
         {
             if (objectDB?.m_recipes == null || _registeredRecipes.Count == 0) return;
-            var station = VirtualRecipeParser.GetOrCreateStationTemplate("$vv_farmer");
-            if (station == null) return;
-            var existingOutputs = new HashSet<string>();
-            foreach (var r in _registeredRecipes)
+
+            foreach (var kv in VillagerRegistry.Definitions)
             {
-                if (r?.m_item?.gameObject == null || r.name == null || !r.name.StartsWith("VV_Recipe_$vv_farmer_"))
-                    continue;
-                existingOutputs.Add(r.m_item.gameObject.name);
+                var def = kv.Value;
+                if (string.IsNullOrEmpty(def?.stationName)) continue;
+                if (def.tags == null || !TagParser.HasTag(def.tags, "recipe", "cooking")) continue;
+
+                var station = VirtualRecipeParser.GetOrCreateStationTemplate(def.stationName);
+                if (station == null) continue;
+
+                var existingOutputs = CollectExistingOutputs(def.stationName);
+                var cookingEntries = CookingRecipeDiscovery.GetCookingRecipes(existingOutputs);
+                if (cookingEntries.Count == 0) continue;
+
+                int added = RegisterDiscoveredEntries(objectDB, station, cookingEntries, existingOutputs);
+                if (added > 0)
+                    Plugin.Log?.LogInfo(
+                        $"VirtualRecipeLoader: Registered {added} cooking-discovered recipes for {def.stationName} (ZNetScene ready)");
             }
-            var cookingEntries = CookingRecipeDiscovery.GetCookingRecipes(existingOutputs);
-            if (cookingEntries.Count == 0) return;
-            foreach (var entry in cookingEntries)
-            {
-                var recipe = CreateRecipe(objectDB, station, entry);
-                if (recipe != null)
-                {
-                    objectDB.m_recipes.Add(recipe);
-                    _registeredRecipes.Add(recipe);
-                }
-            }
-            Plugin.Log?.LogInfo(
-                $"VirtualRecipeLoader: Registered {cookingEntries.Count} cooking-discovered recipes (ZNetScene ready)");
         }
 
         /// <summary>
@@ -141,52 +108,40 @@ namespace ValheimVillages.Items.VirtualRecipes
         public static int RecheckDiscoveredRecipes(ObjectDB objectDB)
         {
             if (objectDB?.m_recipes == null) return 0;
-            var station = VirtualRecipeParser.GetOrCreateStationTemplate("$vv_farmer");
-            if (station == null) return 0;
 
-            var existingOutputs = new HashSet<string>();
-            foreach (var r in _registeredRecipes)
-            {
-                if (r?.m_item?.gameObject == null || r.name == null || !r.name.StartsWith("VV_Recipe_$vv_farmer_"))
-                    continue;
-                existingOutputs.Add(r.m_item.gameObject.name);
-            }
+            int totalAdded = 0;
 
-            var files = VirtualRecipeParser.LoadDefinitions();
-            VirtualRecipeFile farmerFile = null;
-            foreach (var f in files)
+            foreach (var kv in VillagerRegistry.Definitions)
             {
-                if (f?.station == "$vv_farmer") { farmerFile = f; break; }
-            }
-            var exclusions = farmerFile != null ? VirtualRecipeParser.GetCultivatorExclusionsLower(farmerFile) : Array.Empty<string>();
+                var def = kv.Value;
+                if (string.IsNullOrEmpty(def?.stationName)) continue;
 
-            int added = 0;
-            var cultivatorEntries = CultivatorRecipeDiscovery.GetPlantingRecipes(existingOutputs, exclusions);
-            foreach (var entry in cultivatorEntries)
-            {
-                if (!string.IsNullOrEmpty(entry.output)) existingOutputs.Add(entry.output);
-                var recipe = CreateRecipe(objectDB, station, entry);
-                if (recipe != null)
+                bool hasCultivator = def.tags != null && TagParser.HasTag(def.tags, "recipe", "cultivator");
+                bool hasCooking = def.tags != null && TagParser.HasTag(def.tags, "recipe", "cooking");
+                if (!hasCultivator && !hasCooking) continue;
+
+                var station = VirtualRecipeParser.GetOrCreateStationTemplate(def.stationName);
+                if (station == null) continue;
+
+                var existingOutputs = CollectExistingOutputs(def.stationName);
+
+                if (hasCultivator)
                 {
-                    objectDB.m_recipes.Add(recipe);
-                    _registeredRecipes.Add(recipe);
-                    added++;
+                    var exclusions = GetCultivatorExclusionsLower(def);
+                    var cultivatorEntries = CultivatorRecipeDiscovery.GetPlantingRecipes(existingOutputs, exclusions);
+                    totalAdded += RegisterDiscoveredEntries(objectDB, station, cultivatorEntries, existingOutputs);
+                }
+
+                if (hasCooking)
+                {
+                    var cookingEntries = CookingRecipeDiscovery.GetCookingRecipes(existingOutputs);
+                    totalAdded += RegisterDiscoveredEntries(objectDB, station, cookingEntries, existingOutputs);
                 }
             }
-            var cookingEntries = CookingRecipeDiscovery.GetCookingRecipes(existingOutputs);
-            foreach (var entry in cookingEntries)
-            {
-                var recipe = CreateRecipe(objectDB, station, entry);
-                if (recipe != null)
-                {
-                    objectDB.m_recipes.Add(recipe);
-                    _registeredRecipes.Add(recipe);
-                    added++;
-                }
-            }
-            if (added > 0)
-                Plugin.Log?.LogInfo($"VirtualRecipeLoader: Recheck added {added} discovered recipes (post–world load)");
-            return added;
+
+            if (totalAdded > 0)
+                Plugin.Log?.LogInfo($"VirtualRecipeLoader: Recheck added {totalAdded} discovered recipes (post-world load)");
+            return totalAdded;
         }
 
         /// <summary>
@@ -204,6 +159,86 @@ namespace ValheimVillages.Items.VirtualRecipes
         {
             if (string.IsNullOrEmpty(recipeName)) return null;
             return _physicalStationMap.TryGetValue(recipeName, out var ps) ? ps : null;
+        }
+
+        private static int RegisterStationRecipes(
+            ObjectDB objectDB, CraftingStation station,
+            List<StationRecipe> recipes, HashSet<string> existingOutputs)
+        {
+            if (recipes == null || recipes.Count == 0) return 0;
+            int count = 0;
+            foreach (var sr in recipes)
+            {
+                if (IsExcludedFromCraftMenu(sr.output)) continue;
+                if (!string.IsNullOrEmpty(sr.output))
+                    existingOutputs.Add(sr.output);
+
+                var entry = new VirtualRecipeEntry
+                {
+                    output = sr.output,
+                    outputAmount = sr.outputAmount,
+                    inputs = string.IsNullOrEmpty(sr.input) ? null
+                        : new[] { new VirtualRecipeInput { item = sr.input, amount = sr.inputAmount } },
+                    minStationLevel = sr.minStationLevel
+                };
+
+                var recipe = CreateRecipe(objectDB, station, entry);
+                if (recipe != null)
+                {
+                    objectDB.m_recipes.Add(recipe);
+                    _registeredRecipes.Add(recipe);
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private static int RegisterDiscoveredEntries(
+            ObjectDB objectDB, CraftingStation station,
+            List<VirtualRecipeEntry> entries, HashSet<string> existingOutputs)
+        {
+            int count = 0;
+            foreach (var entry in entries)
+            {
+                if (IsExcludedFromCraftMenu(entry.output)) continue;
+                if (!string.IsNullOrEmpty(entry.output))
+                    existingOutputs.Add(entry.output);
+
+                var recipe = CreateRecipe(objectDB, station, entry);
+                if (recipe != null)
+                {
+                    objectDB.m_recipes.Add(recipe);
+                    _registeredRecipes.Add(recipe);
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private static HashSet<string> CollectExistingOutputs(string stationName)
+        {
+            var existingOutputs = new HashSet<string>();
+            var prefix = $"VV_Recipe_{stationName}_";
+            foreach (var r in _registeredRecipes)
+            {
+                if (r?.m_item?.gameObject == null || r.name == null || !r.name.StartsWith(prefix))
+                    continue;
+                existingOutputs.Add(r.m_item.gameObject.name);
+            }
+            return existingOutputs;
+        }
+
+        private static IReadOnlyList<string> GetCultivatorExclusionsLower(VillagerDef def)
+        {
+            if (def?.cultivatorExclusions == null || def.cultivatorExclusions.Count == 0)
+                return Array.Empty<string>();
+            var lower = new string[def.cultivatorExclusions.Count];
+            for (int i = 0; i < def.cultivatorExclusions.Count; i++)
+            {
+                var s = def.cultivatorExclusions[i];
+                lower[i] = string.IsNullOrEmpty(s) ? "" : s.Trim().ToLowerInvariant();
+            }
+            return lower;
         }
 
         private static void ReAddExisting(ObjectDB objectDB)

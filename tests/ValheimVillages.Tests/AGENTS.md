@@ -4,7 +4,7 @@ Keywords: test, unit test, xUnit, dotnet test, FloodFillTests, PathScoringTests,
 
 ## Purpose
 
-Unit tests for ValheimVillages.Core. Runs via `dotnet test` with no Unity or Valheim dependencies. Covers algorithms, registration contracts, NPC definitions, and task queue data types.
+Unit tests for ValheimVillages. Runs via `dotnet test` without launching the game. Covers algorithms, registration contracts, NPC definitions, and task queue data types. Contract tests use safe reflection to skip types with unresolvable Unity dependencies.
 
 ## Directory Structure
 
@@ -40,10 +40,10 @@ ValheimVillages.Tests/
 dotnet test tests/ValheimVillages.Tests/
 ```
 
-No game installation or Unity runtime required. References only `ValheimVillages.Core`.
+References the main `ValheimVillages` project. Contract tests use `AssemblyHelper` to safely reflect over types that may depend on unavailable Unity assemblies.
 
 ## Integration
 
-- **ValheimVillages.Core** -- the only project reference; tests Core algorithms, data, and attributes.
-- Contract tests scan the Core assembly for `[Register*]` attributes to verify interface compliance.
-- Adding a new `[RegisterTab]`, `[RegisterAbility]`, or `[RegisterBehavior]` type in the mod will be caught by contract tests if it fails to implement the required interface.
+- **ValheimVillages** -- the only project reference; tests algorithms, schemas, and registration attributes.
+- Contract tests scan the assembly for `[Register*]` attributes to verify interface compliance, skipping types whose metadata can't be loaded outside the game runtime.
+- Adding a new `[RegisterTab]`, `[RegisterAbility]`, or `[RegisterBehavior]` type will be caught by contract tests if it fails to implement the required interface.

@@ -1,61 +1,47 @@
 using System.Collections.Generic;
-using ValheimVillages.NPCs;
+using ValheimVillages.Schemas;
 using ValheimVillages.Tags;
 using Xunit;
 
 namespace ValheimVillages.Tests.Definitions;
 
 /// <summary>
-/// Validate NPC type definition data integrity and tag references.
+/// Validate villager definition data integrity and tag references.
 /// </summary>
 public class NpcDefinitionTests
 {
     [Fact]
-    public void NpcTypeDefinition_GetNpcType_ParsesValidTypes()
+    public void VillagerDef_TypeIsString()
     {
-        var def = new NpcTypeDefinition { type = "Guard" };
-        Assert.Equal(NpcType.Guard, def.GetNpcType());
+        var def = new VillagerDef { type = "Guard" };
+        Assert.Equal("Guard", def.type);
     }
 
     [Fact]
-    public void NpcTypeDefinition_GetNpcType_DefaultsToFarmerForInvalid()
+    public void VillagerDef_CategoryIsString()
     {
-        var def = new NpcTypeDefinition { type = "InvalidType" };
-        Assert.Equal(NpcType.Farmer, def.GetNpcType());
+        var def = new VillagerDef { category = "Specialist" };
+        Assert.Equal("Specialist", def.category);
     }
 
     [Fact]
-    public void NpcTypeDefinition_GetCategory_ParsesSpecialist()
+    public void VillagerDef_ScalingTypeIsString()
     {
-        var def = new NpcTypeDefinition { category = "Specialist" };
-        Assert.Equal(NpcCategory.Specialist, def.GetCategory());
+        var def = new VillagerDef { scalingType = "Workbench" };
+        Assert.Equal("Workbench", def.scalingType);
     }
 
     [Fact]
-    public void NpcTypeDefinition_GetCategory_DefaultsToVillager()
+    public void VillagerDef_ScalingTypeDefaultsToComfort()
     {
-        var def = new NpcTypeDefinition { category = "Unknown" };
-        Assert.Equal(NpcCategory.Villager, def.GetCategory());
+        var def = new VillagerDef();
+        Assert.Equal("Comfort", def.scalingType);
     }
 
     [Fact]
-    public void NpcTypeDefinition_GetScalingType_ParsesValid()
+    public void VillagerDef_Tags_CanBeFilteredByNamespace()
     {
-        var def = new NpcTypeDefinition { scalingType = "Workbench" };
-        Assert.Equal(BenefitScaling.Workbench, def.GetScalingType());
-    }
-
-    [Fact]
-    public void NpcTypeDefinition_GetScalingType_DefaultsToComfort()
-    {
-        var def = new NpcTypeDefinition { scalingType = "Unknown" };
-        Assert.Equal(BenefitScaling.Comfort, def.GetScalingType());
-    }
-
-    [Fact]
-    public void NpcTypeDefinition_Tags_CanBeFilteredByNamespace()
-    {
-        var def = new NpcTypeDefinition
+        var def = new VillagerDef
         {
             tags = new List<string>
             {
