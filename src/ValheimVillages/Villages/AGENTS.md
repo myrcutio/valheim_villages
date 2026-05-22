@@ -35,5 +35,5 @@ Villages/
 
 - **Behaviors/** -- `PatrolStateMachine` creates `VillageArea` from patrol waypoints and registers it.
 - **Abilities/** -- `SpawnBlockPassiveEffect.IsActive` calls `VillageAreaManager.IsInsideAnyVillage`.
-- **TaskQueue/** -- `NavMeshRebakeHandler` and `HnaPartitionHandler` use `TryGetCombinedBounds()`.
+- **TaskQueue/** -- `NavMeshRebakeHandler` and `RegionPartitionHandler` use `TryGetCombinedBounds()`.
 - **Behaviors/Patrol/** -- `PatrolDiscovery`, `PatrolRefiner`, `BreachDetection` use `WallDetection`.

@@ -27,6 +27,18 @@ namespace ValheimVillages.Settings
         /// </remarks>
         public const float ArrivalThreshold = 2f;
 
+        /// <summary>
+        /// Hard timeout: seconds since last successful waypoint arrival before
+        /// the guard is teleported back to their bed as a safety reset.
+        /// </summary>
+        public const float PatrolHardStuckTimeoutSeconds = 60f;
+
+        /// <summary>
+        /// Fraction of the character's normal m_jumpForce used for automatic step-up
+        /// jumps when stuck against raised geometry. 1.0 = full jump, 0.5 = half height.
+        /// </summary>
+        public const float StepJumpForceFraction = 0.6f;
+
         // Time boundaries as day fraction (0-1 where 0.5 = noon)
         // Valheim: 0.25 = 6am, 0.5 = noon, 0.75 = 6pm
         public const float NightStart = 0.875f;   // ~9pm

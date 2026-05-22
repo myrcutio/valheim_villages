@@ -91,6 +91,14 @@
       <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.AIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.ScreenCaptureModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.ScreenCaptureModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <!-- Unity JSON serialization module -->
@@ -123,5 +131,5 @@
   <PropertyGroup>
     <NoWarn>$(NoWarn);CS0649;CS0169</NoWarn>
   </PropertyGroup>
-</Project>
 
+</Project>

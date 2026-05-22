@@ -248,7 +248,7 @@ namespace ValheimVillages.Testing
         }
 
         /// <summary>Console command to manually run all tests.</summary>
-        [DevCommand("Run all [ModTest] integration tests")]
+        [DevCommand("Run all [ModTest] integration tests", Name = "vv_test_run")]
         public static void RunTestsCommand()
         {
             RunAll();

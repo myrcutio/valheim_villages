@@ -50,20 +50,9 @@ namespace ValheimVillages.Behaviors.Explore
                 m_ai.SetState(BehaviorState.Idle);
         }
 
-        public void OnArrival()
+        public void OnArrival(float dt)
         {
-            switch (m_ai.CurrentState)
-            {
-                case BehaviorState.Sleeping:
-                    m_ai.StopMoving();
-                    m_ai.SetState(BehaviorState.Sleeping);
-                    Plugin.Log?.LogDebug($"[AI:{m_ai.NpcName}] Sleeping at bed");
-                    break;
-
-                default:
-                    m_ai.SetState(BehaviorState.Idle);
-                    break;
-            }
+            m_ai.SetState(BehaviorState.Idle);
         }
 
         public void Save(ZDO zdo) { }
@@ -73,7 +62,6 @@ namespace ValheimVillages.Behaviors.Explore
         {
             return m_ai.CurrentState switch
             {
-                BehaviorState.Sleeping => "Sleeping",
                 BehaviorState.Traveling => "Walking...",
                 BehaviorState.Idle => "Idle",
                 _ => ""
@@ -132,10 +120,8 @@ namespace ValheimVillages.Behaviors.Explore
         private void TransitionToLocation(KnownLocation location)
         {
             float distance = Vector3.Distance(m_ai.Position, location.Position);
-            var newState = distance > ValheimVillages.Settings.VillagerSettings.ArrivalThreshold
-                ? BehaviorState.Traveling
-                : BehaviorState.Idle;
-            m_ai.SetState(newState, location.Position);
+            if (distance > Settings.VillagerSettings.ArrivalThreshold)
+                m_ai.SetState(BehaviorState.Traveling, location.Position);
         }
     }
 }

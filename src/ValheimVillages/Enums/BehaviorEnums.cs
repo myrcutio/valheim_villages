@@ -5,7 +5,7 @@ namespace ValheimVillages.Enums
     /// </summary>
     public enum TimeOfDay
     {
-        Night,      // 9pm - 6am: Sleep time
+        Night,      // 9pm - 6am: Rest time
         Morning,    // 6am - 10am: Wake up, start activities
         Day,        // 10am - 5pm: Main activity period
         Evening     // 5pm - 9pm: Social/feast time
@@ -35,7 +35,6 @@ namespace ValheimVillages.Enums
         Idle,           // Standing/sitting at a location
         Wandering,      // Moving randomly around current area
         Traveling,      // Moving directly to a specific target location
-        Sleeping,       // In bed at night
         Patrolling,     // Outdoor patrol route
         Exploring,      // Searching for new location types
         Working,        // Crafting: executing a work order

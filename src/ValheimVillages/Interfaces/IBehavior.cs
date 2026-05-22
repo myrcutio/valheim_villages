@@ -25,7 +25,7 @@ namespace ValheimVillages.Interfaces
         void Update(float dt);
 
         /// <summary>Called when the NPC arrives at its movement target.</summary>
-        void OnArrival();
+        void OnArrival(float dt);
 
         /// <summary>Get a human-readable status string for the UI hover text.</summary>
         string GetStatusText();

@@ -9,15 +9,16 @@ namespace ValheimVillages.Behaviors
     /// </summary>
     public enum FarmSubState
     {
-        Idle,                   // No farming in progress
-        GatheringSeeds,         // Walking to chest to pick up seeds
-        TravelingToFarm,        // Walking to farm area
-        Planting,               // Placing plants on cultivated ground
-        TravelingToHarvest,     // Walking to a mature crop
-        Harvesting,             // Picking a mature crop
-        CollectingDrops,        // Picking up item drops from harvest
-        ReturningToChest,       // Walking back to deposit harvested items
-        Depositing              // Placing harvested items in chest
+        Idle,
+        GatheringSeeds,
+        TravelingToFarm,
+        WalkingToPlantSpot,     // Walking to a specific planting position
+        Planting,               // Waiting for cooldown then placing plant
+        TravelingToHarvest,
+        Harvesting,
+        CollectingDrops,
+        ReturningToChest,
+        Depositing
     }
 
     /// <summary>
@@ -66,5 +67,11 @@ namespace ValheimVillages.Behaviors
 
         /// <summary>Whether we're in a harvesting pass (true) or planting pass (false).</summary>
         public bool IsHarvestingPass;
+
+        /// <summary>Next position where a seed will be planted.</summary>
+        public Vector3? NextPlantPosition;
+
+        /// <summary>Time until the next planting iteration</summary>
+        public float PlantCooldown;
     }
 }

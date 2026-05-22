@@ -30,8 +30,7 @@
   "stationIcon": "ShieldWood",
   "workStations": [],
   "skinColor": "1.15,0.85,0.55",
-  "weaponRotationFix": "70,10,0",
-  "behaviors": ["patrol", "alarm"],
+  "behaviors": ["patrol"],
   "tags": ["passive:spawnblock", "tab:info", "tab:debug", "listpanel:patrolstatus", "listpanel:villagemap"],
   "randomTalk": [
     "All quiet on the wall... mostly.",
@@ -50,7 +49,7 @@
     "My feet hurt, my back aches, but the village stands. Worth it.",
     "I have the final say around here. I say 'halt', and they halt. Usually.",
     "Have I ever told you about my boots theory?",
-    "Now my watch is ended.  Oh, it's not ended? Shite, back to it then."
+    "Now my watch is ended.  Oh, it's not ended? Back to it then."
   ],
   "randomGreets": [
     "Halt! Oh, it's you. Carry on.",
@@ -69,5 +68,3 @@
     "The watch continues."
   ]
 }
-
-  

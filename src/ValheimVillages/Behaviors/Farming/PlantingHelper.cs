@@ -9,32 +9,33 @@ namespace ValheimVillages.Behaviors.Farming
     /// </summary>
     public static class PlantingHelper
     {
-        /// <summary>Radius to scan for existing plants when checking spacing.</summary>
-        private const float PlantScanRadius = 20f;
+        private static int s_spaceMask;
+
+        private static readonly Collider[] s_overlapBuffer = new Collider[128];
 
         /// <summary>
         /// Find a valid planting position near the given center on cultivated ground.
-        /// Searches in a grid pattern, checking cultivated ground and plant spacing.
-        /// Returns null if no valid position is found.
+        /// Mirrors Valheim's Plant.HaveGrowSpace: any collider within growRadius
+        /// on the space-check layers blocks the position (unless it's a healthy Plant,
+        /// which uses growRadius * 2 spacing instead).
         /// </summary>
         public static Vector3? FindPlantingPosition(
             Vector3 center, float searchRadius, float growRadius)
         {
-            // Collect existing plant positions to check spacing
-            var existingPlants = GetNearbyPlantPositions(center, PlantScanRadius);
-            float spacing = Mathf.Max(growRadius * 2f, 1.5f);
+            EnsureSpaceMask();
+            float plantSpacing = Mathf.Max(growRadius * 2f, 1.5f);
 
-            // Search in a spiral-like grid pattern from center outward
-            for (float r = 0f; r <= searchRadius; r += spacing)
+            DebugLog.Append("PlantingHelper.cs:FindPlantingPosition", "Spacing check start", new Dictionary<string, object>{{"plantSpacing",plantSpacing},{"growRadius",growRadius},{"searchRadius",searchRadius},{"center",center.ToString()}}, "H3", "run1");
+
+            for (float r = 0f; r <= searchRadius; r += plantSpacing)
             {
-                int steps = r < 0.1f ? 1 : Mathf.Max(4, Mathf.RoundToInt(2f * Mathf.PI * r / spacing));
+                int steps = r < 0.1f ? 1 : Mathf.Max(4, Mathf.RoundToInt(2f * Mathf.PI * r / plantSpacing));
                 for (int i = 0; i < steps; i++)
                 {
                     float angle = (2f * Mathf.PI * i) / steps;
                     var candidate = center + new Vector3(
                         Mathf.Cos(angle) * r, 0f, Mathf.Sin(angle) * r);
 
-                    // Snap to terrain height
                     if (!GetTerrainHeight(candidate, out float height))
                         continue;
                     candidate.y = height;
@@ -42,7 +43,7 @@ namespace ValheimVillages.Behaviors.Farming
                     if (!IsCultivated(candidate))
                         continue;
 
-                    if (!HasEnoughSpacing(candidate, existingPlants, spacing))
+                    if (!HasGrowSpace(candidate, growRadius, plantSpacing))
                         continue;
 
                     return candidate;
@@ -64,7 +65,6 @@ namespace ValheimVillages.Behaviors.Farming
             var go = Object.Instantiate(piecePrefab, position, rotation);
             if (go == null) return null;
 
-            // Set the piece creator (0 = no specific player)
             var piece = go.GetComponent<Piece>();
             if (piece != null)
                 piece.SetCreator(0L);
@@ -74,61 +74,73 @@ namespace ValheimVillages.Behaviors.Farming
             return go;
         }
 
-        /// <summary>
-        /// Check if the given world position is on cultivated ground.
-        /// </summary>
         public static bool IsCultivated(Vector3 worldPos)
         {
             var heightmap = Heightmap.FindHeightmap(worldPos);
             return heightmap != null && heightmap.IsCultivated(worldPos);
         }
 
-        /// <summary>
-        /// Get the terrain height at a world position.
-        /// </summary>
         private static bool GetTerrainHeight(Vector3 worldPos, out float height)
         {
             height = 0f;
             if (ZoneSystem.instance == null) return false;
             height = ZoneSystem.instance.GetGroundHeight(worldPos);
-            return height > -1000f; // Valid terrain
+            return height > -1000f;
         }
 
         /// <summary>
-        /// Get positions of all Plant components near a center point.
+        /// Two-pass grow-space check:
+        /// 1. Valheim-style obstruction: any non-Plant collider within growRadius blocks.
+        /// 2. Plant-to-plant spacing: any Plant within plantSpacing blocks.
         /// </summary>
-        private static List<Vector3> GetNearbyPlantPositions(Vector3 center, float radius)
+        private static bool HasGrowSpace(
+            Vector3 candidate, float growRadius, float plantSpacing)
         {
-            var positions = new List<Vector3>();
-            var colliders = Physics.OverlapSphere(center, radius);
-            var seen = new HashSet<int>();
-            foreach (var col in colliders)
+            float checkRadius = Mathf.Max(growRadius, plantSpacing);
+            int count = Physics.OverlapSphereNonAlloc(
+                candidate, checkRadius, s_overlapBuffer, s_spaceMask);
+
+            float growRadiusSq = growRadius * growRadius;
+            float plantSpacingSq = plantSpacing * plantSpacing;
+
+            for (int i = 0; i < count; i++)
             {
+                var col = s_overlapBuffer[i];
                 if (col == null) continue;
-                var plant = col.GetComponentInParent<Plant>();
-                if (plant == null) continue;
-                int id = plant.GetInstanceID();
-                if (!seen.Add(id)) continue;
-                positions.Add(plant.transform.position);
-            }
-            return positions;
-        }
 
-        /// <summary>
-        /// Check that a candidate position has enough spacing from all existing plants.
-        /// </summary>
-        private static bool HasEnoughSpacing(
-            Vector3 candidate, List<Vector3> existingPlants, float minSpacing)
-        {
-            float minSq = minSpacing * minSpacing;
-            foreach (var pos in existingPlants)
-            {
-                float dx = candidate.x - pos.x;
-                float dz = candidate.z - pos.z;
-                if (dx * dx + dz * dz < minSq)
+                var plant = col.GetComponentInParent<Plant>();
+                if (plant != null)
+                {
+                    float dx = candidate.x - plant.transform.position.x;
+                    float dz = candidate.z - plant.transform.position.z;
+                    if (dx * dx + dz * dz < plantSpacingSq)
+                        return false;
+                    continue;
+                }
+
+                var pickable = col.GetComponentInParent<Pickable>();
+                if (pickable != null)
+                {
+                    float dx = candidate.x - pickable.transform.position.x;
+                    float dz = candidate.z - pickable.transform.position.z;
+                    if (dx * dx + dz * dz < plantSpacingSq)
+                        return false;
+                    continue;
+                }
+
+                float distSq = (candidate - col.ClosestPoint(candidate)).sqrMagnitude;
+                if (distSq < growRadiusSq)
                     return false;
             }
+
             return true;
+        }
+
+        private static void EnsureSpaceMask()
+        {
+            if (s_spaceMask != 0) return;
+            s_spaceMask = LayerMask.GetMask(
+                "Default", "static_solid", "Default_small", "piece", "piece_nonsolid");
         }
     }
 }

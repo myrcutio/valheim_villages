@@ -1,10 +1,8 @@
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
-using ValheimVillages;
 using ValheimVillages.Behaviors;
 using ValheimVillages.Interfaces;
-using ValheimVillages.Behaviors.Alarm;
 using ValheimVillages.Behaviors.Explore;
 using ValheimVillages.Behaviors.Patrol;
 using ValheimVillages.Behaviors.Work;
@@ -14,12 +12,13 @@ using ValheimVillages.Settings;
 using ValheimVillages.Tags;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villager.AI.Memory;
+using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
 using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.Villager.AI
 {
-    public class VillagerAI : BaseAI, IVillagerStationLookup, IVillagerWorkContext
+    public class VillagerAI : BaseAI, IVillagerWorkContext
     {
         private Villager m_instance;
         private string m_uniqueId;
@@ -42,18 +41,29 @@ namespace ValheimVillages.Villager.AI
         /// <summary>When the current movement target was set (for stuck timeout).</summary>
         private float m_targetSetTime;
 
+        private Vector3 m_lastMovePos;
+        private float m_lastRealMoveTime;
+        private DoorHandler m_doorHandler;
+        private DoorHandler DoorHandler => m_doorHandler ??= GetComponent<DoorHandler>();
+
+        /// <summary>Time.time when the guard last arrived at a waypoint. Used for hard stuck timeout.</summary>
+        private float m_lastArrivalTime;
+
+        // Hard-stuck backoff
+        private int m_consecutiveStucks;
+        private float m_stuckBackoffUntil;
+        private const float StuckBackoffBase = 10f;
+        private const float StuckBackoffMax = 600f;
+
         // Exploration
         private float m_explorationStartTime;
         private Vector3? m_explorationTarget;
-
-        // Debug
-        private float m_debugLockUntil;
-        private float m_lastLogTime;
 
         // Composable behaviors (populated by BehaviorFactory from NPC definition)
         private List<IBehavior> m_behaviors = new();
 
         private const float PathRetryInterval = 2f;
+        private const float SaveInterval = 60f;
 
         private static readonly FieldInfo s_pathField = typeof(BaseAI).GetField(
             "m_path", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -85,6 +95,9 @@ namespace ValheimVillages.Villager.AI
                 Plugin.Log?.LogWarning($"[VillagerAI] base.Awake() threw: {ex.GetType().Name}: {ex.Message}");
             }
 
+            if (VillagerAgentType.EnsureRegistered())
+                m_pathAgentType = VillagerAgentType.AgentType;
+
             if (m_instance == null)
             {
                 m_instance = GetComponent<Villager>();
@@ -101,8 +114,12 @@ namespace ValheimVillages.Villager.AI
                 VillagerAIManager.RegisterActive(this);
             }
             
+            m_doorHandler = GetComponent<DoorHandler>();
+
             RegisterOwnedBed();
             RegisterBehaviors();
+
+            m_lastArrivalTime = Time.time;
 
             // Stagger behavior ticks so NPCs spawned together don't all evaluate at the same time.
             // This is a countdown timer: 0 means "ready to run", positive means "wait this many more seconds".
@@ -111,6 +128,15 @@ namespace ValheimVillages.Villager.AI
 
         private void OnDestroy()
         {
+            try
+            {
+                var zdo = GetComponent<ZNetView>()?.GetZDO();
+                if (zdo != null) SaveMemories(zdo);
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log?.LogWarning($"[VillagerAI] OnDestroy SaveMemories failed: {ex.Message}");
+            }
             VillagerAIManager.Unregister(this);
         }
 
@@ -120,40 +146,9 @@ namespace ValheimVillages.Villager.AI
             m_memory.BedPosition = m_bedPosition;
         }
 
-        protected new bool MoveTo(float dt, Vector3 point, float dist, bool run)
-        {
-            float b = run ? 1f : 0.5f;
-            if (Vector3.Distance(m_instance.transform.position, point) <= 2f)
-            {
-                StopMoving();
-                return true;
-            }
-            if (!FindPath(point))
-            {
-                StopMoving();
-                return true;
-            }
-            if (m_waypointPath.Count == 0)
-            {
-                StopMoving();
-                return true;
-            }
-            Vector3 nextPoint = m_waypointPath[0];
-            if (Vector3.Distance(nextPoint, m_instance.transform.position) < (double) b)
-            {
-                m_waypointPath.RemoveAt(0);
-                if (m_waypointPath.Count == 0)
-                {
-                    StopMoving();
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         public override bool UpdateAI(float dt)
         {
+            if (m_instance == null) return false;
             if (!base.UpdateAI(dt)) return false;
             if (m_lastBehaviorUpdateTime > 0.0)
             {
@@ -184,28 +179,64 @@ namespace ValheimVillages.Villager.AI
                 }
             }
 
+            if (Time.time - m_lastMemorySaveTime > SaveInterval)
+            {
+                m_lastMemorySaveTime = Time.time;
+                var zdo = GetComponent<ZNetView>()?.GetZDO();
+                if (zdo != null) SaveMemories(zdo);
+            }
+
             // Per-frame movement: drive the character toward the current waypoint
             if (m_currentWaypoint != null && NeedsMovement(m_state))
             {
                 Vector3 targetPos = m_currentWaypoint.Position;
                 float remaining = Vector3.Distance(transform.position, targetPos);
+                var path = s_pathField?.GetValue(this) as List<Vector3>;
 
-                if (remaining < VillagerSettings.ArrivalThreshold)
+                if (remaining < VillagerSettings.ArrivalThreshold && (path == null || path.Count == 0))
                 {
-                    OnArrivedAtTarget();
+                    OnArrivedAtTarget(dt);
                 }
                 else
                 {
-                    var path = s_pathField?.GetValue(this) as List<Vector3>;
                     if (path == null || path.Count == 0)
                     {
                         FindPath(targetPos);
                         path = s_pathField?.GetValue(this) as List<Vector3>;
+
+                        if ((path == null || path.Count == 0) && NavMeshLinkPlacer.PlaceLinks())
+                        {
+                            FindPath(targetPos);
+                            path = s_pathField?.GetValue(this) as List<Vector3>;
+                        }
+                        // Reject paths that are absurdly indirect (NavMesh gap workaround)
+                        if (path != null && path.Count > 2 && m_state == BehaviorState.Patrolling)
+                        {
+                            float straightDist = Vector3.Distance(transform.position, targetPos);
+                            float pathLen = 0f;
+                            var prev = transform.position;
+                            for (int pi = 0; pi < path.Count; pi++)
+                            {
+                                pathLen += Vector3.Distance(prev, path[pi]);
+                                prev = path[pi];
+                            }
+                            if (straightDist > 1f && pathLen > straightDist * 3f)
+                            {
+                                path.Clear();
+
+                                if (NavMeshLinkPlacer.PlaceLinks())
+                                {
+                                    FindPath(targetPos);
+                                    path = s_pathField?.GetValue(this) as List<Vector3>;
+                                }
+                            }
+                        }
+
                     }
 
                     if (path != null && path.Count > 0)
                     {
-                        bool running = remaining > 5f;
+                        bool running = m_state == BehaviorState.Patrolling || remaining > 5f;
                         float closeEnough = running ? 1f : 0.5f;
 
                         while (path.Count > 1 && Vector3.Distance(path[0], transform.position) <= closeEnough)
@@ -223,13 +254,85 @@ namespace ValheimVillages.Villager.AI
                             }
                         }
 
-                        if (path != null && path.Count > 0)
+                    if (path != null && path.Count > 0)
+                    {
+                        DoorHandler?.OpenDoorsAlongPath(path);
+
+                        var diff = path[0] - transform.position;
+                        var dir = diff.normalized;
+                        MoveTowards(dir, running);
+
+                        float moveDelta = Vector3.Distance(transform.position, m_lastMovePos);
+                        if (moveDelta > 0.15f)
                         {
-                            var dir = (path[0] - transform.position).normalized;
-                            MoveTowards(dir, running);
+                            m_lastMovePos = transform.position;
+                            m_lastRealMoveTime = Time.time;
+                        }
+                        else if (Time.time - m_lastRealMoveTime > DoorSettings.MovementStallThreshold)
+                        {
+                            DebugLog.Append("VillagerAI.cs:stall", "stall_detected", new System.Collections.Generic.Dictionary<string, object>{
+                                {"stallDuration", Time.time - m_lastRealMoveTime},
+                                {"hasDoorHandler", DoorHandler != null},
+                                {"npcPos", transform.position.ToString("F2")},
+                                {"targetPos", targetPos.ToString("F2")},
+                                {"moveDelta", Vector3.Distance(transform.position, m_lastMovePos)}
+                            }, "H1H2H3", "run1");
+                            if (DoorHandler != null)
+                            {
+                                var blockingDoor = DoorHandler.GetBlockingDoor(targetPos);
+                                DebugLog.Append("VillagerAI.cs:doorCheck", "blocking_door_result", new System.Collections.Generic.Dictionary<string, object>{
+                                    {"foundDoor", blockingDoor != null},
+                                    {"doorPos", blockingDoor != null ? blockingDoor.transform.position.ToString("F2") : "none"}
+                                }, "H3", "run1");
+                                if (blockingDoor != null)
+                                {
+                                    DoorHandler.OpenDoor(blockingDoor);
+                                    m_lastRealMoveTime = Time.time;
+                                }
+                            }
+
+                            if (Time.time - m_lastRealMoveTime > 1.5f && m_character != null)
+                            {
+                                float stepUp = path[0].y - transform.position.y;
+                                if (stepUp > 0.2f)
+                                {
+                                    float origForce = m_character.m_jumpForce;
+                                    float origForward = m_character.m_jumpForceForward;
+                                    m_character.m_jumpForce *= VillagerSettings.StepJumpForceFraction;
+                                    m_character.m_jumpForceForward *= VillagerSettings.StepJumpForceFraction;
+                                    m_character.Jump(false);
+                                    m_character.m_jumpForce = origForce;
+                                    m_character.m_jumpForceForward = origForward;
+                                    m_lastRealMoveTime = Time.time;
+                                }
+                            }
                         }
                     }
+                }
 
+                    if (m_state == BehaviorState.Patrolling)
+                    {
+                        if (Time.time < m_stuckBackoffUntil)
+                        {
+                            // Still in backoff cooldown — stay idle at bed
+                        }
+                        else if (Time.time - m_lastArrivalTime > VillagerSettings.PatrolHardStuckTimeoutSeconds)
+                        {
+                            m_consecutiveStucks++;
+                            float backoff = Mathf.Min(
+                                StuckBackoffBase * Mathf.Pow(2f, m_consecutiveStucks - 1),
+                                StuckBackoffMax);
+                            m_stuckBackoffUntil = Time.time + backoff;
+
+                            Plugin.Log?.LogWarning(
+                                $"[AI:{m_villagerName}] Hard stuck timeout ({Time.time - m_lastArrivalTime:F0}s). " +
+                                $"Teleporting to bed. Backoff {backoff:F0}s " +
+                                $"(attempt {m_consecutiveStucks})");
+                            transform.position = m_bedPosition + Vector3.up * 0.5f;
+                            m_lastArrivalTime = Time.time;
+                            SetState(BehaviorState.Idle);
+                        }
+                    }
                 }
             }
 
@@ -269,12 +372,6 @@ namespace ValheimVillages.Villager.AI
                 behaviorKeys.AddRange(TagParser.GetValues(villagerDef.tags, "behavior"));
 
             m_behaviors = BehaviorFactory.CreateBehaviors(this, behaviorKeys);
-
-            // Wire up cross-behavior references
-            var patrol = GetBehavior<PerimeterPatrolBehavior>();
-            var alarm = GetBehavior<BreachAlarmBehavior>();
-            if (patrol != null && alarm != null)
-                alarm.SetPatrolBehavior(patrol);
 
             // TODO: why is this necessary? what part of farming requires crafting?
             var craftAdapter = GetBehavior<CraftingBehaviorAdapter>();
@@ -362,11 +459,8 @@ namespace ValheimVillages.Villager.AI
                 BehaviorState.Traveling => true,
                 BehaviorState.Exploring => true,
                 BehaviorState.Wandering => true,
-                BehaviorState.Sleeping => true,
                 BehaviorState.Patrolling => true,
                 BehaviorState.Working => true,
-                BehaviorState.Scouting => true,
-                BehaviorState.CircuitTracing => true,
                 _ => false
             };
         }
@@ -376,6 +470,9 @@ namespace ValheimVillages.Villager.AI
         #region State Management
         
         public BehaviorState CurrentState => m_state;
+
+        /// <summary>True while the AI is in a hard-stuck backoff cooldown and should not start new tasks.</summary>
+        public bool IsInBackoff => Time.time < m_stuckBackoffUntil;
 
         public void SetState(BehaviorState newState, Vector3? target = null)
         {
@@ -392,11 +489,42 @@ namespace ValheimVillages.Villager.AI
             {
                 m_currentWaypoint = waypoint;
                 m_targetSetTime = Time.time;
+                m_lastMovePos = transform.position;
+                m_lastRealMoveTime = Time.time;
             }
             
             if (newState == BehaviorState.Idle)
                 this.StopMoving();
-            Plugin.Log?.LogDebug($"[AI:{m_villagerName}] State -> {newState}");
+            if (waypoint != null)
+                Plugin.Log?.LogDebug(
+                    $"[AI:{m_villagerName}] State -> {newState}, target=({waypoint.Position.x:F1},{waypoint.Position.y:F1},{waypoint.Position.z:F1})");
+            else
+                Plugin.Log?.LogDebug($"[AI:{m_villagerName}] State -> {newState}");
+        }
+
+        /// <summary>
+        /// Inject a pre-computed patrol circuit path. The guard follows the full path
+        /// and only triggers OnArrival when reaching the final waypoint.
+        /// Falls back to single-waypoint FindPath if the path is empty.
+        /// </summary>
+        public void SetPatrolCircuit(VillagerWaypoint finalTarget, List<Vector3> circuitPath)
+        {
+            m_state = BehaviorState.Patrolling;
+            m_currentWaypoint = finalTarget;
+            m_targetSetTime = Time.time;
+            m_lastMovePos = transform.position;
+            m_lastRealMoveTime = Time.time;
+            m_lastArrivalTime = Time.time;
+
+            var path = s_pathField?.GetValue(this) as List<Vector3>;
+            if (path != null)
+            {
+                path.Clear();
+                path.AddRange(circuitPath);
+            }
+
+            Plugin.Log?.LogDebug(
+                $"[AI:{m_villagerName}] State -> Patrolling (circuit: {circuitPath.Count} path nodes)");
         }
 
         public void SetPaused(bool paused)
@@ -423,17 +551,17 @@ namespace ValheimVillages.Villager.AI
             return hasPath;
         }
 
-        private void OnArrivedAtTarget()
+        private void OnArrivedAtTarget(float dt)
         {
-            Plugin.Log?.LogInfo($"[AI:{m_villagerName}] Arrived at destination (state={m_state})");
-            // m_stallStartTime = 0f;
+            m_lastArrivalTime = Time.time;
+            m_consecutiveStucks = 0;
 
             var arrCtx = new BehaviorContext();
             foreach (var b in m_behaviors)
             {
                 if (b.WantsControl(arrCtx))
                 {
-                    b.OnArrival();
+                    b.OnArrival(dt);
                     break;
                 }
             }

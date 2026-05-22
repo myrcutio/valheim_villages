@@ -27,7 +27,7 @@
     "ancient_seed", "firtree_sapling", "pinetree_sapling", "beech_sapling",
     "birch_sapling", "oak_sapling", "ygga", "vineash", "vinegreen"
   ],
-  "behaviors": ["craft"],
+  "behaviors": ["craft", "tidy"],
   "tags": ["behavior:farming", "tab:info", "tab:debug", "tab:workorder", "recipe:cultivator", "recipe:cooking"],
   "dependentOnNpcType": "",
   "tieredBenefits": [],

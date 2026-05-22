@@ -41,7 +41,7 @@ namespace ValheimVillages.Behaviors.Work
 
         public bool WantsControl(BehaviorContext ctx) => false; // Farming is a sub-state of crafting
         public void Update(float dt) { }
-        public void OnArrival() { }
+        public void OnArrival(float dt) { }
         public void Save(ZDO zdo) { }
         public void Load(ZDO zdo) { }
 

@@ -25,6 +25,7 @@ namespace ValheimVillages.Attributes
         private static readonly List<IContextMenu> s_contextMenus = new();
         private static readonly Dictionary<string, Func<VillagerAI, IBehavior>> s_behaviorCreators = new();
         private static readonly HashSet<string> s_modObjectNames = new();
+        private static readonly List<(string Name, string Description)> s_devCommands = new();
 
         /// <summary>
         /// Master entry point. Scans the assembly for all registration attributes
@@ -39,6 +40,7 @@ namespace ValheimVillages.Attributes
             s_contextMenus.Clear();
             s_behaviorCreators.Clear();
             s_modObjectNames.Clear();
+            s_devCommands.Clear();
 
             RegisterDevCommands(assembly);
             RegisterTaskHandlers(assembly);
@@ -96,6 +98,7 @@ namespace ValheimVillages.Attributes
                     }
 
                     new Terminal.ConsoleCommand(name, attr.Description, handler);
+                    s_devCommands.Add((name, attr.Description));
                     count++;
                 }
             }
@@ -106,6 +109,15 @@ namespace ValheimVillages.Attributes
         {
             return $"{type.Name}_{method.Name}".ToLowerInvariant();
         }
+
+        /// <summary>
+        /// Returns (name, description) for every [DevCommand] registered in the
+        /// most recent <see cref="ScanAndRegister"/> pass. Used by the `vv` help
+        /// console command to enumerate available mod commands without reflection
+        /// at print time.
+        /// </summary>
+        public static IReadOnlyList<(string Name, string Description)> GetRegisteredDevCommands()
+            => s_devCommands;
 
         #endregion
 

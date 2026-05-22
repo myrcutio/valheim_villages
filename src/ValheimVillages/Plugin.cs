@@ -10,6 +10,8 @@ using ValheimVillages.Schemas;
 using ValheimVillages.Settings;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villager.AI.Pathfinding;
 
 [assembly: AssemblyTitle("Valheim Villages")]
 [assembly: AssemblyDescription("A village-building and NPC management mod for Valheim")]
@@ -18,6 +20,7 @@ using ValheimVillages.Villager.AI;
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
 [assembly: AssemblyVersion("0.1.0")]
 [assembly: AssemblyFileVersion("0.1.0")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
 {
@@ -31,13 +34,28 @@ namespace ValheimVillages
         private static ManualLogSource _logger;
         private Harmony _harmony;
         private static bool _recipeRefreshEnqueued;
-        private static bool _hnaPartitionEnqueued;
+        private static bool _regionPartitionEnqueued;
+        /// <summary>
+        /// <see cref="Time.realtimeSinceStartup"/> at the moment a hot reload
+        /// was detected, or 0 on cold start. Used by the Update-loop's
+        /// hna_partition gate so the 5-second settling delay restarts after
+        /// every hot reload (otherwise the partition would fire instantly
+        /// against half-reregistered world state).
+        /// </summary>
+        private static float _hotReloadAt;
+        // #endregion
 
         public static ManualLogSource Log => _logger;
+        public static Plugin Instance { get; private set; }
 
         private void Awake()
         {
+            Instance = this;
             _logger = Logger;
+            bool isHotReload = ObjectDB.instance != null &&
+                               ObjectDB.instance.m_items.Count > 0;
+            DebugLog.BeginCycle(isHotReload);
+            RegionGraphPersistence.LogAction = msg => _logger.LogInfo(msg);
             _logger.LogInfo($"{PluginName} v{PluginVersion} loading...");
             
             // Clean up any previous patches with our GUID (hot reload support)
@@ -53,9 +71,6 @@ namespace ValheimVillages
             // run full cleanup BEFORE re-registering anything.
             // FullCleanup invokes [RegisterCleanup] methods (e.g. TaskHandlerRegistry.Clear)
             // so it must run before ScanAndRegister to avoid wiping freshly-registered handlers.
-            bool isHotReload = ObjectDB.instance != null &&
-                               ObjectDB.instance.m_items.Count > 0;
-
             if (isHotReload)
             {
                 _logger.LogInfo("Hot reload detected — running full cleanup");
@@ -90,9 +105,23 @@ namespace ValheimVillages
 
                 _logger.LogInfo("Hot reload — fixing up existing NPC components");
                 HotReloadHelper.FixupExistingNPCs();
+
+                // Hot-reload iteration QoL: arm the Update-loop's hna_partition
+                // auto-enqueue to fire again. The 5-second settling delay
+                // restarts from _hotReloadAt so prefab re-registration and
+                // polygon scope have time to establish before we sample world
+                // state.
+                _hotReloadAt = Time.realtimeSinceStartup;
+                _regionPartitionEnqueued = false;
+                _logger.LogInfo("Hot reload — armed hna_partition (will fire 5s after settle)");
             }
 
             _logger.LogInfo($"{PluginName} loaded successfully!");
+
+            if (isHotReload)
+            {
+                DebugLog.Capture("hot-reload");
+            }
 
             // Schedule integration tests via task queue so they run after fixtures are ready
             if (isHotReload && Testing.ModTestRunner.AutoRunEnabled)
@@ -130,12 +159,12 @@ namespace ValheimVillages
             }
 
             // Enqueue HNA partition (low priority) so village region graph is built without overwhelming other tasks
-            if (!_hnaPartitionEnqueued &&
+            if (!_regionPartitionEnqueued &&
                 ObjectDB.instance != null &&
                 ZNetScene.instance != null &&
-                Time.realtimeSinceStartup > 5f)
+                Time.realtimeSinceStartup > _hotReloadAt + 5f)
             {
-                _hnaPartitionEnqueued = true;
+                _regionPartitionEnqueued = true;
                 GlobalTaskQueue.Enqueue(new VillagerTask
                 {
                     Name = "hna_partition",
@@ -147,7 +176,25 @@ namespace ValheimVillages
                 _logger?.LogInfo("[Valheim Villages] Enqueued hna_partition (low priority)");
             }
 
+            // Debounced HNA rebuild on structural changes (piece placed/removed)
+            const float hnaRebuildDebounce = 10f;
+            if (Patches.PieceChangePatch.IsDirty &&
+                Time.realtimeSinceStartup - Patches.PieceChangePatch.LastStructureChangeTime > hnaRebuildDebounce)
+            {
+                Patches.PieceChangePatch.IsDirty = false;
+                _regionPartitionEnqueued = false;
+                _logger?.LogInfo("[Valheim Villages] Structure change detected, will re-enqueue hna_partition");
+            }
+
             GlobalTaskQueue.ProcessBatch();
+
+            PathDebugRenderer.AutoEnable();
+
+            if (RegionGraph.IsAnyAvailable && !NavMeshLinkPlacer.LinkCandidatesReady)
+                NavMeshLinkPlacer.ComputeLinkCandidates();
+
+            if (RegionGraph.IsAnyAvailable && !NavMeshLinkPlacer.HasLinks)
+                NavMeshLinkPlacer.PlaceLinks();
 
             // Tick Villager.AI.VillagerAI instances (BaseAI path; no MonsterAI)
             foreach (var ai in VillagerAIManager.ActiveVillagers.Values)

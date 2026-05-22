@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using UnityEngine;
 
@@ -193,7 +194,7 @@ namespace ValheimVillages.Items.VirtualRecipes
                     var name = piece != null ? (piece.m_name ?? go.name) : go.name;
                     names.Add(name);
                 }
-                ValheimVillages.Plugin.Log.LogInfo($"[Valheim Villages] Cultivator piece list (all): [{string.Join(", ", names)}]");
+                DebugLog.List("Cultivator", "piece_list", names.Cast<object>());
             }
             return result;
         }

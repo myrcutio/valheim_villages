@@ -6,6 +6,7 @@ using UnityEngine;
 using ValheimVillages.Schemas;
 using ValheimVillages.UI.Interaction;
 using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Registry;
 using ValheimVillages.Villager.Station;
 
@@ -171,6 +172,7 @@ namespace ValheimVillages.Villager
 
             // Add VillagerTalk and configure dialog lines from JSON definition
             npcObject.AddComponent<VillagerTalk>();
+            npcObject.AddComponent<DoorHandler>();
             Dialog.ConfigureDialog(npcObject, villagerDef);
 
             // ZDO must be set before adding Villager so LoadFromZDO can read identity
@@ -187,8 +189,9 @@ namespace ValheimVillages.Villager
             npcZnetView.GetZDO().Set("vv_villager_type", villagerType);
             npcZnetView.GetZDO().Set("vv_villager_name", villagerDef.displayName);
             npcZnetView.GetZDO().Set("vv_bed_position", bed.transform.position);
-            // Faction-based identity; no Tameable dependency
 
+            if (ZNet.instance != null && ZNet.instance.IsDedicated())
+                npcZnetView.GetZDO().SetOwner(ZNet.GetUID());
 
             var bedZnetView = bed.GetComponent<ZNetView>();
             if (bedZnetView != null && bedZnetView.GetZDO() != null)

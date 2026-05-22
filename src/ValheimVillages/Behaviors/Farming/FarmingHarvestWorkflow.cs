@@ -51,18 +51,17 @@ namespace ValheimVillages.Behaviors.Farming
             var target = m_context.CurrentHarvestTarget;
             if (target == null || !target.CanBePicked())
             {
-                // Crop disappeared or was picked by someone else
                 m_context.CurrentHarvestTarget = null;
-                BeginHarvestPass(); // Try next crop
+                BeginHarvestPass();
                 return;
             }
 
-            // Harvest the crop (spawns ItemDrop on ground)
+            DebugLog.Append("FarmingHarvestWorkflow.cs:OnArrivedAtCrop", "About to harvest crop", new System.Collections.Generic.Dictionary<string, object>{{"targetName",target.m_itemPrefab?.name ?? "NULL"},{"targetPos",target.transform.position.ToString()},{"targetGO",target.gameObject.name}}, "A,D", "run1");
+
             var character = m_ai.Character as Humanoid;
             HarvestHelper.HarvestCrop(target, character);
             m_context.CurrentHarvestTarget = null;
 
-            // Collect dropped items into "carried" count (cap per trip), then walk to container to deposit
             Vector3 harvestPos = target.transform.position;
             CollectDropsThenReturnToChest(harvestPos);
         }
@@ -171,13 +170,30 @@ namespace ValheimVillages.Behaviors.Farming
         {
             int total = 0;
             var colliders = Physics.OverlapSphere(center, radius);
+
+            int colCount = 0, dropCount = 0, nullPrefabCount = 0, nameMismatchCount = 0;
+            var mismatchNames = new System.Collections.Generic.List<string>();
+
             foreach (var col in colliders)
             {
                 if (total >= maxTake) break;
                 if (col == null) continue;
+                colCount++;
                 var drop = col.GetComponentInParent<ItemDrop>();
-                if (drop?.m_itemData?.m_dropPrefab == null) continue;
-                if (drop.m_itemData.m_dropPrefab.name != prefabName) continue;
+                if (drop == null || drop.m_itemData == null) continue;
+                dropCount++;
+                if (drop.m_itemData.m_dropPrefab == null)
+                {
+                    nullPrefabCount++;
+                    mismatchNames.Add("NULL_PREFAB|go=" + drop.gameObject.name);
+                    continue;
+                }
+                if (drop.m_itemData.m_dropPrefab.name != prefabName)
+                {
+                    nameMismatchCount++;
+                    mismatchNames.Add(drop.m_itemData.m_dropPrefab.name + "|go=" + drop.gameObject.name);
+                    continue;
+                }
                 int stack = drop.m_itemData.m_stack;
                 if (stack <= 0) continue;
 
@@ -187,6 +203,9 @@ namespace ValheimVillages.Behaviors.Farming
                     Object.Destroy(drop.gameObject);
                 total += take;
             }
+
+            DebugLog.Append("FarmingHarvestWorkflow.cs:CollectItemDropsIntoCarry", "Collect result", new System.Collections.Generic.Dictionary<string, object>{{"prefabName",prefabName},{"maxTake",maxTake},{"totalCollected",total},{"collidersFound",colCount},{"itemDropsFound",dropCount},{"nullPrefabCount",nullPrefabCount},{"nameMismatchCount",nameMismatchCount},{"mismatchNames",string.Join(";",mismatchNames)},{"center",center.ToString()},{"radius",radius}}, "A,D", "run1");
+
             return total;
         }
     }

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 using ValheimVillages.Settings;
 
 namespace ValheimVillages.Villager.AI.Navigation
@@ -51,6 +52,11 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// </summary>
         public Door GetBlockingDoor(Vector3 targetPosition)
         {
+            DebugLog.Append("DoorHandler.cs:entry", "GetBlockingDoor_called", new Dictionary<string, object>{
+                {"nearbyCount", m_nearbyDoors.Count},
+                {"npcPos", transform.position.ToString("F2")},
+                {"targetPos", targetPosition.ToString("F2")}
+            }, "H3H4", "run1");
             if (m_nearbyDoors.Count == 0)
                 return null;
 
@@ -61,30 +67,70 @@ namespace ValheimVillages.Villager.AI.Navigation
             {
                 if (door == null) continue;
 
-                // Check if door is closed
-                if (!IsDoorClosed(door)) continue;
-
-                // Check if door is player-built (has Piece component)
-                if (!IsPlayerBuiltDoor(door)) continue;
-
-                // Check if door is between NPC and target
+                bool closed = IsDoorClosed(door);
+                bool playerBuilt = IsPlayerBuiltDoor(door);
                 Vector3 doorPosition = door.transform.position;
                 Vector3 npcToDoor = doorPosition - npcPosition;
                 float distanceToDoor = npcToDoor.magnitude;
-
-                // Only consider doors within detection radius
-                if (distanceToDoor > DoorSettings.DoorDetectionRadius)
-                    continue;
-
-                // Check if door is roughly in the direction of the target
                 float dotProduct = Vector3.Dot(directionToTarget, npcToDoor.normalized);
-                if (dotProduct > 0.3f) // Door is somewhat in the direction we're trying to go
+
+                DebugLog.Append("DoorHandler.cs:eval", "door_eval", new Dictionary<string, object>{
+                    {"doorPos", doorPosition.ToString("F2")},
+                    {"closed", closed},
+                    {"playerBuilt", playerBuilt},
+                    {"distance", distanceToDoor},
+                    {"dotProduct", dotProduct},
+                    {"detectionRadius", DoorSettings.DoorDetectionRadius}
+                }, "H3H4", "run1");
+
+                if (!closed) continue;
+                if (!playerBuilt) continue;
+                if (distanceToDoor > DoorSettings.DoorDetectionRadius) continue;
+
+                if (dotProduct > 0.3f)
                 {
                     return door;
                 }
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Proactively opens doors that lie along the NPC's current path.
+        /// Checks each upcoming waypoint against NavMeshLinkPlacer's door link registry
+        /// and opens any closed door the NPC is approaching.
+        /// </summary>
+        public void OpenDoorsAlongPath(List<Vector3> path)
+        {
+            var doorLinks = NavMeshLinkPlacer.DoorLinks;
+            if (doorLinks.Count == 0 || path == null || path.Count == 0) return;
+
+            Vector3 npcPos = transform.position;
+            const float approachRadius = 2.5f;
+
+            foreach (var (midpoint, door) in doorLinks)
+            {
+                if (door == null) continue;
+                if (!IsDoorClosed(door)) continue;
+
+                float distToNpc = Vector3.Distance(npcPos, midpoint);
+                if (distToNpc > approachRadius) continue;
+
+                bool pathGoesThrough = false;
+                for (int i = 0; i < path.Count && i < 4; i++)
+                {
+                    float distToWaypoint = Vector3.Distance(path[i], midpoint);
+                    if (distToWaypoint < approachRadius)
+                    {
+                        pathGoesThrough = true;
+                        break;
+                    }
+                }
+                if (!pathGoesThrough) continue;
+
+                OpenDoor(door);
+            }
         }
 
         /// <summary>
@@ -103,6 +149,16 @@ namespace ValheimVillages.Villager.AI.Navigation
             Vector3 userDir = (transform.position - door.transform.position).normalized;
             bool forward = Vector3.Dot(door.transform.forward, userDir) < 0f;
             int openState = forward ? 1 : -1;
+
+            DebugLog.Append("DoorHandler.cs:open", "open_door", new Dictionary<string, object>{
+                {"npcPos", transform.position.ToString("F2")},
+                {"doorPos", door.transform.position.ToString("F2")},
+                {"doorFwd", door.transform.forward.ToString("F2")},
+                {"userDir", userDir.ToString("F2")},
+                {"dot", Vector3.Dot(door.transform.forward, userDir)},
+                {"forward", forward},
+                {"openState", openState}
+            }, "direction", "run1");
 
             nview.GetZDO().Set(ZDOVars.s_state, openState);
 
@@ -165,17 +221,20 @@ namespace ValheimVillages.Villager.AI.Navigation
                 m_pendingCloseDoors.Remove(door);
         }
 
+        private const float DoorCloseBlockRadius = 3f;
+
         private bool IsSafeToCLoseDoor(Door door)
         {
-            float dist = Vector3.Distance(transform.position, door.transform.position);
-
-            if (dist > DoorSettings.DoorDetectionRadius + 1f)
-                return true;
-
-            Vector3 toDoor = (door.transform.position - transform.position).normalized;
-            float dotForward = Mathf.Abs(Vector3.Dot(door.transform.forward, toDoor));
-
-            return dotForward < 0.5f;
+            Vector3 doorPos = door.transform.position;
+            var nearby = Physics.OverlapSphere(doorPos, DoorCloseBlockRadius);
+            foreach (var col in nearby)
+            {
+                if (col == null) continue;
+                var character = col.GetComponentInParent<Character>();
+                if (character != null)
+                    return false;
+            }
+            return true;
         }
 
         private void CloseDoor(Door door)
@@ -205,6 +264,12 @@ namespace ValheimVillages.Villager.AI.Navigation
                     m_nearbyDoors.Add(door);
                 }
             }
+            if (m_nearbyDoors.Count > 0)
+                DebugLog.Append("DoorHandler.cs:scan", "scan_result", new Dictionary<string, object>{
+                    {"npcPos", transform.position.ToString("F2")},
+                    {"doorsFound", m_nearbyDoors.Count},
+                    {"scanRadius", DoorSettings.DoorDetectionRadius * 2f}
+                }, "H4", "run1");
         }
 
         private bool IsDoorClosed(Door door)

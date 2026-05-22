@@ -162,7 +162,7 @@ namespace ValheimVillages.Testing
 
         #region Console commands
 
-        [DevCommand("Capture scene snapshot to vv_snapshot.json")]
+        [DevCommand("Capture scene snapshot to vv_snapshot.json", Name = "vv_snapshot_capture")]
         public static void CaptureCommand()
         {
             var path = Path.Combine(Paths.ConfigPath, "vv_snapshot.json");
@@ -170,7 +170,7 @@ namespace ValheimVillages.Testing
             snapshot.SaveToFile(path);
         }
 
-        [DevCommand("Verify current state against saved snapshot")]
+        [DevCommand("Verify current state against saved snapshot", Name = "vv_snapshot_verify")]
         public static void VerifyCommand()
         {
             var path = Path.Combine(Paths.ConfigPath, "vv_snapshot.json");

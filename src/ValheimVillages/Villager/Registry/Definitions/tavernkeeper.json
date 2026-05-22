@@ -33,7 +33,7 @@
     { "output": "CookedLoxMeat", "outputAmount": 1, "input": "LoxMeat", "inputAmount": 1, "minStationLevel": 2 },
     { "output": "BarleyFlour", "outputAmount": 1, "input": "Barley", "inputAmount": 1, "minStationLevel": 2 }
   ],
-  "behaviors": ["craft"],
+  "behaviors": ["craft", "tidy"],
   "tags": ["tab:info", "tab:debug", "tab:workorder"],
   "randomTalk": [
     "Rule one of tavern keeping: the customer is always right. Rule two: the customer is frequently drunk and therefore not to be trusted. These rules coexist.",

@@ -72,19 +72,29 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        /// Get all known bed positions (active villagers and pending registrations).
-        /// Used e.g. by HNA partition to define village bounds (15m around each bed).
+        /// Get unique bed positions from all active villagers.
+        /// Reads the authoritative <see cref="Villager.BedPosition"/> from each
+        /// villager's component and deduplicates positions within 1m of each other.
         /// </summary>
         public static List<UnityEngine.Vector3> GetAllBedPositions()
         {
             var list = new List<UnityEngine.Vector3>();
             foreach (var ai in ActiveVillagers.Values)
             {
-                if (ai?.GetMemory() != null)
-                    list.Add(ai.GetMemory().BedPosition);
+                var villager = ai?.Villager;
+                if (villager == null) continue;
+                var pos = villager.BedPosition;
+                if (pos == UnityEngine.Vector3.zero) continue;
+
+                bool duplicate = false;
+                foreach (var existing in list)
+                {
+                    if ((existing - pos).sqrMagnitude < 1f)
+                    { duplicate = true; break; }
+                }
+                if (!duplicate)
+                    list.Add(pos);
             }
-            foreach (var pos in s_pendingRegistrations.Values)
-                list.Add(pos);
             return list;
         }
 

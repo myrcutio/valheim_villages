@@ -8,7 +8,7 @@ namespace ValheimVillages.Behaviors.Patrol
     /// Pure geometry operations for boundary waypoint computation:
     /// edge snapping, Chaikin smoothing, RDP simplification, clockwise sorting,
     /// XZ deduplication, sharp-angle pruning, and monotonic-angle enforcement.
-    /// Extracted from HnaBoundaryMapper to keep the orchestration pipeline thin.
+    /// Extracted from BoundaryMapper to keep the orchestration pipeline thin.
     /// </summary>
     internal static class BoundaryGeometry
     {
@@ -17,8 +17,9 @@ namespace ValheimVillages.Behaviors.Patrol
         private const float MaxEdgeXZDrift = 4f;
 
         /// <summary>When two waypoints are within this XZ radius of each other after
-        /// edge-snapping, keep only the higher one (wall-top preference).</summary>
-        internal const float XZDedupeRadius = 3f;
+        /// edge-snapping, keep only the higher one (wall-top preference).
+        /// Must be smaller than CellSize (3m) to avoid merging adjacent boundary cells.</summary>
+        internal const float XZDedupeRadius = 1.5f;
 
         /// <summary>RDP epsilon: 1.0m aggressively simplifies now that boundary cells are
         /// exterior-only and free of inner noise.</summary>
@@ -193,69 +194,7 @@ namespace ValheimVillages.Behaviors.Patrol
 
         #region RDP Simplification
 
-        internal static List<Vector3> SimplifyRDP(List<Vector3> points, float epsilon)
-        {
-            if (points.Count <= 3) return points;
 
-            int oppositeIdx = points.Count / 2;
-
-            var firstHalf = new List<Vector3>();
-            for (int i = 0; i <= oppositeIdx; i++)
-                firstHalf.Add(points[i]);
-
-            var secondHalf = new List<Vector3>();
-            for (int i = oppositeIdx; i < points.Count; i++)
-                secondHalf.Add(points[i]);
-            secondHalf.Add(points[0]);
-
-            var simplifiedFirst = RDPRecursive(firstHalf, epsilon);
-            var simplifiedSecond = RDPRecursive(secondHalf, epsilon);
-
-            var result = new List<Vector3>(simplifiedFirst);
-            for (int i = 1; i < simplifiedSecond.Count - 1; i++)
-                result.Add(simplifiedSecond[i]);
-
-            return result.Count >= 3 ? result : points;
-        }
-
-        private static List<Vector3> RDPRecursive(List<Vector3> points, float epsilon)
-        {
-            if (points.Count <= 2) return new List<Vector3>(points);
-
-            float maxDist = 0f;
-            int maxIdx = 0;
-            var lineStart = new Vector2(points[0].x, points[0].z);
-            var lineEnd = new Vector2(points[points.Count - 1].x, points[points.Count - 1].z);
-
-            for (int i = 1; i < points.Count - 1; i++)
-            {
-                float dist = PerpendicularDistance2D(
-                    new Vector2(points[i].x, points[i].z), lineStart, lineEnd);
-                if (dist > maxDist)
-                {
-                    maxDist = dist;
-                    maxIdx = i;
-                }
-            }
-
-            if (maxDist > epsilon)
-            {
-                var left = new List<Vector3>();
-                for (int i = 0; i <= maxIdx; i++) left.Add(points[i]);
-                var right = new List<Vector3>();
-                for (int i = maxIdx; i < points.Count; i++) right.Add(points[i]);
-
-                var simplifiedLeft = RDPRecursive(left, epsilon);
-                var simplifiedRight = RDPRecursive(right, epsilon);
-
-                var result = new List<Vector3>(simplifiedLeft);
-                for (int i = 1; i < simplifiedRight.Count; i++)
-                    result.Add(simplifiedRight[i]);
-                return result;
-            }
-
-            return new List<Vector3> { points[0], points[points.Count - 1] };
-        }
 
         private static float PerpendicularDistance2D(Vector2 point, Vector2 lineStart, Vector2 lineEnd)
         {
@@ -271,50 +210,6 @@ namespace ValheimVillages.Behaviors.Patrol
         #endregion
 
         #region Helpers
-
-        /// <summary>
-        /// Remove waypoints that are within XZDedupeRadius in the XZ plane of another waypoint,
-        /// keeping the one with the higher Y (wall-top preference).
-        /// </summary>
-        internal static List<Vector3> DeduplicateByXZ(List<Vector3> waypoints)
-        {
-            float radiusSq = XZDedupeRadius * XZDedupeRadius;
-            var keep = new bool[waypoints.Count];
-            for (int i = 0; i < keep.Length; i++) keep[i] = true;
-
-            for (int i = 0; i < waypoints.Count; i++)
-            {
-                if (!keep[i]) continue;
-                for (int j = i + 1; j < waypoints.Count; j++)
-                {
-                    if (!keep[j]) continue;
-
-                    float dx = waypoints[i].x - waypoints[j].x;
-                    float dz = waypoints[i].z - waypoints[j].z;
-                    if (dx * dx + dz * dz > radiusSq) continue;
-
-                    if (waypoints[j].y > waypoints[i].y)
-                        keep[i] = false;
-                    else
-                        keep[j] = false;
-                }
-            }
-
-            var result = new List<Vector3>();
-            for (int i = 0; i < waypoints.Count; i++)
-                if (keep[i]) result.Add(waypoints[i]);
-            return result;
-        }
-
-        internal static List<Vector3> FallbackFromCells(
-            List<(string cellId, Vector3 worldCenter)> boundaryCells, Vector3 bedPosition)
-        {
-            var waypoints = new List<Vector3>(boundaryCells.Count);
-            foreach (var (_, worldCenter) in boundaryCells)
-                waypoints.Add(worldCenter);
-            SortClockwise(waypoints, bedPosition);
-            return waypoints;
-        }
 
         internal static void SortClockwise(List<Vector3> waypoints, Vector3 center)
         {

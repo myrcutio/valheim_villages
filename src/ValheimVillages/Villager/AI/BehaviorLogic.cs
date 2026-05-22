@@ -31,11 +31,9 @@ namespace ValheimVillages.Villager.AI
 
         private static TimeOfDay GetTimeOfDay(float dayFraction)
         {
-            // #region agent log
             // Sleep disabled for debugging — always return Day during night hours
             if (dayFraction >= ValheimVillages.Settings.VillagerSettings.NightStart || dayFraction < ValheimVillages.Settings.VillagerSettings.MorningStart)
                 return TimeOfDay.Evening; // Treat night as evening so NPCs stay awake
-            // #endregion
             if (dayFraction < ValheimVillages.Settings.VillagerSettings.DayStart)
                 return TimeOfDay.Morning;
             if (dayFraction < ValheimVillages.Settings.VillagerSettings.EveningStart)

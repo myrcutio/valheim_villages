@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Reflection;
 using UnityEngine;
 using ValheimVillages;
 using ValheimVillages.Enums;
@@ -14,6 +15,80 @@ namespace ValheimVillages.Villager.AI.Work
     public static class StationFinder
     {
         private const float StationLookupRadius = 2f;
+
+        private static readonly MethodInfo s_isFireLit = typeof(CookingStation)
+            .GetMethod("IsFireLit", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        private static readonly MethodInfo s_getFuel = typeof(CookingStation)
+            .GetMethod("GetFuel", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        /// <summary>
+        /// Raw call to CookingStation.IsFireLit() via reflection.
+        /// Returns false if reflection fails or fire is not lit.
+        /// </summary>
+        private static bool InvokeIsFireLit(CookingStation station)
+        {
+            if (station == null || s_isFireLit == null) return false;
+            try { return (bool)s_isFireLit.Invoke(station, null); }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Returns true when the fire-underneath requirement is satisfied:
+        /// either fire is not required, or it is required and IsFireLit() returns true.
+        /// Used by StationFuelHelper.DiagnoseFuelNeed to check the fire condition independently.
+        /// </summary>
+        public static bool IsCookingStationFireLit(CookingStation station)
+        {
+            if (station == null) return false;
+            if (!station.m_requireFire) return true;
+            return InvokeIsFireLit(station);
+        }
+
+        /// <summary>
+        /// Matches the server's FixedUpdate ready check exactly:
+        ///   isReady = (m_requireFire AND IsFireLit()) OR (m_useFuel AND GetFuel() > 0)
+        /// A station is ready when EITHER fire is lit (for fire-based stations)
+        /// OR it has internal fuel (for fuel-based stations).
+        /// </summary>
+        public static bool IsCookingStationReady(CookingStation station)
+        {
+            if (station == null) return false;
+            if (station.m_requireFire && InvokeIsFireLit(station)) return true;
+            if (station.m_useFuel && GetCookingStationFuel(station) > 0) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Returns the current fuel level of a CookingStation via reflection (GetFuel is private).
+        /// Returns 0 on failure.
+        /// </summary>
+        public static float GetCookingStationFuel(CookingStation station)
+        {
+            if (station == null || s_getFuel == null) return 0f;
+            try { return (float)s_getFuel.Invoke(station, null); }
+            catch { return 0f; }
+        }
+
+        /// <summary>
+        /// Returns true if the cooking station has at least one empty slot.
+        /// Reads slot data from ZDO, matching the server's GetFreeSlot() logic.
+        /// </summary>
+        public static bool HasFreeSlot(CookingStation station)
+        {
+            if (station == null) return false;
+            var nview = station.GetComponent<ZNetView>();
+            if (nview == null || nview.GetZDO() == null) return false;
+
+            int slotCount = station.m_slots != null ? station.m_slots.Length : 0;
+            var zdo = nview.GetZDO();
+            for (int i = 0; i < slotCount; i++)
+            {
+                if (string.IsNullOrEmpty(zdo.GetString("slot" + i, "")))
+                    return true;
+            }
+            return false;
+        }
 
         /// <summary>
         /// Find the first station of type T at the NPC's known CraftStation locations,

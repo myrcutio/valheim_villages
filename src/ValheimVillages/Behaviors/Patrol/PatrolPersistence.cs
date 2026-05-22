@@ -1,21 +1,21 @@
 using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
+using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
 
 namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
     /// Handles saving and loading patrol state to/from ZDO.
-    /// Persists patrol waypoints, current index, discovery completion, and breach position
-    /// so patrollers don't have to redo circuit discovery after every save/load.
+    /// Persists patrol waypoints, current index, and discovery completion
+    /// so patrollers don't have to redo discovery after every save/load.
     /// </summary>
     public static class PatrolPersistence
     {
         private const string ZdoWaypoints = "vv_guard_waypoints";
         private const string ZdoWpIndex = "vv_guard_wp_index";
         private const string ZdoDiscovery = "vv_guard_discovery";
-        private const string ZdoBreach = "vv_guard_breach";
         private const string ZdoHnaRoute = "vv_guard_hna_route";
         private const string ZdoHnaGraph = "vv_hna_graph";
 
@@ -24,32 +24,45 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             if (patrol == null || zdo == null) return;
 
-            var (waypoints, wpIndex, complete, breach, isHna) = patrol.GetPersistentState();
+            var (waypoints, wpIndex, complete, isHna) = patrol.GetPersistentState();
 
             zdo.Set(ZdoDiscovery, complete ? 1 : 0);
             zdo.Set(ZdoWpIndex, wpIndex);
-            zdo.Set(ZdoBreach, breach ?? Vector3.zero);
             zdo.Set(ZdoWaypoints, SerializeWaypoints(waypoints));
             zdo.Set(ZdoHnaRoute, isHna ? 1 : 0);
         }
 
-        /// <summary>Save the HNA region graph to ZDO for cross-player persistence.</summary>
-        public static void SaveHnaGraph(ZDO zdo)
+        /// <summary>Save the HNA region graph for a specific village to ZDO.</summary>
+        public static void SaveHnaGraph(ZDO zdo, string villageKey)
         {
-            if (zdo == null || !ValheimVillages.Villager.AI.Navigation.HnaRegionGraph.IsAvailable) return;
-            zdo.Set(ZdoHnaGraph, ValheimVillages.Villager.AI.Navigation.HnaRegionGraph.Serialize());
+            if (zdo == null) return;
+            var graph = RegionGraph.Get(villageKey);
+            if (graph == null || !graph.IsAvailable) return;
+            zdo.Set(ZdoHnaGraph, graph.Serialize());
         }
 
         /// <summary>
-        /// Try to restore the HNA region graph from ZDO.
-        /// Returns true if the graph was successfully restored (now available in memory).
+        /// Try to restore the HNA region graph from ZDO into the registry
+        /// under the given village key. If the persisted payload is a legacy
+        /// non-v2 format (or otherwise unparseable), the ZDO entry is wiped
+        /// so the next access triggers a fresh hna_partition build.
         /// </summary>
-        public static bool TryRestoreHnaGraph(ZDO zdo)
+        public static bool TryRestoreHnaGraph(ZDO zdo, string villageKey)
         {
             if (zdo == null) return false;
             string data = zdo.GetString(ZdoHnaGraph, "");
             if (string.IsNullOrEmpty(data)) return false;
-            return ValheimVillages.Villager.AI.Navigation.HnaRegionGraph.Restore(data);
+            var graph = RegionGraph.GetOrCreate(villageKey);
+            if (graph.Restore(data)) return true;
+
+            // Restore failed: data is present but the parser rejected it
+            // (most often a legacy v1 grid payload). Wipe so the patrol
+            // behavior falls through to its existing rebuild path.
+            Plugin.Log?.LogInfo(
+                $"[Region] Wiping legacy/unparseable HNA graph from ZDO " +
+                $"(key={villageKey}, bytes={data.Length}); will rebuild on next request");
+            zdo.Set(ZdoHnaGraph, "");
+            return false;
         }
 
         /// <summary>Load patrol state from ZDO and restore it.</summary>
@@ -59,13 +72,12 @@ namespace ValheimVillages.Behaviors.Patrol
 
             bool complete = zdo.GetInt(ZdoDiscovery, 0) == 1;
             int wpIndex = zdo.GetInt(ZdoWpIndex, 0);
-            var breach = zdo.GetVec3(ZdoBreach, Vector3.zero);
             var waypoints = DeserializeWaypoints(zdo.GetString(ZdoWaypoints, ""));
             bool isHna = zdo.GetInt(ZdoHnaRoute, 0) == 1;
 
             if (!complete || waypoints == null || waypoints.Count == 0) return;
 
-            patrol.RestoreState(waypoints, wpIndex, breach != Vector3.zero ? breach : (Vector3?)null, isHna);
+            patrol.RestoreState(waypoints, wpIndex, isHna);
         }
 
         private static string SerializeWaypoints(List<VillagerWaypoint> waypoints)

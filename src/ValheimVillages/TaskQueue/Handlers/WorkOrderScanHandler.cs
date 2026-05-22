@@ -137,12 +137,34 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
 
                 CookingStation cookingStationRef = null;
+                FuelNeed? fuelRequirement = null;
+                Container fuelContainer = null;
                 if (physicalStation == "cookingstation")
                 {
-                    if (StationFinder.TryFindStationAtKnownLocations<CookingStation>(ai, _ => true, out var pos, out var station))
+                    if (StationFinder.TryFindStationAtKnownLocations<CookingStation>(
+                        ai, s => StationFinder.IsCookingStationReady(s), out var pos, out var station))
                     {
                         stationPos = pos;
                         cookingStationRef = station;
+                    }
+                    else if (StationFinder.TryFindStationAtKnownLocations<CookingStation>(
+                        ai, null, out pos, out station))
+                    {
+                        if (StationFuelHelper.DiagnoseFuelNeed(station, out var need)
+                            && StationFuelHelper.FindFuelInContainers(containers, need.FuelItemPrefab, out var fc))
+                        {
+                            stationPos = pos;
+                            cookingStationRef = station;
+                            fuelRequirement = need;
+                            fuelContainer = fc;
+                            Plugin.Log?.LogInfo(
+                                $"[WorkOrderScan] Station needs fuel ({need.FuelItemPrefab}), " +
+                                $"found in container. Will fuel before cooking.");
+                        }
+                        else
+                        {
+                            stationPos = null;
+                        }
                     }
                     else
                         stationPos = null;
@@ -179,7 +201,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                     CookingStationRef = cookingStationRef,
                     CookingInputItemName = cookingInputName,
                     CraftedCount = existingCount,
-                    CurrentIngredientIndex = 0
+                    CurrentIngredientIndex = 0,
+                    FuelRequirement = fuelRequirement,
+                    FuelContainer = fuelContainer
                 };
 
                 // Log the successful scan to the activity log

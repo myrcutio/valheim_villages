@@ -49,9 +49,9 @@ namespace ValheimVillages.Behaviors.Work
             m_crafting?.UpdateWorkAI(dt);
         }
 
-        public void OnArrival()
+        public void OnArrival(float dt)
         {
-            m_crafting?.HandleWorkArrival();
+            m_crafting?.HandleWorkArrival(dt);
         }
 
         public void Save(ZDO zdo) { }

@@ -1,6 +1,6 @@
 # Behaviors
 
-Keywords: behavior, patrol, alarm, craft, farming, explore, IBehavior, BehaviorFactory, RegisterBehavior, PatrolStateMachine, PerimeterPatrolBehavior, BreachAlarmBehavior, breach detection, patrol discovery, waypoint, circuit tracing, scouting, HNA boundary, patrol geometry, patrol persistence, stall detection, behavior priority, WantsControl
+Keywords: behavior, patrol, alarm, craft, farming, explore, tidy, IBehavior, BehaviorFactory, RegisterBehavior, PatrolStateMachine, PerimeterPatrolBehavior, BreachAlarmBehavior, TidyBehavior, breach detection, patrol discovery, waypoint, circuit tracing, scouting, region boundary, patrol geometry, patrol persistence, stall detection, behavior priority, WantsControl, CookingStation
 
 ## Purpose
 
@@ -17,16 +17,18 @@ Behaviors/
   Work/
     CraftingBehaviorAdapter.cs         -- [RegisterBehavior("craft")] wraps CraftingBehavior
     FarmBehaviorAdapter.cs             -- [RegisterBehavior("farming")] wraps FarmingBehavior, linked to crafting
+  Tidy/
+    TidyBehavior.cs                    -- [RegisterBehavior("tidy")] priority 60, removes done/burnt items from cooking stations
   Alarm/
     BreachAlarmBehavior.cs             -- [RegisterBehavior("alarm")] priority 100, triggers on wall breaches
     BreachDetection.cs                 -- Raycast-based breach detection at patrol waypoints
   Patrol/
     PerimeterPatrolBehavior.cs         -- [RegisterBehavior("patrol")] wraps PatrolStateMachine
     PatrolStateMachine.cs              -- State machine: Scouting -> CircuitTracing -> Patrolling <-> Alarmed
-    PatrolPersistence.cs               -- ZDO save/load for waypoints, breach state, HNA graph
+    PatrolPersistence.cs               -- ZDO save/load for waypoints, breach state, region graph
     PatrolDiscovery.cs                 -- Scouting and circuit-tracing algorithms for patrol route
     PatrolRefiner.cs                   -- Smoothing, simplification, and refinement of patrol paths
-    HnaBoundaryMapper.cs              -- Maps HNA region boundaries to patrol-compatible waypoints
+    BoundaryMapper.cs              -- Maps region boundaries to patrol-compatible waypoints
     BoundaryGeometry.cs               -- Geometric utilities for patrol boundary calculations
 ```
 
@@ -37,8 +39,9 @@ Behaviors/
 | `BehaviorFactory` | Maps tag strings to `IBehavior` creator functions; returns sorted list by priority |
 | `PatrolStateMachine` | Patrol state machine with scouting, circuit tracing, patrolling, and alarm states |
 | `PerimeterPatrolBehavior` | Registered adapter that wraps `PatrolStateMachine`; exposes patrol state to UI |
+| `TidyBehavior` | Mid-priority (60) behavior that removes done/burnt items from cooking station spits |
 | `BreachAlarmBehavior` | High-priority (100) behavior that activates on wall breaches |
-| `PatrolPersistence` | Persists patrol state (waypoints, breach, HNA data) to ZDO |
+| `PatrolPersistence` | Persists patrol state (waypoints, breach, region data) to ZDO |
 | `PatrolDiscovery` | Discovers patrol routes by scouting walls and tracing circuits |
 
 ## Entry Points and Registration

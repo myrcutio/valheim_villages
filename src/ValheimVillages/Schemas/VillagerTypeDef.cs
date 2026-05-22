@@ -38,7 +38,6 @@ namespace ValheimVillages.Schemas
         public string preferredPrefab = "";
         public List<string> equipment = new List<string>();
         public string skinColor = "";
-        public string weaponRotationFix = "";
 
         // Station configuration
         public string stationName = "";

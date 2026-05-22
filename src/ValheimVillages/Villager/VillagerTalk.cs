@@ -1,14 +1,12 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.Enums;
-using ValheimVillages.Villager.AI;
+
 
 namespace ValheimVillages.Villager
 {
     /// <summary>
     /// Lightweight replacement for Valheim's NpcTalk.
-    /// Handles greet/goodbye/random talk via Chat.SetNpcText,
-    /// with sleep-talk override when the villager is sleeping.
+    /// Handles greet/goodbye/random talk via Chat.SetNpcText.
     /// </summary>
     public class VillagerTalk : MonoBehaviour
     {
@@ -32,20 +30,8 @@ namespace ValheimVillages.Villager
         private bool m_didGoodbye;
         private float m_lastTargetUpdate;
         private float m_nextRandomTalk;
-        private VillagerAI m_ai;
-
-        private static readonly List<string> s_sleepLines = new()
-        {
-            "...zzzzz...",
-            "...zzzz...",
-            "zzz...",
-            "...zzz...zzz...",
-            "...zzzzzzzz..."
-        };
-
         private void Start()
         {
-            m_ai = GetComponent<VillagerAI>();
             m_nextRandomTalk = Time.time + Random.Range(4f, randomTalkInterval);
         }
 
@@ -62,20 +48,20 @@ namespace ValheimVillages.Villager
             {
                 m_didGreet = true;
                 m_didGoodbye = false;
-                QueueSay(IsSleeping() ? s_sleepLines : randomGreets);
+                QueueSay(randomGreets);
             }
 
             if (m_didGreet && !m_didGoodbye && dist > byeRange)
             {
                 m_didGoodbye = true;
-                QueueSay(IsSleeping() ? s_sleepLines : randomGoodbye);
+                QueueSay(randomGoodbye);
             }
 
             if (Time.time >= m_nextRandomTalk)
             {
                 m_nextRandomTalk = Time.time + randomTalkInterval;
                 if (Random.value < randomTalkChance)
-                    QueueSay(IsSleeping() ? s_sleepLines : randomTalk);
+                    QueueSay(randomTalk);
             }
         }
 
@@ -89,11 +75,6 @@ namespace ValheimVillages.Villager
             if (closest == null) return;
 
             m_targetPlayer = closest;
-        }
-
-        private bool IsSleeping()
-        {
-            return m_ai != null && m_ai.CurrentState == BehaviorState.Sleeping;
         }
 
         private void QueueSay(List<string> lines)

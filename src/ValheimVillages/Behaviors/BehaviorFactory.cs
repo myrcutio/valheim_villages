@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using ValheimVillages.Behaviors.Patrol;
-using ValheimVillages.Behaviors.Alarm;
 using ValheimVillages.Behaviors.Work;
 using ValheimVillages.Behaviors.Explore;
+using ValheimVillages.Behaviors.Tidy;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Villager.AI;
 
@@ -18,9 +18,9 @@ namespace ValheimVillages.Behaviors
         private static readonly Dictionary<string, Func<VillagerAI, IBehavior>> s_creators = new()
         {
             { "patrol", ai => new PerimeterPatrolBehavior(ai) },
-            { "alarm", ai => new BreachAlarmBehavior(ai) },
             { "craft", ai => new CraftingBehaviorAdapter(ai) },
             { "farming", ai => new FarmBehaviorAdapter(ai) },
+            { "tidy", ai => new TidyBehavior(ai) },
             { "explore", ai => new ExploreBehaviorAdapter(ai) },
         };
 

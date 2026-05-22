@@ -1,6 +1,4 @@
 using UnityEngine;
-using ValheimVillages.Behaviors;
-using ValheimVillages.Behaviors.Alarm;
 using ValheimVillages.Enums;
 using ValheimVillages.UI.Core;
 using ValheimVillages.Villager.Station;
@@ -82,10 +80,6 @@ namespace ValheimVillages.UI.Interaction
             return $"{name}\n{stateInfo}\n[<color=yellow><b>E</b></color>] Talk";
         }
 
-        /// <summary>
-        /// Gets a short description of the NPC's current state using the behavior system.
-        /// Iterates behaviors by priority and returns the first non-empty status.
-        /// </summary>
         private string GetStateInfo()
         {
             if (Bridge == null) return "";
@@ -93,28 +87,21 @@ namespace ValheimVillages.UI.Interaction
             var ai = Bridge.villagerInstance.villagerAI;
             if (ai == null) return "";
 
-            string status = ai.CurrentState.ToString();
-            if (!string.IsNullOrEmpty(status))
-                return $"<color=grey>{status}</color>";
+            bool hasActiveWork = ai.CraftingBehavior?.Crafting?.IsWorking == true;
 
-            // Fallback: general state
-            return ai.CurrentState switch
+            string label = ai.CurrentState switch
             {
-                BehaviorState.Idle => "<color=grey>Idle</color>",
-                BehaviorState.Traveling => "<color=grey>Walking somewhere...</color>",
-                BehaviorState.Wandering => "<color=grey>Wandering around</color>",
-                BehaviorState.Exploring => "<color=grey>Exploring the area</color>",
-                BehaviorState.Sleeping => "<color=grey>Sleeping</color>",
-                _ => $"<color=grey>{ai.CurrentState}</color>"
+                BehaviorState.Traveling when !hasActiveWork => "Idle",
+                BehaviorState.Wandering when !hasActiveWork => "Idle",
+                _ => ai.CurrentState.ToString()
             };
+
+            return $"<color=grey>{label}</color>";
         }
 
         private bool IsGuardAlarmed()
         {
-            var ai = Bridge?.villagerInstance.villagerAI;
-            if (ai == null) return false;
-            var alarm = ai.GetBehavior<BreachAlarmBehavior>();
-            return alarm?.IsActive == true;
+            return false;
         }
 
         /// <summary>

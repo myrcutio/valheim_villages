@@ -84,44 +84,112 @@ namespace ValheimVillages.Behaviors.Farming
 
         private void OnArrivedAtFarm()
         {
-            m_subState = FarmSubState.Planting;
-            m_ai.Instance.StopMoving();
-
             if (m_context.PlantPiecePrefab == null)
             {
                 AbandonWork("no plant piece prefab");
                 return;
             }
 
-            // Get the grow radius from the Plant component
+            TryFindAndWalkToNextPlantSpot();
+        }
+
+        private void TryFindAndWalkToNextPlantSpot()
+        {
+            if (m_context.SeedsGathered <= 0)
+            {
+                Plugin.Log?.LogInfo(
+                    $"[Farming:{m_ai.NpcName}] All seeds planted " +
+                    $"(total session: {m_context.PlantedThisSession})");
+                FinishWork();
+                return;
+            }
+
             var plantComp = m_context.PlantPiecePrefab.GetComponent<Plant>();
             float growRadius = plantComp != null ? plantComp.m_growRadius : 0.5f;
 
-            // Plant seeds in available positions
-            int planted = 0;
-            for (int i = 0; i < m_context.SeedsGathered; i++)
-            {
-                var pos = PlantingHelper.FindPlantingPosition(
-                    m_context.FarmPosition, FarmSettings.PlantSearchRadius, growRadius);
-                if (!pos.HasValue)
-                {
-                    Plugin.Log?.LogDebug(
-                        $"[Farming:{m_ai.NpcName}] No more planting positions");
-                    break;
-                }
+            var pos = PlantingHelper.FindPlantingPosition(
+                m_context.FarmPosition, FarmSettings.PlantSearchRadius, growRadius);
 
-                var go = PlantingHelper.PlacePlant(m_context.PlantPiecePrefab, pos.Value);
-                if (go != null)
-                    planted++;
+            if (!pos.HasValue)
+            {
+                Plugin.Log?.LogDebug(
+                    $"[Farming:{m_ai.NpcName}] No more valid planting positions");
+                FinishWork();
+                return;
             }
 
-            m_context.PlantedThisSession += planted;
-            Plugin.Log?.LogInfo(
-                $"[Farming:{m_ai.NpcName}] Planted {planted} " +
-                $"{m_context.PlantPiecePrefab.name} (total session: {m_context.PlantedThisSession})");
+            m_context.NextPlantPosition = pos.Value;
+            m_subState = FarmSubState.WalkingToPlantSpot;
 
-            // Done planting, go idle (plants need time to grow)
-            FinishWork();
+            var target = VillagerMovement.GetWalkableDestination(pos.Value);
+            m_ai.SetState(BehaviorState.Working,
+                new VillagerWaypoint(target, VillagerWaypoint.DefaultStrategyId));
+
+            DebugLog.Append("FarmingWorkflow.cs:TryFindAndWalkToNextPlantSpot", "Walking to plant spot", new System.Collections.Generic.Dictionary<string, object>{{"position",pos.Value.ToString()},{"seedsRemaining",m_context.SeedsGathered},{"plantedSoFar",m_context.PlantedThisSession}}, "H3", "run1");
+
+            Plugin.Log?.LogDebug(
+                $"[Farming:{m_ai.NpcName}] Walking to plant spot at {pos.Value}");
+        }
+
+        private void OnArrivedAtPlantSpot(float dt)
+        {
+            if (m_context.NextPlantPosition == null)
+            {
+                AbandonWork("lost plant target");
+                return;
+            }
+
+            float dist = Vector3.Distance(
+                m_ai.Instance.transform.position, m_context.NextPlantPosition.Value);
+
+            if (dist > FarmSettings.PlantProximityRequired)
+            {
+                Plugin.Log?.LogDebug(
+                    $"[Farming:{m_ai.NpcName}] Can't reach plant spot " +
+                    $"({dist:F1}m away), skipping to find another");
+                m_context.NextPlantPosition = null;
+                TryFindAndWalkToNextPlantSpot();
+                return;
+            }
+
+            m_subState = FarmSubState.Planting;
+            m_context.PlantCooldown = dt - 4.0f;
+            m_ai.Instance.StopMoving();
+        }
+
+        private void UpdatePlantingCooldown(float dt)
+        {
+
+            if (m_subState != FarmSubState.Planting) return;
+            if (m_context.NextPlantPosition == null)
+            {
+                AbandonWork("lost plant target during cooldown");
+                return;
+            }
+
+            m_context.PlantCooldown += 0.5f;
+            if (m_context.PlantCooldown < dt)    
+                return;
+            
+            m_context.PlantCooldown = dt - 4.0f;
+            var go = PlantingHelper.PlacePlant(
+                m_context.PlantPiecePrefab, m_context.NextPlantPosition.Value);
+            if (go != null)
+            {
+                m_context.PlantedThisSession++;
+                m_context.SeedsGathered--;
+                Plugin.Log?.LogInfo(
+                    $"[Farming:{m_ai.NpcName}] Planted {m_context.PlantPiecePrefab.name} " +
+                    $"(planted: {m_context.PlantedThisSession}, seeds left: {m_context.SeedsGathered})");
+            }
+            else
+            {
+                Plugin.Log?.LogWarning(
+                    $"[Farming:{m_ai.NpcName}] Failed to place plant");
+            }
+
+            m_context.NextPlantPosition = null;
+            TryFindAndWalkToNextPlantSpot();
         }
     }
 }

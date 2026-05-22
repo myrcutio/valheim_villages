@@ -43,29 +43,10 @@ namespace ValheimVillages.UI.Panels
                 };
             }
 
-            if (patrol.IsAlarmed)
-            {
-                return new TabDetailData
-                {
-                    Title = "Patrol Duty — BREACH",
-                    Description = "A breach has been detected!\n" +
-                        "Repair the wall gap to resume patrol.",
-                    ActionText = "Show Breach",
-                    OnAction = () =>
-                    {
-                        patrol.WalkToBreach();
-                        Player.m_localPlayer?.Message(
-                            MessageHud.MessageType.TopLeft,
-                            "The patroller will walk to the breach.");
-                    }
-                };
-            }
-
             return new TabDetailData
             {
                 Title = "Patrol Duty",
-                Description = $"Patrolling ({patrol.WaypointCount} waypoints).\n" +
-                    "No breaches detected."
+                Description = $"Patrolling ({patrol.WaypointCount} waypoints)."
             };
         }
     }

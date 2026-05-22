@@ -9,25 +9,6 @@ using ValheimVillages.TaskQueue.ActivityLog;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
-    // #region agent log
-    internal static class DebugLog
-    {
-        private const string Path = "/home/benny/Projects/valheim_villages/.cursor/debug.log";
-        public static void Write(string hypothesisId, string location, string message, string data)
-        {
-            try
-            {
-                long ts = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                string line = $"{{\"hypothesisId\":\"{hypothesisId}\",\"location\":\"{location}\",\"message\":\"{message}\",\"data\":{data},\"timestamp\":{ts}}}\n";
-                File.AppendAllText(Path, line);
-            }
-            catch { }
-        }
-        public static string Str(string v) => $"\"{v?.Replace("\"", "\\\"")}\"";
-        public static string Num(int v) => v.ToString();
-    }
-    // #endregion
-
     /// <summary>
     /// Handles "poi_discovery" and "poi_validation" tasks.
     /// Wraps VillagerPOIDiscovery.DiscoverNearbyPOIs, DiscoverVisiblePOIs,
@@ -94,23 +75,6 @@ namespace ValheimVillages.TaskQueue.Handlers
                     VillagerPOIDiscovery.DiscoverVisiblePOIs(transform, memory);
 
                 int discovered = memory.KnownLocations.Count - beforeCount;
-
-                // #region agent log
-                if (string.Equals(ai.VillagerType, "Farmer", System.StringComparison.OrdinalIgnoreCase))
-                {
-                    var craftStationsAfter = new System.Collections.Generic.List<string>();
-                    var cookingStationsAfter = new System.Collections.Generic.List<string>();
-                    foreach (var loc in memory.KnownLocations)
-                    {
-                        if (loc.Type == LocationType.CraftStation)
-                            craftStationsAfter.Add($"{loc.Position.x:F0},{loc.Position.y:F0},{loc.Position.z:F0}(q={loc.GetQualityScore():F0})");
-                        else if (loc.Type == LocationType.CookingStation)
-                            cookingStationsAfter.Add($"{loc.Position.x:F0},{loc.Position.y:F0},{loc.Position.z:F0}(q={loc.GetQualityScore():F0})");
-                    }
-                    DebugLog.Write("FH", "POIDiscoveryHandler:discovery", "AfterDiscover",
-                        $"{{\"npc\":{DebugLog.Str(ai.NpcName)},\"discovered\":{DebugLog.Num(discovered)},\"totalLocs\":{DebugLog.Num(memory.KnownLocations.Count)},\"craftStationCount\":{DebugLog.Num(craftStationsAfter.Count)},\"craftStations\":{DebugLog.Str(string.Join("|", craftStationsAfter))},\"cookingStationCount\":{DebugLog.Num(cookingStationsAfter.Count)},\"cookingStations\":{DebugLog.Str(string.Join("|", cookingStationsAfter))}}}");
-                }
-                // #endregion
 
                 if (discovered > 0)
                 {

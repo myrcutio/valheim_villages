@@ -254,7 +254,7 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             snapped = candidate;
             var filter = new NavMeshQueryFilter();
-            filter.agentTypeID = ValheimVillages.Villager.AI.Navigation.VillageNavMeshBake.ResolveValheimHumanoidAgentTypeID();
+            filter.agentTypeID = VillagerAgentType.ResolveValheimHumanoidAgentTypeID();
             filter.areaMask = NavMesh.AllAreas;
 
             float probeY = preferElevated ? candidate.y + NavMeshProbeHeight : candidate.y;
@@ -273,7 +273,7 @@ namespace ValheimVillages.Behaviors.Patrol
         private bool IsReachableFromPatroller(Vector3 target)
         {
             var filter = new NavMeshQueryFilter();
-            filter.agentTypeID = ValheimVillages.Villager.AI.Navigation.VillageNavMeshBake.ResolveValheimHumanoidAgentTypeID();
+            filter.agentTypeID = VillagerAgentType.ResolveValheimHumanoidAgentTypeID();
             filter.areaMask = NavMesh.AllAreas;
 
             if (!NavMesh.SamplePosition(m_ai.Position, out NavMeshHit srcHit, 5f, filter)) return false;

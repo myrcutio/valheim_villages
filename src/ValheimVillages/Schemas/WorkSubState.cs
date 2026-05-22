@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Villager.AI.Work;
 
 namespace ValheimVillages.Schemas
 {
@@ -9,6 +10,8 @@ namespace ValheimVillages.Schemas
     public enum WorkSubState
     {
         Idle,                   // Not working, ready to scan
+        GatheringFuel,          // Walking to container with fuel
+        FuelingStation,         // Walking to fire/station to add fuel
         GatheringIngredients,   // Walking to ingredient chest
         TravelingToStation,     // Walking to the crafting station
         Crafting,               // Waiting at station (craft timer)
@@ -62,6 +65,12 @@ namespace ValheimVillages.Schemas
 
         /// <summary>True when this context is a cooking rescue (retrieving done items after load/reload), not a normal crafting cycle.</summary>
         public bool IsRescue;
+
+        /// <summary>Fuel requirement diagnosed during scan; null when no fueling is needed.</summary>
+        public FuelNeed? FuelRequirement;
+
+        /// <summary>Container holding the fuel item (set during scan when fueling is required).</summary>
+        public Container FuelContainer;
     }
 
     /// <summary>

@@ -157,7 +157,7 @@ namespace ValheimVillages.Behaviors.Crafting
             m_context = context;
             TaskQueue.ActivityLog.VillagerActivityLog.Instance.Record(
                 UniqueIdForLog, context.WorkOrder.ItemPrefabName, "start", "crafting");
-            BeginGatheringIngredients();
+            BeginFueling();
         }
 
         /// <summary>
@@ -181,10 +181,10 @@ namespace ValheimVillages.Behaviors.Crafting
 
             if (m_subState != WorkSubState.Crafting) return;
 
-            // Cooking station polling (extracted to CraftingCookingLogic.cs)
+            // Cooking station: poll for done items instead of using a fixed timer
             if (TryPollCookingStation()) return;
 
-            // Fixed timer for non-cooking or when station had no free slot
+            // Fixed timer for non-cooking stations
             float elapsed = Time.time - m_context.CraftStartTime;
             if (elapsed >= WorkSettings.CraftDuration)
                 CompleteCraft();
@@ -193,12 +193,12 @@ namespace ValheimVillages.Behaviors.Crafting
         /// <summary>
         /// Called when the NPC arrives at its movement target during Working state.
         /// </summary>
-        public void HandleWorkArrival()
+        public void HandleWorkArrival(float dt)
         {
             // Delegate to farming behavior if active
             if (m_farmingBehavior != null && m_farmingBehavior.IsWorking)
             {
-                m_farmingBehavior.HandleWorkArrival();
+                m_farmingBehavior.HandleWorkArrival(dt);
                 return;
             }
 
@@ -210,6 +210,12 @@ namespace ValheimVillages.Behaviors.Crafting
 
             switch (m_subState)
             {
+                case WorkSubState.GatheringFuel:
+                    OnArrivedAtFuelContainer();
+                    break;
+                case WorkSubState.FuelingStation:
+                    OnArrivedAtFuelTarget();
+                    break;
                 case WorkSubState.GatheringIngredients:
                     OnArrivedAtIngredientChest();
                     break;

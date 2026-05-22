@@ -75,14 +75,13 @@ namespace ValheimVillages.Behaviors.Farming
                 return;
             }
 
-            // Planting is handled in OnArrivedAtFarm (no polling needed like cooking)
-            // Harvesting collection is handled in HandleWorkArrival
+            UpdatePlantingCooldown(dt);
         }
 
         /// <summary>
         /// Called when the NPC arrives at its movement target during farming.
         /// </summary>
-        public void HandleWorkArrival()
+        public void HandleWorkArrival(float dt)
         {
             if (m_context == null)
             {
@@ -97,6 +96,14 @@ namespace ValheimVillages.Behaviors.Farming
                     break;
                 case FarmSubState.TravelingToFarm:
                     OnArrivedAtFarm();
+                    break;
+                case FarmSubState.WalkingToPlantSpot:
+                    OnArrivedAtPlantSpot(dt);
+                    break;
+                case FarmSubState.Planting:
+                case FarmSubState.Harvesting:
+                case FarmSubState.CollectingDrops:
+                case FarmSubState.Depositing:
                     break;
                 case FarmSubState.TravelingToHarvest:
                     OnArrivedAtCrop();

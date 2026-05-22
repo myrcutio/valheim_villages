@@ -25,8 +25,6 @@ namespace ValheimVillages.Behaviors.Patrol
         #region Pass-through patrol state
 
         public bool IsDiscoveryComplete => m_patrol?.IsDiscoveryComplete ?? false;
-        public bool IsAlarmed => m_patrol?.IsAlarmed ?? false;
-        public Vector3? BreachPosition => m_patrol?.BreachPosition;
         public Vector3 BedPosition => m_patrol?.BedPosition ?? Vector3.zero;
         public int WaypointCount => m_patrol?.WaypointCount ?? 0;
         public int ActiveWaypointCount => m_patrol?.ActiveWaypointCount ?? 0;
@@ -43,8 +41,7 @@ namespace ValheimVillages.Behaviors.Patrol
 
         public bool WantsControl(BehaviorContext ctx)
         {
-            if (m_patrol == null) return false;
-            return !m_patrol.IsAlarmed;
+            return m_patrol != null;
         }
 
         public void Update(float dt)
@@ -52,9 +49,9 @@ namespace ValheimVillages.Behaviors.Patrol
             m_patrol?.UpdatePatrolAI(dt);
         }
 
-        public void OnArrival()
+        public void OnArrival(float dt)
         {
-            m_patrol?.HandleArrival();
+            m_patrol?.HandleArrival(dt);
         }
 
         public void Save(ZDO zdo)
@@ -69,8 +66,6 @@ namespace ValheimVillages.Behaviors.Patrol
                 PatrolPersistence.Load(m_patrol, zdo);
         }
 
-        public void WalkToBreach() => m_patrol?.WalkToBreach();
-        public void ClearBreach() => m_patrol?.ClearBreach();
         public void ResetDiscovery() => m_patrol?.ResetDiscovery();
 
         public string GetStatusText()
@@ -79,10 +74,6 @@ namespace ValheimVillages.Behaviors.Patrol
             var state = m_ai.CurrentState;
             if (state == BehaviorState.Patrolling)
                 return $"Patrolling ({m_patrol.ActiveWaypointCount} waypoints)";
-            if (state == BehaviorState.Scouting)
-                return "Scouting perimeter...";
-            if (state == BehaviorState.CircuitTracing)
-                return "Tracing patrol route...";
             return m_patrol.IsDiscoveryComplete ? "On patrol" : "Mapping village";
         }
     }

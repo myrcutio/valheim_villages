@@ -29,7 +29,7 @@ Villager/
     Discovery/
       VillagerPOIDiscovery.cs          -- DiscoverNearbyPOIs, DiscoverVisiblePOIs, ValidateKnownLocations (Transform + IVillagerMemory)
     Navigation/
-      DoorHandler.cs, VillagerMovement.cs, VillagerWaypoint.cs, Hna*.cs, VillageNavMeshBake.cs, NavMeshLinkPlacer.cs
+      DoorHandler.cs, VillagerMovement.cs, VillagerWaypoint.cs, Region*.cs, BoundaryDump.cs, SpatialDump.cs, NavMeshLinkPlacer.cs
     Work/
       ContainerScanner.cs, StationFinder.cs, StationMatcher.cs (reads workStations from VillagerDef)
 ```

@@ -6,7 +6,7 @@ using ValheimVillages;
 namespace ValheimVillages.Algorithms
 {
     /// <summary>
-    /// Offline reimplementation of HnaBoundaryMapper's pure-geometry pipeline steps.
+    /// Offline reimplementation of BoundaryMapper's pure-geometry pipeline steps.
     /// NavMesh-dependent steps (re-snap, unpathable removal) are skipped; sharp angle
     /// pruning uses straight-line distance as a proxy for NavMesh pathability.
     /// </summary>

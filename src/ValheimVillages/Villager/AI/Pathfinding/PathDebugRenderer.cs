@@ -1,0 +1,650 @@
+using System.Collections.Generic;
+using System.Reflection;
+using System.Text;
+using UnityEngine;
+using UnityEngine.AI;
+using ValheimVillages.Attributes;
+using ValheimVillages.TaskQueue.Handlers;
+using ValheimVillages.Villager.AI.Navigation;
+
+namespace ValheimVillages.Villager.AI.Pathfinding
+{
+    /// <summary>
+    /// GL-based in-game path visualization for all active villagers.
+    /// Draws path segments and corner markers colored by path status:
+    /// green = path found, yellow = partial/stale, red = no path.
+    /// Toggle with the "vv_path_debug" console command.
+    /// </summary>
+    public class PathDebugRenderer : MonoBehaviour
+    {
+        private static PathDebugRenderer s_instance;
+        private static bool s_enabled;
+        private static bool s_showTriangulation = true;
+
+        /// <summary>
+        /// Region IDs whose triangulation edges should be drawn with extra
+        /// emphasis (overlaid in bright white at multiple Y offsets). Set
+        /// by <c>vv_bfs_trace</c> to highlight the path from a target
+        /// region back to a seed. Empty = no highlight.
+        /// </summary>
+        public static readonly HashSet<string> HighlightedRegions = new HashSet<string>();
+
+        private Material m_lineMaterial;
+
+        private const float NodeMarkerSize = 0.15f;
+        private const float LineYOffset = 0.1f;
+
+        private static readonly FieldInfo s_pathField = typeof(BaseAI).GetField(
+            "m_path", BindingFlags.NonPublic | BindingFlags.Instance);
+        private static readonly FieldInfo s_lastFindPathResultField = typeof(BaseAI).GetField(
+            "m_lastFindPathResult", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        private static readonly Color ColorComplete = Color.green;
+        private static readonly Color ColorPartial = Color.yellow;
+        private static readonly Color ColorNoPath = Color.red;
+        private static readonly Color ColorTarget = new Color(1f, 0.4f, 0f); // orange
+        private static readonly Color ColorNavLink = new Color(0.7f, 0.3f, 1f); // purple
+        private static readonly Color ColorHnaNeedsLink = Color.cyan;
+        private static readonly Color ColorHnaConnected = new Color(0.5f, 0.5f, 0.5f, 0.4f); // dim gray
+        private static readonly Color ColorHnaRejected = new Color(1f, 0.3f, 0.2f, 0.6f); // dim red
+
+        private const float NavLinkPyramidSize = 0.3f;
+        private const float HnaCandidateMarkerSize = 0.25f;
+
+        [DevCommand("Toggle path debug visualization for all villagers", Name = "vv_path_debug")]
+        public static void Toggle()
+        {
+            s_enabled = !s_enabled;
+
+            if (s_enabled)
+                EnsureInstance();
+            else if (s_instance != null)
+            {
+                Destroy(s_instance.gameObject);
+                s_instance = null;
+            }
+
+            string state = s_enabled ? "ON" : "OFF";
+            Console.instance?.Print($"Path debug rendering {state}");
+            Plugin.Log?.LogInfo($"[PathDebug] Visualization {state}");
+        }
+
+        [DevCommand("Toggle NavMesh triangulation wireframe overlay", Name = "vv_tri_debug")]
+        public static void ToggleTriangulation()
+        {
+            s_showTriangulation = !s_showTriangulation;
+            if (s_showTriangulation)
+                EnsureInstance();
+
+            string state = s_showTriangulation ? "ON" : "OFF";
+            int count = RegionBuilder.CachedTriangles?.Count ?? 0;
+            Console.instance?.Print($"Triangulation wireframe {state} ({count} triangles)");
+            Plugin.Log?.LogInfo($"[PathDebug] Triangulation wireframe {state}");
+        }
+
+        /// <summary>
+        /// Create the renderer instance if enabled but not yet instantiated.
+        /// Called from Plugin.Update so the GL renderer is ready before the first frame.
+        /// </summary>
+        public static void AutoEnable()
+        {
+            if ((s_enabled || s_showTriangulation) && s_instance == null)
+                EnsureInstance();
+        }
+
+        private static void EnsureInstance()
+        {
+            if (s_instance != null) return;
+            var go = new GameObject("PathDebugRenderer");
+            DontDestroyOnLoad(go);
+            s_instance = go.AddComponent<PathDebugRenderer>();
+        }
+
+        private void Awake()
+        {
+            m_lineMaterial = new Material(Shader.Find("Hidden/Internal-Colored"));
+            m_lineMaterial.hideFlags = HideFlags.HideAndDontSave;
+            m_lineMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            m_lineMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            m_lineMaterial.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
+            m_lineMaterial.SetInt("_ZWrite", 0);
+            m_lineMaterial.SetInt("_ZTest", (int)UnityEngine.Rendering.CompareFunction.Always);
+        }
+
+        private void OnDestroy()
+        {
+            if (m_lineMaterial != null)
+                Destroy(m_lineMaterial);
+        }
+
+        private void OnRenderObject()
+        {
+            if (!s_enabled && !s_showTriangulation) return;
+
+            m_lineMaterial.SetPass(0);
+            GL.PushMatrix();
+            GL.MultMatrix(Matrix4x4.identity);
+
+            if (s_enabled)
+            {
+                foreach (var kvp in VillagerAIManager.ActiveVillagers)
+                {
+                    var ai = kvp.Value;
+                    if (ai == null) continue;
+                    DrawVillagerPath(ai);
+                }
+
+                DrawNavMeshLinks();
+                DrawHnaCandidates();
+            }
+
+            if (s_showTriangulation)
+                DrawTriangulation();
+
+            GL.PopMatrix();
+        }
+
+        private void DrawVillagerPath(VillagerAI ai)
+        {
+            var path = s_pathField?.GetValue(ai) as List<Vector3>;
+            bool lastResult = s_lastFindPathResultField != null
+                && (bool)s_lastFindPathResultField.GetValue(ai);
+
+            Vector3 npcPos = ai.transform.position;
+            Vector3 yOff = Vector3.up * LineYOffset;
+
+            if (path == null || path.Count == 0)
+            {
+                // No path at all — draw red line from NPC to target if we have one
+                if (ai.CurrentTarget.HasValue)
+                {
+                    GL.Begin(GL.LINES);
+                    GL.Color(ColorNoPath);
+                    GL.Vertex(npcPos + yOff);
+                    GL.Vertex(ai.CurrentTarget.Value + yOff);
+                    GL.End();
+                    DrawWireOctahedron(ai.CurrentTarget.Value + yOff, NodeMarkerSize * 2f, ColorNoPath);
+                }
+                return;
+            }
+
+            Color lineColor = lastResult ? ColorComplete : ColorPartial;
+
+            // NPC position to first path node
+            GL.Begin(GL.LINES);
+            GL.Color(lineColor);
+            GL.Vertex(npcPos + yOff);
+            GL.Vertex(path[0] + yOff);
+
+            // Path segments
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                GL.Vertex(path[i] + yOff);
+                GL.Vertex(path[i + 1] + yOff);
+            }
+            GL.End();
+
+            // Corner markers at each path node
+            for (int i = 0; i < path.Count; i++)
+                DrawWireOctahedron(path[i] + yOff, NodeMarkerSize, lineColor);
+
+            // Draw final target with orange marker if different from last path node
+            if (ai.CurrentTarget.HasValue)
+            {
+                Vector3 target = ai.CurrentTarget.Value;
+                float distToLast = Vector3.Distance(target, path[path.Count - 1]);
+                if (distToLast > 0.5f)
+                {
+                    GL.Begin(GL.LINES);
+                    GL.Color(ColorTarget);
+                    GL.Vertex(path[path.Count - 1] + yOff);
+                    GL.Vertex(target + yOff);
+                    GL.End();
+                }
+                DrawWireOctahedron(target + yOff, NodeMarkerSize * 2f, ColorTarget);
+            }
+        }
+
+        /// <summary>
+        /// Wire octahedron — 6 vertices, 12 edges. Visible from any angle as a "sphere-like" marker.
+        /// </summary>
+        private static void DrawWireOctahedron(Vector3 center, float radius, Color color)
+        {
+            Vector3 top    = center + Vector3.up * radius;
+            Vector3 bottom = center - Vector3.up * radius;
+            Vector3 north  = center + Vector3.forward * radius;
+            Vector3 south  = center - Vector3.forward * radius;
+            Vector3 east   = center + Vector3.right * radius;
+            Vector3 west   = center - Vector3.right * radius;
+
+            GL.Begin(GL.LINES);
+            GL.Color(color);
+
+            // Top ring
+            GL.Vertex(top); GL.Vertex(north);
+            GL.Vertex(top); GL.Vertex(south);
+            GL.Vertex(top); GL.Vertex(east);
+            GL.Vertex(top); GL.Vertex(west);
+
+            // Bottom ring
+            GL.Vertex(bottom); GL.Vertex(north);
+            GL.Vertex(bottom); GL.Vertex(south);
+            GL.Vertex(bottom); GL.Vertex(east);
+            GL.Vertex(bottom); GL.Vertex(west);
+
+            // Equator
+            GL.Vertex(north); GL.Vertex(east);
+            GL.Vertex(east);  GL.Vertex(south);
+            GL.Vertex(south); GL.Vertex(west);
+            GL.Vertex(west);  GL.Vertex(north);
+
+            GL.End();
+        }
+
+        private void DrawNavMeshLinks()
+        {
+            var endpoints = NavMeshLinkPlacer.LinkEndpoints;
+            if (endpoints.Count == 0) return;
+
+            Vector3 yOff = Vector3.up * LineYOffset;
+
+            foreach (var (start, end) in endpoints)
+            {
+                // Dashed line connecting the two link endpoints
+                GL.Begin(GL.LINES);
+                GL.Color(ColorNavLink);
+                GL.Vertex(start + yOff);
+                GL.Vertex(end + yOff);
+                GL.End();
+
+                DrawWirePyramid(start + yOff, NavLinkPyramidSize, ColorNavLink);
+                DrawWirePyramid(end + yOff, NavLinkPyramidSize, ColorNavLink);
+            }
+        }
+
+        private void DrawHnaCandidates()
+        {
+            if (!NavMeshLinkPlacer.LinkCandidatesReady) return;
+
+            var candidates = NavMeshLinkPlacer.HnaCandidates;
+            if (candidates.Count == 0) return;
+
+            Vector3 yOff = Vector3.up * LineYOffset;
+
+            foreach (var c in candidates)
+            {
+                Color color;
+                switch (c.Status)
+                {
+                    case NavMeshLinkPlacer.HnaCandidateStatus.NeedsLink:
+                        color = ColorHnaNeedsLink;
+                        break;
+                    case NavMeshLinkPlacer.HnaCandidateStatus.AlreadyConnected:
+                        color = ColorHnaConnected;
+                        break;
+                    default:
+                        color = ColorHnaRejected;
+                        break;
+                }
+
+                GL.Begin(GL.LINES);
+                GL.Color(color);
+                GL.Vertex(c.Start + yOff);
+                GL.Vertex(c.End + yOff);
+                GL.End();
+
+                DrawWireOctahedron(c.Start + yOff, HnaCandidateMarkerSize, color);
+                DrawWireOctahedron(c.End + yOff, HnaCandidateMarkerSize, color);
+            }
+        }
+
+        /// <summary>
+        /// Wire pyramid (tetrahedron) — 4 vertices, 6 edges. Pointy top, triangular base.
+        /// </summary>
+        private static void DrawWirePyramid(Vector3 center, float size, Color color)
+        {
+            float halfBase = size * 0.7f;
+            Vector3 apex = center + Vector3.up * size;
+
+            // Equilateral triangle base offset downward
+            Vector3 b0 = center + new Vector3(0f, -size * 0.3f, halfBase);
+            Vector3 b1 = center + new Vector3(-halfBase * 0.866f, -size * 0.3f, -halfBase * 0.5f);
+            Vector3 b2 = center + new Vector3(halfBase * 0.866f, -size * 0.3f, -halfBase * 0.5f);
+
+            GL.Begin(GL.LINES);
+            GL.Color(color);
+
+            // Base triangle
+            GL.Vertex(b0); GL.Vertex(b1);
+            GL.Vertex(b1); GL.Vertex(b2);
+            GL.Vertex(b2); GL.Vertex(b0);
+
+            // Apex edges
+            GL.Vertex(apex); GL.Vertex(b0);
+            GL.Vertex(apex); GL.Vertex(b1);
+            GL.Vertex(apex); GL.Vertex(b2);
+
+            GL.End();
+        }
+
+        private void DrawTriangulation()
+        {
+            var tris = RegionBuilder.CachedTriangles;
+            if (tris == null || tris.Count == 0) return;
+
+            Vector3 yOff = Vector3.up * LineYOffset;
+
+            GL.Begin(GL.LINES);
+            foreach (var t in tris)
+            {
+                GL.Color(RegionColor(t.RegionId));
+                // Edge 0-1
+                GL.Vertex(t.V0 + yOff); GL.Vertex(t.V1 + yOff);
+                // Edge 1-2
+                GL.Vertex(t.V1 + yOff); GL.Vertex(t.V2 + yOff);
+                // Edge 2-0
+                GL.Vertex(t.V2 + yOff); GL.Vertex(t.V0 + yOff);
+            }
+            GL.End();
+
+            // Highlight pass: draw highlighted regions in bright white,
+            // overlaid at multiple Y offsets to simulate thicker lines.
+            if (HighlightedRegions.Count == 0) return;
+            var highlightColor = new Color(1f, 1f, 1f, 0.95f);
+            GL.Begin(GL.LINES);
+            GL.Color(highlightColor);
+            for (int pass = 0; pass < 5; pass++)
+            {
+                float dy = LineYOffset + 0.05f + pass * 0.02f;
+                Vector3 off = Vector3.up * dy;
+                foreach (var t in tris)
+                {
+                    if (!HighlightedRegions.Contains(t.RegionId)) continue;
+                    GL.Vertex(t.V0 + off); GL.Vertex(t.V1 + off);
+                    GL.Vertex(t.V1 + off); GL.Vertex(t.V2 + off);
+                    GL.Vertex(t.V2 + off); GL.Vertex(t.V0 + off);
+                }
+            }
+            GL.End();
+        }
+
+        private static Color RegionColor(string regionId)
+        {
+            if (string.IsNullOrEmpty(regionId))
+                return new Color(1f, 1f, 1f, 0.3f);
+            int hash = regionId.GetHashCode() & 0x7FFFFFFF;
+            float hue = (hash % 360) / 360f;
+            float sat = 0.6f + (hash / 360 % 4) * 0.1f;
+            float val = 0.7f + (hash / 1440 % 3) * 0.1f;
+            var c = Color.HSVToRGB(hue, sat, val);
+            c.a = 0.7f;
+            return c;
+        }
+
+        [DevCommand("Inspect village region graph (use near=x,z or near=player for position-filtered triangle detail)", Name = "vv_tri_inspect")]
+        public static void TriInspect(Terminal.ConsoleEventArgs args)
+        {
+            Vector3? nearPos = ParseNearArg(args);
+            if (nearPos.HasValue)
+                InspectNearPosition(nearPos.Value);
+            else
+                InspectVillage();
+        }
+
+        private static Vector3? ParseNearArg(Terminal.ConsoleEventArgs args)
+        {
+            if (args?.Args == null) return null;
+            for (int i = 1; i < args.Args.Length; i++)
+            {
+                string a = args.Args[i];
+                if (string.IsNullOrEmpty(a) || !a.StartsWith("near=", System.StringComparison.OrdinalIgnoreCase))
+                    continue;
+                string val = a.Substring("near=".Length);
+                if (val.Equals("player", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    var p = Player.m_localPlayer;
+                    return p != null ? p.transform.position : (Vector3?)null;
+                }
+                var parts = val.Split(',');
+                if (parts.Length >= 2
+                    && float.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out float nx)
+                    && float.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out float nz))
+                {
+                    return new Vector3(nx, 0f, nz);
+                }
+            }
+            return null;
+        }
+
+        private static void InspectVillage()
+        {
+            int graphIdx = 0;
+            int totalGraphs = 0;
+            int totalRegions = 0;
+            int totalLinks = 0;
+            var summaryLines = new List<string>();
+
+            foreach (var graph in RegionGraph.GetAll())
+            {
+                totalGraphs++;
+                totalRegions += graph.RegionCount;
+                totalLinks += graph.LinkCount;
+
+                // Per-region data goes to a sidecar so the console summary stays terse.
+                var regionEntries = new List<object>();
+                foreach (var center in graph.GetAllRegionCenters())
+                {
+                    regionEntries.Add(
+                        $"{center.x:F2},{center.y:F2},{center.z:F2}");
+                }
+                DebugLog.List("Region", $"village_{graphIdx}_centers", regionEntries);
+
+                graph.GetOrigin(out float ox, out float oz);
+                string line =
+                    $"  graph[{graphIdx}] regions={graph.RegionCount} " +
+                    $"links={graph.LinkCount} origin=({ox:F0},{oz:F0})";
+                summaryLines.Add(line);
+                graphIdx++;
+            }
+
+            if (totalGraphs == 0)
+            {
+                string empty = "[TriInspect] No region graphs available. Run hna_partition (or move a Guard into a village).";
+                Console.instance?.Print(empty);
+                Plugin.Log?.LogInfo(empty);
+                return;
+            }
+
+            DebugLog.Event("TriInspect", "village_summary",
+                ("graphs", totalGraphs),
+                ("regions", totalRegions),
+                ("links", totalLinks));
+
+            var sb = new StringBuilder();
+            sb.Append("[TriInspect] village graphs=").Append(totalGraphs)
+              .Append(" regions=").Append(totalRegions)
+              .Append(" links=").Append(totalLinks).AppendLine();
+            foreach (var line in summaryLines) sb.AppendLine(line);
+            sb.AppendLine("  (per-region centroids written to <BepInEx>/config/vv_dumps/)");
+
+            string output = sb.ToString();
+            Console.instance?.Print(output);
+            Plugin.Log?.LogInfo(output);
+        }
+
+        private static void InspectNearPosition(Vector3 pos)
+        {
+            var tris = RegionBuilder.CachedTriangles;
+            if (tris == null || tris.Count == 0)
+            {
+                Console.instance?.Print("No cached triangles. Run vv_tri_debug first.");
+                return;
+            }
+
+            const float radius = 2f;
+            const float r2 = radius * radius;
+
+            var regionTris = new Dictionary<string, List<RegionBuilder.CachedTriangle>>();
+            foreach (var t in tris)
+            {
+                var centroid = (t.V0 + t.V1 + t.V2) / 3f;
+                if ((centroid - pos).sqrMagnitude > r2) continue;
+                string key = string.IsNullOrEmpty(t.RegionId) ? "(none)" : t.RegionId;
+                if (!regionTris.TryGetValue(key, out var list))
+                {
+                    list = new List<RegionBuilder.CachedTriangle>();
+                    regionTris[key] = list;
+                }
+                list.Add(t);
+            }
+
+            if (regionTris.Count == 0)
+            {
+                Console.instance?.Print($"No triangles within {radius}m of ({pos.x:F1}, {pos.y:F1}, {pos.z:F1})");
+                Plugin.Log?.LogInfo($"[TriInspect] No triangles within {radius}m of ({pos.x:F1}, {pos.y:F1}, {pos.z:F1})");
+                return;
+            }
+
+            var graph = RegionGraph.GetNearest(pos);
+            var filter = new NavMeshQueryFilter
+            {
+                agentTypeID = VillagerAgentType.ResolveValheimHumanoidAgentTypeID(),
+                areaMask = NavMesh.AllAreas
+            };
+
+            float terrainY = 0f;
+            bool hasTerrain = ZoneSystem.instance != null;
+            if (hasTerrain)
+                terrainY = ZoneSystem.instance.GetGroundHeight(new Vector3(pos.x, 0f, pos.z));
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"[TriInspect] Pos=({pos.x:F1}, {pos.y:F1}, {pos.z:F1})  " +
+                          $"Terrain={terrainY:F1}  Δ={pos.y - terrainY:F1}m above terrain");
+            sb.AppendLine($"  {regionTris.Count} region(s) within {radius}m sphere:");
+
+            const float subdivCell = 3f;
+            const float heightBand = 2f;
+
+            // Collect all vertices per region for shared-edge analysis
+            var regionVertices = new Dictionary<string, List<(Vector3 v, int vi)>>();
+
+            foreach (var kv in regionTris)
+            {
+                string rid = kv.Key;
+                var triList = kv.Value;
+
+                float yMin = float.MaxValue, yMax = float.MinValue;
+                float totalArea = 0f;
+                float maxEdgeLen = 0f;
+                var vertList = new List<(Vector3 v, int vi)>();
+                int triIdx = 0;
+                foreach (var t in triList)
+                {
+                    foreach (float y in new[] { t.V0.y, t.V1.y, t.V2.y })
+                    {
+                        if (y < yMin) yMin = y;
+                        if (y > yMax) yMax = y;
+                    }
+                    totalArea += Vector3.Cross(t.V1 - t.V0, t.V2 - t.V0).magnitude * 0.5f;
+                    float e0 = Vector3.Distance(t.V0, t.V1);
+                    float e1 = Vector3.Distance(t.V1, t.V2);
+                    float e2 = Vector3.Distance(t.V2, t.V0);
+                    float em = Mathf.Max(e0, Mathf.Max(e1, e2));
+                    if (em > maxEdgeLen) maxEdgeLen = em;
+                    vertList.Add((t.V0, triIdx * 3));
+                    vertList.Add((t.V1, triIdx * 3 + 1));
+                    vertList.Add((t.V2, triIdx * 3 + 2));
+                    triIdx++;
+                }
+                regionVertices[rid] = vertList;
+
+                Vector3 samplePt = (triList[0].V0 + triList[0].V1 + triList[0].V2) / 3f;
+                int gx = Mathf.FloorToInt(samplePt.x / subdivCell);
+                int gz = Mathf.FloorToInt(samplePt.z / subdivCell);
+                int hb = Mathf.FloorToInt(samplePt.y / heightBand);
+
+                sb.AppendLine($"  --- Region {rid} ({triList.Count} tri) ---");
+                sb.AppendLine($"    Y range: [{yMin:F2}, {yMax:F2}]  ΔY={yMax - yMin:F2}m");
+                sb.AppendLine($"    Area: {totalArea:F2}m²  MaxEdge: {maxEdgeLen:F2}m");
+                sb.AppendLine($"    Cell: gx={gx} gz={gz} hb={hb}  " +
+                              $"(X[{gx * subdivCell:F0},{(gx + 1) * subdivCell:F0}] " +
+                              $"Z[{gz * subdivCell:F0},{(gz + 1) * subdivCell:F0}])");
+
+                if (hasTerrain)
+                {
+                    float midY = (yMin + yMax) * 0.5f;
+                    sb.AppendLine($"    Above terrain: {midY - terrainY:F2}m");
+                }
+
+                bool hasGround = CellValidator.HasGroundBelow(samplePt);
+                sb.AppendLine($"    GroundBelow: {hasGround}");
+
+                if (NavMesh.FindClosestEdge(samplePt, out NavMeshHit edgeHit, filter))
+                    sb.AppendLine($"    EdgeDist: {edgeHit.distance:F3}m");
+
+                bool wideEnough = CellValidator.IsSurfaceWideEnough(samplePt, filter);
+                sb.AppendLine($"    SurfaceWide: {wideEnough}");
+
+                if (graph != null)
+                {
+                    string resolvedId = graph.PointToRegionId(samplePt);
+                    sb.AppendLine($"    GraphLookup: {resolvedId ?? "(unresolved)"}");
+                }
+
+                foreach (var t in triList)
+                {
+                    var tc = (t.V0 + t.V1 + t.V2) / 3f;
+                    sb.AppendLine($"    Tri: ({t.V0.x:F2},{t.V0.y:F2},{t.V0.z:F2}) " +
+                                  $"({t.V1.x:F2},{t.V1.y:F2},{t.V1.z:F2}) " +
+                                  $"({t.V2.x:F2},{t.V2.y:F2},{t.V2.z:F2})  " +
+                                  $"cen=({tc.x:F2},{tc.y:F2},{tc.z:F2})");
+                }
+            }
+
+            // Shared-edge analysis: check which regions share vertex positions
+            const float vertexEps = 0.01f;
+            sb.AppendLine("  --- Edge sharing ---");
+            var rids = new List<string>(regionVertices.Keys);
+            bool anyShared = false;
+            for (int i = 0; i < rids.Count; i++)
+            for (int j = i + 1; j < rids.Count; j++)
+            {
+                int shared = 0;
+                foreach (var (va, _) in regionVertices[rids[i]])
+                foreach (var (vb, _) in regionVertices[rids[j]])
+                {
+                    if (Vector3.Distance(va, vb) < vertexEps)
+                        shared++;
+                }
+                if (shared >= 2)
+                {
+                    sb.AppendLine($"    {rids[i]} <-> {rids[j]}: {shared} shared vertices (CONNECTED)");
+                    anyShared = true;
+                }
+                else if (shared == 1)
+                {
+                    sb.AppendLine($"    {rids[i]} <-> {rids[j]}: 1 shared vertex (TOUCHING, no shared edge)");
+                    anyShared = true;
+                }
+            }
+            if (!anyShared)
+                sb.AppendLine("    No shared edges or vertices between nearby regions");
+
+            string output = sb.ToString();
+            Plugin.Log?.LogInfo(output);
+            Console.instance?.Print(output);
+        }
+
+        [RegisterCleanup]
+        public static void Cleanup()
+        {
+            if (s_instance != null)
+            {
+                Destroy(s_instance.gameObject);
+                s_instance = null;
+            }
+        }
+    }
+}

@@ -134,7 +134,7 @@ namespace ValheimVillages.Abilities
         /// <summary>
         /// Reset the cooldown to zero (debug command).
         /// </summary>
-        [DevCommand("Reset Mountain Stride cooldown", Name = "vv_reset_cooldown")]
+        [DevCommand("Reset Mountain Stride cooldown", Name = "vv_ability_reset_cooldown")]
         public static void ResetCooldown()
         {
             s_cooldownRemaining = 0f;
@@ -143,7 +143,7 @@ namespace ValheimVillages.Abilities
             Plugin.Log?.LogInfo("[Mountaineer] Cooldown reset via debug command");
         }
 
-        [DevCommand("Log HNA attributes for current player position to .cursor/debug.log (region, bounds, heights)", Name = "hna_debug_player")]
+        [DevCommand("Log HNA attributes for current player position to BepInEx log (region, bounds, heights)", Name = "vv_hna_debug_player")]
         public static void LogHnaPlayerPosition(Terminal.ConsoleEventArgs args)
         {
             var player = Player.m_localPlayer;
