@@ -6,10 +6,10 @@ using ValheimVillages.TaskQueue.Handlers;
 namespace ValheimVillages.Villager.AI.Navigation
 {
     /// <summary>
-    /// "Rubber-band" prune: drops HNA regions whose footprint falls outside
-    /// the outermost layer of player-placed wall pieces. Two-pass algorithm
-    /// over a 4-connected XZ grid at <see cref="RegionGraph.LookupCellSize"/>
-    /// resolution (height-bucket-flattened):
+    /// "Rubber-band" prune: drops HNA cells and regions that fall outside the
+    /// outermost layer of player-placed wall pieces. Two-pass flood over a
+    /// 4-connected XZ grid at <see cref="RegionGraph.LookupCellSize"/>
+    /// resolution (height-bucket flattened):
     /// <list type="number">
     /// <item>Outside-in flood seeded from every perimeter cell of the inflated
     /// bake bounds. Cell→cell traversal is gated by a symmetric
@@ -17,11 +17,15 @@ namespace ValheimVillages.Villager.AI.Navigation
     /// <item>Bed-anchored island cleanup BFS on the survivors using plain grid
     /// adjacency.</item>
     /// </list>
-    /// Region-level apply: a region is dropped iff <em>all</em> of its
-    /// LookupGrid entries land on outside ∪ island XZ cells. Mutates the
-    /// passed-in combined collections in place, mirroring how
-    /// <see cref="RegionPartitionHandler"/> handles its earlier cross-kind
-    /// reachability prune.
+    /// Cell-level apply: outside ∪ island XZ cells are dropped individually
+    /// from <c>LookupGrid</c> (all height buckets at that XZ) and from
+    /// <c>CachedTriangles</c> (filtered by tri-centroid XZ). Regions that span
+    /// a wall keep their inside half. A region is dropped wholesale (from
+    /// <c>RegionIds</c>, <c>Centroids</c>, <c>kindMap</c>, <c>BoundaryCells</c>,
+    /// <c>Links</c>) only when every one of its XZ cells got pruned.
+    /// <c>BoundaryCells</c> entries for partial regions are left untouched —
+    /// downstream consumers (e.g. <see cref="Behaviors.Patrol.BoundaryMapper"/>)
+    /// accept slightly stale centroid markers for partial regions in v1.
     /// </summary>
     internal static class RubberBandPrune
     {
@@ -31,6 +35,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int IslandCells;
             public int RegionsDropped;
             public int PerimeterSeeds;
+            public int LookupCellsDropped;
+            public int TrianglesDropped;
+            public int RegionsReached;
         }
 
         private const float CapsuleRadius = 0.35f;
@@ -50,7 +57,6 @@ namespace ValheimVillages.Villager.AI.Navigation
             Dictionary<string, SurfaceKind> kindMap,
             List<RegionBuilder.CachedTriangle> triangles,
             float minX, float minZ, float maxX, float maxZ,
-            List<Vector3> beds,
             out HashSet<string> droppedRegionIds)
         {
             var dropped = new HashSet<string>();
@@ -73,11 +79,15 @@ namespace ValheimVillages.Villager.AI.Navigation
             int gzMax = Mathf.FloorToInt(maxZ / cell) + 1;
 
             // --- Flatten LookupGrid by XZ ---
-            // xzMaxY: max region-centroid Y per XZ cell (used as cast-height
-            // anchor). ridToXz: reverse index region → its XZ cells (used by
-            // the region-level apply at the end).
+            // xzMaxY: max region-centroid Y per XZ cell (cast-height anchor).
+            // ridToXz: region → its XZ cells (used to detect fully-emptied
+            //   regions for the region-level cascade).
+            // xzToLookupKeys: XZ → list of LookupGrid keys at that XZ across
+            //   all height buckets (used by the cell-level apply below to
+            //   drop entries without rescanning the full lookupGrid).
             var xzMaxY = new Dictionary<long, float>();
             var ridToXz = new Dictionary<string, List<long>>();
+            var xzToLookupKeys = new Dictionary<long, List<long>>();
             foreach (var kv in lookupGrid)
             {
                 UnpackLookup(kv.Key, out int gx, out int gz, out int _);
@@ -97,12 +107,18 @@ namespace ValheimVillages.Villager.AI.Navigation
                 {
                     xzMaxY[xz] = 0f;
                 }
-                if (!ridToXz.TryGetValue(kv.Value, out var list))
+                if (!ridToXz.TryGetValue(kv.Value, out var ridList))
                 {
-                    list = new List<long>(4);
-                    ridToXz[kv.Value] = list;
+                    ridList = new List<long>(4);
+                    ridToXz[kv.Value] = ridList;
                 }
-                list.Add(xz);
+                ridList.Add(xz);
+                if (!xzToLookupKeys.TryGetValue(xz, out var keyList))
+                {
+                    keyList = new List<long>(4);
+                    xzToLookupKeys[xz] = keyList;
+                }
+                keyList.Add(kv.Key);
             }
 
             // --- Pass 1: outside-in flood ---
@@ -146,33 +162,47 @@ namespace ValheimVillages.Villager.AI.Navigation
             foreach (var kv in xzMaxY)
                 if (outsideCells.Contains(kv.Key)) stats.OutsideCells++;
 
-            // --- Pass 2: bed-anchored island cleanup ---
+            // --- Pass 2: region-aware bed-flood ---
+            // Walk BfsAdjacencyStore.Adjacency from BfsAdjacencyStore.Seeds
+            // (populated upstream by RecordCrossKindAdjacency) to find the
+            // bed-reachable region IDs. Expand to XZ cells via ridToXz.
+            // Region-aware so the build-time terrain edge-midpoint capsule
+            // break is respected — bed-flood can't cross from inside-terrain
+            // to outside-terrain via raw XZ adjacency because the two halves
+            // are different regions with no edge in combinedAdj.
             var insideCells = new HashSet<long>();
-            queue.Clear();
-            if (beds != null)
+            var seeds = BfsAdjacencyStore.Seeds;
+            var adjacency = BfsAdjacencyStore.Adjacency;
+            if (seeds == null || seeds.Count == 0)
             {
-                foreach (var bed in beds)
-                {
-                    int gx = Mathf.FloorToInt(bed.x / cell);
-                    int gz = Mathf.FloorToInt(bed.z / cell);
-                    long key = XzKey(gx, gz);
-                    if (!xzMaxY.ContainsKey(key)) continue;
-                    if (outsideCells.Contains(key)) continue;
-                    if (insideCells.Add(key)) queue.Enqueue(key);
-                }
+                Plugin.Log?.LogWarning(
+                    "[RubberBand] Pass 2 skipped: BfsAdjacencyStore.Seeds is empty " +
+                    "(no terrain regions, or RecordCrossKindAdjacency wasn't called). " +
+                    "All non-outside populated cells kept (no island marking).");
+                foreach (var kv in xzMaxY)
+                    if (!outsideCells.Contains(kv.Key)) insideCells.Add(kv.Key);
             }
-            while (queue.Count > 0)
+            else
             {
-                long curKey = queue.Dequeue();
-                UnpackXz(curKey, out int gx, out int gz);
-                for (int d = 0; d < 4; d++)
+                var reachedRegions = new HashSet<string>(seeds);
+                var regionQueue = new Queue<string>(seeds);
+                while (regionQueue.Count > 0)
                 {
-                    int ngx = gx + dx[d], ngz = gz + dz[d];
-                    long nKey = XzKey(ngx, ngz);
-                    if (!xzMaxY.ContainsKey(nKey)) continue;
-                    if (outsideCells.Contains(nKey)) continue;
-                    if (!insideCells.Add(nKey)) continue;
-                    queue.Enqueue(nKey);
+                    string cur = regionQueue.Dequeue();
+                    if (!adjacency.TryGetValue(cur, out var neighbors)) continue;
+                    foreach (var n in neighbors)
+                        if (reachedRegions.Add(n)) regionQueue.Enqueue(n);
+                }
+                stats.RegionsReached = reachedRegions.Count;
+
+                foreach (string rid in reachedRegions)
+                {
+                    if (!ridToXz.TryGetValue(rid, out var cells)) continue;
+                    foreach (long xz in cells)
+                    {
+                        if (outsideCells.Contains(xz)) continue;
+                        insideCells.Add(xz);
+                    }
                 }
             }
 
@@ -186,11 +216,51 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
             stats.IslandCells = islandCells.Count;
 
-            // --- Region-level apply ---
-            // A region is dropped iff every one of its XZ cells is in
-            // outside ∪ island. A region with no recorded XZ cells (e.g. its
-            // centroid lookup failed earlier) is also dropped as a no-op
-            // safety. Survivors keep all their entries — we don't fragment.
+            // --- Cell-level apply ---
+            // Build the union of XZ cells to prune (populated outside cells +
+            // all island cells). Drop matching LookupGrid entries via the
+            // xzToLookupKeys reverse index, and drop matching triangles by
+            // tri-centroid XZ. Surviving regions (those with at least one
+            // un-pruned cell) keep their reduced footprint — handles the
+            // "region spans a wall" case without fragmenting region identity.
+            var prunedXz = new HashSet<long>(outsideCells.Count + islandCells.Count);
+            foreach (long key in outsideCells)
+                if (xzMaxY.ContainsKey(key)) prunedXz.Add(key);
+            foreach (long key in islandCells) prunedXz.Add(key);
+
+            if (prunedXz.Count > 0)
+            {
+                foreach (long xz in prunedXz)
+                {
+                    if (!xzToLookupKeys.TryGetValue(xz, out var keys)) continue;
+                    foreach (long lookupKey in keys)
+                    {
+                        if (lookupGrid.Remove(lookupKey)) stats.LookupCellsDropped++;
+                    }
+                }
+
+                if (triangles != null && triangles.Count > 0)
+                {
+                    int beforeCount = triangles.Count;
+                    triangles.RemoveAll(t =>
+                    {
+                        float cx = (t.V0.x + t.V1.x + t.V2.x) / 3f;
+                        float cz = (t.V0.z + t.V1.z + t.V2.z) / 3f;
+                        int tgx = Mathf.FloorToInt(cx / cell);
+                        int tgz = Mathf.FloorToInt(cz / cell);
+                        return prunedXz.Contains(XzKey(tgx, tgz));
+                    });
+                    stats.TrianglesDropped = beforeCount - triangles.Count;
+                }
+            }
+
+            // --- Region-level cascade ---
+            // A region is dropped wholesale iff none of its XZ cells survived
+            // the cell-level apply above. A region with no recorded XZ cells
+            // (e.g. centroid lookup failed during flatten) is also dropped as
+            // a no-op safety. LookupGrid + triangles for fully-dropped regions
+            // were already removed by the cell-level pass; no duplicate sweep
+            // needed here.
             foreach (string rid in regionIds)
             {
                 bool anyKept = false;
@@ -198,8 +268,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 {
                     foreach (long xz in cells)
                     {
-                        if (outsideCells.Contains(xz)) continue;
-                        if (islandCells.Contains(xz)) continue;
+                        if (prunedXz.Contains(xz)) continue;
                         anyKept = true;
                         break;
                     }
@@ -219,14 +288,6 @@ namespace ValheimVillages.Villager.AI.Navigation
                     dropped.Contains(l.FromRegionId) ||
                     dropped.Contains(l.ToRegionId));
                 boundaryCells?.RemoveAll(b => dropped.Contains(b.id));
-                if (lookupGrid != null)
-                {
-                    var keysToDrop = new List<long>();
-                    foreach (var kv in lookupGrid)
-                        if (dropped.Contains(kv.Value)) keysToDrop.Add(kv.Key);
-                    foreach (long k in keysToDrop) lookupGrid.Remove(k);
-                }
-                triangles?.RemoveAll(t => dropped.Contains(t.RegionId));
             }
             stats.RegionsDropped = dropped.Count;
             return stats;

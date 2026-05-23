@@ -176,12 +176,15 @@ namespace ValheimVillages.TaskQueue.Handlers
             var rbStats = RubberBandPrune.Apply(
                 combinedRegionIds, combinedCentroids, combinedLookup,
                 combinedBoundary, combinedLinks, kindMap, combinedTriangles,
-                minX, minZ, maxX, maxZ, beds,
+                minX, minZ, maxX, maxZ,
                 out var droppedRubberBand);
             DebugLog.Event("RubberBandPrune", "applied",
                 ("cells_outside", rbStats.OutsideCells),
                 ("cells_island", rbStats.IslandCells),
+                ("lookup_cells_dropped", rbStats.LookupCellsDropped),
+                ("triangles_dropped", rbStats.TrianglesDropped),
                 ("regions_dropped", rbStats.RegionsDropped),
+                ("regions_reached", rbStats.RegionsReached),
                 ("seed_perimeter_cells", rbStats.PerimeterSeeds),
                 ("regions_kept", combinedRegionIds.Count));
             if (droppedRubberBand.Count > 0)
