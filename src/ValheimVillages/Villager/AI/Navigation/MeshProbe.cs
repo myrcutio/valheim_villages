@@ -297,7 +297,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         private static void ReportRawExtracted(StringBuilder sb, Vector3 pos)
         {
-            var (verts, idx) = NavMeshBakeManager.ExtractBakedTriangles();
+            var (verts, idx, _) = NavMeshBakeManager.ExtractBakedTriangles();
             if (verts == null || verts.Length == 0)
             {
                 sb.AppendLine("  Extractor produced 0 vertices");
@@ -334,7 +334,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         private static void ReportFilterTrace(StringBuilder sb, Vector3 pos)
         {
-            var (verts, idx) = NavMeshBakeManager.ExtractBakedTriangles();
+            var (verts, idx, _) = NavMeshBakeManager.ExtractBakedTriangles();
             if (verts == null || verts.Length == 0)
             {
                 sb.AppendLine("  No extracted triangles");

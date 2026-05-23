@@ -37,6 +37,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int PerimeterSeeds;
             public int LookupCellsDropped;
             public int TrianglesDropped;
+            public int StaticSolidTrianglesDropped;
             public int RegionsReached;
         }
 
@@ -71,6 +72,16 @@ namespace ValheimVillages.Villager.AI.Navigation
                 Plugin.Log?.LogWarning("[RubberBand] Skipped: 'piece' layer not found");
                 return stats;
             }
+
+            // static_solid layer carries cliffs, rocks, and world props. These
+            // bake as Piece-kind sources (NavMeshBakeManager piece mask includes
+            // 'static_solid'), but the piece filter path in RegionBuilder has no
+            // wall-aware primitive — outside-wall static_solid artifacts persist
+            // through the existing prunes. Below, after Pass 1 builds
+            // outsideCells, we sweep triangles whose source layer == this and
+            // whose centroid XZ is in outsideCells. Sentinel -1 disables the
+            // sweep if the layer isn't found in the project.
+            int staticSolidLayer = LayerMask.NameToLayer("static_solid");
 
             float cell = RegionGraph.LookupCellSize;
             int gxMin = Mathf.FloorToInt(minX / cell) - 1;
@@ -227,6 +238,30 @@ namespace ValheimVillages.Villager.AI.Navigation
             foreach (long key in outsideCells)
                 if (xzMaxY.ContainsKey(key)) prunedXz.Add(key);
             foreach (long key in islandCells) prunedXz.Add(key);
+
+            // --- Static_solid filled-polygon mask sweep ---
+            // Filled-polygon mask = bake bounds \ outsideCells. Tris on the
+            // static_solid layer whose centroid XZ falls in outsideCells (i.e.
+            // outside the filled mask) are dropped here. Uses the full
+            // outsideCells set, not prunedXz — by design, this also catches
+            // unpopulated outside cells the main sweep below skips. Runs first
+            // so StaticSolidTrianglesDropped is an exhaustive count and the
+            // following TrianglesDropped captures only non-static-solid drops.
+            if (staticSolidLayer >= 0 && outsideCells.Count > 0 &&
+                triangles != null && triangles.Count > 0)
+            {
+                int beforeCount = triangles.Count;
+                triangles.RemoveAll(t =>
+                {
+                    if (t.Layer != staticSolidLayer) return false;
+                    float cx = (t.V0.x + t.V1.x + t.V2.x) / 3f;
+                    float cz = (t.V0.z + t.V1.z + t.V2.z) / 3f;
+                    int tgx = Mathf.FloorToInt(cx / cell);
+                    int tgz = Mathf.FloorToInt(cz / cell);
+                    return outsideCells.Contains(XzKey(tgx, tgz));
+                });
+                stats.StaticSolidTrianglesDropped = beforeCount - triangles.Count;
+            }
 
             if (prunedXz.Count > 0)
             {

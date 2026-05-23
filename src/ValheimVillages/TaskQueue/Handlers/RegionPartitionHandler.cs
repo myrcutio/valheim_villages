@@ -183,6 +183,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("cells_island", rbStats.IslandCells),
                 ("lookup_cells_dropped", rbStats.LookupCellsDropped),
                 ("triangles_dropped", rbStats.TrianglesDropped),
+                ("static_solid_dropped", rbStats.StaticSolidTrianglesDropped),
                 ("regions_dropped", rbStats.RegionsDropped),
                 ("regions_reached", rbStats.RegionsReached),
                 ("seed_perimeter_cells", rbStats.PerimeterSeeds),

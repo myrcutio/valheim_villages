@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.AI;
+using ValheimVillages.Attributes;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
 
@@ -87,6 +88,9 @@ namespace ValheimVillages.TaskQueue.Handlers
             public Vector3 V0, V1, V2;
             public string RegionId;
             public SurfaceKind Kind;
+            // Source Unity layer (NavMeshBuildSource.component.gameObject.layer).
+            // -1 if unknown (synthetic/phantom sources or pre-tag legacy entries).
+            public int Layer;
         }
 
         /// <summary>
@@ -96,6 +100,19 @@ namespace ValheimVillages.TaskQueue.Handlers
         /// </summary>
         internal static List<CachedTriangle> CachedTriangles { get; set; }
             = new List<CachedTriangle>();
+
+        /// <summary>
+        /// Clear cached per-triangle state on world unload / hot reload.
+        /// Without this, stale CachedTriangle entries from a prior assembly
+        /// (carrying default/zero Layer values from before the field existed,
+        /// or stale region IDs from a previous bake) would taint the next
+        /// partition's RubberBandPrune static_solid mask sweep.
+        /// </summary>
+        [RegisterCleanup]
+        public static void ClearCachedState()
+        {
+            CachedTriangles.Clear();
+        }
 
         internal struct BuildResult
         {
@@ -170,7 +187,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             // structures (ramparts, stairs added after world load) never get
             // any cached triangles. Sourcing from the bake's input list ensures
             // we see exactly the geometry we baked.
-            var (verts, idx) = NavMeshBakeManager.ExtractBakedTriangles(kind, minX, minZ, maxX, maxZ);
+            var (verts, idx, triangleLayers) = NavMeshBakeManager.ExtractBakedTriangles(kind, minX, minZ, maxX, maxZ);
             if (verts == null || idx == null || idx.Length < 3)
             {
                 Plugin.Log?.LogWarning($"[Region] No baked sources to extract triangles from (kind={kind}) — has NavMeshBakeManager.BakeVillage run?");
@@ -526,6 +543,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                     V0 = tv0, V1 = tv1, V2 = tv2,
                     RegionId = rid,
                     Kind = kind,
+                    Layer = (triangleLayers != null && t < triangleLayers.Length) ? triangleLayers[t] : -1,
                 });
 
                 float lo = Mathf.Min(tv0.y, Mathf.Min(tv1.y, tv2.y));

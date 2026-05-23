@@ -218,12 +218,12 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <see cref="ExtractBakedTriangles(SurfaceKind)"/> overload so they
         /// can run separate filter passes.
         /// </summary>
-        public static (Vector3[] vertices, int[] indices) ExtractBakedTriangles()
+        public static (Vector3[] vertices, int[] indices, int[] triangleLayers) ExtractBakedTriangles()
         {
-            var (tv, ti) = ExtractBakedTriangles(SurfaceKind.Terrain);
-            var (pv, pi) = ExtractBakedTriangles(SurfaceKind.Piece);
-            if (tv.Length == 0) return (pv, pi);
-            if (pv.Length == 0) return (tv, ti);
+            var (tv, ti, tl) = ExtractBakedTriangles(SurfaceKind.Terrain);
+            var (pv, pi, pl) = ExtractBakedTriangles(SurfaceKind.Piece);
+            if (tv.Length == 0) return (pv, pi, pl);
+            if (pv.Length == 0) return (tv, ti, tl);
 
             var verts = new Vector3[tv.Length + pv.Length];
             System.Array.Copy(tv, 0, verts, 0, tv.Length);
@@ -233,7 +233,11 @@ namespace ValheimVillages.Villager.AI.Navigation
             System.Array.Copy(ti, 0, idx, 0, ti.Length);
             for (int i = 0; i < pi.Length; i++) idx[ti.Length + i] = pi[i] + tv.Length;
 
-            return (verts, idx);
+            var layers = new int[tl.Length + pl.Length];
+            System.Array.Copy(tl, 0, layers, 0, tl.Length);
+            System.Array.Copy(pl, 0, layers, tl.Length, pl.Length);
+
+            return (verts, idx, layers);
         }
 
         /// <summary>
@@ -247,7 +251,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// sources are skipped (they're synthetic obstacles, not extractable
         /// walkable geometry).
         /// </summary>
-        public static (Vector3[] vertices, int[] indices) ExtractBakedTriangles(SurfaceKind kind)
+        public static (Vector3[] vertices, int[] indices, int[] triangleLayers) ExtractBakedTriangles(SurfaceKind kind)
         {
             // Sentinel bounds = no filter. Use the overload to skip
             // out-of-bounds triangles at extraction time.
@@ -264,16 +268,17 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// extraction skips the per-triangle work RegionBuilder would have
         /// otherwise wasted on rej_bounds.
         /// </summary>
-        public static (Vector3[] vertices, int[] indices) ExtractBakedTriangles(
+        public static (Vector3[] vertices, int[] indices, int[] triangleLayers) ExtractBakedTriangles(
             SurfaceKind kind, float minX, float minZ, float maxX, float maxZ)
         {
             var sources = kind == SurfaceKind.Terrain ? s_terrainSources : s_pieceSources;
             int phantom = kind == SurfaceKind.Piece ? s_piecePhantomCount : 0;
             if (sources.Count == 0)
-                return (System.Array.Empty<Vector3>(), System.Array.Empty<int>());
+                return (System.Array.Empty<Vector3>(), System.Array.Empty<int>(), System.Array.Empty<int>());
 
             var verts = new List<Vector3>(sources.Count * 32);
             var idx = new List<int>(sources.Count * 96);
+            var triLayers = new List<int>(sources.Count * 32);
             int skippedUnreadable = 0;
             int skippedShape = 0;
 
@@ -281,16 +286,21 @@ namespace ValheimVillages.Villager.AI.Navigation
             for (int i = 0; i < realCount; i++)
             {
                 var src = sources[i];
+                // Layer is read from the source Collider's GameObject. Box
+                // sources we synthesize (door blockers) have no component
+                // and get -1; they're phantom obstacles and excluded from
+                // extraction by realCount anyway.
+                int layer = src.component != null ? src.component.gameObject.layer : -1;
                 switch (src.shape)
                 {
                     case NavMeshBuildSourceShape.Mesh:
                         var mesh = src.sourceObject as Mesh;
                         if (mesh == null) { skippedShape++; continue; }
                         if (!mesh.isReadable) { skippedUnreadable++; continue; }
-                        AppendMesh(verts, idx, src.transform, mesh, minX, minZ, maxX, maxZ);
+                        AppendMesh(verts, idx, triLayers, layer, src.transform, mesh, minX, minZ, maxX, maxZ);
                         break;
                     case NavMeshBuildSourceShape.Box:
-                        AppendBox(verts, idx, src.transform, src.size, minX, minZ, maxX, maxZ);
+                        AppendBox(verts, idx, triLayers, layer, src.transform, src.size, minX, minZ, maxX, maxZ);
                         break;
                     default:
                         skippedShape++;
@@ -317,10 +327,12 @@ namespace ValheimVillages.Villager.AI.Navigation
             // Piece pass is not welded (its prefabs are intentionally
             // distinct walkable surfaces; we don't want adjacent piece
             // prefabs to silently bridge their regions).
+            // Weld remaps indices but preserves triangle count, so
+            // triLayers stays parallel to idx (length = idx.Count / 3).
             if (kind == SurfaceKind.Terrain)
                 WeldCoincidentVertices(verts, idx);
 
-            return (verts.ToArray(), idx.ToArray());
+            return (verts.ToArray(), idx.ToArray(), triLayers.ToArray());
         }
 
         /// <summary>
@@ -410,7 +422,8 @@ namespace ValheimVillages.Villager.AI.Navigation
             return added;
         }
 
-        private static void AppendMesh(List<Vector3> verts, List<int> idx, Matrix4x4 t, Mesh mesh,
+        private static void AppendMesh(List<Vector3> verts, List<int> idx, List<int> triLayers, int layer,
+            Matrix4x4 t, Mesh mesh,
             float minX, float minZ, float maxX, float maxZ)
         {
             Vector3[] localVerts;
@@ -451,10 +464,12 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (remap[li1] < 0) { remap[li1] = verts.Count; verts.Add(v1); }
                 if (remap[li2] < 0) { remap[li2] = verts.Count; verts.Add(v2); }
                 idx.Add(remap[li0]); idx.Add(remap[li1]); idx.Add(remap[li2]);
+                triLayers.Add(layer);
             }
         }
 
-        private static void AppendBox(List<Vector3> verts, List<int> idx, Matrix4x4 t, Vector3 size,
+        private static void AppendBox(List<Vector3> verts, List<int> idx, List<int> triLayers, int layer,
+            Matrix4x4 t, Vector3 size,
             float minX, float minZ, float maxX, float maxZ)
         {
             // Box bounds check via the world-space transform origin; boxes
@@ -487,6 +502,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             };
             for (int i = 0; i < boxTris.Length; i++)
                 idx.Add(b + boxTris[i]);
+            // 12 triangles (6 faces × 2), all sharing this box's source layer.
+            for (int i = 0; i < 12; i++)
+                triLayers.Add(layer);
         }
 
         /// <summary>
