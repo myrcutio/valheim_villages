@@ -29,8 +29,37 @@ namespace ValheimVillages.Villager.AI.Navigation
         // queries union them. Splitting the bake by source kind lets
         // RegionBuilder run two filter/build passes with per-kind tuning
         // (terrain has gentler edge cases than buildable pieces).
-        private static NavMeshDataInstance s_terrainInstance;
-        private static NavMeshDataInstance s_pieceInstance;
+        //
+        // Instances are stored on a DontDestroyOnLoad MonoBehaviour found by
+        // name so that a hot-reloaded assembly inherits the prior assembly's
+        // active bakes and can Remove() them before adding fresh data. Plain
+        // static fields would leak: on reload the static resets to default,
+        // .valid becomes false, the Remove guard skips, and the prior
+        // instance stays orphaned inside Unity's NavMesh — stacking layer
+        // after layer of village geometry across reloads.
+        private const string HolderName = "VV_NavMeshBakeHolder";
+        private static NavMeshBakeHolder s_holder;
+        private static NavMeshBakeHolder Holder
+        {
+            get
+            {
+                if (s_holder != null) return s_holder;
+                // Find by name first — a holder created by a prior assembly
+                // survives via DontDestroyOnLoad and still owns its instances.
+                var existing = GameObject.Find(HolderName);
+                if (existing != null)
+                {
+                    s_holder = existing.GetComponent<NavMeshBakeHolder>()
+                               ?? existing.AddComponent<NavMeshBakeHolder>();
+                    return s_holder;
+                }
+                var go = new GameObject(HolderName);
+                Object.DontDestroyOnLoad(go);
+                go.hideFlags = HideFlags.HideInHierarchy;
+                s_holder = go.AddComponent<NavMeshBakeHolder>();
+                return s_holder;
+            }
+        }
 
         private static readonly List<NavMeshBuildSource> s_terrainSources = new List<NavMeshBuildSource>();
         private static readonly List<NavMeshBuildSource> s_pieceSources = new List<NavMeshBuildSource>();
@@ -83,9 +112,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             // Remove previous bakes to avoid accumulating data across
-            // partition runs.
-            if (s_terrainInstance.valid) { s_terrainInstance.Remove(); s_terrainInstance = default; }
-            if (s_pieceInstance.valid) { s_pieceInstance.Remove(); s_pieceInstance = default; }
+            // partition runs. Routed through the holder so a hot-reloaded
+            // assembly correctly clears the prior assembly's instances.
+            Holder.RemoveTerrain();
+            Holder.RemovePiece();
 
             var settings = NavMesh.GetSettingsByID(VillagerAgentType.UnityAgentTypeID);
 
@@ -104,7 +134,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             {
                 var data = NavMeshBuilder.BuildNavMeshData(
                     settings, terrainSources, bounds, Vector3.zero, Quaternion.identity);
-                if (data != null) s_terrainInstance = NavMesh.AddNavMeshData(data);
+                if (data != null) Holder.SetTerrain(NavMesh.AddNavMeshData(data));
             }
             terrainSw.Stop();
             result.TerrainDurationMs = (float)terrainSw.Elapsed.TotalMilliseconds;
@@ -137,7 +167,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             {
                 var data = NavMeshBuilder.BuildNavMeshData(
                     settings, pieceSources, bounds, Vector3.zero, Quaternion.identity);
-                if (data != null) s_pieceInstance = NavMesh.AddNavMeshData(data);
+                if (data != null) Holder.SetPiece(NavMesh.AddNavMeshData(data));
             }
             pieceSw.Stop();
             result.PieceDurationMs = (float)pieceSw.Elapsed.TotalMilliseconds;
@@ -152,7 +182,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 return result;
             }
 
-            result.Success = s_terrainInstance.valid || s_pieceInstance.valid;
+            result.Success = Holder.HasAny;
             if (!result.Success) result.FailureReason = "build_returned_null";
             sw.Stop();
             result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
@@ -160,7 +190,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
         /// <summary>Whether any bake is currently active.</summary>
-        public static bool HasBakedData => s_terrainInstance.valid || s_pieceInstance.valid;
+        public static bool HasBakedData => Holder.HasAny;
 
         /// <summary>
         /// Snapshot of the source list used by the most recent bake (terrain
@@ -467,11 +497,65 @@ namespace ValheimVillages.Villager.AI.Navigation
         [RegisterCleanup]
         public static void Clear()
         {
-            if (s_terrainInstance.valid) { s_terrainInstance.Remove(); s_terrainInstance = default; }
-            if (s_pieceInstance.valid) { s_pieceInstance.Remove(); s_pieceInstance = default; }
+            // Route through holder so a fresh assembly cleanup also clears
+            // instances inherited from the prior assembly.
+            Holder.RemoveAll();
             s_terrainSources.Clear();
             s_pieceSources.Clear();
             s_piecePhantomCount = 0;
+        }
+    }
+
+    /// <summary>
+    /// Owns the active <see cref="NavMeshDataInstance"/> handles for the
+    /// villager bake on a <see cref="Object.DontDestroyOnLoad"/> GameObject
+    /// named <c>VV_NavMeshBakeHolder</c>. New assemblies find the existing
+    /// holder by name so they inherit and can clean up the prior assembly's
+    /// bake instances. <see cref="OnDestroy"/> is a safety net for full
+    /// teardown (game exit, scene unload).
+    /// </summary>
+    internal class NavMeshBakeHolder : MonoBehaviour
+    {
+        private NavMeshDataInstance m_terrain;
+        private NavMeshDataInstance m_piece;
+
+        internal bool HasAny => m_terrain.valid || m_piece.valid;
+
+        internal void SetTerrain(NavMeshDataInstance instance)
+        {
+            RemoveTerrain();
+            m_terrain = instance;
+        }
+
+        internal void SetPiece(NavMeshDataInstance instance)
+        {
+            RemovePiece();
+            m_piece = instance;
+        }
+
+        internal void RemoveTerrain()
+        {
+            if (m_terrain.valid) { m_terrain.Remove(); m_terrain = default; }
+        }
+
+        internal void RemovePiece()
+        {
+            if (m_piece.valid) { m_piece.Remove(); m_piece = default; }
+        }
+
+        internal void RemoveAll()
+        {
+            RemoveTerrain();
+            RemovePiece();
+        }
+
+        private void OnDestroy()
+        {
+            int removed = 0;
+            if (m_terrain.valid) { m_terrain.Remove(); m_terrain = default; removed++; }
+            if (m_piece.valid) { m_piece.Remove(); m_piece = default; removed++; }
+            if (removed > 0)
+                Plugin.Log?.LogInfo($"[NavMeshBakeHolder] OnDestroy: removed {removed} orphaned NavMesh data instances");
         }
     }
 }
