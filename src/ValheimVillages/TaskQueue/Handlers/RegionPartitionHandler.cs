@@ -176,16 +176,18 @@ namespace ValheimVillages.TaskQueue.Handlers
             var rbStats = RubberBandPrune.Apply(
                 combinedRegionIds, combinedCentroids, combinedLookup,
                 combinedBoundary, combinedLinks, kindMap, combinedTriangles,
+                beds,
                 minX, minZ, maxX, maxZ,
                 out var droppedRubberBand);
             DebugLog.Event("RubberBandPrune", "applied",
-                ("cells_outside", rbStats.OutsideCells),
-                ("cells_island", rbStats.IslandCells),
+                ("outside_terrain_cells", rbStats.OutsideTerrainCells),
+                ("pass2_seeds", rbStats.Pass2Seeds),
+                ("bed_reachable_terrain_cells", rbStats.BedReachableTerrainCells),
+                ("pass3_piece_cells_dropped", rbStats.Pass3PieceCellsDropped),
                 ("lookup_cells_dropped", rbStats.LookupCellsDropped),
                 ("triangles_dropped", rbStats.TrianglesDropped),
                 ("static_solid_dropped", rbStats.StaticSolidTrianglesDropped),
                 ("regions_dropped", rbStats.RegionsDropped),
-                ("regions_reached", rbStats.RegionsReached),
                 ("seed_perimeter_cells", rbStats.PerimeterSeeds),
                 ("regions_kept", combinedRegionIds.Count));
             if (droppedRubberBand.Count > 0)
@@ -317,6 +319,14 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             // --- Build combined adjacency ---
             var combinedAdj = new Dictionary<string, HashSet<string>>();
+            // Per-edge metadata for vv_bfs_trace. Tracks which mechanism(s)
+            // added each edge (in-pass shared edge / cross-kind vertex
+            // coincidence / cross-kind 0.5m vertex proximity) and a
+            // representative bridge position for cross-kind edges. Keyed by
+            // BfsAdjacencyStore.EdgeKey(a, b) so undirected lookups are
+            // canonical regardless of insertion order.
+            var edgeMeta = new Dictionary<string, ValheimVillages.Villager.AI.Navigation.BfsEdgeMeta>();
+
             void EnsureNode(string id)
             {
                 if (!combinedAdj.ContainsKey(id))
@@ -328,20 +338,76 @@ namespace ValheimVillages.TaskQueue.Handlers
                 combinedAdj[a].Add(b);
                 combinedAdj[b].Add(a);
             }
+            // Adds the directed pair in both directions AND records / merges
+            // the edge's kind + (optional) representative position into
+            // edgeMeta. Multi-kind ORs together; first non-null RepresentativePos
+            // wins; ProxMinDist tracks the min across CrossProx insertions.
+            void RecordEdge(string a, string b,
+                            ValheimVillages.Villager.AI.Navigation.BfsEdgeKind kind,
+                            Vector3? repPos, float proxDist)
+            {
+                AddEdgeBoth(a, b);
+                string key = ValheimVillages.Villager.AI.Navigation.BfsAdjacencyStore.EdgeKey(a, b);
+                if (edgeMeta.TryGetValue(key, out var meta))
+                {
+                    meta.Kinds |= kind;
+                    if (!meta.RepresentativePos.HasValue && repPos.HasValue)
+                        meta.RepresentativePos = repPos;
+                    if (kind == ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.CrossProx &&
+                        (meta.ProxMinDist == 0f || proxDist < meta.ProxMinDist))
+                        meta.ProxMinDist = proxDist;
+                    edgeMeta[key] = meta;
+                }
+                else
+                {
+                    edgeMeta[key] = new ValheimVillages.Villager.AI.Navigation.BfsEdgeMeta
+                    {
+                        Kinds = kind,
+                        RepresentativePos = repPos,
+                        ProxMinDist = (kind == ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.CrossProx) ? proxDist : 0f,
+                    };
+                }
+            }
 
             // In-kind adjacency from each pass.
             if (terrainResult.Adjacency != null)
                 foreach (var kv in terrainResult.Adjacency)
                 {
                     EnsureNode(kv.Key);
-                    foreach (var n in kv.Value) AddEdgeBoth(kv.Key, n);
+                    foreach (var n in kv.Value)
+                        RecordEdge(kv.Key, n,
+                            ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.InPassEdge, null, 0f);
                 }
             if (pieceResult.Adjacency != null)
                 foreach (var kv in pieceResult.Adjacency)
                 {
                     EnsureNode(kv.Key);
-                    foreach (var n in kv.Value) AddEdgeBoth(kv.Key, n);
+                    foreach (var n in kv.Value)
+                        RecordEdge(kv.Key, n,
+                            ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.InPassEdge, null, 0f);
                 }
+
+            // --- Build quantized-vertex → world-position map ---
+            // Used by the cross-kind CrossVert edge recording below to
+            // attach a representative world position to each edge (where
+            // the bridge geometrically sits). First vertex wins per bucket
+            // — sufficient for the diagnostic; the actual matched vertex
+            // is within 25cm of any other vertex in the same bucket.
+            var quantPosToWorld = new Dictionary<long, Vector3>();
+            if (terrainResult.RegionVertexList != null)
+                foreach (var kv in terrainResult.RegionVertexList)
+                    foreach (var v in kv.Value)
+                    {
+                        long q = RegionBuilder.PackQuantizedPos(v);
+                        if (!quantPosToWorld.ContainsKey(q)) quantPosToWorld[q] = v;
+                    }
+            if (pieceResult.RegionVertexList != null)
+                foreach (var kv in pieceResult.RegionVertexList)
+                    foreach (var v in kv.Value)
+                    {
+                        long q = RegionBuilder.PackQuantizedPos(v);
+                        if (!quantPosToWorld.ContainsKey(q)) quantPosToWorld[q] = v;
+                    }
 
             // Cross-kind adjacency: terrain region T and piece region P are
             // adjacent iff they share any quantized vertex position. Build
@@ -368,15 +434,23 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
                 foreach (var kv in terrainResult.RegionVertexPositions)
                 {
-                    var matched = new HashSet<string>();
+                    // Track the FIRST matching quantized vertex per piece
+                    // region so each CrossVert edge has a representative
+                    // bridge position for the diagnostic.
+                    var firstMatchPos = new Dictionary<string, long>();
                     foreach (long q in kv.Value)
                     {
                         if (!posToPieces.TryGetValue(q, out var list)) continue;
-                        foreach (var pid in list) matched.Add(pid);
+                        foreach (var pid in list)
+                            if (!firstMatchPos.ContainsKey(pid)) firstMatchPos[pid] = q;
                     }
-                    foreach (var pid in matched)
+                    foreach (var pair in firstMatchPos)
                     {
-                        AddEdgeBoth(kv.Key, pid);
+                        Vector3? repPos = quantPosToWorld.TryGetValue(pair.Value, out var wp)
+                            ? (Vector3?)wp : null;
+                        RecordEdge(kv.Key, pair.Key,
+                            ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.CrossVert,
+                            repPos, 0f);
                         crossKindEdges++;
                     }
                 }
@@ -414,6 +488,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                         // Precise vertex-to-vertex min distance.
                         var pVerts = pkv.Value;
                         bool matched = false;
+                        Vector3 matchedMidpoint = default;
+                        float matchedDistSq = 0f;
                         for (int i = 0; i < tVerts.Count && !matched; i++)
                         {
                             Vector3 ta = tVerts[i];
@@ -421,13 +497,21 @@ namespace ValheimVillages.TaskQueue.Handlers
                             {
                                 Vector3 pa = pVerts[j];
                                 float dx = ta.x - pa.x, dy = ta.y - pa.y, dz = ta.z - pa.z;
-                                if (dx * dx + dy * dy + dz * dz <= proxMaxDistSq)
-                                { matched = true; break; }
+                                float dSq = dx * dx + dy * dy + dz * dz;
+                                if (dSq <= proxMaxDistSq)
+                                {
+                                    matched = true;
+                                    matchedMidpoint = (ta + pa) * 0.5f;
+                                    matchedDistSq = dSq;
+                                    break;
+                                }
                             }
                         }
                         if (matched)
                         {
-                            AddEdgeBoth(tkv.Key, pkv.Key);
+                            RecordEdge(tkv.Key, pkv.Key,
+                                ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.CrossProx,
+                                matchedMidpoint, Mathf.Sqrt(matchedDistSq));
                             crossKindEdgesProx++;
                         }
                     }
@@ -488,11 +572,12 @@ namespace ValheimVillages.TaskQueue.Handlers
             }
 
             // Persist for vv_bfs_trace diagnostic.
-            ValheimVillages.Villager.AI.Navigation.BfsAdjacencyStore.Set(combinedAdj, seeds);
+            ValheimVillages.Villager.AI.Navigation.BfsAdjacencyStore.Set(combinedAdj, seeds, edgeMeta);
 
             Plugin.Log?.LogInfo(
                 $"[Region] CrossKind adjacency built: {combinedAdj.Count} nodes, " +
-                $"seeds={seeds.Count}, cross_vert={crossKindEdges}, cross_prox={crossKindEdgesProx} " +
+                $"seeds={seeds.Count}, edges={edgeMeta.Count}, " +
+                $"cross_vert={crossKindEdges}, cross_prox={crossKindEdgesProx} " +
                 $"(prune handled downstream by RubberBandPrune)");
         }
     }

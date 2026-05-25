@@ -88,6 +88,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.AppendLine($"--- RegionGraph at this point ---");
             ReportRegionGraph(sb, pos);
 
+            sb.AppendLine($"--- Pass 1 flood reachability at this cell ---");
+            ReportFloodReachability(sb, pos);
+
             string output = sb.ToString();
             Console.instance?.Print(output);
             Plugin.Log?.LogInfo(output);
@@ -529,6 +532,67 @@ namespace ValheimVillages.Villager.AI.Navigation
                     $"dist3d={closestDist:F2}m " +
                     $"(graph has {graph.RegionCount} regions, {graph.LinkCount} links)");
             }
+        }
+
+        private static void ReportFloodReachability(StringBuilder sb, Vector3 pos)
+        {
+            if (!RubberBandPrune.HasSnapshot ||
+                RubberBandPrune.LastOutsideCells == null ||
+                RubberBandPrune.LastXzMaxY == null ||
+                RubberBandPrune.LastCell <= 0f)
+            {
+                sb.AppendLine("  No RubberBandPrune snapshot — run vv_repartition first");
+                return;
+            }
+
+            float cell = RubberBandPrune.LastCell;
+            int mask = RubberBandPrune.LastPieceMask;
+            int gx = Mathf.FloorToInt(pos.x / cell);
+            int gz = Mathf.FloorToInt(pos.z / cell);
+            long selfKey = RubberBandPrune.DiagnoseXzKey(gx, gz);
+            bool selfOutside = RubberBandPrune.LastOutsideCells.Contains(selfKey);
+            bool selfPopulated = RubberBandPrune.LastXzMaxY.ContainsKey(selfKey);
+            float selfY = RubberBandPrune.DiagnoseCellY(gx, gz);
+            sb.AppendLine(
+                $"  cell gx={gx} gz={gz}  Y={selfY:F2}  " +
+                $"populated={(selfPopulated ? "yes" : "no")}  " +
+                $"in_outsideCells={(selfOutside ? "YES" : "NO")}");
+            sb.AppendLine(
+                $"  bake bounds gx=[{RubberBandPrune.LastGxMin}..{RubberBandPrune.LastGxMax}] " +
+                $"gz=[{RubberBandPrune.LastGzMin}..{RubberBandPrune.LastGzMax}] " +
+                $"cell={cell:F2}m  pieceMask=0x{mask:X}");
+
+            string[] cardLabels = { "E ", "W ", "N ", "S " };
+            int[] cardDx = { 1, -1, 0, 0 };
+            int[] cardDz = { 0, 0, 1, -1 };
+            string[] diagLabels = { "NE", "NW", "SE", "SW" };
+            int[] diagDx = { 1, -1, 1, -1 };
+            int[] diagDz = { 1, 1, -1, -1 };
+
+            sb.AppendLine("  4-connected neighbors (used by Pass 1):");
+            for (int i = 0; i < 4; i++)
+                ReportNeighbor(sb, cardLabels[i], gx, gz, cardDx[i], cardDz[i], cell, mask);
+            sb.AppendLine("  8-connected diagonal neighbors (NOT used by Pass 1 today):");
+            for (int i = 0; i < 4; i++)
+                ReportNeighbor(sb, diagLabels[i], gx, gz, diagDx[i], diagDz[i], cell, mask);
+        }
+
+        private static void ReportNeighbor(StringBuilder sb, string label,
+            int gx, int gz, int dx, int dz, float cell, int mask)
+        {
+            int ngx = gx + dx, ngz = gz + dz;
+            long nKey = RubberBandPrune.DiagnoseXzKey(ngx, ngz);
+            bool nOutside = RubberBandPrune.LastOutsideCells.Contains(nKey);
+            bool nPopulated = RubberBandPrune.LastXzMaxY.ContainsKey(nKey);
+            float yA = RubberBandPrune.DiagnoseCellY(gx, gz);
+            float yB = RubberBandPrune.DiagnoseCellY(ngx, ngz);
+            bool blocked = RubberBandPrune.Diagnose(gx, gz, ngx, ngz,
+                yA, yB, cell, mask, out string hits);
+            sb.AppendLine(
+                $"    {label} gx={ngx} gz={ngz}  Y={yB:F2}  " +
+                $"populated={(nPopulated ? "y" : "n")}  outside={(nOutside ? "YES" : "no ")}  " +
+                $"WallBlocks={(blocked ? "TRUE" : "false")}" +
+                (blocked ? $"  hits=[{hits}]" : ""));
         }
     }
 }

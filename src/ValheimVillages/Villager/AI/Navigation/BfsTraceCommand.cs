@@ -108,19 +108,65 @@ namespace ValheimVillages.Villager.AI.Navigation
                     perHopBounds[ct.RegionId] = nb;
                 }
             }
-            foreach (var rid in path)
+            for (int hi = 0; hi < path.Count; hi++)
             {
+                string rid = path[hi];
+                // Edge label describing how this hop connects to the previous
+                // one. First hop (the target region itself) has no incoming
+                // edge — label is empty there. Reads BfsAdjacencyStore.EdgeMeta
+                // populated at partition time by RecordCrossKindAdjacency.
+                string edgeLabel = "";
+                if (hi > 0)
+                {
+                    string prev = path[hi - 1];
+                    string ekey = BfsAdjacencyStore.EdgeKey(prev, rid);
+                    if (BfsAdjacencyStore.EdgeMeta.TryGetValue(ekey, out var meta))
+                        edgeLabel = "  via [" + FormatEdgeMeta(meta) + "]";
+                    else
+                        edgeLabel = "  via [?]"; // edge exists in adjacency but missing meta
+                }
                 if (!perHopBounds.TryGetValue(rid, out var b))
                 {
-                    Plugin.Log?.LogInfo($"[vv_bfs_trace]   {rid}: (no cached tris)");
+                    Plugin.Log?.LogInfo($"[vv_bfs_trace]   {rid}: (no cached tris){edgeLabel}");
                     continue;
                 }
                 Vector3 c = b.center, sz = b.size;
                 Plugin.Log?.LogInfo(
                     $"[vv_bfs_trace]   {rid}: centroid=({c.x:F1},{c.y:F1},{c.z:F1}) " +
                     $"size=({sz.x:F1}x{sz.y:F1}x{sz.z:F1}) " +
-                    $"y=[{b.min.y:F2}..{b.max.y:F2}]");
+                    $"y=[{b.min.y:F2}..{b.max.y:F2}]{edgeLabel}");
             }
+        }
+
+        /// <summary>
+        /// Formats a <see cref="BfsEdgeMeta"/> into a compact human-readable
+        /// label for the per-hop trace log. Multi-kind edges OR together
+        /// (e.g. "InPassEdge | CrossVert @ (-2264.5,37.6,1284.5)").
+        /// </summary>
+        private static string FormatEdgeMeta(BfsEdgeMeta meta)
+        {
+            var parts = new System.Collections.Generic.List<string>(3);
+            if ((meta.Kinds & BfsEdgeKind.InPassEdge) != 0)
+                parts.Add("InPassEdge");
+            if ((meta.Kinds & BfsEdgeKind.CrossVert) != 0)
+            {
+                if (meta.RepresentativePos.HasValue)
+                {
+                    var p = meta.RepresentativePos.Value;
+                    parts.Add($"CrossVert @ ({p.x:F1},{p.y:F1},{p.z:F1})");
+                }
+                else parts.Add("CrossVert");
+            }
+            if ((meta.Kinds & BfsEdgeKind.CrossProx) != 0)
+            {
+                if (meta.RepresentativePos.HasValue)
+                {
+                    var p = meta.RepresentativePos.Value;
+                    parts.Add($"CrossProx @ ({p.x:F1},{p.y:F1},{p.z:F1}) d={meta.ProxMinDist:F2}m");
+                }
+                else parts.Add($"CrossProx d={meta.ProxMinDist:F2}m");
+            }
+            return parts.Count == 0 ? "None" : string.Join(" | ", parts);
         }
     }
 }
