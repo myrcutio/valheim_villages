@@ -23,6 +23,16 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         /// <summary>Cross-kind: any vertex pair within 0.5m vertex-to-vertex.</summary>
         CrossProx = 4,
+
+        /// <summary>
+        ///     RubberBandPrune Pass 3 cell-level piece flood actually
+        ///     traversed from one region to another (4-neighbour XZ + MaxClimb).
+        ///     Ground-truth walkable adjacency; doesn't depend on vertex
+        ///     coincidence, so it covers piece-to-piece chains across
+        ///     separate prefab instances and piece-to-terrain bridges where
+        ///     vertices don't quantize identically.
+        /// </summary>
+        Pass3Step = 8,
     }
 
     /// <summary>

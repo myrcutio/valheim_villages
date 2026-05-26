@@ -121,10 +121,14 @@ namespace ValheimVillages.Villager.AI.Navigation
             List<RegionBuilder.CachedTriangle> triangles,
             List<Vector3> beds,
             float minX, float minZ, float maxX, float maxZ,
-            out HashSet<string> droppedRegionIds)
+            out HashSet<string> droppedRegionIds,
+            out List<(string fromRid, string toRid)> pass3DiscoveredEdgeList)
         {
             var dropped = new HashSet<string>();
             droppedRegionIds = dropped;
+            // Pre-assign the out so all early-exit paths satisfy the
+            // definite-assignment rule. Pass 3 will overwrite later if it runs.
+            pass3DiscoveredEdgeList = new List<(string fromRid, string toRid)>();
             var stats = new Stats();
             if (regionIds == null || regionIds.Count == 0) return stats;
             if (lookupGrid == null || lookupGrid.Count == 0) return stats;
@@ -381,6 +385,38 @@ namespace ValheimVillages.Villager.AI.Navigation
             const float MaxClimb = 1.0f;
             var pieceReachableKeys = new HashSet<long>();
             var pass3Seeds = 0;
+            // Discovered piece-step adjacency: edges proven walkable by the
+            // cell-level flood (piece A's cell → piece B's neighbour cell at
+            // compatible Y). These become formal RegionLinks below, replacing
+            // the earlier vertex-distance heuristics that misfired on piece
+            // prefabs whose vertices didn't quantize identically.
+            var pass3DiscoveredEdges = new HashSet<string>();
+            var pass3EdgePairs = new List<(string fromRid, string toRid)>();
+
+            string CanonicalPair(string a, string b) =>
+                string.CompareOrdinal(a, b) < 0 ? a + "|" + b : b + "|" + a;
+
+            void RecordPass3Edge(string fromRid, string toRid)
+            {
+                if (string.IsNullOrEmpty(fromRid) || string.IsNullOrEmpty(toRid)) return;
+                if (fromRid == toRid) return;
+                var key = CanonicalPair(fromRid, toRid);
+                if (pass3DiscoveredEdges.Add(key))
+                    pass3EdgePairs.Add((fromRid, toRid));
+            }
+
+            // Helper: terrain region at a given cell XZ (any height bucket).
+            // Returns the first lookup-key-resolved rid — sufficient for
+            // recording adjacency since multiple terrain regions at the same
+            // cell are coplanar-merged upstream.
+            string TerrainRegionAtCell(long xz)
+            {
+                if (!xzToLookupKeysTerrain.TryGetValue(xz, out var keys)) return null;
+                foreach (var lookupKey in keys)
+                    if (lookupGrid.TryGetValue(lookupKey, out var trid)) return trid;
+                return null;
+            }
+
             if (xzToLookupKeysPiece.Count > 0 && bedReachableCells.Count > 0
                                               && ZoneSystem.instance != null)
             {
@@ -393,29 +429,26 @@ namespace ValheimVillages.Villager.AI.Navigation
                 //   - Piece visits (piece-step) skip the XZ gate so a column
                 //     with stacked pieces can be re-entered at multiple
                 //     altitudes; pieceReachableKeys dedups per lookup key.
-                var pieceQueue = new Queue<(long xz, float y, bool isTerrain)>();
+                //
+                // sourceRid threads the most recently added piece's region id
+                // through piece-step enqueues so the next piece-step can
+                // record (sourceRid, newRid) as a discovered adjacency.
+                // Terrain visits carry null sourceRid — when piece-step fires
+                // from a terrain visit, we look up the terrain region at curXz
+                // and record (terrainRid, newRid) as a piece↔terrain edge.
+                var pieceQueue = new Queue<(long xz, float y, bool isTerrain, string sourceRid)>();
                 foreach (var xz in bedReachableCells)
                 {
                     UnpackXz(xz, out var gx, out var gz);
                     var wx = gx * cell + half;
                     var wz = gz * cell + half;
                     var ty = ZoneSystem.instance.GetGroundHeight(new Vector3(wx, 0f, wz));
-                    // Do NOT pre-mark visitedTerrainXz here. Marking on
-                    // seed-enqueue was the dead-code bug — it pre-flagged
-                    // every bed-reachable XZ so the bridge step (a) below
-                    // could never fire from a piece visit. Dedup at dequeue
-                    // instead. (bedReachableCells is a HashSet so seeds are
-                    // already unique; the queue is safe.)
-                    pieceQueue.Enqueue((xz, ty, true));
+                    pieceQueue.Enqueue((xz, ty, true, null));
                 }
 
                 while (pieceQueue.Count > 0)
                 {
-                    var (curXz, curY, isTerrain) = pieceQueue.Dequeue();
-                    // Terrain-altitude dedup: each bed-reachable XZ runs its
-                    // 4-neighbour scan at most once at ground height. Piece
-                    // visits bypass this gate — pieceReachableKeys already
-                    // prevents redundant per-piece work.
+                    var (curXz, curY, isTerrain, sourceRid) = pieceQueue.Dequeue();
                     if (isTerrain && !visitedTerrainXz.Add(curXz)) continue;
                     UnpackXz(curXz, out var gx, out var gz);
                     for (var d = 0; d < 4; d++)
@@ -424,18 +457,16 @@ namespace ValheimVillages.Villager.AI.Navigation
                         var nXz = XzKey(ngx, ngz);
                         // (a) Terrain bridge: enqueue as a terrain visit at the
                         //     neighbour's ground height if it's bed-reachable and
-                        //     the climb from curY fits within MaxClimb. Fires
-                        //     from both terrain visits AND piece visits — the
-                        //     latter is "step off this piece onto the adjacent
-                        //     ground". The pre-check against visitedTerrainXz is
-                        //     an optimization; the authoritative dedup is the
-                        //     dequeue gate above.
+                        //     the climb from curY fits within MaxClimb. Terrain
+                        //     bridges propagate sourceRid=null (no piece adjacency
+                        //     created by terrain-walk bridges; they're pure
+                        //     connectivity).
                         if (bedReachableCells.Contains(nXz) && !visitedTerrainXz.Contains(nXz))
                         {
                             var nwx = ngx * cell + half;
                             var nwz = ngz * cell + half;
                             var tnY = ZoneSystem.instance.GetGroundHeight(new Vector3(nwx, 0f, nwz));
-                            if (Mathf.Abs(tnY - curY) <= MaxClimb) pieceQueue.Enqueue((nXz, tnY, true));
+                            if (Mathf.Abs(tnY - curY) <= MaxClimb) pieceQueue.Enqueue((nXz, tnY, true, null));
                         }
 
                         // (b) Piece step: walk every piece at neighbour XZ within
@@ -460,8 +491,15 @@ namespace ValheimVillages.Villager.AI.Navigation
                                 // check sidesteps that ambiguity entirely.
                                 if (outsideCells.Contains(nXz)) continue;
                                 pieceReachableKeys.Add(pKey);
-                                pieceQueue.Enqueue((nXz, c.y, false));
+                                pieceQueue.Enqueue((nXz, c.y, false, rid));
                                 pass3Seeds++;
+
+                                // Record discovered adjacency. Source is the
+                                // previously-added piece (sourceRid) or, for
+                                // initial-seed / terrain-bridge visits, the
+                                // terrain region at the current cell.
+                                var fromRid = sourceRid ?? TerrainRegionAtCell(curXz);
+                                RecordPass3Edge(fromRid, rid);
                             }
                     }
                 }
@@ -469,6 +507,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             stats.Pass3Seeds = pass3Seeds;
             stats.BedReachablePieceKeys = pieceReachableKeys.Count;
+            pass3DiscoveredEdgeList = pass3EdgePairs;
 
             // --- Cell-level apply ---
             // Static_solid sweep runs first so its tris are counted under
@@ -602,6 +641,47 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             stats.RegionsDropped = dropped.Count;
+
+            // --- Apply Pass 3 discovered adjacency as formal RegionLinks ---
+            // The cell-level piece flood above is the ground truth for
+            // "these two regions are walkable-adjacent" — it actually
+            // traversed the chain. Build RegionLinks from those discovered
+            // edges so the formal RegionGraph reflects the same connectivity
+            // Pass 3 used to populate pieceReachableKeys.
+            //
+            // Runs AFTER the region cascade so endpoints are guaranteed to
+            // be present in the surviving graph (any pair where one side
+            // got dropped is filtered out). Dedup against existing links
+            // (the RegionBuilder edge-based pass may have already added
+            // some piece-piece edges and the cross-kind paths may have
+            // added piece-terrain edges).
+            if (links != null && pass3EdgePairs.Count > 0)
+            {
+                var existingLinkPairs = new HashSet<string>(links.Count);
+                foreach (var link in links)
+                    existingLinkPairs.Add(CanonicalPair(link.FromRegionId, link.ToRegionId));
+
+                var pass3LinksAdded = 0;
+                foreach (var (fromRid, toRid) in pass3EdgePairs)
+                {
+                    if (dropped.Contains(fromRid) || dropped.Contains(toRid)) continue;
+                    var key = CanonicalPair(fromRid, toRid);
+                    if (!existingLinkPairs.Add(key)) continue;
+                    if (centroids == null) continue;
+                    if (!centroids.TryGetValue(fromRid, out var fromC)) continue;
+                    if (!centroids.TryGetValue(toRid, out var toC)) continue;
+                    links.Add(new RegionLink
+                    {
+                        FromRegionId = fromRid,
+                        ToRegionId = toRid,
+                        LinkType = RegionLinkType.Slope,
+                        PositionStart = fromC,
+                        PositionEnd = toC,
+                    });
+                    pass3LinksAdded++;
+                }
+                stats.Pass3LinksAdded = pass3LinksAdded;
+            }
 
             // --- Snapshot for diagnostics ---
             // Combine terrain + piece xzMaxY into a single map for vv_probe;
@@ -825,6 +905,8 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             /// <summary>Piece lookup keys dropped by Pass 3 (not reached by the piece flood).</summary>
             public int Pass3PieceKeysDropped;
+            /// <summary>RegionLinks added from Pass 3's discovered piece-step adjacency (cell-level flood is more reliable than vertex-distance heuristics for proving walkable adjacency).</summary>
+            public int Pass3LinksAdded;
 
             public int RegionsDropped;
             public int PerimeterSeeds;

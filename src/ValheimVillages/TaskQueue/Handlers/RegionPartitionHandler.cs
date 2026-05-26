@@ -146,7 +146,14 @@ namespace ValheimVillages.TaskQueue.Handlers
             // legitimate bridges between terrain regions; without this,
             // terrain pieced over by walkable floor pieces appears
             // disconnected and gets falsely pruned.
-            RecordCrossKindAdjacency(terrainResult, pieceResult, beds);
+            //
+            // Captured here (not persisted) so Pass 3's discovered piece-
+            // step edges can be merged in before the BfsAdjacencyStore
+            // gets its final snapshot — otherwise vv_bfs_trace would walk
+            // a graph missing every piece-to-piece edge discovered by the
+            // cell-level flood (and the trace would show "no path" for
+            // any region only reachable via the piece chain).
+            var crossKindAdj = BuildCrossKindAdjacency(terrainResult, pieceResult, beds);
 
             var combinedRegionIds = new HashSet<string>(terrainResult.RegionIds);
             combinedRegionIds.UnionWith(pieceResult.RegionIds);
@@ -186,7 +193,57 @@ namespace ValheimVillages.TaskQueue.Handlers
                 combinedBoundary, combinedLinks, kindMap, combinedTriangles,
                 beds,
                 minX, minZ, maxX, maxZ,
-                out var droppedRubberBand);
+                out var droppedRubberBand,
+                out var pass3DiscoveredEdges);
+
+            // Merge Pass 3 discovered edges into the cross-kind adjacency
+            // (if it was built) and publish the merged graph to
+            // BfsAdjacencyStore for vv_bfs_trace. Pass 3 records each
+            // piece-step transition during its cell-level flood — ground
+            // truth for walkable adjacency, more reliable than vertex-
+            // proximity heuristics. We add ONLY edges where both endpoints
+            // survived the region cascade (others would point at dropped
+            // nodes the trace can't render).
+            if (crossKindAdj.HasValue)
+            {
+                var (combinedAdj, seeds, edgeMeta) = crossKindAdj.Value;
+                var pass3EdgesMerged = 0;
+                foreach (var (fromRid, toRid) in pass3DiscoveredEdges)
+                {
+                    if (droppedRubberBand.Contains(fromRid)
+                        || droppedRubberBand.Contains(toRid)) continue;
+                    if (!combinedAdj.TryGetValue(fromRid, out var fromAdj))
+                    {
+                        fromAdj = new HashSet<string>();
+                        combinedAdj[fromRid] = fromAdj;
+                    }
+                    if (!combinedAdj.TryGetValue(toRid, out var toAdj))
+                    {
+                        toAdj = new HashSet<string>();
+                        combinedAdj[toRid] = toAdj;
+                    }
+                    fromAdj.Add(toRid);
+                    toAdj.Add(fromRid);
+
+                    var key = BfsAdjacencyStore.EdgeKey(fromRid, toRid);
+                    if (edgeMeta.TryGetValue(key, out var meta))
+                    {
+                        meta.Kinds |= BfsEdgeKind.Pass3Step;
+                        edgeMeta[key] = meta;
+                    }
+                    else
+                    {
+                        edgeMeta[key] = new BfsEdgeMeta { Kinds = BfsEdgeKind.Pass3Step };
+                        pass3EdgesMerged++;
+                    }
+                }
+                BfsAdjacencyStore.Set(combinedAdj, seeds, edgeMeta);
+                if (pass3EdgesMerged > 0)
+                    DebugLog.Event("Region", "bfs_store_merged_pass3",
+                        ("new_edges", pass3EdgesMerged),
+                        ("total_pass3_pairs", pass3DiscoveredEdges.Count));
+            }
+
             DebugLog.Event("RubberBandPrune", "applied",
                 ("outside_terrain_cells", rbStats.OutsideTerrainCells),
                 ("pass2_seeds", rbStats.Pass2Seeds),
@@ -194,6 +251,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("pass3_seeds", rbStats.Pass3Seeds),
                 ("bed_reachable_piece_keys", rbStats.BedReachablePieceKeys),
                 ("pass3_piece_keys_dropped", rbStats.Pass3PieceKeysDropped),
+                ("pass3_links_added", rbStats.Pass3LinksAdded),
                 ("lookup_cells_dropped", rbStats.LookupCellsDropped),
                 ("triangles_dropped", rbStats.TrianglesDropped),
                 ("static_solid_dropped", rbStats.StaticSolidTrianglesDropped),
@@ -320,12 +378,23 @@ namespace ValheimVillages.TaskQueue.Handlers
         ///     regions; downstream <see cref="RubberBandPrune" /> handles cell-grid
         ///     reachability via the outermost wall layer.
         /// </summary>
-        private static void RecordCrossKindAdjacency(
+        /// <summary>
+        ///     Builds the cross-kind adjacency graph (BFS nodes / edges /
+        ///     seeds) from per-pass results. Returns the tuple instead of
+        ///     persisting to <see cref="BfsAdjacencyStore" /> directly so
+        ///     the caller can merge in Pass 3's discovered piece-step
+        ///     edges before publishing. Returns null on early abort
+        ///     conditions (no terrain regions, no bed-mapped seeds).
+        /// </summary>
+        private static (Dictionary<string, HashSet<string>> adjacency,
+                        HashSet<string> seeds,
+                        Dictionary<string, BfsEdgeMeta> edgeMeta)?
+            BuildCrossKindAdjacency(
             RegionBuilder.BuildResult terrainResult,
             RegionBuilder.BuildResult pieceResult,
             List<Vector3> beds)
         {
-            if (terrainResult.RegionIds == null || terrainResult.RegionIds.Count == 0) return;
+            if (terrainResult.RegionIds == null || terrainResult.RegionIds.Count == 0) return null;
 
             // --- Build combined adjacency ---
             var combinedAdj = new Dictionary<string, HashSet<string>>();
@@ -570,17 +639,18 @@ namespace ValheimVillages.TaskQueue.Handlers
                     "[Region] CrossKind adjacency aborted: no bed mapped to any terrain region " +
                     $"(beds={bedCount}, terrain_regions={regionCount}). " +
                     "Refusing to seed BFS from a synthetic largest-region fallback; vv_bfs_trace will report no data.");
-                return;
+                return null;
             }
 
-            // Persist for vv_bfs_trace diagnostic.
-            BfsAdjacencyStore.Set(combinedAdj, seeds, edgeMeta);
-
+            // Defer persistence to the caller — they merge Pass 3's
+            // discovered piece-step edges in first, then call
+            // BfsAdjacencyStore.Set once with the merged adjacency.
             Plugin.Log?.LogInfo(
                 $"[Region] CrossKind adjacency built: {combinedAdj.Count} nodes, " +
                 $"seeds={seeds.Count}, edges={edgeMeta.Count}, " +
                 $"cross_vert={crossKindEdges}, cross_prox={crossKindEdgesProx} " +
-                "(prune handled downstream by RubberBandPrune)");
+                "(piece-step edges added downstream by RubberBandPrune)");
+            return (combinedAdj, seeds, edgeMeta);
         }
     }
 }

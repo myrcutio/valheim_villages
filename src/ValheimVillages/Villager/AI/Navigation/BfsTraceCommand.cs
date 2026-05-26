@@ -185,6 +185,9 @@ namespace ValheimVillages.Villager.AI.Navigation
                 }
             }
 
+            if ((meta.Kinds & BfsEdgeKind.Pass3Step) != 0)
+                parts.Add("Pass3Step");
+
             return parts.Count == 0 ? "None" : string.Join(" | ", parts);
         }
     }

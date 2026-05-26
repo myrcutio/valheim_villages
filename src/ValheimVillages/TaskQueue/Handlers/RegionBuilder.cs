@@ -550,69 +550,16 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
             }
 
-            // --- Piece-to-piece position-based adjacency ---
-            // Piece prefabs that snap to the same grid points share vertex
-            // *positions* but have separate vertex *index* arrays (each
-            // prefab is its own mesh). The index-based edgeToTris adjacency
-            // above never connects them — a stair piece and the floor at
-            // its top will have triangles whose vertex positions coincide
-            // but whose indices don't, so they're index-disjoint.
-            //
-            // Result: piece regions like balcony floors / rampart walks /
-            // wall-top decks (each a separate prefab instance) end up with
-            // `links=0` in the formal RegionGraph and unreachable in
-            // `vv_bfs_trace`, even though they're physically contiguous
-            // with adjacent stair/floor pieces.
-            //
-            // Fix: augment with position-based adjacency. Two piece regions
-            // sharing any quantized vertex position (25cm via PackQuantizedPos
-            // — same bucket used by RecordCrossKindAdjacency's CrossVert)
-            // are walkable-adjacent. Cheap: O(V) bucket scan over the
-            // already-built RegionVertexPositions, no extra Physics calls.
-            //
-            // Terrain doesn't need this: the heightmap is a single mesh, so
-            // index-based adjacency already captures all terrain-to-terrain
-            // contacts. Cross-kind (terrain↔piece) is handled separately by
-            // RegionPartitionHandler.RecordCrossKindAdjacency.
-            if (kind == SurfaceKind.Piece)
-            {
-                var quantToPieceRegions = new Dictionary<long, HashSet<string>>();
-                foreach (var kv in result.RegionVertexPositions)
-                foreach (var q in kv.Value)
-                {
-                    if (!quantToPieceRegions.TryGetValue(q, out var set))
-                    {
-                        set = new HashSet<string>();
-                        quantToPieceRegions[q] = set;
-                    }
-
-                    set.Add(kv.Key);
-                }
-
-                var piecePosAdjEdges = 0;
-                foreach (var kv in quantToPieceRegions)
-                {
-                    if (kv.Value.Count < 2) continue;
-                    var rlist = new List<string>(kv.Value);
-                    for (var i = 0; i < rlist.Count; i++)
-                    for (var j = i + 1; j < rlist.Count; j++)
-                    {
-                        string ra = rlist[i], rb = rlist[j];
-                        var added = false;
-                        if (result.Adjacency.TryGetValue(ra, out var na))
-                            added |= na.Add(rb);
-                        if (result.Adjacency.TryGetValue(rb, out var nb))
-                            nb.Add(ra);
-                        if (added) piecePosAdjEdges++;
-                    }
-                }
-
-                if (piecePosAdjEdges > 0)
-                    DebugLog.Event("Region", "piece_position_adjacency",
-                        ("edges_added", piecePosAdjEdges));
-            }
-
             // --- Cross-region links from shared edges ---
+            // NOTE: piece-to-piece adjacency between separate prefab
+            // instances (e.g., a stair piece and the floor at its top)
+            // is NOT discovered here — those have separate vertex index
+            // arrays, so the index-based edgeToTris pass never connects
+            // them. That gap is filled later by RubberBandPrune Pass 3,
+            // which records cell-level piece-step adjacency from its
+            // BFS as it traverses the chain (geometric ground truth,
+            // not vertex-distance heuristics). Don't add a position-
+            // proximity hack here — Pass 3 already proves adjacency.
             var seenPairs = new HashSet<string>();
             foreach (var kv in edgeToTris)
             {
