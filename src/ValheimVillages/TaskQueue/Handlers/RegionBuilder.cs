@@ -573,14 +573,24 @@ namespace ValheimVillages.TaskQueue.Handlers
                     var pairKey = string.CompareOrdinal(ra, rb) < 0 ? $"{ra}|{rb}" : $"{rb}|{ra}";
                     if (!seenPairs.Add(pairKey)) continue;
 
-                    int ev1 = (int)(kv.Key >> 32), ev2 = (int)(kv.Key & 0xFFFFFFFFL);
-                    var edgeMid = (verts[ev1] + verts[ev2]) * 0.5f;
+                    // Anchor the link at the TRIANGLE centroids that share
+                    // this edge, NOT the region centroids. Region centroids
+                    // can sit many metres from where the regions actually
+                    // touch (especially after MergeCoplanarRegions creates
+                    // big spread-out regions), which produced long visible
+                    // "purple stride" NavMeshLinks crossing half the map.
+                    // The two triangles' centroids sit on opposite sides
+                    // of the shared edge and are short by construction.
+                    int va0 = idx[tris[i] * 3], va1 = idx[tris[i] * 3 + 1], va2 = idx[tris[i] * 3 + 2];
+                    int vb0 = idx[tris[j] * 3], vb1 = idx[tris[j] * 3 + 1], vb2 = idx[tris[j] * 3 + 2];
+                    var triACentroid = (verts[va0] + verts[va1] + verts[va2]) / 3f;
+                    var triBCentroid = (verts[vb0] + verts[vb1] + verts[vb2]) / 3f;
                     result.Links.Add(new RegionLink
                     {
                         FromRegionId = ra, ToRegionId = rb,
                         LinkType = RegionLinkType.Slope,
-                        PositionStart = result.Centroids[ra],
-                        PositionEnd = result.Centroids[rb],
+                        PositionStart = triACentroid,
+                        PositionEnd = triBCentroid,
                     });
                 }
             }

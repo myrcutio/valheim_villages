@@ -120,6 +120,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("terrain_sources", bakeResult.TerrainSourceCount),
                 ("piece_sources", bakeResult.PieceSourceCount),
                 ("doors_blocked", bakeResult.DoorsBlocked),
+                ("beds_blocked", bakeResult.BedsBlocked),
+                ("outside_cells_blocked", bakeResult.OutsideCellsBlocked),
                 ("duration_ms", bakeResult.DurationMs),
                 ("terrain_ms", bakeResult.TerrainDurationMs),
                 ("piece_ms", bakeResult.PieceDurationMs),
@@ -208,7 +210,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             {
                 var (combinedAdj, seeds, edgeMeta) = crossKindAdj.Value;
                 var pass3EdgesMerged = 0;
-                foreach (var (fromRid, toRid) in pass3DiscoveredEdges)
+                foreach (var (fromRid, toRid, _, _) in pass3DiscoveredEdges)
                 {
                     if (droppedRubberBand.Contains(fromRid)
                         || droppedRubberBand.Contains(toRid)) continue;
@@ -252,6 +254,12 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("bed_reachable_piece_keys", rbStats.BedReachablePieceKeys),
                 ("pass3_piece_keys_dropped", rbStats.Pass3PieceKeysDropped),
                 ("pass3_links_added", rbStats.Pass3LinksAdded),
+                ("pass4_verts_snapped", rbStats.Pass4BoundaryVertsSnapped),
+                ("pass4_snap_misses", rbStats.Pass4SnapMisses),
+                ("pass4_links_snapped", rbStats.Pass4LinksSnapped),
+                ("pass5_chains", rbStats.Pass5ChainsConsolidated),
+                ("pass5_consumed", rbStats.Pass5RegionsConsumed),
+                ("pass5_links_removed", rbStats.Pass5LinksRemoved),
                 ("lookup_cells_dropped", rbStats.LookupCellsDropped),
                 ("triangles_dropped", rbStats.TrianglesDropped),
                 ("static_solid_dropped", rbStats.StaticSolidTrianglesDropped),
@@ -265,6 +273,24 @@ namespace ValheimVillages.TaskQueue.Handlers
             var graph = RegionGraph.GetOrCreate(villageKey);
             graph.SetGraph(combinedRegionIds, combinedLinks,
                 combinedCentroids, combinedLookup, combinedBoundary, kindMap);
+
+            // (NavMesh carving for outside-the-wall cells is now done at
+            // bake time by NavMeshBakeManager.BakeVillage via phantom
+            // NotWalkable box sources — see ComputeOutsideCellsForBake +
+            // AddOutsideCellBlockers. The earlier post-prune HNA-only
+            // rebake is gone; the single bake produces a NavMesh that
+            // already excludes outside surfaces and carves obstacles.)
+
+            // Clear stale NavMeshLinks from the previous partition's
+            // RegionGraph — region IDs renumber on every rebuild, so
+            // links pointing at the old centroids are no longer valid
+            // anchors. RemoveAllLinks also resets the PlaceLinks
+            // cooldown so the next PlaceLinks call (triggered by the
+            // first villager that needs pathing) repopulates from this
+            // fresh RegionGraph immediately. Without this cleanup,
+            // links accumulated across repartitions and pointed at
+            // stale positions — masking the new graph's connectivity.
+            NavMeshLinkPlacer.RemoveAllLinks();
 
             DebugLog.Capture("repartition");
 

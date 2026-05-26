@@ -4,6 +4,7 @@ using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.AI;
 using ValheimVillages.Attributes;
+using ValheimVillages.TaskQueue.Handlers;
 using ValheimVillages.Villager.AI.Pathfinding;
 using Object = UnityEngine.Object;
 
@@ -165,9 +166,26 @@ namespace ValheimVillages.Villager.AI.Navigation
             var phantomDoors = AddDoorBlockers(pieceSources, bounds);
             result.DoorsBlocked = phantomDoors;
 
+            var phantomBeds = AddBedBlockers(pieceSources, bounds);
+            result.BedsBlocked = phantomBeds;
+
+            // Compute outside cells via a pre-bake perimeter flood (uses
+            // Physics.CheckBox on the piece layer + ZoneSystem.GetGroundHeight,
+            // doesn't require any NavMesh data), then append phantom
+            // NotWalkable box sources covering each outside cell. The bake's
+            // voxelizer marks those cells as unwalkable, so the agent NavMesh
+            // excludes outside-the-wall surface up front — no need for a
+            // second HNA-only rebake afterwards. The bake also keeps the
+            // real piece colliders, so wall corners and small interior
+            // obstacles (chairs, decorations) get carved properly.
+            var outsideCells = ValheimVillages.Villager.AI.Navigation
+                .RubberBandPrune.ComputeOutsideCellsForBake(bounds);
+            var phantomOutside = AddOutsideCellBlockers(pieceSources, outsideCells, bounds);
+            result.OutsideCellsBlocked = phantomOutside;
+
             s_pieceSources.Clear();
             s_pieceSources.AddRange(pieceSources);
-            s_piecePhantomCount = phantomDoors;
+            s_piecePhantomCount = phantomDoors + phantomBeds + phantomOutside;
             result.PieceSourceCount = pieceSources.Count;
 
             if (pieceSources.Count > 0)
@@ -200,6 +218,136 @@ namespace ValheimVillages.Villager.AI.Navigation
         public static IReadOnlyList<NavMeshBuildSource> GetSources(SurfaceKind kind)
         {
             return kind == SurfaceKind.Terrain ? (IReadOnlyList<NavMeshBuildSource>)s_terrainSources : s_pieceSources;
+        }
+
+        /// <summary>
+        ///     Result of a <see cref="RebakeFromHnaTriangles" /> call.
+        /// </summary>
+        public struct HnaRebakeResult
+        {
+            public bool Success;
+            public int TriangleCount;
+            public int VertexCount;
+            public float DurationMs;
+            public string FailureReason;
+        }
+
+        /// <summary>
+        ///     REPLACE the slot-31 agent NavMesh with one baked solely from
+        ///     the HNA-accepted triangle set. Call this after
+        ///     <see cref="RubberBandPrune.Apply" /> finishes and
+        ///     <see cref="RegionBuilder.CachedTriangles" /> reflects the
+        ///     final inside-village geometry.
+        ///
+        ///     Removes the existing terrain + piece bakes (they include
+        ///     outside-the-wall walkable surface that the prune excluded
+        ///     but the bake doesn't know about) and replaces them with a
+        ///     single NavMesh built from the HNA tris only.
+        ///
+        ///     Why: <c>NavMesh.SamplePosition</c> and Valheim's
+        ///     <c>Pathfinding.GetPath</c> query whatever NavMesh data is
+        ///     registered for the agent type. If the bake covers the open
+        ///     terrain around the village, link endpoint snaps can land
+        ///     outside the perimeter and path queries can route through
+        ///     non-village surface — both observed in practice. Carving
+        ///     the bake down to HNA-only surfaces makes the agent NavMesh
+        ///     and the HNA RegionGraph represent the same walkable set.
+        ///
+        ///     The bake is voxelized at slot-31's voxel size (~0.166m), so
+        ///     adjacent HNA triangles whose vertices are sub-voxel apart
+        ///     should remain connected. Pass 4 border snapping is what
+        ///     keeps this true; if snap misses leave gaps, the rebaked
+        ///     NavMesh will reflect those gaps as real discontinuities
+        ///     (then NavMeshLinkPlacer fills them with explicit links).
+        /// </summary>
+        internal static HnaRebakeResult RebakeFromHnaTriangles(
+            IReadOnlyList<RegionBuilder.CachedTriangle> triangles,
+            Bounds bounds)
+        {
+            var result = new HnaRebakeResult();
+            var sw = Stopwatch.StartNew();
+
+            if (!VillagerAgentType.IsRegistered)
+            {
+                result.FailureReason = "agent_not_registered";
+                sw.Stop();
+                result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+                return result;
+            }
+            if (triangles == null || triangles.Count == 0)
+            {
+                result.FailureReason = "no_triangles";
+                sw.Stop();
+                result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+                return result;
+            }
+
+            // Pack HNA triangles into a single Mesh. Each cached triangle
+            // contributes 3 unique vertices (no dedup — Unity's voxelizer
+            // handles the redundancy and the bake's voxel size is much
+            // larger than typical vertex coincidence, so dedup wouldn't
+            // change the output).
+            var triCount = triangles.Count;
+            var verts = new Vector3[triCount * 3];
+            var idx = new int[triCount * 3];
+            for (var i = 0; i < triCount; i++)
+            {
+                var t = triangles[i];
+                var i0 = i * 3;
+                verts[i0] = t.V0;
+                verts[i0 + 1] = t.V1;
+                verts[i0 + 2] = t.V2;
+                idx[i0] = i0;
+                idx[i0 + 1] = i0 + 1;
+                idx[i0 + 2] = i0 + 2;
+            }
+
+            var mesh = new Mesh
+            {
+                indexFormat = triCount * 3 > ushort.MaxValue
+                    ? UnityEngine.Rendering.IndexFormat.UInt32
+                    : UnityEngine.Rendering.IndexFormat.UInt16,
+                vertices = verts,
+                triangles = idx,
+            };
+            mesh.RecalculateBounds();
+
+            var sources = new List<NavMeshBuildSource>(1)
+            {
+                new NavMeshBuildSource
+                {
+                    shape = NavMeshBuildSourceShape.Mesh,
+                    sourceObject = mesh,
+                    transform = Matrix4x4.identity,
+                    area = 0, // Walkable
+                },
+            };
+
+            var settings = NavMesh.GetSettingsByID(VillagerAgentType.UnityAgentTypeID);
+            var data = NavMeshBuilder.BuildNavMeshData(
+                settings, sources, bounds, Vector3.zero, Quaternion.identity);
+            if (data == null)
+            {
+                Object.DestroyImmediate(mesh);
+                result.FailureReason = "build_returned_null";
+                sw.Stop();
+                result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+                return result;
+            }
+
+            // REPLACE the previous bakes. Remove terrain + piece (they
+            // included outside-the-wall surface) so SamplePosition and
+            // Pathfinding queries see ONLY the HNA-derived navmesh.
+            Holder.RemoveTerrain();
+            Holder.RemovePiece();
+            Holder.SetHna(NavMesh.AddNavMeshData(data));
+
+            result.Success = true;
+            result.TriangleCount = triCount;
+            result.VertexCount = verts.Length;
+            sw.Stop();
+            result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+            return result;
         }
 
         /// <summary>
@@ -425,6 +573,101 @@ namespace ValheimVillages.Villager.AI.Navigation
             return added;
         }
 
+        /// <summary>
+        ///     Append a phantom <c>NotWalkable</c> box source for each
+        ///     outside cell computed by the pre-bake perimeter flood. The
+        ///     box is a 1m × bake-height × 1m column centered on the cell —
+        ///     tall enough to carve the cell out of the agent NavMesh at
+        ///     every altitude (terrain ground, piece tops, rampart tops),
+        ///     so the bake doesn't produce walkable surface anywhere in an
+        ///     outside cell.
+        ///
+        ///     Effect: NavMesh.SamplePosition snaps inside the village
+        ///     stay inside; Pathfinding.GetPath queries can't route through
+        ///     outside-the-wall surfaces; NavMeshLink endpoints can't snap
+        ///     outside. The HNA RegionGraph and the agent NavMesh end up
+        ///     representing the same walkable set in a single bake.
+        ///
+        ///     area=1 (NotWalkable) — same approach as AddDoorBlockers.
+        /// </summary>
+        /// <summary>
+        ///     Append a phantom <c>NotWalkable</c> box source over every
+        ///     <c>Bed</c> in bake bounds. Without this, the bake produces
+        ///     walkable mesh on the bed's flat top face: villagers
+        ///     pathfinding past a bed can route OVER it (treating the bed
+        ///     top as a shortcut, then getting stuck because the bed's
+        ///     height exceeds the agent's climb), and the agent's
+        ///     CapsuleCollider catches on the bed's frame when trying to
+        ///     pass at floor level.
+        ///
+        ///     The blocker is generously sized (2.5m × 1.2m × 1.5m, raised
+        ///     0.6m off the bed pivot) so it covers the bed's footprint
+        ///     plus a small clearance margin that pushes the agent's
+        ///     navmesh further away from the bed's collider. Beds remain
+        ///     valid Pass-2 seed POSITIONS — Pass 2 uses GetGroundHeight,
+        ///     not the navmesh, so the seed cell's "walkability" in the
+        ///     agent navmesh doesn't matter for seeding. (Villagers that
+        ///     need to physically reach the bed for sleep can still get
+        ///     close — the blocker is above floor, so the floor next to
+        ///     the bed remains walkable.)
+        /// </summary>
+        private static int AddBedBlockers(List<NavMeshBuildSource> sources, Bounds bounds)
+        {
+            var added = 0;
+            var allBeds = Object.FindObjectsByType<Bed>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var bed in allBeds)
+            {
+                if (bed == null || bed.transform == null) continue;
+                if (!bounds.Contains(bed.transform.position)) continue;
+
+                var transform = Matrix4x4.TRS(
+                    bed.transform.position + Vector3.up * 0.6f,
+                    bed.transform.rotation,
+                    Vector3.one);
+                sources.Add(new NavMeshBuildSource
+                {
+                    shape = NavMeshBuildSourceShape.Box,
+                    size = new Vector3(2.5f, 1.2f, 1.5f),
+                    transform = transform,
+                    area = 1, // NotWalkable
+                });
+                added++;
+            }
+            return added;
+        }
+
+        private static int AddOutsideCellBlockers(
+            List<NavMeshBuildSource> sources,
+            HashSet<long> outsideCells,
+            Bounds bounds)
+        {
+            if (outsideCells == null || outsideCells.Count == 0) return 0;
+            var cell = ValheimVillages.Villager.AI.Navigation.RegionGraph.LookupCellSize;
+            var half = cell * 0.5f;
+            var ySize = bounds.size.y + 4f;
+            var yCenter = bounds.center.y;
+            var boxSize = new Vector3(cell, ySize, cell);
+            var added = 0;
+            foreach (var key in outsideCells)
+            {
+                ValheimVillages.Villager.AI.Navigation
+                    .RubberBandPrune.UnpackOutsideCellKey(key, out var gx, out var gz);
+                var transform = Matrix4x4.TRS(
+                    new Vector3(gx * cell + half, yCenter, gz * cell + half),
+                    Quaternion.identity, Vector3.one);
+                sources.Add(new NavMeshBuildSource
+                {
+                    shape = NavMeshBuildSourceShape.Box,
+                    size = boxSize,
+                    transform = transform,
+                    area = 1, // NotWalkable
+                });
+                added++;
+            }
+            return added;
+        }
+
         private static void AppendMesh(List<Vector3> verts, List<int> idx, List<int> triLayers, int layer,
             Matrix4x4 t, Mesh mesh,
             float minX, float minZ, float maxX, float maxZ)
@@ -551,6 +794,8 @@ namespace ValheimVillages.Villager.AI.Navigation
             public bool Success;
             public int SourceCount;
             public int DoorsBlocked;
+            public int BedsBlocked;
+            public int OutsideCellsBlocked;
             public float DurationMs;
             public string FailureReason;
 
@@ -575,8 +820,9 @@ namespace ValheimVillages.Villager.AI.Navigation
     {
         private NavMeshDataInstance m_piece;
         private NavMeshDataInstance m_terrain;
+        private NavMeshDataInstance m_hna;
 
-        internal bool HasAny => m_terrain.valid || m_piece.valid;
+        internal bool HasAny => m_terrain.valid || m_piece.valid || m_hna.valid;
 
         private void OnDestroy()
         {
@@ -592,6 +838,13 @@ namespace ValheimVillages.Villager.AI.Navigation
             {
                 m_piece.Remove();
                 m_piece = default;
+                removed++;
+            }
+
+            if (m_hna.valid)
+            {
+                m_hna.Remove();
+                m_hna = default;
                 removed++;
             }
 
@@ -612,6 +865,12 @@ namespace ValheimVillages.Villager.AI.Navigation
             m_piece = instance;
         }
 
+        internal void SetHna(NavMeshDataInstance instance)
+        {
+            RemoveHna();
+            m_hna = instance;
+        }
+
         internal void RemoveTerrain()
         {
             if (m_terrain.valid)
@@ -630,10 +889,20 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
         }
 
+        internal void RemoveHna()
+        {
+            if (m_hna.valid)
+            {
+                m_hna.Remove();
+                m_hna = default;
+            }
+        }
+
         internal void RemoveAll()
         {
             RemoveTerrain();
             RemovePiece();
+            RemoveHna();
         }
     }
 }

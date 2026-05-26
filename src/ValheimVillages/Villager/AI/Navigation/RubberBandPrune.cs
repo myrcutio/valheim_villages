@@ -1,7 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 using ValheimVillages.Attributes;
 using ValheimVillages.TaskQueue.Handlers;
+using ValheimVillages.Villager.AI.Pathfinding;
 
 namespace ValheimVillages.Villager.AI.Navigation
 {
@@ -122,13 +124,15 @@ namespace ValheimVillages.Villager.AI.Navigation
             List<Vector3> beds,
             float minX, float minZ, float maxX, float maxZ,
             out HashSet<string> droppedRegionIds,
-            out List<(string fromRid, string toRid)> pass3DiscoveredEdgeList)
+            out List<(string fromRid, string toRid,
+                      Vector3 startPos, Vector3 endPos)> pass3DiscoveredEdgeList)
         {
             var dropped = new HashSet<string>();
             droppedRegionIds = dropped;
             // Pre-assign the out so all early-exit paths satisfy the
             // definite-assignment rule. Pass 3 will overwrite later if it runs.
-            pass3DiscoveredEdgeList = new List<(string fromRid, string toRid)>();
+            pass3DiscoveredEdgeList = new List<(string fromRid, string toRid,
+                                                Vector3 startPos, Vector3 endPos)>();
             var stats = new Stats();
             if (regionIds == null || regionIds.Count == 0) return stats;
             if (lookupGrid == null || lookupGrid.Count == 0) return stats;
@@ -387,22 +391,29 @@ namespace ValheimVillages.Villager.AI.Navigation
             var pass3Seeds = 0;
             // Discovered piece-step adjacency: edges proven walkable by the
             // cell-level flood (piece A's cell → piece B's neighbour cell at
-            // compatible Y). These become formal RegionLinks below, replacing
-            // the earlier vertex-distance heuristics that misfired on piece
-            // prefabs whose vertices didn't quantize identically.
+            // compatible Y). These become formal RegionLinks below.
+            //
+            // Each pair carries the cell-boundary positions for the link
+            // endpoints — NOT the region centroids. Centroid-anchored links
+            // tell the path planner "shortcut from A's centre to B's centre",
+            // which makes the agent walk through both regions to use the
+            // link; boundary-anchored links are a short ~1m hop between
+            // adjacent cells exactly where the walker transitions.
             var pass3DiscoveredEdges = new HashSet<string>();
-            var pass3EdgePairs = new List<(string fromRid, string toRid)>();
+            var pass3EdgePairs = new List<(string fromRid, string toRid,
+                                           Vector3 startPos, Vector3 endPos)>();
 
             string CanonicalPair(string a, string b) =>
                 string.CompareOrdinal(a, b) < 0 ? a + "|" + b : b + "|" + a;
 
-            void RecordPass3Edge(string fromRid, string toRid)
+            void RecordPass3Edge(string fromRid, string toRid,
+                                 Vector3 startPos, Vector3 endPos)
             {
                 if (string.IsNullOrEmpty(fromRid) || string.IsNullOrEmpty(toRid)) return;
                 if (fromRid == toRid) return;
                 var key = CanonicalPair(fromRid, toRid);
                 if (pass3DiscoveredEdges.Add(key))
-                    pass3EdgePairs.Add((fromRid, toRid));
+                    pass3EdgePairs.Add((fromRid, toRid, startPos, endPos));
             }
 
             // Helper: terrain region at a given cell XZ (any height bucket).
@@ -415,6 +426,82 @@ namespace ValheimVillages.Villager.AI.Navigation
                 foreach (var lookupKey in keys)
                     if (lookupGrid.TryGetValue(lookupKey, out var trid)) return trid;
                 return null;
+            }
+
+            // Helper: any piece at a given cell XZ already in
+            // pieceReachableKeys whose centroid Y is within MaxClimb of
+            // targetY. Used as a Pass 3 piece-step source-region fallback
+            // when the current visit is a terrain visit at a cell that
+            // has no terrain region (Pass 2 walks any non-outside cell —
+            // floor pieces commonly shadow terrain so a bed-reachable
+            // cell can have only piece geometry). Picks the closest-in-Y
+            // candidate so the recorded edge represents the most natural
+            // walker step (smallest Δy).
+            string PieceAtCellInReachable(long xz, float targetY)
+            {
+                if (!xzToLookupKeysPiece.TryGetValue(xz, out var keys)) return null;
+                string bestRid = null;
+                var bestDeltaY = float.MaxValue;
+                foreach (var lookupKey in keys)
+                {
+                    if (!pieceReachableKeys.Contains(lookupKey)) continue;
+                    if (!lookupGrid.TryGetValue(lookupKey, out var prid)) continue;
+                    if (!centroids.TryGetValue(prid, out var pc)) continue;
+                    var delta = Mathf.Abs(pc.y - targetY);
+                    if (delta > MaxClimb) continue;
+                    if (delta < bestDeltaY)
+                    {
+                        bestDeltaY = delta;
+                        bestRid = prid;
+                    }
+                }
+                return bestRid;
+            }
+
+            // Helper: compute boundary-anchored link endpoints for a Pass 3
+            // piece-step from cell `fromXz` to cell `toXz`. The endpoints sit
+            // on opposite sides of the shared edge at the from/to surface Y,
+            // separated by a small horizontal epsilon so SamplePosition
+            // snaps each one to the correct cell's NavMesh tile.
+            //
+            // sameCell case: when `lastAddedAtNeighbour` resolved the source,
+            // both pieces are at the SAME cell (sibling pieces stacked at
+            // different Y). There's no horizontal boundary to anchor at, so
+            // the link is a purely vertical hop at the cell centre.
+            void ComputePieceStepLinkPositions(long fromXz, long toXz,
+                float fromY, float toY, float cellSize, bool sameCell,
+                out Vector3 startPos, out Vector3 endPos)
+            {
+                UnpackXz(fromXz, out var fGx, out var fGz);
+                UnpackXz(toXz, out var tGx, out var tGz);
+                var half = cellSize * 0.5f;
+                var fCenterX = fGx * cellSize + half;
+                var fCenterZ = fGz * cellSize + half;
+                var tCenterX = tGx * cellSize + half;
+                var tCenterZ = tGz * cellSize + half;
+                if (sameCell)
+                {
+                    // Pure vertical hop — both endpoints at cell center,
+                    // different Y. SamplePosition will snap each to its
+                    // own NavMesh patch (different height bucket).
+                    startPos = new Vector3(fCenterX, fromY, fCenterZ);
+                    endPos = new Vector3(fCenterX, toY, fCenterZ);
+                }
+                else
+                {
+                    // Boundary midpoint between the two cells, with small
+                    // epsilon offset on each side so each endpoint sits
+                    // unambiguously on its own cell's tile.
+                    const float epsilon = 0.1f;
+                    var boundaryX = (fCenterX + tCenterX) * 0.5f;
+                    var boundaryZ = (fCenterZ + tCenterZ) * 0.5f;
+                    var dirX = Mathf.Sign(tCenterX - fCenterX);
+                    var dirZ = Mathf.Sign(tCenterZ - fCenterZ);
+                    startPos = new Vector3(boundaryX - dirX * epsilon, fromY,
+                                           boundaryZ - dirZ * epsilon);
+                    endPos = new Vector3(boundaryX + dirX * epsilon, toY,
+                                           boundaryZ + dirZ * epsilon);
+                }
             }
 
             if (xzToLookupKeysPiece.Count > 0 && bedReachableCells.Count > 0
@@ -472,6 +559,16 @@ namespace ValheimVillages.Villager.AI.Navigation
                         // (b) Piece step: walk every piece at neighbour XZ within
                         //     climb of curY. Dedup via pieceReachableKeys.
                         if (xzToLookupKeysPiece.TryGetValue(nXz, out var nPieceKeys))
+                        {
+                            // Tracks the most recently added piece in this
+                            // foreach iteration so sibling pieces at the
+                            // same nXz can chain to each other. Without
+                            // this, two pieces stacked at the same cell
+                            // (e.g. a small stair-tread piece next to its
+                            // landing piece, both at gx=-2268,gz=1299) end
+                            // up isolated when added from a no-terrain
+                            // curXz visit — see the p509 hex-fort case.
+                            string lastAddedAtNeighbour = null;
                             foreach (var pKey in nPieceKeys)
                             {
                                 if (pieceReachableKeys.Contains(pKey)) continue;
@@ -494,13 +591,40 @@ namespace ValheimVillages.Villager.AI.Navigation
                                 pieceQueue.Enqueue((nXz, c.y, false, rid));
                                 pass3Seeds++;
 
-                                // Record discovered adjacency. Source is the
-                                // previously-added piece (sourceRid) or, for
-                                // initial-seed / terrain-bridge visits, the
-                                // terrain region at the current cell.
-                                var fromRid = sourceRid ?? TerrainRegionAtCell(curXz);
-                                RecordPass3Edge(fromRid, rid);
+                                // Resolve fromRid via a fallback chain so
+                                // first-piece-at-cell cases aren't orphaned:
+                                //   1. sourceRid (came from a piece visit).
+                                //   2. Terrain region at curXz (came from a
+                                //      terrain visit with a terrain region
+                                //      present at this cell).
+                                //   3. Any piece at curXz already in
+                                //      pieceReachableKeys within MaxClimb
+                                //      of curY (we're at a no-terrain cell
+                                //      but standing on a floor piece).
+                                //   4. The previous piece added in THIS
+                                //      foreach iteration — sibling pieces
+                                //      at the same nXz chain to each other
+                                //      even when their cell has no terrain
+                                //      and no other prior reachable piece.
+                                var fromRid = sourceRid
+                                              ?? TerrainRegionAtCell(curXz)
+                                              ?? PieceAtCellInReachable(curXz, curY)
+                                              ?? lastAddedAtNeighbour;
+                                // Compute link endpoints AT THE CELL
+                                // BOUNDARY, not the region centroids.
+                                // Centroid-anchored links make the path
+                                // planner route the agent through both
+                                // regions to use the link; boundary-anchored
+                                // links are a short hop exactly where the
+                                // walker transitions cells.
+                                ComputePieceStepLinkPositions(
+                                    curXz, nXz, curY, c.y, cell,
+                                    fromRid == lastAddedAtNeighbour,
+                                    out var startPos, out var endPos);
+                                RecordPass3Edge(fromRid, rid, startPos, endPos);
+                                lastAddedAtNeighbour = rid;
                             }
+                        }
                     }
                 }
             }
@@ -662,26 +786,56 @@ namespace ValheimVillages.Villager.AI.Navigation
                     existingLinkPairs.Add(CanonicalPair(link.FromRegionId, link.ToRegionId));
 
                 var pass3LinksAdded = 0;
-                foreach (var (fromRid, toRid) in pass3EdgePairs)
+                foreach (var (fromRid, toRid, startPos, endPos) in pass3EdgePairs)
                 {
                     if (dropped.Contains(fromRid) || dropped.Contains(toRid)) continue;
                     var key = CanonicalPair(fromRid, toRid);
                     if (!existingLinkPairs.Add(key)) continue;
                     if (centroids == null) continue;
-                    if (!centroids.TryGetValue(fromRid, out var fromC)) continue;
-                    if (!centroids.TryGetValue(toRid, out var toC)) continue;
+                    if (!centroids.ContainsKey(fromRid)) continue;
+                    if (!centroids.ContainsKey(toRid)) continue;
+                    // Anchor the link at the cell boundary positions
+                    // captured during the BFS step — NOT centroids.
+                    // Centroid-anchored links make the path planner route
+                    // through both regions; boundary-anchored is a short
+                    // hop exactly where the walker transitions cells.
                     links.Add(new RegionLink
                     {
                         FromRegionId = fromRid,
                         ToRegionId = toRid,
                         LinkType = RegionLinkType.Slope,
-                        PositionStart = fromC,
-                        PositionEnd = toC,
+                        PositionStart = startPos,
+                        PositionEnd = endPos,
                     });
                     pass3LinksAdded++;
                 }
                 stats.Pass3LinksAdded = pass3LinksAdded;
             }
+
+            // --- Pass 5: consolidate linear piece chains ---
+            // Detect maximal linear sequences of piece regions where each
+            // intermediate node has degree 2 in the piece-only adjacency
+            // (formal RegionLinks), and the chain's centroids are roughly
+            // collinear. Each valid chain collapses into a single anchor
+            // region: chain members' triangles, lookup keys, and external
+            // links all reroute to the anchor; intra-chain links drop.
+            //
+            // The cached triangles are PRESERVED (each tri's RegionId is
+            // reassigned to the anchor) so vv_tri_debug still shows the
+            // original step geometry, just coloured as one region. The
+            // path-planner-visible structure shrinks dramatically: a
+            // 7-step staircase becomes 1 region + 2 external links
+            // instead of 7 regions + 6 intra-chain links + N external.
+            //
+            // Runs BEFORE Pass 4 (border snap) so Pass 4 processes the
+            // merged region's outer boundary only — intra-chain vertices
+            // are now internal and don't need snapping.
+            ConsolidateLinearChains(regionIds, centroids, lookupGrid,
+                boundaryCells, links, kindMap, triangles, pass3EdgePairs,
+                ref stats);
+
+            // --- Pass 4: snap border geometry to the agent NavMesh ---
+            SnapBordersToAgentNavMesh(regionIds, links, triangles, ref stats);
 
             // --- Snapshot for diagnostics ---
             // Combine terrain + piece xzMaxY into a single map for vv_probe;
@@ -724,6 +878,80 @@ namespace ValheimVillages.Villager.AI.Navigation
             return GetCellY(gx, gz, LastXzMaxY, LastCell > 0f ? LastCell : RegionGraph.LookupCellSize);
         }
 
+        /// <summary>
+        ///     Compute the outside-cell set for a bake using only
+        ///     <c>ZoneSystem.GetGroundHeight</c> for cell Y values.
+        ///     Runs the same perimeter flood as Pass 1 but doesn't require
+        ///     baked NavMesh data or RegionBuilder-built terrain centroids,
+        ///     so it can run BEFORE <see cref="NavMeshBakeManager.BakeVillage" />.
+        ///
+        ///     Used by the bake to inject phantom <c>NotWalkable</c> box
+        ///     sources covering outside cells, carving them out of the
+        ///     agent NavMesh up front instead of leaving the bake to
+        ///     produce walkable surface there.
+        /// </summary>
+        public static HashSet<long> ComputeOutsideCellsForBake(Bounds bounds)
+        {
+            var outsideCells = new HashSet<long>();
+            var pieceMask = LayerMask.GetMask("piece");
+            if (pieceMask == 0) return outsideCells;
+            if (ZoneSystem.instance == null) return outsideCells;
+
+            var cell = RegionGraph.LookupCellSize;
+            var gxMin = Mathf.FloorToInt(bounds.min.x / cell) - 1;
+            var gzMin = Mathf.FloorToInt(bounds.min.z / cell) - 1;
+            var gxMax = Mathf.FloorToInt(bounds.max.x / cell) + 1;
+            var gzMax = Mathf.FloorToInt(bounds.max.z / cell) + 1;
+
+            var queue = new Queue<long>();
+            for (var gx = gxMin; gx <= gxMax; gx++)
+            {
+                EnqueuePerimeterSeed(gx, gzMin, outsideCells, queue);
+                EnqueuePerimeterSeed(gx, gzMax, outsideCells, queue);
+            }
+            for (var gz = gzMin + 1; gz <= gzMax - 1; gz++)
+            {
+                EnqueuePerimeterSeed(gxMin, gz, outsideCells, queue);
+                EnqueuePerimeterSeed(gxMax, gz, outsideCells, queue);
+            }
+
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+
+            var half = cell * 0.5f;
+            while (queue.Count > 0)
+            {
+                var curKey = queue.Dequeue();
+                UnpackXz(curKey, out var gx, out var gz);
+                var curY = ZoneSystem.instance.GetGroundHeight(
+                    new Vector3(gx * cell + half, 0f, gz * cell + half));
+                for (var d = 0; d < 4; d++)
+                {
+                    int ngx = gx + dx[d], ngz = gz + dz[d];
+                    if (ngx < gxMin || ngx > gxMax || ngz < gzMin || ngz > gzMax) continue;
+                    var nKey = XzKey(ngx, ngz);
+                    if (outsideCells.Contains(nKey)) continue;
+                    var nY = ZoneSystem.instance.GetGroundHeight(
+                        new Vector3(ngx * cell + half, 0f, ngz * cell + half));
+                    if (WallBlocks(gx, gz, ngx, ngz, curY, nY, cell, pieceMask)) continue;
+                    outsideCells.Add(nKey);
+                    queue.Enqueue(nKey);
+                }
+            }
+
+            return outsideCells;
+        }
+
+        /// <summary>
+        ///     Diagnostic helper: unpack an outside-cell key into its grid
+        ///     coordinates. Used by <see cref="NavMeshBakeManager" /> when
+        ///     synthesizing phantom NotWalkable box sources.
+        /// </summary>
+        public static void UnpackOutsideCellKey(long key, out int gx, out int gz)
+        {
+            UnpackXz(key, out gx, out gz);
+        }
+
         private static void EnqueuePerimeterSeed(int gx, int gz,
             HashSet<long> outsideCells, Queue<long> queue)
         {
@@ -762,6 +990,461 @@ namespace ValheimVillages.Villager.AI.Navigation
                 out var center, out var halfExtents);
             return Physics.CheckBox(center, halfExtents, Quaternion.identity,
                 mask, QueryTriggerInteraction.Ignore);
+        }
+
+        /// <summary>
+        ///     Pass 5: consolidate maximal linear piece-region chains into
+        ///     single regions. A chain is a sequence [R0..Rn] of piece
+        ///     regions where each link in the piece-only RegionLink
+        ///     adjacency forms a degree-2 path with collinear centroids.
+        ///
+        ///     For each valid chain, the first region (R0) becomes the
+        ///     anchor; the rest are absorbed: their cached triangles get
+        ///     re-tagged to the anchor's id, their lookupGrid entries
+        ///     point to the anchor, their incoming/outgoing links reroute
+        ///     to the anchor, and intra-chain links (now anchor→anchor
+        ///     self-loops) drop out.
+        ///
+        ///     Triangles are PRESERVED (not synthesized into a smooth
+        ///     ramp) — vv_tri_debug still shows the original stair
+        ///     geometry, just coloured as one region. This logical merge
+        ///     reduces link count and waypoint count for the path planner
+        ///     without changing what the agent NavMesh actually walks on.
+        /// </summary>
+        private static void ConsolidateLinearChains(
+            HashSet<string> regionIds,
+            Dictionary<string, Vector3> centroids,
+            Dictionary<long, string> lookupGrid,
+            List<(string id, Vector3 center, Vector3 outwardDir)> boundaryCells,
+            List<RegionLink> links,
+            Dictionary<string, SurfaceKind> kindMap,
+            List<RegionBuilder.CachedTriangle> triangles,
+            List<(string fromRid, string toRid, Vector3 startPos, Vector3 endPos)> pass3EdgePairs,
+            ref Stats stats)
+        {
+            if (links == null || links.Count == 0) return;
+            if (regionIds == null || regionIds.Count == 0) return;
+
+            // Build piece-only adjacency from current links.
+            var adj = new Dictionary<string, HashSet<string>>();
+            foreach (var link in links)
+            {
+                if (kindMap == null) break;
+                if (!kindMap.TryGetValue(link.FromRegionId, out var fk)) continue;
+                if (!kindMap.TryGetValue(link.ToRegionId, out var tk)) continue;
+                if (fk != SurfaceKind.Piece || tk != SurfaceKind.Piece) continue;
+                if (!adj.TryGetValue(link.FromRegionId, out var sa))
+                {
+                    sa = new HashSet<string>();
+                    adj[link.FromRegionId] = sa;
+                }
+                sa.Add(link.ToRegionId);
+                if (!adj.TryGetValue(link.ToRegionId, out var sb))
+                {
+                    sb = new HashSet<string>();
+                    adj[link.ToRegionId] = sb;
+                }
+                sb.Add(link.FromRegionId);
+            }
+            if (adj.Count == 0) return;
+
+            // Find chains. Start from degree-1 endpoints, trace via
+            // degree-2 neighbours, stop at next endpoint or hub.
+            const float MinCollinearDot = 0.94f; // ~20° tolerance
+            const float MinVerticalDelta = 0.1f; // skip pure-flat chains
+            var visited = new HashSet<string>();
+            var ridToAnchor = new Dictionary<string, string>();
+            var chainsConsolidated = 0;
+            var regionsConsumed = 0;
+
+            foreach (var startRid in adj.Keys)
+            {
+                if (visited.Contains(startRid)) continue;
+                if (adj[startRid].Count != 1) continue; // start only from endpoints
+
+                var chain = new List<string> { startRid };
+                visited.Add(startRid);
+                string prev = null;
+                var current = startRid;
+                while (true)
+                {
+                    string next = null;
+                    foreach (var n in adj[current])
+                    {
+                        if (n != prev) { next = n; break; }
+                    }
+                    if (next == null) break;
+                    if (visited.Contains(next)) break;
+                    if (!adj.TryGetValue(next, out var nAdj)) break;
+                    if (nAdj.Count > 2) break; // hub — stop chain here
+                    chain.Add(next);
+                    visited.Add(next);
+                    if (nAdj.Count == 1) break; // reached other endpoint
+                    prev = current;
+                    current = next;
+                }
+
+                if (chain.Count < 2) continue;
+
+                // Validate collinearity + vertical component.
+                var chainDir = Vector3.zero;
+                for (var i = 0; i < chain.Count - 1; i++)
+                {
+                    if (!centroids.TryGetValue(chain[i], out var cA)) goto skip;
+                    if (!centroids.TryGetValue(chain[i + 1], out var cB)) goto skip;
+                    chainDir += (cB - cA).normalized;
+                }
+                chainDir = (chainDir / (chain.Count - 1)).normalized;
+
+                // Skip pure-flat chains — they're not stair runs and the
+                // logical merge offers less value (no vertical step
+                // clutter to collapse). Vertical component must be at
+                // least MinVerticalDelta of the chain direction.
+                if (Mathf.Abs(chainDir.y) < MinVerticalDelta) continue;
+
+                var valid = true;
+                for (var i = 0; i < chain.Count - 1; i++)
+                {
+                    var seg = (centroids[chain[i + 1]] - centroids[chain[i]]).normalized;
+                    if (Vector3.Dot(seg, chainDir) < MinCollinearDot)
+                    {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) continue;
+
+                // Merge: anchor is chain[0]. Compute new centroid as the
+                // mean of chain centroids.
+                var anchor = chain[0];
+                var sum = Vector3.zero;
+                foreach (var r in chain) sum += centroids[r];
+                centroids[anchor] = sum / chain.Count;
+                for (var i = 1; i < chain.Count; i++)
+                {
+                    ridToAnchor[chain[i]] = anchor;
+                    regionsConsumed++;
+                }
+                chainsConsolidated++;
+                continue;
+
+                skip: ;
+            }
+
+            if (ridToAnchor.Count == 0)
+            {
+                stats.Pass5ChainsConsolidated = 0;
+                stats.Pass5RegionsConsumed = 0;
+                stats.Pass5LinksRemoved = 0;
+                return;
+            }
+
+            // Apply ID remap across all data structures.
+            // 1) Remove consumed regions from regionIds / centroids / kindMap.
+            foreach (var consumed in ridToAnchor.Keys)
+            {
+                regionIds.Remove(consumed);
+                centroids?.Remove(consumed);
+                kindMap?.Remove(consumed);
+            }
+
+            // 2) Reassign triangles' RegionId.
+            if (triangles != null)
+                for (var i = 0; i < triangles.Count; i++)
+                {
+                    var t = triangles[i];
+                    if (ridToAnchor.TryGetValue(t.RegionId, out var a))
+                    {
+                        t.RegionId = a;
+                        triangles[i] = t;
+                    }
+                }
+
+            // 3) Update lookupGrid values.
+            if (lookupGrid != null)
+            {
+                var keysToUpdate = new List<long>();
+                foreach (var kv in lookupGrid)
+                    if (ridToAnchor.ContainsKey(kv.Value))
+                        keysToUpdate.Add(kv.Key);
+                foreach (var k in keysToUpdate)
+                    lookupGrid[k] = ridToAnchor[lookupGrid[k]];
+            }
+
+            // 4) Remap links: redirect endpoints through ridToAnchor.
+            //    Self-loops drop; dedup by canonical pair so we don't
+            //    leave several copies of a link between the same anchor
+            //    and an external region.
+            var linksRemoved = 0;
+            if (links != null)
+            {
+                var seenPairs = new HashSet<string>();
+                for (var i = links.Count - 1; i >= 0; i--)
+                {
+                    var link = links[i];
+                    var fromMapped = ridToAnchor.TryGetValue(link.FromRegionId, out var fa)
+                        ? fa : link.FromRegionId;
+                    var toMapped = ridToAnchor.TryGetValue(link.ToRegionId, out var ta)
+                        ? ta : link.ToRegionId;
+                    if (fromMapped == toMapped)
+                    {
+                        links.RemoveAt(i);
+                        linksRemoved++;
+                        continue;
+                    }
+                    var pairKey = string.CompareOrdinal(fromMapped, toMapped) < 0
+                        ? fromMapped + "|" + toMapped
+                        : toMapped + "|" + fromMapped;
+                    if (!seenPairs.Add(pairKey))
+                    {
+                        links.RemoveAt(i);
+                        linksRemoved++;
+                        continue;
+                    }
+                    link.FromRegionId = fromMapped;
+                    link.ToRegionId = toMapped;
+                    links[i] = link;
+                }
+            }
+
+            // 5) Remap pass3EdgePairs (consumed downstream by
+            //    RegionPartitionHandler to merge into BfsAdjacencyStore).
+            if (pass3EdgePairs != null)
+            {
+                var seenEdges = new HashSet<string>();
+                for (var i = pass3EdgePairs.Count - 1; i >= 0; i--)
+                {
+                    var ep = pass3EdgePairs[i];
+                    var fromMapped = ridToAnchor.TryGetValue(ep.fromRid, out var fa)
+                        ? fa : ep.fromRid;
+                    var toMapped = ridToAnchor.TryGetValue(ep.toRid, out var ta)
+                        ? ta : ep.toRid;
+                    if (fromMapped == toMapped)
+                    {
+                        pass3EdgePairs.RemoveAt(i);
+                        continue;
+                    }
+                    var pairKey = string.CompareOrdinal(fromMapped, toMapped) < 0
+                        ? fromMapped + "|" + toMapped
+                        : toMapped + "|" + fromMapped;
+                    if (!seenEdges.Add(pairKey))
+                    {
+                        pass3EdgePairs.RemoveAt(i);
+                        continue;
+                    }
+                    pass3EdgePairs[i] = (fromMapped, toMapped, ep.startPos, ep.endPos);
+                }
+            }
+
+            // 6) Remap boundaryCells ids (don't dedup — multiple cells
+            //    with the same id are valid; each is a distinct cell).
+            if (boundaryCells != null)
+                for (var i = 0; i < boundaryCells.Count; i++)
+                {
+                    var bc = boundaryCells[i];
+                    if (ridToAnchor.TryGetValue(bc.id, out var a))
+                        boundaryCells[i] = (a, bc.center, bc.outwardDir);
+                }
+
+            stats.Pass5ChainsConsolidated = chainsConsolidated;
+            stats.Pass5RegionsConsumed = regionsConsumed;
+            stats.Pass5LinksRemoved = linksRemoved;
+
+            DebugLog.Event("RubberBandPrune", "pass5_chain_consolidation",
+                ("chains_consolidated", chainsConsolidated),
+                ("regions_consumed", regionsConsumed),
+                ("links_removed", linksRemoved));
+        }
+
+        /// <summary>
+        ///     Pass 4: snap region boundary vertices and link endpoints to
+        ///     the slot-31 agent NavMesh. Boundary vertices are vertices
+        ///     incident to edges that appear only once in their region's
+        ///     triangulation (the region's outer perimeter); interior
+        ///     vertices are deliberately left alone since they have no
+        ///     bearing on pathing or link placement.
+        ///
+        ///     Skips early if VillagerAgentType isn't registered (no agent
+        ///     NavMesh to snap against) — leaves all vertices untouched.
+        /// </summary>
+        private static void SnapBordersToAgentNavMesh(
+            HashSet<string> regionIds,
+            List<RegionLink> links,
+            List<RegionBuilder.CachedTriangle> triangles,
+            ref Stats stats)
+        {
+            if (!VillagerAgentType.IsRegistered) return;
+            if (triangles == null || triangles.Count == 0) return;
+
+            var agentTypeID = VillagerAgentType.UnityAgentTypeID;
+            var filter = new NavMeshQueryFilter
+            {
+                agentTypeID = agentTypeID,
+                areaMask = NavMesh.AllAreas,
+            };
+            const float snapRadius = 0.5f;
+
+            // Group triangle indices by region.
+            var ridToTris = new Dictionary<string, List<int>>();
+            for (var i = 0; i < triangles.Count; i++)
+            {
+                var rid = triangles[i].RegionId;
+                if (string.IsNullOrEmpty(rid)) continue;
+                if (!regionIds.Contains(rid)) continue;
+                if (!ridToTris.TryGetValue(rid, out var list))
+                {
+                    list = new List<int>();
+                    ridToTris[rid] = list;
+                }
+                list.Add(i);
+            }
+
+            // Per-region boundary vertex collection, then snap.
+            // Cache snap results so a vertex shared by multiple regions
+            // gets one SamplePosition call total (and a consistent
+            // snapped position across regions).
+            var snapCache = new Dictionary<Vector3, Vector3>();
+            var boundarySnapped = 0;
+            var boundaryMisses = 0;
+
+            foreach (var kv in ridToTris)
+            {
+                var triIndices = kv.Value;
+                // Count each undirected edge within this region. Boundary
+                // edges have count == 1 (no neighbouring triangle in this
+                // region shares them — they're either the region perimeter
+                // or shared with a different region).
+                var edgeCount = new Dictionary<long, int>();
+                var edgeVerts = new Dictionary<long, (Vector3 a, Vector3 b)>();
+                foreach (var ti in triIndices)
+                {
+                    var t = triangles[ti];
+                    AddEdgeForSnap(edgeCount, edgeVerts, t.V0, t.V1);
+                    AddEdgeForSnap(edgeCount, edgeVerts, t.V1, t.V2);
+                    AddEdgeForSnap(edgeCount, edgeVerts, t.V2, t.V0);
+                }
+
+                foreach (var ekv in edgeCount)
+                {
+                    if (ekv.Value != 1) continue;
+                    var (a, b) = edgeVerts[ekv.Key];
+                    TrySnapAndCache(a, filter, snapRadius, snapCache,
+                        ref boundarySnapped, ref boundaryMisses);
+                    TrySnapAndCache(b, filter, snapRadius, snapCache,
+                        ref boundarySnapped, ref boundaryMisses);
+                }
+            }
+
+            // Apply snapped positions back to cached triangles. Interior
+            // vertices aren't in snapCache so they pass through unchanged.
+            for (var i = 0; i < triangles.Count; i++)
+            {
+                var t = triangles[i];
+                var changed = false;
+                if (snapCache.TryGetValue(t.V0, out var sv0) && sv0 != t.V0)
+                { t.V0 = sv0; changed = true; }
+                if (snapCache.TryGetValue(t.V1, out var sv1) && sv1 != t.V1)
+                { t.V1 = sv1; changed = true; }
+                if (snapCache.TryGetValue(t.V2, out var sv2) && sv2 != t.V2)
+                { t.V2 = sv2; changed = true; }
+                if (changed) triangles[i] = t;
+            }
+
+            // Snap link endpoints. Most should already be in snapCache from
+            // the boundary pass (Pass 3 emits links at cell boundaries which
+            // typically coincide with region boundary vertices), but probe
+            // unconditionally so edge-based RegionBuilder links (which use
+            // centroid positions) also get snapped.
+            var linksSnapped = 0;
+            if (links != null)
+            {
+                for (var i = 0; i < links.Count; i++)
+                {
+                    var link = links[i];
+                    var changed = false;
+                    if (NavMesh.SamplePosition(link.PositionStart,
+                            out var startHit, snapRadius, filter))
+                    {
+                        if (link.PositionStart != startHit.position)
+                        {
+                            link.PositionStart = startHit.position;
+                            changed = true;
+                        }
+                    }
+                    if (NavMesh.SamplePosition(link.PositionEnd,
+                            out var endHit, snapRadius, filter))
+                    {
+                        if (link.PositionEnd != endHit.position)
+                        {
+                            link.PositionEnd = endHit.position;
+                            changed = true;
+                        }
+                    }
+                    if (changed)
+                    {
+                        links[i] = link;
+                        linksSnapped++;
+                    }
+                }
+            }
+
+            stats.Pass4BoundaryVertsSnapped = boundarySnapped;
+            stats.Pass4SnapMisses = boundaryMisses;
+            stats.Pass4LinksSnapped = linksSnapped;
+
+            DebugLog.Event("RubberBandPrune", "pass4_border_snap",
+                ("boundary_verts_snapped", boundarySnapped),
+                ("snap_misses", boundaryMisses),
+                ("links_snapped", linksSnapped));
+        }
+
+        /// <summary>
+        ///     Helper: register an undirected edge under a canonical key so
+        ///     edge counting works regardless of triangle winding order.
+        /// </summary>
+        private static void AddEdgeForSnap(
+            Dictionary<long, int> edgeCount,
+            Dictionary<long, (Vector3 a, Vector3 b)> edgeVerts,
+            Vector3 a, Vector3 b)
+        {
+            var ha = a.GetHashCode();
+            var hb = b.GetHashCode();
+            // Canonical key — order by hash so (a,b) and (b,a) collide.
+            var key = ha <= hb
+                ? ((long)ha << 32) | (uint)hb
+                : ((long)hb << 32) | (uint)ha;
+            if (edgeCount.TryGetValue(key, out var c))
+            {
+                edgeCount[key] = c + 1;
+            }
+            else
+            {
+                edgeCount[key] = 1;
+                edgeVerts[key] = (a, b);
+            }
+        }
+
+        /// <summary>
+        ///     Helper: snap one vertex via SamplePosition, caching the
+        ///     result so subsequent calls for the same position don't re-
+        ///     query the NavMesh.
+        /// </summary>
+        private static void TrySnapAndCache(Vector3 v,
+            NavMeshQueryFilter filter, float radius,
+            Dictionary<Vector3, Vector3> cache,
+            ref int snapped, ref int misses)
+        {
+            if (cache.ContainsKey(v)) return;
+            if (NavMesh.SamplePosition(v, out var hit, radius, filter))
+            {
+                cache[v] = hit.position;
+                if (hit.position != v) snapped++;
+            }
+            else
+            {
+                cache[v] = v;
+                misses++;
+            }
         }
 
         /// <summary>
@@ -907,6 +1590,20 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int Pass3PieceKeysDropped;
             /// <summary>RegionLinks added from Pass 3's discovered piece-step adjacency (cell-level flood is more reliable than vertex-distance heuristics for proving walkable adjacency).</summary>
             public int Pass3LinksAdded;
+
+            /// <summary>Pass 4: unique boundary vertices snapped to the agent NavMesh.</summary>
+            public int Pass4BoundaryVertsSnapped;
+            /// <summary>Pass 4: boundary vertices whose snap missed (no agent NavMesh within snap radius).</summary>
+            public int Pass4SnapMisses;
+            /// <summary>Pass 4: RegionLink endpoints snapped to the agent NavMesh.</summary>
+            public int Pass4LinksSnapped;
+
+            /// <summary>Pass 5: linear piece-region chains consolidated (e.g. stair runs merged into a single region).</summary>
+            public int Pass5ChainsConsolidated;
+            /// <summary>Pass 5: piece regions absorbed by chain consolidation (anchor regions retained, others removed).</summary>
+            public int Pass5RegionsConsumed;
+            /// <summary>Pass 5: RegionLinks removed because they became intra-chain (anchor→anchor self-loops) or duplicates of an existing external link.</summary>
+            public int Pass5LinksRemoved;
 
             public int RegionsDropped;
             public int PerimeterSeeds;

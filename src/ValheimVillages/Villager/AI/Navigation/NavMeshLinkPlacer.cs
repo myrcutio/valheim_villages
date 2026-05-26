@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.AI;
 using ValheimVillages.Algorithms;
@@ -16,6 +17,20 @@ namespace ValheimVillages.Villager.AI.Navigation
     public static class NavMeshLinkPlacer
     {
         private const float AttemptCooldown = 5f;
+
+        /// <summary>
+        ///     Minimum vertical Δy between a RegionLink's endpoints for it
+        ///     to be materialized as a NavMeshLink. Below this, the link is
+        ///     skipped because flat-adjacent regions are already connected
+        ///     by the continuous baked NavMesh — an explicit link there is
+        ///     planner noise that adds search cost without bridging
+        ///     anything. Above this, NavMesh likely couldn't span the
+        ///     transition (slope / stair riser / step-up exceeds the slot-31
+        ///     agent's climb of ~0.3m) and we genuinely need the link.
+        ///     Tuned a touch below the agent climb to catch borderline
+        ///     slopes the bake voxelizer may have disconnected.
+        /// </summary>
+        private const float MinVerticalDeltaForLink = 0.2f;
 
         /// <summary>Probe grid step size in meters for island detection.</summary>
         private const float ProbeStep = 3f;
@@ -103,18 +118,124 @@ namespace ValheimVillages.Villager.AI.Navigation
                 areaMask = NavMesh.AllAreas,
             };
 
+            // Order matters: place formal RegionGraph links FIRST so the
+            // subsequent island-bridge pass sees a baseline NavMesh that
+            // already includes every adjacency the HNA prune validated.
+            // That suppresses BridgeDisconnectedIslands's tendency to
+            // re-discover the same connections via random probing.
+            var regionGraphLinks = PlaceRegionGraphLinks(agentTypeID, filter);
             var placed = BridgeDisconnectedIslands(agentTypeID, filter);
             var doorLinks = PlaceDoorLinks(agentTypeID, filter);
-            placed += doorLinks;
+            var islandLinks = placed; // BridgeDisconnectedIslands count, before adding the rest
+            placed += doorLinks + regionGraphLinks;
 
             if (placed >= 0)
             {
                 s_scanned = true;
                 Plugin.Log?.LogInfo(
-                    $"[NavMeshLink] PlaceLinks: bridged {placed} gaps ({placed - doorLinks} island, {doorLinks} door) (agentTypeID={agentTypeID})");
+                    $"[NavMeshLink] PlaceLinks: bridged {placed} gaps " +
+                    $"({islandLinks} island, {doorLinks} door, {regionGraphLinks} regiongraph) " +
+                    $"(agentTypeID={agentTypeID})");
             }
 
             return placed > 0;
+        }
+
+        /// <summary>
+        ///     Place a <see cref="NavMeshLink" /> across every formal
+        ///     <see cref="RegionLink" /> in the active region graphs. The HNA
+        ///     prune has already validated each link as walkable adjacency
+        ///     (via RubberBandPrune Pass 3 cell-flood discovery or
+        ///     edge-based shared-vertex), so each one is a known-good bridge
+        ///     for the agent NavMesh — gives villager pathing seamless
+        ///     traversal between regions without depending on the
+        ///     island-bridge probe finding them.
+        ///
+        ///     Endpoints are snapped to the agent NavMesh via SamplePosition
+        ///     (centroids may sit 0.x m off the navmesh due to mesh edge
+        ///     irregularities); pairs that don't snap within 1m are skipped
+        ///     with a counter. No dedup against existing links — caller's
+        ///     scan-once gate (s_scanned) prevents repeated runs.
+        /// </summary>
+        private static int PlaceRegionGraphLinks(int agentTypeID, NavMeshQueryFilter filter)
+        {
+            var placed = 0;
+            var skippedNoSnap = 0;
+            var skippedInvalid = 0;
+            var skippedFlat = 0;
+            var totalLinks = 0;
+
+            // Diagnostic: confirm the agentTypeID we're placing links with
+            // matches what Pathfinding.GetPath will use at query time. They
+            // SHOULD be identical (UnityAgentTypeID captures the same
+            // build.agentTypeID slot 31's Pathfinding.m_agentSettings[31]
+            // references), but a race between agent re-capture after first
+            // link placement could desync them — and a mismatch would
+            // silently make every placed link invisible to the path planner.
+            var queryAgentTypeID = ResolveSlot31AgentTypeIDViaReflection();
+            if (queryAgentTypeID != agentTypeID)
+                Plugin.Log?.LogError(
+                    $"[NavMeshLink] AgentTypeID MISMATCH: placing links with " +
+                    $"{agentTypeID} (UnityAgentTypeID) but Pathfinding slot 31 " +
+                    $"resolves to {queryAgentTypeID} at query time — every link " +
+                    $"placed will be invisible to villager path queries. Most " +
+                    $"likely a registration race (links placed before slot 31 " +
+                    $"settings were re-captured).");
+            else
+                Plugin.Log?.LogInfo(
+                    $"[NavMeshLink] AgentTypeID confirmed: links and Pathfinding " +
+                    $"slot 31 both use {agentTypeID}");
+
+            foreach (var graph in RegionGraph.GetAll())
+            {
+                if (graph == null) continue;
+                var links = graph.GetAllLinks();
+                if (links == null || links.Count == 0) continue;
+                foreach (var link in links)
+                {
+                    totalLinks++;
+                    // Vertical-only filter: NavMesh is naturally continuous
+                    // across flat-adjacent regions, so explicit NavMeshLinks
+                    // between two same-Y centroids are noise that adds path-
+                    // planner overhead without bridging anything real. The
+                    // agent only needs a link when there's a vertical
+                    // transition the bake couldn't span — slopes / stair
+                    // risers / step-ups taller than the agent's climb (0.3m
+                    // for Humanoid-cloned slot 31).
+                    //
+                    // Threshold 0.2m: a touch below the 0.3m climb limit so
+                    // sloped surfaces near the climb threshold get links
+                    // (NavMesh may or may not have spanned them depending on
+                    // bake voxelization). Bump to 0.3m if too many "almost-
+                    // flat" links survive.
+                    var verticalDelta = Mathf.Abs(link.PositionEnd.y - link.PositionStart.y);
+                    if (verticalDelta < MinVerticalDeltaForLink)
+                    {
+                        skippedFlat++;
+                        continue;
+                    }
+                    // Snap each endpoint to the agent NavMesh. Region
+                    // centroids drift up to ~0.75m off (sloped triangles,
+                    // coplanar merges) — SamplePosition with a 1m radius
+                    // catches the typical case.
+                    if (!NavMesh.SamplePosition(link.PositionStart, out var startHit, 1.0f, filter))
+                    { skippedNoSnap++; continue; }
+                    if (!NavMesh.SamplePosition(link.PositionEnd, out var endHit, 1.0f, filter))
+                    { skippedNoSnap++; continue; }
+                    if (TryAddLink(startHit.position, endHit.position, agentTypeID))
+                        placed++;
+                    else
+                        skippedInvalid++;
+                }
+            }
+            if (totalLinks > 0)
+                Plugin.Log?.LogInfo(
+                    $"[NavMeshLink] PlaceRegionGraphLinks: {placed} placed, " +
+                    $"{skippedFlat} skipped (flat, Δy<{MinVerticalDeltaForLink:F2}m — NavMesh continuous), " +
+                    $"{skippedNoSnap} skipped (no agent navmesh within 1m of centroid), " +
+                    $"{skippedInvalid} skipped (NavMesh.AddLink invalid) " +
+                    $"of {totalLinks} formal links");
+            return placed;
         }
 
         /// <summary>
@@ -396,6 +517,40 @@ namespace ValheimVillages.Villager.AI.Navigation
             return true;
         }
 
+        /// <summary>
+        ///     Reads the slot-31 agent's <c>m_build.agentTypeID</c> directly
+        ///     from <c>Pathfinding.instance.m_agentSettings[31]</c> via
+        ///     reflection — this is the exact value Valheim's
+        ///     <c>Pathfinding.GetPath</c> will resolve at query time. Used
+        ///     by the diagnostic in <see cref="PlaceRegionGraphLinks" /> to
+        ///     verify links and path queries see the same NavMesh tile.
+        ///     Returns 0 if reflection fails (Pathfinding not initialized,
+        ///     slot 31 not registered, schema changed).
+        /// </summary>
+        private static int ResolveSlot31AgentTypeIDViaReflection()
+        {
+            try
+            {
+                var pf = global::Pathfinding.instance;
+                if (pf == null) return 0;
+                var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+                var listField = typeof(global::Pathfinding).GetField("m_agentSettings", flags);
+                if (listField == null) return 0;
+                var list = listField.GetValue(pf) as System.Collections.IList;
+                if (list == null || list.Count <= 31) return 0;
+                var slot = list[31];
+                if (slot == null) return 0;
+                var buildField = slot.GetType().GetField("m_build");
+                if (buildField == null) return 0;
+                var build = (NavMeshBuildSettings)buildField.GetValue(slot);
+                return build.agentTypeID;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
         private static bool TryAddLink(Vector3 start, Vector3 end, int agentTypeID)
         {
             var linkData = new NavMeshLinkData
@@ -421,6 +576,10 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <summary>
         ///     Removes all previously placed links and resets the scan flag,
         ///     allowing <see cref="PlaceLinks" /> to re-scan on next call.
+        ///     Also resets the cooldown so the next PlaceLinks call isn't
+        ///     blocked — callers expect that after a fresh repartition,
+        ///     PlaceLinks can fire immediately to repopulate the cleared
+        ///     links from the new RegionGraph.
         /// </summary>
         public static void RemoveAllLinks()
         {
@@ -428,6 +587,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 s_holder.RemoveAll();
             s_doorLinks.Clear();
             s_scanned = false;
+            s_lastAttemptTime = 0f;
         }
 
         #region HNA Candidate Visualization
