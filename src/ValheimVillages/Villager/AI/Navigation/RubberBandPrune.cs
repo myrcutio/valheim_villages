@@ -447,6 +447,18 @@ namespace ValheimVillages.Villager.AI.Navigation
                                 if (!lookupGrid.TryGetValue(pKey, out string rid)) continue;
                                 if (!centroids.TryGetValue(rid, out Vector3 c)) continue;
                                 if (Mathf.Abs(c.y - curY) > MaxClimb) continue;
+                                // Don't chain into pieces in outsideCells.
+                                // Pass 1's perimeter flood is the authoritative
+                                // "what's inside the village" signal; pieces
+                                // whose XZ Pass 1 reached are outside the wall
+                                // ring (rogue floors, far-away structures,
+                                // decorations). Without this gate, piece
+                                // chains hop over walls into outside pieces
+                                // via 4-neighbour adjacency. A wall-blocking
+                                // primitive can't distinguish stair risers
+                                // from walls reliably; this perimeter-based
+                                // check sidesteps that ambiguity entirely.
+                                if (outsideCells.Contains(nXz)) continue;
                                 pieceReachableKeys.Add(pKey);
                                 pieceQueue.Enqueue((nXz, c.y, false));
                                 pass3Seeds++;

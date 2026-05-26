@@ -45,14 +45,22 @@ namespace ValheimVillages.TaskQueue.Handlers
         /// pruning. A must be lower (or equal) and within this distance.</summary>
         private const float EnclosureMaxBelow = 0.5f;
 
-        // --- Terrain-only "is this spot walkable" checks ---
+        // --- "Is this spot walkable for the villager agent" checks ---
         // Slope cutoff matches the villager agent's max climbable slope (27°,
-        // cloned from Humanoid). Looser values (32°, 45°) over-merged regions
-        // in coplanar pass, which drifted area-weighted centroids far from
-        // beds and broke centroid-based BFS seeding (seeds=1 with fallback,
-        // dropping reachable count from 12 to ~2). 27° keeps centroids local
-        // enough that both beds reliably seed.
-        private const float MinTerrainNormalY = 0.891007f; // cos(27°)
+        // cloned from Humanoid). Applies to BOTH terrain and piece tris:
+        // a 45° roof tile is just as unwalkable as a 45° cliff. Looser
+        // values (32°, 45°) over-merged regions in coplanar pass, which
+        // drifted area-weighted centroids far from beds and broke centroid-
+        // based BFS seeding (seeds=1 with fallback, dropping reachable
+        // count from 12 to ~2). 27° keeps centroids local enough that both
+        // beds reliably seed.
+        //
+        // Stair pieces are usually triangulated as flat horizontal treads
+        // (normal.y = 1, passes any slope check) with discrete climb
+        // events handled by the agent's climb capability — not modeled as
+        // continuous sloped ramps — so the strict cutoff doesn't break
+        // stair connectivity in practice.
+        private const float MinWalkableNormalY = 0.891007f; // cos(27°)
 
         // Villager-sized vertical capsule used to probe for obstructions on
         // terrain spots. Tuned smaller than the agent's strict body bounds
@@ -64,6 +72,40 @@ namespace ValheimVillages.TaskQueue.Handlers
         private const float CapsuleRadius = 0.3f;
         private const float CapsuleHeight = 1.4f;
         private const float CapsuleLift = 0.25f;
+
+        // Piece-only: walker-waist clearance check. A small sphere
+        // (0.1m radius) lifted to walker waist height above the centroid.
+        // If any piece collider overlaps the sphere, the centroid is
+        // inside wall material at walker body height — no walker can
+        // stand here. Catches:
+        //   - Surfaces buried inside a wall's mesh (the wall's interior
+        //     volume overlaps the sphere).
+        //   - Encased wall tops where the upper wall starts at or near
+        //     the lower wall's top (the sphere at top+1m is inside the
+        //     upper wall body).
+        //   - Any horizontal surface that has wall material at walker
+        //     body height directly above the centroid.
+        //
+        // Survives:
+        //   - Open courtyard floor (sphere in open air at waist height).
+        //   - Floor under a high ceiling (sphere below the ceiling).
+        //   - Balcony / floor adjacent to a tall wall (sphere is above
+        //     the centroid, which sits on the floor — the wall to the
+        //     side isn't directly above unless the floor centroid is
+        //     literally inside the wall's column).
+        //
+        // Replaces the previous 9-ray radial probe, which had Unity
+        // raycast backface artifacts when the origin landed inside a
+        // MeshCollider (rays going outward hit back faces that the
+        // default queriesHitBackfaces=false skips). CheckSphere is an
+        // overlap test, reliable for primitive colliders and for
+        // MeshColliders where the sphere intersects the mesh surface.
+        //
+        // 0.1m radius: tight enough to not false-positive on pieces
+        // 0.2m+ away from the centroid. 1.0m lift: walker waist; below
+        // typical ceilings, above bed tops and decorations.
+        private const float PieceWaistProbeLift = 1.0f;
+        private const float PieceWaistProbeRadius = 0.1f;
 
         // Same layers as the piece bake (Default + static_solid + piece).
         // Deliberately excludes "terrain" so the capsule doesn't self-hit
@@ -227,38 +269,51 @@ namespace ValheimVillages.TaskQueue.Handlers
                 if (normal.y < MinNormalY)
                 { rejNormal++; continue; }
 
+                // Walker slope cutoff (27°) applies to both terrain and
+                // piece tris — a roof tile at 30°+ is just as unwalkable
+                // as a sloped cliff. Was previously terrain-only, which
+                // let moderately sloped roof / vault triangles survive
+                // when the agent NavMesh sample happened to hit a flat
+                // strip within the 0.5m filter radius. Cheap, run before
+                // the capsule check.
+                if (normal.y < MinWalkableNormalY)
+                { rejSteep++; continue; }
+
                 if (c.x < minX || c.x > maxX || c.z < minZ || c.z > maxZ)
                 { rejBounds++; continue; }
 
                 if (kind == SurfaceKind.Terrain)
                 {
-                    // Terrain scope = bake bounds only (rejBounds above is
-                    // the only spatial filter). Deliberately patrol-independent:
-                    // the polygon path re-introduces the chicken-egg dependency
-                    // the skill warns about, and bed-distance drops outlying
-                    // terrain when the village extends past 30m from any bed.
-                    // Bake bounds = village beds + patrol bounds + 30m pad,
-                    // which is already a tight, patrol-influenced-but-bake-time
-                    // scope set in RegionPartitionHandler.
-
-                    // Steep terrain reject (stricter than the generic MinNormalY
-                    // 60° cutoff): drops cliffs the villager agent can't climb.
-                    // Cheap, run before the capsule check.
-                    if (normal.y < MinTerrainNormalY)
-                    { rejSteep++; continue; }
-
-                    // Villager-sized capsule overlap: catches walls, decorative
-                    // pieces, rocks, and modded items by physical collision —
-                    // independent of prefab name. Expensive (Physics broadphase
-                    // + narrowphase per call), so it runs after every cheaper
-                    // filter has had a chance to reject.
+                    // Terrain: walker-sized capsule overlap. Catches walls,
+                    // decorative pieces, rocks, and modded items by physical
+                    // collision — independent of prefab name. Expensive
+                    // (Physics broadphase + narrowphase per call), so it runs
+                    // after every cheaper filter has had a chance to reject.
                     Vector3 capP0 = c + Vector3.up * (CapsuleLift + CapsuleRadius);
                     Vector3 capP1 = c + Vector3.up * (CapsuleLift + CapsuleHeight - CapsuleRadius);
                     if (Physics.CheckCapsule(capP0, capP1, CapsuleRadius, s_blockMask))
                     { rejBlocked++; continue; }
                 }
-                // Piece pass: no patrol-polygon / bed-distance gating. Falls
-                // through to the shared agent NavMesh sample below.
+                else
+                {
+                    // Piece: walker-waist clearance check. Tiny sphere
+                    // (0.1m) at the centroid lifted to walker waist height.
+                    // If a piece collider overlaps the sphere, the centroid
+                    // is inside wall material at walker body height — see
+                    // constants block for the geometric rationale.
+                    Vector3 waistOrigin = c + Vector3.up * PieceWaistProbeLift;
+                    if (Physics.CheckSphere(waistOrigin, PieceWaistProbeRadius,
+                            s_blockMask, QueryTriggerInteraction.Ignore))
+                    { rejBlocked++; continue; }
+                }
+
+                // Scope note: bake bounds = village beds + patrol bounds +
+                // 30m pad, set in RegionPartitionHandler. Deliberately
+                // patrol-independent in here — the polygon path re-introduces
+                // the chicken-egg dependency the skill warns about, and
+                // bed-distance drops outlying terrain when the village extends
+                // past 30m from any bed. Both kinds fall through to the shared
+                // agent NavMesh sample below.
 
                 if (!NavMesh.SamplePosition(c, out NavMeshHit hit, AgentFilterRadius, filter) ||
                     Vector3.Distance(hit.position, c) > AgentFilterRadius)
