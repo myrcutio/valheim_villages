@@ -5,35 +5,42 @@ using UnityEngine.AI;
 namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
-    /// Pure geometry operations for boundary waypoint computation:
-    /// edge snapping, Chaikin smoothing, RDP simplification, clockwise sorting,
-    /// XZ deduplication, sharp-angle pruning, and monotonic-angle enforcement.
-    /// Extracted from BoundaryMapper to keep the orchestration pipeline thin.
+    ///     Pure geometry operations for boundary waypoint computation:
+    ///     edge snapping, Chaikin smoothing, RDP simplification, clockwise sorting,
+    ///     XZ deduplication, sharp-angle pruning, and monotonic-angle enforcement.
+    ///     Extracted from BoundaryMapper to keep the orchestration pipeline thin.
     /// </summary>
     internal static class BoundaryGeometry
     {
         internal const float NavMeshProbeRadius = 4f;
-        private static readonly float[] ElevationProbes = { 0f, 3f, 6f, 10f };
         private const float MaxEdgeXZDrift = 4f;
 
-        /// <summary>When two waypoints are within this XZ radius of each other after
-        /// edge-snapping, keep only the higher one (wall-top preference).
-        /// Must be smaller than CellSize (3m) to avoid merging adjacent boundary cells.</summary>
+        /// <summary>
+        ///     When two waypoints are within this XZ radius of each other after
+        ///     edge-snapping, keep only the higher one (wall-top preference).
+        ///     Must be smaller than CellSize (3m) to avoid merging adjacent boundary cells.
+        /// </summary>
         internal const float XZDedupeRadius = 1.5f;
 
-        /// <summary>RDP epsilon: 1.0m aggressively simplifies now that boundary cells are
-        /// exterior-only and free of inner noise.</summary>
+        /// <summary>
+        ///     RDP epsilon: 1.0m aggressively simplifies now that boundary cells are
+        ///     exterior-only and free of inner noise.
+        /// </summary>
         internal const float RdpEpsilon = 1f;
 
-        /// <summary>Interior angle threshold for pruning. Waypoints with reflex angles above
-        /// this are removed if the neighbors have a clear NavMesh path between them.</summary>
+        /// <summary>
+        ///     Interior angle threshold for pruning. Waypoints with reflex angles above
+        ///     this are removed if the neighbors have a clear NavMesh path between them.
+        /// </summary>
         internal const float SharpAngleThreshold = 270f;
+
+        private static readonly float[] ElevationProbes = { 0f, 3f, 6f, 10f };
 
         #region NavMesh Edge Snapping
 
         /// <param name="probeOrigin">
-        /// Outward-offset position (cell center + outward * halfCell).
-        /// Biases FindClosestEdge toward the exterior perimeter.
+        ///     Outward-offset position (cell center + outward * halfCell).
+        ///     Biases FindClosestEdge toward the exterior perimeter.
         /// </param>
         /// <param name="cellCenter">Original cell center for XZ-drift check.</param>
         internal static bool TryFindBestEdge(
@@ -42,21 +49,21 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             bestEdge = cellCenter;
             isElevated = false;
-            bool found = false;
+            var found = false;
             Vector3 groundEdge = default;
-            bool hasGround = false;
+            var hasGround = false;
 
-            foreach (float heightOffset in ElevationProbes)
+            foreach (var heightOffset in ElevationProbes)
             {
                 var probe = new Vector3(probeOrigin.x, probeOrigin.y + heightOffset, probeOrigin.z);
 
-                if (!NavMesh.SamplePosition(probe, out NavMeshHit sample, NavMeshProbeRadius, filter))
+                if (!NavMesh.SamplePosition(probe, out var sample, NavMeshProbeRadius, filter))
                     continue;
 
-                if (!NavMesh.FindClosestEdge(sample.position, out NavMeshHit edge, filter))
+                if (!NavMesh.FindClosestEdge(sample.position, out var edge, filter))
                     continue;
 
-                float xzDrift = Vector2.Distance(
+                var xzDrift = Vector2.Distance(
                     new Vector2(cellCenter.x, cellCenter.z),
                     new Vector2(edge.position.x, edge.position.z));
 
@@ -91,22 +98,37 @@ namespace ValheimVillages.Behaviors.Patrol
 
         #endregion
 
+        #region RDP Simplification
+
+        private static float PerpendicularDistance2D(Vector2 point, Vector2 lineStart, Vector2 lineEnd)
+        {
+            var line = lineEnd - lineStart;
+            var lineLenSq = line.sqrMagnitude;
+            if (lineLenSq < 0.0001f) return Vector2.Distance(point, lineStart);
+
+            var t = Mathf.Clamp01(Vector2.Dot(point - lineStart, line) / lineLenSq);
+            var projection = lineStart + t * line;
+            return Vector2.Distance(point, projection);
+        }
+
+        #endregion
+
         #region Chaikin Smoothing
 
         /// <summary>
-        /// Chaikin corner-cutting: for each edge A->B in the closed polygon, generate two
-        /// new points at 25% and 75% along the segment.
+        ///     Chaikin corner-cutting: for each edge A->B in the closed polygon, generate two
+        ///     new points at 25% and 75% along the segment.
         /// </summary>
         internal static List<Vector3> ChaikinSmooth(List<Vector3> points)
         {
             if (points.Count < 3) return points;
 
-            int n = points.Count;
+            var n = points.Count;
             var result = new List<Vector3>(n * 2);
 
-            for (int i = 0; i < n; i++)
+            for (var i = 0; i < n; i++)
             {
-                int next = (i + 1) % n;
+                var next = (i + 1) % n;
                 var a = points[i];
                 var b = points[next];
 
@@ -118,17 +140,15 @@ namespace ValheimVillages.Behaviors.Patrol
         }
 
         /// <summary>
-        /// Re-snap interpolated Chaikin points back onto the NavMesh.
-        /// Points that can't be snapped are dropped.
+        ///     Re-snap interpolated Chaikin points back onto the NavMesh.
+        ///     Points that can't be snapped are dropped.
         /// </summary>
         internal static List<Vector3> NavMeshReSnap(List<Vector3> points, NavMeshQueryFilter filter)
         {
             var result = new List<Vector3>(points.Count);
             foreach (var p in points)
-            {
-                if (NavMesh.SamplePosition(p, out NavMeshHit hit, NavMeshProbeRadius, filter))
+                if (NavMesh.SamplePosition(p, out var hit, NavMeshProbeRadius, filter))
                     result.Add(hit.position);
-            }
             return result;
         }
 
@@ -140,13 +160,13 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             if (waypoints.Count <= 4) return 0;
 
-            int pruned = 0;
-            for (int i = waypoints.Count - 1; i >= 0 && waypoints.Count > 4; i--)
+            var pruned = 0;
+            for (var i = waypoints.Count - 1; i >= 0 && waypoints.Count > 4; i--)
             {
-                int prev = (i - 1 + waypoints.Count) % waypoints.Count;
-                int next = (i + 1) % waypoints.Count;
+                var prev = (i - 1 + waypoints.Count) % waypoints.Count;
+                var next = (i + 1) % waypoints.Count;
 
-                float angle = InteriorAngleCW(waypoints[prev], waypoints[i], waypoints[next]);
+                var angle = InteriorAngleCW(waypoints[prev], waypoints[i], waypoints[next]);
                 if (angle < SharpAngleThreshold)
                     continue;
 
@@ -165,46 +185,29 @@ namespace ValheimVillages.Behaviors.Patrol
             var ab = new Vector2(b.x - a.x, b.z - a.z);
             var bc = new Vector2(c.x - b.x, c.z - b.z);
 
-            float cross = ab.x * bc.y - ab.y * bc.x;
-            float dot = ab.x * bc.x + ab.y * bc.y;
-            float turnAngle = Mathf.Atan2(cross, dot) * Mathf.Rad2Deg;
+            var cross = ab.x * bc.y - ab.y * bc.x;
+            var dot = ab.x * bc.x + ab.y * bc.y;
+            var turnAngle = Mathf.Atan2(cross, dot) * Mathf.Rad2Deg;
 
-            float interior = 180f - turnAngle;
+            var interior = 180f - turnAngle;
             if (interior < 0f) interior += 360f;
             if (interior >= 360f) interior -= 360f;
             return interior;
         }
 
         /// <summary>
-        /// Check if a full NavMesh path exists between two points.
+        ///     Check if a full NavMesh path exists between two points.
         /// </summary>
         internal static bool IsNavMeshPathClear(Vector3 from, Vector3 to, NavMeshQueryFilter filter)
         {
-            if (!NavMesh.SamplePosition(from, out NavMeshHit srcHit, NavMeshProbeRadius, filter))
+            if (!NavMesh.SamplePosition(from, out var srcHit, NavMeshProbeRadius, filter))
                 return false;
-            if (!NavMesh.SamplePosition(to, out NavMeshHit dstHit, NavMeshProbeRadius, filter))
+            if (!NavMesh.SamplePosition(to, out var dstHit, NavMeshProbeRadius, filter))
                 return false;
 
             var path = new NavMeshPath();
             NavMesh.CalculatePath(srcHit.position, dstHit.position, filter, path);
-            return path.status == UnityEngine.AI.NavMeshPathStatus.PathComplete;
-        }
-
-        #endregion
-
-        #region RDP Simplification
-
-
-
-        private static float PerpendicularDistance2D(Vector2 point, Vector2 lineStart, Vector2 lineEnd)
-        {
-            var line = lineEnd - lineStart;
-            float lineLenSq = line.sqrMagnitude;
-            if (lineLenSq < 0.0001f) return Vector2.Distance(point, lineStart);
-
-            float t = Mathf.Clamp01(Vector2.Dot(point - lineStart, line) / lineLenSq);
-            var projection = lineStart + t * line;
-            return Vector2.Distance(point, projection);
+            return path.status == NavMeshPathStatus.PathComplete;
         }
 
         #endregion
@@ -215,33 +218,33 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             waypoints.Sort((a, b) =>
             {
-                float ax = a.x - center.x;
-                float az = a.z - center.z;
-                float bx = b.x - center.x;
-                float bz = b.z - center.z;
-                float angleA = Mathf.Atan2(az, ax);
-                float angleB = Mathf.Atan2(bz, bx);
+                var ax = a.x - center.x;
+                var az = a.z - center.z;
+                var bx = b.x - center.x;
+                var bz = b.z - center.z;
+                var angleA = Mathf.Atan2(az, ax);
+                var angleB = Mathf.Atan2(bz, bx);
                 return angleB.CompareTo(angleA);
             });
         }
 
         /// <summary>
-        /// Walk the clockwise-sorted waypoint list and drop any waypoint whose angle
-        /// from the bed center doesn't advance (decrease) relative to the previous kept
-        /// waypoint.
+        ///     Walk the clockwise-sorted waypoint list and drop any waypoint whose angle
+        ///     from the bed center doesn't advance (decrease) relative to the previous kept
+        ///     waypoint.
         /// </summary>
         internal static List<Vector3> EnforceMonotonicAngle(List<Vector3> waypoints, Vector3 center)
         {
             if (waypoints.Count < 3) return waypoints;
 
             var result = new List<Vector3>(waypoints.Count) { waypoints[0] };
-            float prevAngle = Mathf.Atan2(waypoints[0].z - center.z, waypoints[0].x - center.x);
+            var prevAngle = Mathf.Atan2(waypoints[0].z - center.z, waypoints[0].x - center.x);
 
-            for (int i = 1; i < waypoints.Count; i++)
+            for (var i = 1; i < waypoints.Count; i++)
             {
-                float angle = Mathf.Atan2(waypoints[i].z - center.z, waypoints[i].x - center.x);
+                var angle = Mathf.Atan2(waypoints[i].z - center.z, waypoints[i].x - center.x);
 
-                float delta = angle - prevAngle;
+                var delta = angle - prevAngle;
 
                 if (delta > Mathf.PI) delta -= 2f * Mathf.PI;
                 if (delta <= -Mathf.PI) delta += 2f * Mathf.PI;

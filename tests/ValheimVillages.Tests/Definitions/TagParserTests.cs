@@ -4,7 +4,7 @@ using Xunit;
 namespace ValheimVillages.Tests.Definitions;
 
 /// <summary>
-/// Tests for the namespace:value tag parser and filter utilities.
+///     Tests for the namespace:value tag parser and filter utilities.
 /// </summary>
 public class TagParserTests
 {

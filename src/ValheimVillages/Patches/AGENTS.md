@@ -1,10 +1,13 @@
 # Patches
 
-Keywords: Harmony patch, ObjectDB, ZNetScene, ItemPatch, LocalizationPatch, PrefabProtectionPatch, DiagnosticPatch, item registration, localization, token, template prefab, ZNetView, ItemDrop, prefab protection, vv_ prefix
+Keywords: Harmony patch, ObjectDB, ZNetScene, ItemPatch, LocalizationPatch, PrefabProtectionPatch, DiagnosticPatch, item
+registration, localization, token, template prefab, ZNetView, ItemDrop, prefab protection, vv_ prefix
 
 ## Purpose
 
-Global Harmony patches that wire mod systems into Valheim's initialization lifecycle. Handles item/recipe registration in ObjectDB and ZNetScene, localization token injection, and protection of template prefabs from unintended initialization.
+Global Harmony patches that wire mod systems into Valheim's initialization lifecycle. Handles item/recipe registration
+in ObjectDB and ZNetScene, localization token injection, and protection of template prefabs from unintended
+initialization.
 
 ## Directory Structure
 
@@ -18,13 +21,13 @@ Patches/
 
 ## Key Types
 
-| Type | Role |
-|------|------|
-| `ObjectDBAwakePatch` / `ObjectDBCopyPatch` | Calls `ItemFactory.RegisterAll`, `VirtualRecipeLoader.RegisterAll` |
-| `ZNetSceneAwakePatch` | Calls `ItemFactory.RegisterAllInZNetScene`, `VirtualRecipeLoader.RegisterCookingRecipesIfNeeded` |
-| `LocalizationPatch` | Adds localization tokens: `vv_farmer`, `vv_tavernkeeper`, `vv_villager`, etc. |
-| `ItemDropAwakeProtectionPatch` | Skips `ItemDrop.Awake` for template prefabs (`vv_*` without `(Clone)`) |
-| `ZNetViewAwakeProtectionPatch` | Skips `ZNetView.Awake` for template prefabs |
+| Type                                       | Role                                                                                             |
+|--------------------------------------------|--------------------------------------------------------------------------------------------------|
+| `ObjectDBAwakePatch` / `ObjectDBCopyPatch` | Calls `ItemFactory.RegisterAll`, `VirtualRecipeLoader.RegisterAll`                               |
+| `ZNetSceneAwakePatch`                      | Calls `ItemFactory.RegisterAllInZNetScene`, `VirtualRecipeLoader.RegisterCookingRecipesIfNeeded` |
+| `LocalizationPatch`                        | Adds localization tokens: `vv_farmer`, `vv_tavernkeeper`, `vv_villager`, etc.                    |
+| `ItemDropAwakeProtectionPatch`             | Skips `ItemDrop.Awake` for template prefabs (`vv_*` without `(Clone)`)                           |
+| `ZNetViewAwakeProtectionPatch`             | Skips `ZNetView.Awake` for template prefabs                                                      |
 
 ## Entry Points and Registration
 
@@ -34,5 +37,6 @@ Patches/
 ## Integration
 
 - **Items/** -- `ItemPatch` triggers `ItemFactory.RegisterAll` and `VirtualRecipeLoader.RegisterAll`.
-- **Villager/** -- `VillagerPawnPatch.LogAvailableDvergrPrefabs` (in `Villager/SpawnPatch.cs`) called from `ZNetSceneAwakePatch`.
+- **Villager/** -- `VillagerPawnPatch.LogAvailableDvergrPrefabs` (in `Villager/SpawnPatch.cs`) called from
+  `ZNetSceneAwakePatch`.
 - **Attributes/** -- `AttributeScanner.InvokeObjectDBRegistrations()` called during hot reload alongside these patches.

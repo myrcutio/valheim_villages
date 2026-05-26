@@ -1,9 +1,9 @@
-using System;
 using System.Linq;
+using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Behaviors.Patrol;
-using ValheimVillages.Testing;
 using ValheimVillages.Tags;
+using ValheimVillages.Testing;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
 using ValheimVillages.Villager.Registry;
@@ -11,8 +11,8 @@ using ValheimVillages.Villager.Registry;
 namespace ValheimVillages.IntegrationTests
 {
     /// <summary>
-    /// Integration tests for the Debug tab's panel registration and rendering.
-    /// Validates end-to-end: definition tags -> panel registration -> tab rendering.
+    ///     Integration tests for the Debug tab's panel registration and rendering.
+    ///     Validates end-to-end: definition tags -> panel registration -> tab rendering.
     /// </summary>
     public static class DebugTabTests
     {
@@ -46,7 +46,7 @@ namespace ValheimVillages.IntegrationTests
 
             // 4. Find a patroller NPC (guard or scout) and verify Village Map appears
 #pragma warning disable CS0618
-            var patrollers = UnityEngine.Object.FindObjectsOfType<VillagerBehaviorBridge>()
+            var patrollers = Object.FindObjectsOfType<VillagerBehaviorBridge>()
                 .Where(v => v.AI?.GetBehavior<PerimeterPatrolBehavior>() != null)
                 .ToArray();
 #pragma warning restore CS0618

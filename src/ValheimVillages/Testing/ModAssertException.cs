@@ -4,28 +4,26 @@ using System.Collections.Generic;
 namespace ValheimVillages.Testing
 {
     /// <summary>
-    /// A single assertion failure with expected/actual values.
+    ///     A single assertion failure with expected/actual values.
     /// </summary>
     public class AssertionEntry
     {
-        public string Message;
-        public string Expected;
         public string Actual;
+        public string Expected;
+        public string Message;
     }
 
     /// <summary>
-    /// Exception thrown by ModAssert when an assertion fails.
-    /// Captures all assertions (including soft-assert batches) for JSON output.
+    ///     Exception thrown by ModAssert when an assertion fails.
+    ///     Captures all assertions (including soft-assert batches) for JSON output.
     /// </summary>
     public class ModAssertException : Exception
     {
-        public List<AssertionEntry> Assertions { get; }
-
         public ModAssertException(string message) : base(message)
         {
             Assertions = new List<AssertionEntry>
             {
-                new AssertionEntry { Message = message }
+                new() { Message = message },
             };
         }
 
@@ -33,7 +31,7 @@ namespace ValheimVillages.Testing
         {
             Assertions = new List<AssertionEntry>
             {
-                new AssertionEntry { Message = message, Expected = expected, Actual = actual }
+                new() { Message = message, Expected = expected, Actual = actual },
             };
         }
 
@@ -42,5 +40,7 @@ namespace ValheimVillages.Testing
         {
             Assertions = assertions;
         }
+
+        public List<AssertionEntry> Assertions { get; }
     }
 }

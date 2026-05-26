@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
-using ValheimVillages;
 using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Schemas;
@@ -12,7 +11,7 @@ using ValheimVillages.Villager.AI.Memory;
 namespace ValheimVillages.Behaviors.Farming
 {
     /// <summary>
-    /// Handles finding mature harvestable crops and picking them for NPC farming.
+    ///     Handles finding mature harvestable crops and picking them for NPC farming.
     /// </summary>
     public static class HarvestHelper
     {
@@ -25,8 +24,8 @@ namespace ValheimVillages.Behaviors.Farming
                 BindingFlags.NonPublic | BindingFlags.Instance);
 
         /// <summary>
-        /// Find all harvestable Pickable objects near the given position that produce
-        /// the specified output item. Returns empty list if none found.
+        ///     Find all harvestable Pickable objects near the given position that produce
+        ///     the specified output item. Returns empty list if none found.
         /// </summary>
         public static List<Pickable> FindHarvestableCrops(
             Vector3 center, float radius, string outputItemName)
@@ -59,8 +58,8 @@ namespace ValheimVillages.Behaviors.Farming
         }
 
         /// <summary>
-        /// Find any harvestable Pickable near farm locations in the NPC's memory.
-        /// Returns the first match with its position, or null if none found.
+        ///     Find any harvestable Pickable near farm locations in the NPC's memory.
+        ///     Returns the first match with its position, or null if none found.
         /// </summary>
         public static Pickable FindNearestHarvestableCrop(
             VillagerAI ai, string outputItemName, float radius)
@@ -69,21 +68,21 @@ namespace ValheimVillages.Behaviors.Farming
         }
 
         /// <summary>
-        /// Overload for work-order handler: uses known locations and current position from interface.
+        ///     Overload for work-order handler: uses known locations and current position from interface.
         /// </summary>
         public static Pickable FindNearestHarvestableCrop(
             IVillagerStationLookup ai, Vector3 currentPosition, string outputItemName, float radius)
         {
             if (ai?.KnownLocations == null) return null;
             Pickable nearest = null;
-            float nearestDist = float.MaxValue;
+            var nearestDist = float.MaxValue;
 
             foreach (var loc in ai.KnownLocations.Where(l => l.Type == LocationType.Farm))
             {
                 var crops = FindHarvestableCrops(loc.Position, radius, outputItemName);
                 foreach (var crop in crops)
                 {
-                    float dist = Vector3.Distance(currentPosition, crop.transform.position);
+                    var dist = Vector3.Distance(currentPosition, crop.transform.position);
                     if (dist < nearestDist)
                     {
                         nearestDist = dist;
@@ -96,8 +95,8 @@ namespace ValheimVillages.Behaviors.Farming
         }
 
         /// <summary>
-        /// Harvest a Pickable crop. Calls Interact which triggers the RPC to
-        /// spawn item drops on the ground near the plant.
+        ///     Harvest a Pickable crop. Calls Interact which triggers the RPC to
+        ///     spawn item drops on the ground near the plant.
         /// </summary>
         public static bool HarvestCrop(Pickable pickable, Humanoid npc)
         {
@@ -112,21 +111,19 @@ namespace ValheimVillages.Behaviors.Farming
         }
 
         /// <summary>
-        /// Count harvestable crops near farm locations for a specific output item.
+        ///     Count harvestable crops near farm locations for a specific output item.
         /// </summary>
         public static int CountHarvestableCrops(
             VillagerAI ai, string outputItemName, float radius)
         {
-            int count = 0;
+            var count = 0;
             foreach (var loc in FindKnownFarms(ai.GetMemory()))
-            {
                 count += FindHarvestableCrops(loc.Position, radius, outputItemName).Count;
-            }
             return count;
         }
 
         /// <summary>
-        /// Check if a Pickable has already been picked (private m_picked field).
+        ///     Check if a Pickable has already been picked (private m_picked field).
         /// </summary>
         private static bool IsAlreadyPicked(Pickable pickable)
         {

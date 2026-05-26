@@ -2,24 +2,22 @@ using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Enums;
 using ValheimVillages.Schemas;
-using ValheimVillages.Settings;
 using ValheimVillages.Villager.AI.Navigation;
-using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Work;
 using VillagerWaypoint = ValheimVillages.Villager.AI.Pathfinding.VillagerWaypoint;
 
 namespace ValheimVillages.Behaviors.Crafting
 {
     /// <summary>
-    /// Workflow method stubs for CraftingBehavior (Villager path).
-    /// Full implementation to be completed in later migration step.
+    ///     Workflow method stubs for CraftingBehavior (Villager path).
+    ///     Full implementation to be completed in later migration step.
     /// </summary>
     public partial class CraftingBehavior
     {
         private void AbandonWork(string reason)
         {
             m_context = null;
-            m_subState = WorkSubState.Idle;
+            SubState = WorkSubState.Idle;
             if (m_ai != null)
                 m_ai.SetState(BehaviorState.Idle, (VillagerWaypoint)null);
         }
@@ -34,9 +32,9 @@ namespace ValheimVillages.Behaviors.Crafting
 
             Plugin.Log?.LogInfo(
                 $"[Work:{LogName}] Fueling required ({m_context.FuelRequirement.Value.FuelItemPrefab}), " +
-                $"walking to fuel container");
+                "walking to fuel container");
 
-            m_subState = WorkSubState.GatheringFuel;
+            SubState = WorkSubState.GatheringFuel;
             var fuelChestPos = VillagerMovement.GetWalkableDestination(
                 m_context.FuelContainer.transform.position);
             m_ai.SetState(BehaviorState.Working,
@@ -68,18 +66,18 @@ namespace ValheimVillages.Behaviors.Crafting
 
             ContainerScanner.RemoveIngredients(new List<IngredientSource>
             {
-                new IngredientSource
+                new()
                 {
                     PrefabName = fuel.FuelItemPrefab,
                     Amount = 1,
-                    Container = container
-                }
+                    Container = container,
+                },
             });
 
             Plugin.Log?.LogInfo(
                 $"[Work:{LogName}] Picked up 1x {fuel.FuelItemPrefab}, walking to fuel target");
 
-            m_subState = WorkSubState.FuelingStation;
+            SubState = WorkSubState.FuelingStation;
             var targetPos = VillagerMovement.GetWalkableDestination(fuel.FuelTargetPosition);
             m_ai.SetState(BehaviorState.Working,
                 new VillagerWaypoint(targetPos, VillagerWaypoint.DefaultStrategyId));
@@ -138,6 +136,7 @@ namespace ValheimVillages.Behaviors.Crafting
                 BeginTravelingToStation();
                 return;
             }
+
             m_context.CurrentIngredientIndex = 0;
             WalkToNextIngredientChest();
         }
@@ -157,14 +156,14 @@ namespace ValheimVillages.Behaviors.Crafting
             var nview = station.GetComponent<ZNetView>();
             if (nview == null || nview.GetZDO() == null) return false;
 
-            int slotCount = station.m_slots != null ? station.m_slots.Length : 0;
+            var slotCount = station.m_slots != null ? station.m_slots.Length : 0;
             var zdo = nview.GetZDO();
-            for (int i = 0; i < slotCount; i++)
+            for (var i = 0; i < slotCount; i++)
             {
-                string slotItem = zdo.GetString("slot" + i, "");
+                var slotItem = zdo.GetString("slot" + i);
                 if (string.IsNullOrEmpty(slotItem)) continue;
 
-                int status = zdo.GetInt("slotstatus" + i, 0);
+                var status = zdo.GetInt("slotstatus" + i);
                 // Status: 0=NotDone, 1=Done, 2=Burnt
                 if (status >= 1)
                 {
@@ -178,6 +177,7 @@ namespace ValheimVillages.Behaviors.Crafting
                     return true;
                 }
             }
+
             return true;
         }
 
@@ -191,15 +191,15 @@ namespace ValheimVillages.Behaviors.Crafting
             var allDrops = PhysicsHelper.GetAllInRadius<ItemDrop>(spawnPos, searchRadius);
 
             ItemDrop closest = null;
-            float closestDist = float.MaxValue;
+            var closestDist = float.MaxValue;
             foreach (var drop in allDrops)
             {
                 if (drop == null || drop.m_itemData == null) continue;
-                string dropPrefab = drop.m_itemData.m_dropPrefab?.name
-                    ?? drop.gameObject.name.Replace("(Clone)", "").Trim();
+                var dropPrefab = drop.m_itemData.m_dropPrefab?.name
+                                 ?? drop.gameObject.name.Replace("(Clone)", "").Trim();
                 if (dropPrefab != slotItemName) continue;
 
-                float dist = Vector3.Distance(drop.transform.position, spawnPos);
+                var dist = Vector3.Distance(drop.transform.position, spawnPos);
                 if (dist < closestDist)
                 {
                     closest = drop;
@@ -227,7 +227,7 @@ namespace ValheimVillages.Behaviors.Crafting
 
             if (m_context.CookingStationRef != null)
             {
-                string outputPrefab = m_context.WorkOrder?.ItemPrefabName;
+                var outputPrefab = m_context.WorkOrder?.ItemPrefabName;
                 if (!string.IsNullOrEmpty(outputPrefab) && m_context.SourceContainer != null)
                 {
                     ContainerScanner.TryDepositItem(m_context.SourceContainer, outputPrefab, 1);
@@ -256,7 +256,7 @@ namespace ValheimVillages.Behaviors.Crafting
                 return;
             }
 
-            m_subState = WorkSubState.ReturningToChest;
+            SubState = WorkSubState.ReturningToChest;
             var chestPos = VillagerMovement.GetWalkableDestination(m_context.SourceContainer.transform.position);
             m_ai.SetState(BehaviorState.Working, new VillagerWaypoint(chestPos, VillagerWaypoint.DefaultStrategyId));
         }
@@ -264,7 +264,7 @@ namespace ValheimVillages.Behaviors.Crafting
         private void FinishWork()
         {
             m_context = null;
-            m_subState = WorkSubState.Idle;
+            SubState = WorkSubState.Idle;
             if (m_ai != null)
                 m_ai.SetState(BehaviorState.Idle, (VillagerWaypoint)null);
         }
@@ -297,7 +297,7 @@ namespace ValheimVillages.Behaviors.Crafting
             if (m_context == null) return;
 
             m_context.CraftStartTime = Time.time;
-            m_subState = WorkSubState.Crafting;
+            SubState = WorkSubState.Crafting;
 
             var station = m_context.CookingStationRef;
             if (station != null && !string.IsNullOrEmpty(m_context.CookingInputItemName))
@@ -319,8 +319,8 @@ namespace ValheimVillages.Behaviors.Crafting
                 {
                     nview.InvokeRPC("RPC_AddItem", m_context.CookingInputItemName);
 
-                    var conversion = station.m_conversion?.Find(
-                        c => c.m_from != null && c.m_from.gameObject.name == m_context.CookingInputItemName);
+                    var conversion = station.m_conversion?.Find(c =>
+                        c.m_from != null && c.m_from.gameObject.name == m_context.CookingInputItemName);
                     if (conversion != null)
                         m_context.CraftCookTimeSeconds = conversion.m_cookTime;
                 }
@@ -341,7 +341,7 @@ namespace ValheimVillages.Behaviors.Crafting
 
             if (!m_context.CookingItemAlreadyInChest && m_context.SourceContainer != null)
             {
-                string outputPrefab = m_context.WorkOrder?.ItemPrefabName;
+                var outputPrefab = m_context.WorkOrder?.ItemPrefabName;
                 if (!string.IsNullOrEmpty(outputPrefab))
                     ContainerScanner.TryDepositItem(m_context.SourceContainer, outputPrefab, 1);
             }
@@ -349,24 +349,21 @@ namespace ValheimVillages.Behaviors.Crafting
             m_context.CookingItemAlreadyInChest = false;
             m_context.CookingRemovalRequested = false;
 
-            int maxQuantity = m_context.WorkOrder?.MaxQuantity ?? 1;
+            var maxQuantity = m_context.WorkOrder?.MaxQuantity ?? 1;
             if (m_context.CraftedCount < maxQuantity)
-            {
                 BeginGatheringIngredients();
-            }
             else
-            {
                 FinishWork();
-            }
         }
 
         private void BeginTravelingToStation()
         {
-            m_subState = WorkSubState.TravelingToStation;
+            SubState = WorkSubState.TravelingToStation;
             if (m_ai != null && m_context != null)
             {
                 var stationTarget = VillagerMovement.GetWalkableDestination(m_context.CraftStationPosition);
-                m_ai.SetState(BehaviorState.Working, new VillagerWaypoint(stationTarget, VillagerWaypoint.DefaultStrategyId));
+                m_ai.SetState(BehaviorState.Working,
+                    new VillagerWaypoint(stationTarget, VillagerWaypoint.DefaultStrategyId));
             }
         }
 
@@ -378,13 +375,15 @@ namespace ValheimVillages.Behaviors.Crafting
                 BeginTravelingToStation();
                 return;
             }
+
             var source = m_context.IngredientSources[m_context.CurrentIngredientIndex];
             if (source.Container == null)
             {
                 AbandonWork("ingredient container destroyed");
                 return;
             }
-            m_subState = WorkSubState.GatheringIngredients;
+
+            SubState = WorkSubState.GatheringIngredients;
             var targetPos = VillagerMovement.GetWalkableDestination(source.Container.transform.position);
             m_ai.SetState(BehaviorState.Working, new VillagerWaypoint(targetPos, VillagerWaypoint.DefaultStrategyId));
         }

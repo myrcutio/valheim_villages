@@ -12,31 +12,30 @@ using ValheimVillages.Villager.AI.Work;
 namespace ValheimVillages.Behaviors.Tidy
 {
     /// <summary>
-    /// Scans nearby cooking stations for finished (Done) or burnt items and removes them
-    /// from the spit. Higher priority than crafting/farming so the NPC tidies before
-    /// starting new work. Removed items are deposited into the nearest container if one
-    /// exists; otherwise the physical drop is simply destroyed.
-    /// Tag: "tidy", Priority: 60.
+    ///     Scans nearby cooking stations for finished (Done) or burnt items and removes them
+    ///     from the spit. Higher priority than crafting/farming so the NPC tidies before
+    ///     starting new work. Removed items are deposited into the nearest container if one
+    ///     exists; otherwise the physical drop is simply destroyed.
+    ///     Tag: "tidy", Priority: 60.
     /// </summary>
     [RegisterBehavior("tidy")]
     public class TidyBehavior : IBehavior
     {
-        private readonly VillagerAI m_ai;
-        private CookingStation m_targetStation;
-        private bool m_active;
-        private float m_lastScanTime;
-
         private const float ScanInterval = 10f;
         private const float StationLookupRadius = 2f;
         private const float ItemPickupRadius = 3f;
-
-        public string Tag => "tidy";
-        public int Priority => 60;
+        private readonly VillagerAI m_ai;
+        private bool m_active;
+        private float m_lastScanTime;
+        private CookingStation m_targetStation;
 
         public TidyBehavior(VillagerAI ai)
         {
             m_ai = ai;
         }
+
+        public string Tag => "tidy";
+        public int Priority => 60;
 
         public bool WantsControl(BehaviorContext ctx)
         {
@@ -106,14 +105,14 @@ namespace ValheimVillages.Behaviors.Tidy
             if (nview == null || nview.GetZDO() == null) return false;
 
             var zdo = nview.GetZDO();
-            int slotCount = station.m_slots != null ? station.m_slots.Length : 0;
+            var slotCount = station.m_slots != null ? station.m_slots.Length : 0;
 
-            for (int i = 0; i < slotCount; i++)
+            for (var i = 0; i < slotCount; i++)
             {
-                string item = zdo.GetString("slot" + i, "");
+                var item = zdo.GetString("slot" + i);
                 if (string.IsNullOrEmpty(item)) continue;
 
-                int status = zdo.GetInt("slotstatus" + i, 0);
+                var status = zdo.GetInt("slotstatus" + i);
                 if (status >= 1) return true;
             }
 
@@ -126,15 +125,15 @@ namespace ValheimVillages.Behaviors.Tidy
             if (nview == null || nview.GetZDO() == null) return;
 
             var zdo = nview.GetZDO();
-            int slotCount = station.m_slots != null ? station.m_slots.Length : 0;
+            var slotCount = station.m_slots != null ? station.m_slots.Length : 0;
             var removedItems = new List<string>();
 
-            for (int i = 0; i < slotCount; i++)
+            for (var i = 0; i < slotCount; i++)
             {
-                string item = zdo.GetString("slot" + i, "");
+                var item = zdo.GetString("slot" + i);
                 if (string.IsNullOrEmpty(item)) continue;
 
-                int status = zdo.GetInt("slotstatus" + i, 0);
+                var status = zdo.GetInt("slotstatus" + i);
                 if (status < 1) continue;
 
                 Plugin.Log?.LogInfo(
@@ -158,16 +157,16 @@ namespace ValheimVillages.Behaviors.Tidy
             var allDrops = PhysicsHelper.GetAllInRadius<ItemDrop>(spawnPos, ItemPickupRadius);
 
             ItemDrop closest = null;
-            float closestDist = float.MaxValue;
+            var closestDist = float.MaxValue;
 
             foreach (var drop in allDrops)
             {
                 if (drop == null || drop.m_itemData == null) continue;
-                string dropPrefab = drop.m_itemData.m_dropPrefab?.name
-                    ?? drop.gameObject.name.Replace("(Clone)", "").Trim();
+                var dropPrefab = drop.m_itemData.m_dropPrefab?.name
+                                 ?? drop.gameObject.name.Replace("(Clone)", "").Trim();
                 if (dropPrefab != slotItemName) continue;
 
-                float dist = Vector3.Distance(drop.transform.position, spawnPos);
+                var dist = Vector3.Distance(drop.transform.position, spawnPos);
                 if (dist < closestDist)
                 {
                     closest = drop;
@@ -192,14 +191,10 @@ namespace ValheimVillages.Behaviors.Tidy
 
             if (containers.Count == 0) return;
 
-            foreach (string itemName in itemNames)
-            {
-                foreach (var container in containers)
-                {
-                    if (ContainerScanner.TryDepositItem(container, itemName, 1))
-                        break;
-                }
-            }
+            foreach (var itemName in itemNames)
+            foreach (var container in containers)
+                if (ContainerScanner.TryDepositItem(container, itemName, 1))
+                    break;
         }
 
         private void Reset()

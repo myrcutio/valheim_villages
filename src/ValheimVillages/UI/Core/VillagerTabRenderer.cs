@@ -6,17 +6,18 @@ using RawImage = UnityEngine.UI.RawImage;
 namespace ValheimVillages.UI.Core
 {
     /// <summary>
-    /// Content rendering, scroll handling, and layout for the villager tab UI.
-    /// Populates the native RecipeList (left pane) and Description panel (right pane).
-    /// Partial class — see VillagerTabManager.cs for lifecycle and tab switching.
+    ///     Content rendering, scroll handling, and layout for the villager tab UI.
+    ///     Populates the native RecipeList (left pane) and Description panel (right pane).
+    ///     Partial class — see VillagerTabManager.cs for lifecycle and tab switching.
     /// </summary>
     public partial class VillagerTabManager
     {
         private const string ListItemPrefix = "VV_ListItem_";
+        private Vector2? m_savedListRootAnchorMax;
 
         /// <summary>Saved m_recipeListRoot layout so we can restore after custom tabs.</summary>
         private Vector2? m_savedListRootAnchorMin;
-        private Vector2? m_savedListRootAnchorMax;
+
         private Vector2? m_savedListRootPivot;
 
         #region Custom Content (populates native RecipeList + Decription)
@@ -45,13 +46,12 @@ namespace ValheimVillages.UI.Core
                 go.transform.SetParent(null);
                 Destroy(go);
             }
+
             m_listElements.Clear();
 
             if (gui.m_recipeListRoot != null)
-            {
                 foreach (Transform child in gui.m_recipeListRoot)
                     child.gameObject.SetActive(false);
-            }
 
             if (gui.m_recipeElementPrefab == null || gui.m_recipeListRoot == null)
                 return;
@@ -63,12 +63,13 @@ namespace ValheimVillages.UI.Core
                 m_savedListRootAnchorMax = rootRT.anchorMax;
                 m_savedListRootPivot = rootRT.pivot;
             }
+
             rootRT.anchorMin = new Vector2(rootRT.anchorMin.x, 1f);
             rootRT.anchorMax = new Vector2(rootRT.anchorMax.x, 1f);
             rootRT.pivot = new Vector2(rootRT.pivot.x, 1f);
 
-            float yPos = 0f;
-            for (int i = 0; i < items.Count; i++)
+            var yPos = 0f;
+            for (var i = 0; i < items.Count; i++)
             {
                 var elem = Instantiate(
                     gui.m_recipeElementPrefab, gui.m_recipeListRoot);
@@ -101,7 +102,7 @@ namespace ValheimVillages.UI.Core
                     }
                 }
 
-                int idx = i;
+                var idx = i;
                 var btn = elem.GetComponent<Button>();
                 if (btn == null) btn = elem.AddComponent<Button>();
                 btn.onClick.RemoveAllListeners();
@@ -115,7 +116,7 @@ namespace ValheimVillages.UI.Core
             var listRootRT = gui.m_recipeListRoot;
             if (listRootRT != null)
             {
-                float totalH = items.Count * gui.m_recipeListSpace;
+                var totalH = items.Count * gui.m_recipeListSpace;
                 listRootRT.SetSizeWithCurrentAnchors(
                     RectTransform.Axis.Vertical, totalH);
             }
@@ -147,11 +148,11 @@ namespace ValheimVillages.UI.Core
                         descChild.gameObject, detail?.Description ?? "");
             }
 
-            UpdateMapImage(descPanel, (detail as TabDetailDataUI)?.MapTexture);
+            UpdateMapImage(descPanel, detail?.MapTexture);
 
             if (gui.m_craftButton != null)
             {
-                bool hasAction = detail?.OnAction != null;
+                var hasAction = detail?.OnAction != null;
                 gui.m_craftButton.interactable = hasAction;
                 gui.m_craftButton.gameObject.SetActive(hasAction);
                 if (hasAction)
@@ -169,7 +170,7 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>
-        /// Show or hide a map texture in the description panel.
+        ///     Show or hide a map texture in the description panel.
         /// </summary>
         private void UpdateMapImage(Transform descPanel, Texture2D texture)
         {
@@ -206,7 +207,7 @@ namespace ValheimVillages.UI.Core
         {
             m_selectedListIndex = index;
             UpdateSelectionVisuals();
-            int ci = GetCustomIndex();
+            var ci = GetCustomIndex();
             if (ci >= 0)
             {
                 var gui = InventoryGui.instance;
@@ -216,11 +217,11 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>
-        /// Toggle the "selected" child on each list element.
+        ///     Toggle the "selected" child on each list element.
         /// </summary>
         private void UpdateSelectionVisuals()
         {
-            for (int i = 0; i < m_listElements.Count; i++)
+            for (var i = 0; i < m_listElements.Count; i++)
             {
                 var elem = m_listElements[i];
                 if (elem == null) continue;
@@ -231,7 +232,7 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>
-        /// Hide crafting-specific children inside the Decription panel.
+        ///     Hide crafting-specific children inside the Decription panel.
         /// </summary>
         private static void HideDescriptionSubElements(InventoryGui gui)
         {
@@ -241,7 +242,7 @@ namespace ValheimVillages.UI.Core
             string[] toHide =
             {
                 "SelectVariant", "CraftType", "UpgradePanel",
-                "OLD_QualityPanel", "requirements"
+                "OLD_QualityPanel", "requirements",
             };
             foreach (var name in toHide)
             {
@@ -251,7 +252,7 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>
-        /// Disable inventory-style sub-elements on a cloned recipe element.
+        ///     Disable inventory-style sub-elements on a cloned recipe element.
         /// </summary>
         private static void CleanRecipeElement(GameObject elem)
         {
@@ -267,29 +268,25 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>
-        /// Re-hide Valheim's native recipe elements.
+        ///     Re-hide Valheim's native recipe elements.
         /// </summary>
         private void SuppressNativeRecipeElements(InventoryGui gui)
         {
             if (gui.m_recipeListRoot == null) return;
             var ours = new HashSet<GameObject>(m_listElements);
             foreach (Transform child in gui.m_recipeListRoot)
-            {
                 child.gameObject.SetActive(ours.Contains(child.gameObject));
-            }
         }
 
         /// <summary>
-        /// Re-hide crafting children that Valheim may re-show each frame.
+        ///     Re-hide crafting children that Valheim may re-show each frame.
         /// </summary>
         private void ReapplyChildHiding(InventoryGui gui)
         {
             if (gui?.m_crafting == null) return;
             foreach (Transform child in gui.m_crafting)
-            {
                 if (s_craftingChildrenToHide.Contains(child.name))
                     child.gameObject.SetActive(false);
-            }
         }
 
         #endregion
@@ -297,7 +294,7 @@ namespace ValheimVillages.UI.Core
         #region Crafting Panel Hide / Restore
 
         /// <summary>
-        /// Names of direct children of m_crafting to hide on custom tabs.
+        ///     Names of direct children of m_crafting to hide on custom tabs.
         /// </summary>
         private static readonly HashSet<string> s_craftingChildrenToHide = new();
 
@@ -324,6 +321,7 @@ namespace ValheimVillages.UI.Core
                 go.transform.SetParent(null);
                 Destroy(go);
             }
+
             m_listElements.Clear();
 
             if (m_mapImageObject != null)
@@ -340,7 +338,8 @@ namespace ValheimVillages.UI.Core
             }
 
             foreach (var kvp in m_childSnapshot)
-                if (kvp.Key != null) kvp.Key.gameObject.SetActive(kvp.Value);
+                if (kvp.Key != null)
+                    kvp.Key.gameObject.SetActive(kvp.Value);
             m_childSnapshot.Clear();
 
             if (gui?.m_craftButton != null)
@@ -348,12 +347,12 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>
-        /// Destroy any children of m_recipeListRoot that we created but lost
-        /// track of (e.g. after re-activation without deactivation).
+        ///     Destroy any children of m_recipeListRoot that we created but lost
+        ///     track of (e.g. after re-activation without deactivation).
         /// </summary>
         private static void DestroyOrphanedListItems(RectTransform listRoot)
         {
-            for (int i = listRoot.childCount - 1; i >= 0; i--)
+            for (var i = listRoot.childCount - 1; i >= 0; i--)
             {
                 var child = listRoot.GetChild(i);
                 if (child.name.StartsWith(ListItemPrefix))

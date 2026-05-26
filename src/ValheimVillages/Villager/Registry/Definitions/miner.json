@@ -4,11 +4,21 @@
   "displayName": "Miner",
   "description": "Specialized in mining, ore extraction, and underground operations",
   "workbenches": [
-    { "name": "Workbench", "minLevel": 1 },
-    { "name": "Stonecutter", "minLevel": 1 }
+    {
+      "name": "Workbench",
+      "minLevel": 1
+    },
+    {
+      "name": "Stonecutter",
+      "minLevel": 1
+    }
   ],
   "requiredBiomes": [],
-  "preferredBiomes": ["BlackForest", "Mountain", "Swamp"],
+  "preferredBiomes": [
+    "BlackForest",
+    "Mountain",
+    "Swamp"
+  ],
   "requiresCoastal": false,
   "minComfortLevel": 2,
   "materialRequirements": "Wood for mining camp, proximity to ore deposits",
@@ -16,17 +26,37 @@
   "dependentOnNpcType": "",
   "tieredBenefits": [],
   "productions": [
-    { "requiredLevel": 1, "outputItem": "CopperOre", "description": "Produces copper ore daily (requires Farmer)" },
-    { "requiredLevel": 2, "outputItem": "TinOre", "description": "Produces tin ore (requires Blacksmith support)" }
+    {
+      "requiredLevel": 1,
+      "outputItem": "CopperOre",
+      "description": "Produces copper ore daily (requires Farmer)"
+    },
+    {
+      "requiredLevel": 2,
+      "outputItem": "TinOre",
+      "description": "Produces tin ore (requires Blacksmith support)"
+    }
   ],
-  "providesLevelTo": ["Blacksmith"],
-  "receivesLevelFrom": ["Farmer", "Blacksmith", "Carpenter"],
+  "providesLevelTo": [
+    "Blacksmith"
+  ],
+  "receivesLevelFrom": [
+    "Farmer",
+    "Blacksmith",
+    "Carpenter"
+  ],
   "interdependenceDescription": "Requires Farmer for base level; Blacksmith enables tin; Carpenter improves tools",
   "stationName": "",
   "stationIcon": "Pickaxe",
   "workStations": [],
-  "behaviors": ["craft"],
-  "tags": ["tab:info", "tab:debug", "tab:workorder"],
+  "behaviors": [
+    "craft"
+  ],
+  "tags": [
+    "tab:info",
+    "tab:debug",
+    "tab:workorder"
+  ],
   "randomTalk": [
     "You know what they say about copper deposits: where there's copper, there's... probably more copper.",
     "I don't have claustrophobia. I have a healthy respect for loose rocks above my head.",

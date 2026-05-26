@@ -4,30 +4,34 @@ using ValheimVillages.Attributes;
 using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Schemas;
+using ValheimVillages.Settings;
 using ValheimVillages.Villager.AI;
 
 namespace ValheimVillages.Behaviors.Explore
 {
     /// <summary>
-    /// Universal lowest-priority behavior handling idle, wander, and location-seeking.
-    /// Auto-injected for every NPC; only runs when no higher-priority behavior wants control.
-    /// Scores known locations by context (time, weather, shelter) and moves the NPC
-    /// toward the best one. Also triggers work-order scanning for crafting NPCs.
+    ///     Universal lowest-priority behavior handling idle, wander, and location-seeking.
+    ///     Auto-injected for every NPC; only runs when no higher-priority behavior wants control.
+    ///     Scores known locations by context (time, weather, shelter) and moves the NPC
+    ///     toward the best one. Also triggers work-order scanning for crafting NPCs.
     /// </summary>
     [RegisterBehavior("explore")]
     public class ExploreBehaviorAdapter : IBehavior
     {
         private readonly VillagerAI m_ai;
 
-        public string Tag => "explore";
-        public int Priority => 20;
-
         public ExploreBehaviorAdapter(VillagerAI ai)
         {
             m_ai = ai;
         }
 
-        public bool WantsControl(BehaviorContext ctx) => true;
+        public string Tag => "explore";
+        public int Priority => 20;
+
+        public bool WantsControl(BehaviorContext ctx)
+        {
+            return true;
+        }
 
         public void Update(float dt)
         {
@@ -55,17 +59,22 @@ namespace ValheimVillages.Behaviors.Explore
             m_ai.SetState(BehaviorState.Idle);
         }
 
-        public void Save(ZDO zdo) { }
-        public void Load(ZDO zdo) { }
-
         public string GetStatusText()
         {
             return m_ai.CurrentState switch
             {
                 BehaviorState.Traveling => "Walking...",
                 BehaviorState.Idle => "Idle",
-                _ => ""
+                _ => "",
             };
+        }
+
+        public void Save(ZDO zdo)
+        {
+        }
+
+        public void Load(ZDO zdo)
+        {
         }
 
         private KnownLocation SelectBestKnownLocation(BehaviorContext context)
@@ -82,8 +91,8 @@ namespace ValheimVillages.Behaviors.Explore
 
         private float ScoreLocation(KnownLocation loc, BehaviorContext context)
         {
-            float score = 0f;
-            float distance = Vector3.Distance(context.CurrentPosition, loc.Position);
+            var score = 0f;
+            var distance = Vector3.Distance(context.CurrentPosition, loc.Position);
 
             if (context.TimeOfDay == TimeOfDay.Night)
             {
@@ -119,8 +128,8 @@ namespace ValheimVillages.Behaviors.Explore
 
         private void TransitionToLocation(KnownLocation location)
         {
-            float distance = Vector3.Distance(m_ai.Position, location.Position);
-            if (distance > Settings.VillagerSettings.ArrivalThreshold)
+            var distance = Vector3.Distance(m_ai.Position, location.Position);
+            if (distance > VillagerSettings.ArrivalThreshold)
                 m_ai.SetState(BehaviorState.Traveling, location.Position);
         }
     }

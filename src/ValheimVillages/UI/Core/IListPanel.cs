@@ -5,9 +5,9 @@ using ValheimVillages.UI.Interaction;
 namespace ValheimVillages.UI.Core
 {
     /// <summary>
-    /// Extended IListPanel interface with Unity-dependent UI methods.
-    /// Panel implementations should implement this interface.
-    /// The Core IListPanel provides the Unity-free base (Tag, ParentTab).
+    ///     Extended IListPanel interface with Unity-dependent UI methods.
+    ///     Panel implementations should implement this interface.
+    ///     The Core IListPanel provides the Unity-free base (Tag, ParentTab).
     /// </summary>
     public interface IListPanelUI : IListPanel
     {

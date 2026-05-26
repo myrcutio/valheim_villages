@@ -1,18 +1,17 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.Villager.AI.Work
 {
     /// <summary>
-    /// Reads workStations from villager JSON definitions to determine
-    /// which crafting stations each villager type can work at.
+    ///     Reads workStations from villager JSON definitions to determine
+    ///     which crafting stations each villager type can work at.
     /// </summary>
     public static class StationMatcher
     {
         /// <summary>
-        /// Returns true if this villager type can execute work orders.
+        ///     Returns true if this villager type can execute work orders.
         /// </summary>
         public static bool IsWorkerType(string villagerType)
         {
@@ -21,7 +20,7 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Returns the station name strings this villager type can work at.
+        ///     Returns the station name strings this villager type can work at.
         /// </summary>
         public static string[] GetStationNames(string villagerType)
         {
@@ -32,7 +31,7 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Checks if a villager type can work at the given station (by station m_name).
+        ///     Checks if a villager type can work at the given station (by station m_name).
         /// </summary>
         public static bool CanWorkStation(string villagerType, string stationName)
         {
@@ -41,7 +40,7 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Finds a recipe in ObjectDB that produces the given item at the given station.
+        ///     Finds a recipe in ObjectDB that produces the given item at the given station.
         /// </summary>
         public static Recipe FindRecipe(string itemPrefabName, string stationName)
         {
@@ -56,7 +55,7 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Finds a recipe by item prefab name, checking all stations the villager type can use.
+        ///     Finds a recipe by item prefab name, checking all stations the villager type can use.
         /// </summary>
         public static Recipe FindRecipeForNpc(string itemPrefabName, string villagerType)
         {
@@ -65,6 +64,7 @@ namespace ValheimVillages.Villager.AI.Work
                 var recipe = FindRecipe(itemPrefabName, station);
                 if (recipe != null) return recipe;
             }
+
             return null;
         }
     }

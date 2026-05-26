@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Algorithms;
 using Xunit;
@@ -7,7 +5,7 @@ using Xunit;
 namespace ValheimVillages.Tests.Algorithms;
 
 /// <summary>
-/// Tests for PathScoring: point-based and segment-based scoring.
+///     Tests for PathScoring: point-based and segment-based scoring.
 /// </summary>
 public class PathScoringTests
 {
@@ -39,7 +37,7 @@ public class PathScoringTests
         // Reference is a slightly offset version
         var reference = MakeCircle(10.5f, 20);
 
-        var result = PathScoring.Score(pipeline, reference, coverageRadius: 3f);
+        var result = PathScoring.Score(pipeline, reference, 3f);
 
         Assert.True(result.Coverage > 0.9f,
             $"Coverage should be >90% for nearby paths, got {result.Coverage:P0}");
@@ -53,7 +51,7 @@ public class PathScoringTests
         var pipeline = MakeCircle(10f, 20);
         var reference = MakeCircle(50f, 20); // Very different radius
 
-        var result = PathScoring.Score(pipeline, reference, coverageRadius: 3f);
+        var result = PathScoring.Score(pipeline, reference, 3f);
 
         Assert.True(result.Coverage < 0.5f,
             $"Coverage should be low for far paths, got {result.Coverage:P0}");
@@ -65,15 +63,15 @@ public class PathScoringTests
         // Sparse pipeline (4 points, square) vs dense reference (circle)
         var pipeline = new List<Vector3>
         {
-            new Vector3(10, 0, 10),
-            new Vector3(-10, 0, 10),
-            new Vector3(-10, 0, -10),
-            new Vector3(10, 0, -10)
+            new(10, 0, 10),
+            new(-10, 0, 10),
+            new(-10, 0, -10),
+            new(10, 0, -10),
         };
         var reference = MakeCircle(10f, 100);
 
-        var pointScore = PathScoring.Score(pipeline, reference, coverageRadius: 5f);
-        var segmentScore = PathScoring.ScoreSegments(pipeline, reference, coverageRadius: 5f);
+        var pointScore = PathScoring.Score(pipeline, reference, 5f);
+        var segmentScore = PathScoring.ScoreSegments(pipeline, reference, 5f);
 
         // Segment scoring should give equal or better coverage
         Assert.True(segmentScore.Coverage >= pointScore.Coverage,
@@ -97,13 +95,14 @@ public class PathScoringTests
     private static List<Vector3> MakeCircle(float radius, int points)
     {
         var result = new List<Vector3>(points);
-        for (int i = 0; i < points; i++)
+        for (var i = 0; i < points; i++)
         {
-            float angle = 2f * MathF.PI * i / points;
+            var angle = 2f * MathF.PI * i / points;
             result.Add(new Vector3(
                 radius * MathF.Cos(angle), 0,
                 radius * MathF.Sin(angle)));
         }
+
         return result;
     }
 

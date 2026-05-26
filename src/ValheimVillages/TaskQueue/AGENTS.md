@@ -1,10 +1,16 @@
 # TaskQueue
 
-Keywords: task queue, GlobalTaskQueue, TaskHandlerRegistry, ITaskHandler, VillagerTask, TaskResult, TaskPriority, task handler, work order scan, WorkOrderScanHandler, POI discovery, POIDiscoveryHandler, breach check, BreachCheckHandler, region partition, RegionPartitionHandler, RegionBuilder, container scan, ContainerScanHandler, recipe discovery, RecipeDiscoveryRefreshHandler, FarmWorkOrderHelper, activity log, VillagerActivityLog, deduplication, priority tier, RegisterTaskHandler, ProcessBatch
+Keywords: task queue, GlobalTaskQueue, TaskHandlerRegistry, ITaskHandler, VillagerTask, TaskResult, TaskPriority, task
+handler, work order scan, WorkOrderScanHandler, POI discovery, POIDiscoveryHandler, breach check, BreachCheckHandler,
+region partition, RegionPartitionHandler, RegionBuilder, container scan, ContainerScanHandler, recipe discovery,
+RecipeDiscoveryRefreshHandler, FarmWorkOrderHelper, activity log, VillagerActivityLog, deduplication, priority tier,
+RegisterTaskHandler, ProcessBatch
 
 ## Purpose
 
-Frame-budget global task queue for async work. Tasks are prioritized into tiers (High/Medium/Low), deduplicated by (Name, SourceId), and processed each frame via `ProcessBatch()`. Each handler implements `ITaskHandler` and is registered via `[RegisterTaskHandler]`.
+Frame-budget global task queue for async work. Tasks are prioritized into tiers (High/Medium/Low), deduplicated by
+(Name, SourceId), and processed each frame via `ProcessBatch()`. Each handler implements `ITaskHandler` and is
+registered via `[RegisterTaskHandler]`.
 
 ## Directory Structure
 
@@ -30,14 +36,14 @@ TaskQueue/
 
 ## Key Types
 
-| Type | Role |
-|------|------|
-| `GlobalTaskQueue` | Tiered queue with dedup; `Enqueue(task)`, `ProcessBatch()` per frame |
-| `TaskHandlerRegistry` | Maps task name strings to `ITaskHandler` instances |
-| `VillagerActivityLog` | Per-villager action log persisted to ZDO; shown in Debug tab |
-| `WorkOrderScanHandler` | Scans containers for work orders matching NPC station type |
-| `POIDiscoveryHandler` | Discovers beds, fires, chairs, stations near villager |
-| `RegionPartitionHandler` | Builds region graph from village area bounds |
+| Type                     | Role                                                                 |
+|--------------------------|----------------------------------------------------------------------|
+| `GlobalTaskQueue`        | Tiered queue with dedup; `Enqueue(task)`, `ProcessBatch()` per frame |
+| `TaskHandlerRegistry`    | Maps task name strings to `ITaskHandler` instances                   |
+| `VillagerActivityLog`    | Per-villager action log persisted to ZDO; shown in Debug tab         |
+| `WorkOrderScanHandler`   | Scans containers for work orders matching NPC station type           |
+| `POIDiscoveryHandler`    | Discovers beds, fires, chairs, stations near villager                |
+| `RegionPartitionHandler` | Builds region graph from village area bounds                         |
 
 ## Entry Points and Registration
 
@@ -48,7 +54,8 @@ TaskQueue/
 
 ## Integration
 
-- **Villager/** -- `VillagerAI` (Villager.AI) enqueues `poi_discovery`; **Behaviors/** `CraftingBehavior` enqueues `work_order_scan`.
+- **Villager/** -- `VillagerAI` (Villager.AI) enqueues `poi_discovery`; **Behaviors/** `CraftingBehavior` enqueues
+  `work_order_scan`.
 - **Behaviors/** -- Patrollers enqueue `breach_check` via `BreachAlarmBehavior`.
 - **Villages/** -- `RegionPartitionHandler` uses `VillageAreaManager.TryGetCombinedBounds()`.
 - **Items/** -- `RecipeDiscoveryRefreshHandler` calls `VirtualRecipeLoader.RecheckDiscoveredRecipes()`.

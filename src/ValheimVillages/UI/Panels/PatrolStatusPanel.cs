@@ -3,15 +3,14 @@ using ValheimVillages.Attributes;
 using ValheimVillages.Behaviors.Patrol;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Schemas;
-using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
 
 namespace ValheimVillages.UI.Panels
 {
     /// <summary>
-    /// List panel showing patrol status in the Info tab.
-    /// Discovered via NPC tag "listpanel:patrolstatus".
-    /// Shows for any villager with the patrol behavior.
+    ///     List panel showing patrol status in the Info tab.
+    ///     Discovered via NPC tag "listpanel:patrolstatus".
+    ///     Shows for any villager with the patrol behavior.
     /// </summary>
     [RegisterListPanel("patrolstatus", "info")]
     public class PatrolStatusPanel : IListPanel
@@ -35,18 +34,16 @@ namespace ValheimVillages.UI.Panels
             if (patrol == null) return null;
 
             if (!patrol.IsDiscoveryComplete)
-            {
                 return new TabDetailData
                 {
                     Title = "Patrol Duty",
                     Description = "Mapping the village perimeter...",
                 };
-            }
 
             return new TabDetailData
             {
                 Title = "Patrol Duty",
-                Description = $"Patrolling ({patrol.WaypointCount} waypoints)."
+                Description = $"Patrolling ({patrol.WaypointCount} waypoints).",
             };
         }
     }

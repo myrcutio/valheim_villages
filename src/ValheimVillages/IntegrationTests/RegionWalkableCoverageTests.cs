@@ -11,9 +11,9 @@ using ValheimVillages.Villager.AI.Pathfinding;
 namespace ValheimVillages.IntegrationTests
 {
     /// <summary>
-    /// Runtime integration tests verifying the live HNA graph covers all
-    /// recorded walkable positions. Each point must be within CellSize (3m)
-    /// of at least one HNA region center.
+    ///     Runtime integration tests verifying the live HNA graph covers all
+    ///     recorded walkable positions. Each point must be within CellSize (3m)
+    ///     of at least one HNA region center.
     /// </summary>
     public static partial class RegionWalkableCoverageTests
     {
@@ -37,16 +37,16 @@ namespace ValheimVillages.IntegrationTests
                 return;
             }
 
-            int covered = 0;
-            int uncovered = 0;
-            float worstDist = 0f;
-            int worstIdx = -1;
+            var covered = 0;
+            var uncovered = 0;
+            var worstDist = 0f;
+            var worstIdx = -1;
             var uncoveredSamples = new List<string>();
 
-            for (int i = 0; i < WalkablePositions.Length; i++)
+            for (var i = 0; i < WalkablePositions.Length; i++)
             {
                 var pt = WalkablePositions[i];
-                float minDist = NearestCenterDist3D(pt, centers);
+                var minDist = NearestCenterDist3D(pt, centers);
 
                 if (minDist <= MaxDistance)
                 {
@@ -60,19 +60,18 @@ namespace ValheimVillages.IntegrationTests
                         worstDist = minDist;
                         worstIdx = i;
                     }
+
                     if (uncoveredSamples.Count < 20)
-                    {
                         uncoveredSamples.Add(
                             $"  [{i}] ({pt.x:F1}, {pt.y:F1}, {pt.z:F1}) nearest={minDist:F2}m");
-                    }
                 }
             }
 
-            float coveragePct = 100f * covered / WalkablePositions.Length;
+            var coveragePct = 100f * covered / WalkablePositions.Length;
 
             var sb = new StringBuilder();
             sb.AppendLine($"[HNA Coverage] {covered}/{WalkablePositions.Length} points within " +
-                $"{MaxDistance}m (3D) of a region center ({coveragePct:F1}%)");
+                          $"{MaxDistance}m (3D) of a region center ({coveragePct:F1}%)");
             sb.AppendLine($"  Graph regions total: {centers.Count}");
             if (uncovered > 0)
             {
@@ -82,6 +81,7 @@ namespace ValheimVillages.IntegrationTests
                 if (uncovered > 20)
                     sb.AppendLine($"  ... and {uncovered - 20} more");
             }
+
             Plugin.Log?.LogInfo(sb.ToString());
 
             ModAssert.True(uncovered == 0,
@@ -100,11 +100,11 @@ namespace ValheimVillages.IntegrationTests
                 return;
             }
 
-            int resolved = 0;
-            int unresolved = 0;
+            var resolved = 0;
+            var unresolved = 0;
             var unresolvedSamples = new List<string>();
 
-            for (int i = 0; i < WalkablePositions.Length; i++)
+            for (var i = 0; i < WalkablePositions.Length; i++)
             {
                 var pt = WalkablePositions[i];
                 var graph = RegionGraph.GetNearest(pt);
@@ -114,7 +114,7 @@ namespace ValheimVillages.IntegrationTests
                     continue;
                 }
 
-                string regionId = graph.PointToRegionId(pt);
+                var regionId = graph.PointToRegionId(pt);
                 if (regionId != null)
                 {
                     resolved++;
@@ -123,24 +123,23 @@ namespace ValheimVillages.IntegrationTests
                 {
                     unresolved++;
                     if (unresolvedSamples.Count < 20)
-                    {
                         unresolvedSamples.Add(
                             $"  [{i}] ({pt.x:F1}, {pt.y:F1}, {pt.z:F1})");
-                    }
                 }
             }
 
-            float pct = 100f * resolved / WalkablePositions.Length;
+            var pct = 100f * resolved / WalkablePositions.Length;
 
             var sb = new StringBuilder();
             sb.AppendLine($"[HNA PointToRegion] {resolved}/{WalkablePositions.Length} " +
-                $"points resolve to a region ({pct:F1}%)");
+                          $"points resolve to a region ({pct:F1}%)");
             if (unresolved > 0)
             {
                 sb.AppendLine($"  Unresolved: {unresolved}");
                 foreach (var s in unresolvedSamples)
                     sb.AppendLine(s);
             }
+
             Plugin.Log?.LogInfo(sb.ToString());
 
             ModAssert.True(unresolved == 0,
@@ -162,7 +161,7 @@ namespace ValheimVillages.IntegrationTests
             Plugin.Log?.LogInfo($"[HNA MinRegions] Total region centers across all graphs: {centers.Count}");
 
             ModAssert.True(centers.Count >= 10,
-                $"HNA graph should have at least 10 regions to cover the village, " +
+                "HNA graph should have at least 10 regions to cover the village, " +
                 $"but has {centers.Count}");
         }
 
@@ -181,7 +180,6 @@ namespace ValheimVillages.IntegrationTests
             var failSamples = new List<string>();
 
             foreach (var pos in centers)
-            {
                 if (CellValidator.HasGroundBelow(pos))
                 {
                     passed++;
@@ -192,7 +190,6 @@ namespace ValheimVillages.IntegrationTests
                     if (failSamples.Count < 10)
                         failSamples.Add($"  ({pos.x:F1}, {pos.y:F1}, {pos.z:F1})");
                 }
-            }
 
             var sb = new StringBuilder();
             sb.AppendLine($"[HNA GroundBelow] {passed}/{centers.Count} regions have ground below");
@@ -201,6 +198,7 @@ namespace ValheimVillages.IntegrationTests
                 sb.AppendLine($"  Floating: {failed}");
                 foreach (var s in failSamples) sb.AppendLine(s);
             }
+
             Plugin.Log?.LogInfo(sb.ToString());
 
             if (failed > 0)
@@ -222,7 +220,7 @@ namespace ValheimVillages.IntegrationTests
             var filter = new NavMeshQueryFilter
             {
                 agentTypeID = VillagerAgentType.ResolveValheimHumanoidAgentTypeID(),
-                areaMask = NavMesh.AllAreas
+                areaMask = NavMesh.AllAreas,
             };
 
             var centers = CollectAllRegionCenters();
@@ -230,7 +228,6 @@ namespace ValheimVillages.IntegrationTests
             var failSamples = new List<string>();
 
             foreach (var pos in centers)
-            {
                 if (CellValidator.IsSurfaceWideEnough(pos, filter))
                 {
                     passed++;
@@ -241,16 +238,16 @@ namespace ValheimVillages.IntegrationTests
                     if (failSamples.Count < 10)
                         failSamples.Add($"  ({pos.x:F1}, {pos.y:F1}, {pos.z:F1})");
                 }
-            }
 
             var sb = new StringBuilder();
             sb.AppendLine($"[HNA SurfaceWidth] {passed}/{centers.Count} regions have " +
-                $"sufficient width (>= {CellValidator.MinEdgeDistance}m from edge)");
+                          $"sufficient width (>= {CellValidator.MinEdgeDistance}m from edge)");
             if (failed > 0)
             {
                 sb.AppendLine($"  Too narrow: {failed}");
                 foreach (var s in failSamples) sb.AppendLine(s);
             }
+
             Plugin.Log?.LogInfo(sb.ToString());
 
             if (failed > 0)
@@ -260,7 +257,7 @@ namespace ValheimVillages.IntegrationTests
         }
 
         /// <summary>
-        /// Collect all region centers from every available HNA graph.
+        ///     Collect all region centers from every available HNA graph.
         /// </summary>
         private static List<Vector3> CollectAllRegionCenters()
         {
@@ -271,18 +268,19 @@ namespace ValheimVillages.IntegrationTests
         }
 
         /// <summary>
-        /// Find the minimum 3D distance from a point to any region center.
-        /// Uses full XYZ so upper-floor coverage gaps are detected.
+        ///     Find the minimum 3D distance from a point to any region center.
+        ///     Uses full XYZ so upper-floor coverage gaps are detected.
         /// </summary>
         private static float NearestCenterDist3D(Vector3 point, List<Vector3> centers)
         {
-            float best = float.MaxValue;
-            for (int i = 0; i < centers.Count; i++)
+            var best = float.MaxValue;
+            for (var i = 0; i < centers.Count; i++)
             {
-                float dist = Vector3.Distance(point, centers[i]);
+                var dist = Vector3.Distance(point, centers[i]);
                 if (dist < best)
                     best = dist;
             }
+
             return best;
         }
     }

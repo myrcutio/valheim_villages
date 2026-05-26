@@ -1,17 +1,17 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.Schemas;
 using ValheimVillages.Items;
+using ValheimVillages.Schemas;
 
 namespace ValheimVillages.Villager.AI.Work
 {
     /// <summary>
-    /// Utility for scanning nearby containers for work orders and ingredients.
+    ///     Utility for scanning nearby containers for work orders and ingredients.
     /// </summary>
     public static class ContainerScanner
     {
         /// <summary>
-        /// Find all Container components within the given radius of a position.
+        ///     Find all Container components within the given radius of a position.
         /// </summary>
         public static List<Container> FindNearbyContainers(Vector3 center, float radius)
         {
@@ -23,12 +23,13 @@ namespace ValheimVillages.Villager.AI.Work
                 if (nview == null || nview.GetZDO() == null) continue;
                 result.Add(container);
             }
+
             return result;
         }
 
         /// <summary>
-        /// Scan containers for all work orders that match the NPC's station type.
-        /// Caller should try each in turn until one passes full validation (recipe, ingredients, station).
+        ///     Scan containers for all work orders that match the NPC's station type.
+        ///     Caller should try each in turn until one passes full validation (recipe, ingredients, station).
         /// </summary>
         public static List<WorkOrderMatch> FindAllWorkOrders(List<Container> containers, string villagerType)
         {
@@ -47,13 +48,10 @@ namespace ValheimVillages.Villager.AI.Work
                 {
                     if (item?.m_customData == null) continue;
 
-                    string prefabName = item.m_dropPrefab?.name ?? "null";
-                    bool isWO = IsWorkOrderItem(item);
+                    var prefabName = item.m_dropPrefab?.name ?? "null";
+                    var isWO = IsWorkOrderItem(item);
 
-                    if (!isWO)
-                    {
-                        continue;
-                    }
+                    if (!isWO) continue;
 
                     Plugin.Log?.LogDebug(
                         $"[ContainerScan] Found work order item: {prefabName}, " +
@@ -63,9 +61,10 @@ namespace ValheimVillages.Villager.AI.Work
                     if (!item.m_customData.TryGetValue("wo_station", out var station))
                     {
                         Plugin.Log?.LogDebug(
-                            $"[ContainerScan] Work order missing wo_station");
+                            "[ContainerScan] Work order missing wo_station");
                         continue;
                     }
+
                     if (!StationMatcher.CanWorkStation(villagerType, station))
                     {
                         Plugin.Log?.LogDebug(
@@ -78,14 +77,15 @@ namespace ValheimVillages.Villager.AI.Work
                     if (!item.m_customData.TryGetValue("wo_item", out var itemPrefab))
                     {
                         Plugin.Log?.LogDebug(
-                            $"[ContainerScan] Work order missing wo_item field " +
-                            $"(was this created before the update?)");
+                            "[ContainerScan] Work order missing wo_item field " +
+                            "(was this created before the update?)");
                         continue;
                     }
+
                     if (string.IsNullOrEmpty(itemPrefab))
                     {
                         Plugin.Log?.LogDebug(
-                            $"[ContainerScan] Work order has empty wo_item");
+                            "[ContainerScan] Work order has empty wo_item");
                         continue;
                     }
 
@@ -96,7 +96,7 @@ namespace ValheimVillages.Villager.AI.Work
                         int.TryParse(maxStr, out max);
 
                     Plugin.Log?.LogDebug(
-                        $"[ContainerScan] Work order matched! " +
+                        "[ContainerScan] Work order matched! " +
                         $"item={itemPrefab}, station={station}, qty={min}-{max}");
 
                     matches.Add(new WorkOrderMatch
@@ -106,7 +106,7 @@ namespace ValheimVillages.Villager.AI.Work
                         ItemPrefabName = itemPrefab,
                         StationName = station,
                         MinQuantity = min,
-                        MaxQuantity = max
+                        MaxQuantity = max,
                     });
                 }
             }
@@ -115,8 +115,8 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Check if required ingredients for a recipe exist across the given containers.
-        /// Returns a list describing where each ingredient can be found, or null if missing.
+        ///     Check if required ingredients for a recipe exist across the given containers.
+        ///     Returns a list describing where each ingredient can be found, or null if missing.
         /// </summary>
         public static List<IngredientSource> FindIngredients(
             List<Container> containers, Recipe recipe)
@@ -129,9 +129,9 @@ namespace ValheimVillages.Villager.AI.Work
             {
                 if (req.m_resItem == null) continue;
 
-                string prefabName = req.m_resItem.gameObject.name;
-                int needed = req.m_amount;
-                int found = 0;
+                var prefabName = req.m_resItem.gameObject.name;
+                var needed = req.m_amount;
+                var found = 0;
                 Container sourceContainer = null;
 
                 Plugin.Log?.LogDebug(
@@ -143,7 +143,7 @@ namespace ValheimVillages.Villager.AI.Work
                     var inv = container.GetInventory();
                     if (inv == null) continue;
 
-                    int count = CountByPrefab(inv, prefabName);
+                    var count = CountByPrefab(inv, prefabName);
                     Plugin.Log?.LogDebug(
                         $"[IngredientScan] Container '{container.m_name}': " +
                         $"{count}x '{prefabName}'");
@@ -168,7 +168,7 @@ namespace ValheimVillages.Villager.AI.Work
                 {
                     PrefabName = prefabName,
                     Amount = needed,
-                    Container = sourceContainer
+                    Container = sourceContainer,
                 });
             }
 
@@ -176,8 +176,8 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Remove ingredients from their source containers.
-        /// Matches by prefab name (m_dropPrefab.name), not m_shared.m_name.
+        ///     Remove ingredients from their source containers.
+        ///     Matches by prefab name (m_dropPrefab.name), not m_shared.m_name.
         /// </summary>
         public static bool RemoveIngredients(List<IngredientSource> sources)
         {
@@ -188,11 +188,12 @@ namespace ValheimVillages.Villager.AI.Work
 
                 RemoveByPrefab(inv, source.PrefabName, source.Amount);
             }
+
             return true;
         }
 
         /// <summary>
-        /// Check if a container can accept the crafted output item.
+        ///     Check if a container can accept the crafted output item.
         /// </summary>
         public static bool CanAcceptItem(Container container, string prefabName, int amount)
         {
@@ -206,8 +207,8 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Deposit a crafted item into a container.
-        /// Returns true on success, false if the container is full.
+        ///     Deposit a crafted item into a container.
+        ///     Returns true on success, false if the container is full.
         /// </summary>
         public static bool TryDepositItem(Container container, string prefabName, int amount)
         {
@@ -229,7 +230,7 @@ namespace ValheimVillages.Villager.AI.Work
 
         private static bool IsWorkOrderItem(ItemDrop.ItemData item)
         {
-            string prefabName = item?.m_dropPrefab?.name;
+            var prefabName = item?.m_dropPrefab?.name;
             if (string.IsNullOrEmpty(prefabName)) return false;
 
             var def = ItemFactory.GetDefinition(prefabName);
@@ -237,53 +238,52 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Count items in an inventory by prefab name (m_dropPrefab.name).
-        /// Valheim's built-in CountItems matches m_shared.m_name which differs.
+        ///     Count items in an inventory by prefab name (m_dropPrefab.name).
+        ///     Valheim's built-in CountItems matches m_shared.m_name which differs.
         /// </summary>
         public static int CountByPrefab(Inventory inv, string prefabName)
         {
-            int total = 0;
+            var total = 0;
             foreach (var item in inv.GetAllItems())
-            {
                 if (item?.m_dropPrefab != null && item.m_dropPrefab.name == prefabName)
                     total += item.m_stack;
-            }
             return total;
         }
 
         /// <summary>
-        /// Count total items across multiple containers by prefab name.
-        /// Sums all stack sizes, not just the number of stacks.
+        ///     Count total items across multiple containers by prefab name.
+        ///     Sums all stack sizes, not just the number of stacks.
         /// </summary>
         public static int CountAcrossContainers(
             List<Container> containers, string prefabName)
         {
-            int total = 0;
+            var total = 0;
             foreach (var container in containers)
             {
                 var inv = container?.GetInventory();
                 if (inv == null) continue;
                 total += CountByPrefab(inv, prefabName);
             }
+
             return total;
         }
 
         /// <summary>
-        /// Remove a quantity of items from an inventory by prefab name.
-        /// Uses RemoveItem(ItemData, int) which handles partial stacks
-        /// and calls Changed() internally.
+        ///     Remove a quantity of items from an inventory by prefab name.
+        ///     Uses RemoveItem(ItemData, int) which handles partial stacks
+        ///     and calls Changed() internally.
         /// </summary>
         private static void RemoveByPrefab(Inventory inv, string prefabName, int amount)
         {
-            int remaining = amount;
+            var remaining = amount;
             var items = inv.GetAllItems();
-            for (int i = items.Count - 1; i >= 0 && remaining > 0; i--)
+            for (var i = items.Count - 1; i >= 0 && remaining > 0; i--)
             {
                 var item = items[i];
                 if (item?.m_dropPrefab == null || item.m_dropPrefab.name != prefabName)
                     continue;
 
-                int toRemove = Mathf.Min(item.m_stack, remaining);
+                var toRemove = Mathf.Min(item.m_stack, remaining);
                 inv.RemoveItem(item, toRemove);
                 remaining -= toRemove;
             }

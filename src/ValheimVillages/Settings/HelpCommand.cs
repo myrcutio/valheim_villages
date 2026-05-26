@@ -5,9 +5,9 @@ using ValheimVillages.Attributes;
 namespace ValheimVillages.Settings
 {
     /// <summary>
-    /// In-game help command. Type <c>vv</c>, <c>vv help</c>, or <c>vv --help</c>
-    /// in the Valheim developer console to print every dev command this mod
-    /// has registered (name + description), sorted alphabetically.
+    ///     In-game help command. Type <c>vv</c>, <c>vv help</c>, or <c>vv --help</c>
+    ///     in the Valheim developer console to print every dev command this mod
+    ///     has registered (name + description), sorted alphabetically.
     /// </summary>
     internal static class HelpCommand
     {
@@ -24,7 +24,7 @@ namespace ValheimVillages.Settings
                 return;
             }
 
-            int width = commands.Max(c => c.Name.Length);
+            var width = commands.Max(c => c.Name.Length);
             var sb = new StringBuilder();
             sb.Append("[vv] ").Append(commands.Count).Append(" dev command(s):");
             Console.instance?.Print(sb.ToString());

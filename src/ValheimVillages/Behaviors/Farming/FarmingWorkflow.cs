@@ -3,15 +3,14 @@ using UnityEngine;
 using ValheimVillages.Enums;
 using ValheimVillages.Schemas;
 using ValheimVillages.Villager.AI.Navigation;
-using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Pathfinding;
 using ValheimVillages.Villager.AI.Work;
 
 namespace ValheimVillages.Behaviors.Farming
 {
     /// <summary>
-    /// Sub-state transition handlers for FarmingBehavior: planting pass.
-    /// Manages: gather seeds -> travel to farm -> plant.
+    ///     Sub-state transition handlers for FarmingBehavior: planting pass.
+    ///     Manages: gather seeds -> travel to farm -> plant.
     /// </summary>
     public partial class FarmingBehavior
     {
@@ -47,9 +46,10 @@ namespace ValheimVillages.Behaviors.Farming
                 return;
             }
 
-            m_subState = FarmSubState.GatheringSeeds;
+            SubState = FarmSubState.GatheringSeeds;
             var seedChestTarget = VillagerMovement.GetWalkableDestination(source.Container.transform.position);
-            m_ai.SetState(BehaviorState.Working, new ValheimVillages.Villager.AI.Pathfinding.VillagerWaypoint(seedChestTarget, ValheimVillages.Villager.AI.Pathfinding.VillagerWaypoint.DefaultStrategyId));
+            m_ai.SetState(BehaviorState.Working,
+                new VillagerWaypoint(seedChestTarget, VillagerWaypoint.DefaultStrategyId));
             Plugin.Log?.LogDebug(
                 $"[Farming:{m_ai.NpcName}] Walking to seed chest for {source.PrefabName}");
         }
@@ -75,9 +75,9 @@ namespace ValheimVillages.Behaviors.Farming
 
         private void BeginTravelingToFarm()
         {
-            m_subState = FarmSubState.TravelingToFarm;
+            SubState = FarmSubState.TravelingToFarm;
             var farmTarget = VillagerMovement.GetWalkableDestination(m_context.FarmPosition);
-            m_ai.SetState(BehaviorState.Working, new ValheimVillages.Villager.AI.Pathfinding.VillagerWaypoint(farmTarget, ValheimVillages.Villager.AI.Pathfinding.VillagerWaypoint.DefaultStrategyId));
+            m_ai.SetState(BehaviorState.Working, new VillagerWaypoint(farmTarget, VillagerWaypoint.DefaultStrategyId));
             Plugin.Log?.LogInfo(
                 $"[Farming:{m_ai.NpcName}] Walking to farm at {m_context.FarmPosition}");
         }
@@ -105,7 +105,7 @@ namespace ValheimVillages.Behaviors.Farming
             }
 
             var plantComp = m_context.PlantPiecePrefab.GetComponent<Plant>();
-            float growRadius = plantComp != null ? plantComp.m_growRadius : 0.5f;
+            var growRadius = plantComp != null ? plantComp.m_growRadius : 0.5f;
 
             var pos = PlantingHelper.FindPlantingPosition(
                 m_context.FarmPosition, FarmSettings.PlantSearchRadius, growRadius);
@@ -119,13 +119,18 @@ namespace ValheimVillages.Behaviors.Farming
             }
 
             m_context.NextPlantPosition = pos.Value;
-            m_subState = FarmSubState.WalkingToPlantSpot;
+            SubState = FarmSubState.WalkingToPlantSpot;
 
             var target = VillagerMovement.GetWalkableDestination(pos.Value);
             m_ai.SetState(BehaviorState.Working,
                 new VillagerWaypoint(target, VillagerWaypoint.DefaultStrategyId));
 
-            DebugLog.Append("FarmingWorkflow.cs:TryFindAndWalkToNextPlantSpot", "Walking to plant spot", new System.Collections.Generic.Dictionary<string, object>{{"position",pos.Value.ToString()},{"seedsRemaining",m_context.SeedsGathered},{"plantedSoFar",m_context.PlantedThisSession}}, "H3", "run1");
+            DebugLog.Append("FarmingWorkflow.cs:TryFindAndWalkToNextPlantSpot", "Walking to plant spot",
+                new Dictionary<string, object>
+                {
+                    { "position", pos.Value.ToString() }, { "seedsRemaining", m_context.SeedsGathered },
+                    { "plantedSoFar", m_context.PlantedThisSession },
+                }, "H3", "run1");
 
             Plugin.Log?.LogDebug(
                 $"[Farming:{m_ai.NpcName}] Walking to plant spot at {pos.Value}");
@@ -139,7 +144,7 @@ namespace ValheimVillages.Behaviors.Farming
                 return;
             }
 
-            float dist = Vector3.Distance(
+            var dist = Vector3.Distance(
                 m_ai.Instance.transform.position, m_context.NextPlantPosition.Value);
 
             if (dist > FarmSettings.PlantProximityRequired)
@@ -152,15 +157,14 @@ namespace ValheimVillages.Behaviors.Farming
                 return;
             }
 
-            m_subState = FarmSubState.Planting;
+            SubState = FarmSubState.Planting;
             m_context.PlantCooldown = dt - 4.0f;
             m_ai.Instance.StopMoving();
         }
 
         private void UpdatePlantingCooldown(float dt)
         {
-
-            if (m_subState != FarmSubState.Planting) return;
+            if (SubState != FarmSubState.Planting) return;
             if (m_context.NextPlantPosition == null)
             {
                 AbandonWork("lost plant target during cooldown");
@@ -168,9 +172,9 @@ namespace ValheimVillages.Behaviors.Farming
             }
 
             m_context.PlantCooldown += 0.5f;
-            if (m_context.PlantCooldown < dt)    
+            if (m_context.PlantCooldown < dt)
                 return;
-            
+
             m_context.PlantCooldown = dt - 4.0f;
             var go = PlantingHelper.PlacePlant(
                 m_context.PlantPiecePrefab, m_context.NextPlantPosition.Value);

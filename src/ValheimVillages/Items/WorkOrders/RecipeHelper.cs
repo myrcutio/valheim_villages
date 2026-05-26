@@ -1,11 +1,12 @@
+using System;
 using System.Reflection;
 
 namespace ValheimVillages.Items.WorkOrders
 {
     /// <summary>
-    /// Helper for accessing the currently selected recipe from InventoryGui.
-    /// Uses reflection to access private InventoryGui fields without
-    /// depending on assembly_guiutils.
+    ///     Helper for accessing the currently selected recipe from InventoryGui.
+    ///     Uses reflection to access private InventoryGui fields without
+    ///     depending on assembly_guiutils.
     /// </summary>
     public static class RecipeHelper
     {
@@ -14,8 +15,8 @@ namespace ValheimVillages.Items.WorkOrders
                 BindingFlags.NonPublic | BindingFlags.Instance);
 
         /// <summary>
-        /// Gets the currently selected recipe from InventoryGui.
-        /// Returns null if no recipe is selected or the GUI is not available.
+        ///     Gets the currently selected recipe from InventoryGui.
+        ///     Returns null if no recipe is selected or the GUI is not available.
         /// </summary>
         public static Recipe GetSelectedRecipe()
         {
@@ -33,7 +34,7 @@ namespace ValheimVillages.Items.WorkOrders
                     BindingFlags.Public | BindingFlags.Instance);
                 return recipeProp?.GetValue(pair) as Recipe;
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 Plugin.Log?.LogWarning($"Failed to get selected recipe: {ex.Message}");
                 return null;

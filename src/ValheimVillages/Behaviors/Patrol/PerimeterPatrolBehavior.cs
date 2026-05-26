@@ -10,8 +10,8 @@ using ValheimVillages.Villager.AI.Pathfinding;
 namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
-    /// IBehavior wrapper around PatrolStateMachine for the behavior composition system.
-    /// Tag: "patrol", Priority: 30. Any villager with behavior:patrol gets this behavior.
+    ///     IBehavior wrapper around PatrolStateMachine for the behavior composition system.
+    ///     Tag: "patrol", Priority: 30. Any villager with behavior:patrol gets this behavior.
     /// </summary>
     [RegisterBehavior("patrol")]
     public class PerimeterPatrolBehavior : IBehavior
@@ -19,25 +19,14 @@ namespace ValheimVillages.Behaviors.Patrol
         private readonly VillagerAI m_ai;
         private readonly PatrolStateMachine m_patrol;
 
-        public string Tag => "patrol";
-        public int Priority => 30;
-
-        #region Pass-through patrol state
-
-        public bool IsDiscoveryComplete => m_patrol?.IsDiscoveryComplete ?? false;
-        public Vector3 BedPosition => m_patrol?.BedPosition ?? Vector3.zero;
-        public int WaypointCount => m_patrol?.WaypointCount ?? 0;
-        public int ActiveWaypointCount => m_patrol?.ActiveWaypointCount ?? 0;
-        public IReadOnlyList<VillagerWaypoint> PatrolWaypoints => m_patrol?.PatrolWaypoints;
-        public bool IsHnaRoute => m_patrol?.IsHnaRoute ?? false;
-
-        #endregion
-
         public PerimeterPatrolBehavior(VillagerAI ai)
         {
             m_ai = ai;
             m_patrol = new PatrolStateMachine(ai.Villager);
         }
+
+        public string Tag => "patrol";
+        public int Priority => 30;
 
         public bool WantsControl(BehaviorContext ctx)
         {
@@ -54,6 +43,15 @@ namespace ValheimVillages.Behaviors.Patrol
             m_patrol?.HandleArrival(dt);
         }
 
+        public string GetStatusText()
+        {
+            if (m_patrol == null) return "";
+            var state = m_ai.CurrentState;
+            if (state == BehaviorState.Patrolling)
+                return $"Patrolling ({m_patrol.ActiveWaypointCount} waypoints)";
+            return m_patrol.IsDiscoveryComplete ? "On patrol" : "Mapping village";
+        }
+
         public void Save(ZDO zdo)
         {
             if (m_patrol != null && zdo != null)
@@ -66,15 +64,20 @@ namespace ValheimVillages.Behaviors.Patrol
                 PatrolPersistence.Load(m_patrol, zdo);
         }
 
-        public void ResetDiscovery() => m_patrol?.ResetDiscovery();
-
-        public string GetStatusText()
+        public void ResetDiscovery()
         {
-            if (m_patrol == null) return "";
-            var state = m_ai.CurrentState;
-            if (state == BehaviorState.Patrolling)
-                return $"Patrolling ({m_patrol.ActiveWaypointCount} waypoints)";
-            return m_patrol.IsDiscoveryComplete ? "On patrol" : "Mapping village";
+            m_patrol?.ResetDiscovery();
         }
+
+        #region Pass-through patrol state
+
+        public bool IsDiscoveryComplete => m_patrol?.IsDiscoveryComplete ?? false;
+        public Vector3 BedPosition => m_patrol?.BedPosition ?? Vector3.zero;
+        public int WaypointCount => m_patrol?.WaypointCount ?? 0;
+        public int ActiveWaypointCount => m_patrol?.ActiveWaypointCount ?? 0;
+        public IReadOnlyList<VillagerWaypoint> PatrolWaypoints => m_patrol?.PatrolWaypoints;
+        public bool IsHnaRoute => m_patrol?.IsHnaRoute ?? false;
+
+        #endregion
     }
 }

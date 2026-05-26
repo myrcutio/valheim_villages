@@ -1,31 +1,32 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.AI;
 using ValheimVillages.Settings;
 
 namespace ValheimVillages.Villager.AI.Navigation
 {
     /// <summary>
-    /// Handles door interaction for NPC navigation.
-    /// Detects blocking doors, opens them, and closes them after the NPC passes through.
+    ///     Handles door interaction for NPC navigation.
+    ///     Detects blocking doors, opens them, and closes them after the NPC passes through.
     /// </summary>
     public class DoorHandler : MonoBehaviour
     {
-        private Character m_character;
-        private ZNetView m_znetView;
+        private const float DoorCloseBlockRadius = 3f;
 
         /// <summary>
-        /// Doors that were opened by this NPC and are pending closure.
-        /// Key: Door instance, Value: Time when door should be closed.
-        /// </summary>
-        private readonly Dictionary<Door, float> m_pendingCloseDoors = new();
-
-        /// <summary>
-        /// Doors currently detected near the NPC.
+        ///     Doors currently detected near the NPC.
         /// </summary>
         private readonly List<Door> m_nearbyDoors = new();
 
+        /// <summary>
+        ///     Doors that were opened by this NPC and are pending closure.
+        ///     Key: Door instance, Value: Time when door should be closed.
+        /// </summary>
+        private readonly Dictionary<Door, float> m_pendingCloseDoors = new();
+
+        private Character m_character;
+
         private float m_lastDoorScanTime;
+        private ZNetView m_znetView;
 
         private void Awake()
         {
@@ -46,67 +47,75 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
         }
 
+        private void OnDestroy()
+        {
+            foreach (var kvp in m_pendingCloseDoors)
+                if (kvp.Key != null)
+                    CloseDoor(kvp.Key);
+
+            m_pendingCloseDoors.Clear();
+        }
+
         /// <summary>
-        /// Check for a closed door blocking the path to the target position.
-        /// Returns the blocking door if found, null otherwise.
+        ///     Check for a closed door blocking the path to the target position.
+        ///     Returns the blocking door if found, null otherwise.
         /// </summary>
         public Door GetBlockingDoor(Vector3 targetPosition)
         {
-            DebugLog.Append("DoorHandler.cs:entry", "GetBlockingDoor_called", new Dictionary<string, object>{
-                {"nearbyCount", m_nearbyDoors.Count},
-                {"npcPos", transform.position.ToString("F2")},
-                {"targetPos", targetPosition.ToString("F2")}
+            DebugLog.Append("DoorHandler.cs:entry", "GetBlockingDoor_called", new Dictionary<string, object>
+            {
+                { "nearbyCount", m_nearbyDoors.Count },
+                { "npcPos", transform.position.ToString("F2") },
+                { "targetPos", targetPosition.ToString("F2") },
             }, "H3H4", "run1");
             if (m_nearbyDoors.Count == 0)
                 return null;
 
-            Vector3 npcPosition = transform.position;
-            Vector3 directionToTarget = (targetPosition - npcPosition).normalized;
+            var npcPosition = transform.position;
+            var directionToTarget = (targetPosition - npcPosition).normalized;
 
             foreach (var door in m_nearbyDoors)
             {
                 if (door == null) continue;
 
-                bool closed = IsDoorClosed(door);
-                bool playerBuilt = IsPlayerBuiltDoor(door);
-                Vector3 doorPosition = door.transform.position;
-                Vector3 npcToDoor = doorPosition - npcPosition;
-                float distanceToDoor = npcToDoor.magnitude;
-                float dotProduct = Vector3.Dot(directionToTarget, npcToDoor.normalized);
+                var closed = IsDoorClosed(door);
+                var playerBuilt = IsPlayerBuiltDoor(door);
+                var doorPosition = door.transform.position;
+                var npcToDoor = doorPosition - npcPosition;
+                var distanceToDoor = npcToDoor.magnitude;
+                var dotProduct = Vector3.Dot(directionToTarget, npcToDoor.normalized);
 
-                DebugLog.Append("DoorHandler.cs:eval", "door_eval", new Dictionary<string, object>{
-                    {"doorPos", doorPosition.ToString("F2")},
-                    {"closed", closed},
-                    {"playerBuilt", playerBuilt},
-                    {"distance", distanceToDoor},
-                    {"dotProduct", dotProduct},
-                    {"detectionRadius", DoorSettings.DoorDetectionRadius}
+                DebugLog.Append("DoorHandler.cs:eval", "door_eval", new Dictionary<string, object>
+                {
+                    { "doorPos", doorPosition.ToString("F2") },
+                    { "closed", closed },
+                    { "playerBuilt", playerBuilt },
+                    { "distance", distanceToDoor },
+                    { "dotProduct", dotProduct },
+                    { "detectionRadius", DoorSettings.DoorDetectionRadius },
                 }, "H3H4", "run1");
 
                 if (!closed) continue;
                 if (!playerBuilt) continue;
                 if (distanceToDoor > DoorSettings.DoorDetectionRadius) continue;
 
-                if (dotProduct > 0.3f)
-                {
-                    return door;
-                }
+                if (dotProduct > 0.3f) return door;
             }
 
             return null;
         }
 
         /// <summary>
-        /// Proactively opens doors that lie along the NPC's current path.
-        /// Checks each upcoming waypoint against NavMeshLinkPlacer's door link registry
-        /// and opens any closed door the NPC is approaching.
+        ///     Proactively opens doors that lie along the NPC's current path.
+        ///     Checks each upcoming waypoint against NavMeshLinkPlacer's door link registry
+        ///     and opens any closed door the NPC is approaching.
         /// </summary>
         public void OpenDoorsAlongPath(List<Vector3> path)
         {
             var doorLinks = NavMeshLinkPlacer.DoorLinks;
             if (doorLinks.Count == 0 || path == null || path.Count == 0) return;
 
-            Vector3 npcPos = transform.position;
+            var npcPos = transform.position;
             const float approachRadius = 2.5f;
 
             foreach (var (midpoint, door) in doorLinks)
@@ -114,19 +123,20 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (door == null) continue;
                 if (!IsDoorClosed(door)) continue;
 
-                float distToNpc = Vector3.Distance(npcPos, midpoint);
+                var distToNpc = Vector3.Distance(npcPos, midpoint);
                 if (distToNpc > approachRadius) continue;
 
-                bool pathGoesThrough = false;
-                for (int i = 0; i < path.Count && i < 4; i++)
+                var pathGoesThrough = false;
+                for (var i = 0; i < path.Count && i < 4; i++)
                 {
-                    float distToWaypoint = Vector3.Distance(path[i], midpoint);
+                    var distToWaypoint = Vector3.Distance(path[i], midpoint);
                     if (distToWaypoint < approachRadius)
                     {
                         pathGoesThrough = true;
                         break;
                     }
                 }
+
                 if (!pathGoesThrough) continue;
 
                 OpenDoor(door);
@@ -134,8 +144,8 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
         /// <summary>
-        /// Open a door by setting its ZDO state.
-        /// Opens the door AWAY from the NPC, matching Valheim's native door behavior.
+        ///     Open a door by setting its ZDO state.
+        ///     Opens the door AWAY from the NPC, matching Valheim's native door behavior.
         /// </summary>
         public void OpenDoor(Door door)
         {
@@ -146,18 +156,19 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             if (!IsDoorClosed(door)) return;
 
-            Vector3 userDir = (transform.position - door.transform.position).normalized;
-            bool forward = Vector3.Dot(door.transform.forward, userDir) < 0f;
-            int openState = forward ? 1 : -1;
+            var userDir = (transform.position - door.transform.position).normalized;
+            var forward = Vector3.Dot(door.transform.forward, userDir) < 0f;
+            var openState = forward ? 1 : -1;
 
-            DebugLog.Append("DoorHandler.cs:open", "open_door", new Dictionary<string, object>{
-                {"npcPos", transform.position.ToString("F2")},
-                {"doorPos", door.transform.position.ToString("F2")},
-                {"doorFwd", door.transform.forward.ToString("F2")},
-                {"userDir", userDir.ToString("F2")},
-                {"dot", Vector3.Dot(door.transform.forward, userDir)},
-                {"forward", forward},
-                {"openState", openState}
+            DebugLog.Append("DoorHandler.cs:open", "open_door", new Dictionary<string, object>
+            {
+                { "npcPos", transform.position.ToString("F2") },
+                { "doorPos", door.transform.position.ToString("F2") },
+                { "doorFwd", door.transform.forward.ToString("F2") },
+                { "userDir", userDir.ToString("F2") },
+                { "dot", Vector3.Dot(door.transform.forward, userDir) },
+                { "forward", forward },
+                { "openState", openState },
             }, "direction", "run1");
 
             nview.GetZDO().Set(ZDOVars.s_state, openState);
@@ -169,16 +180,12 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         private void ScheduleClose(Door door)
         {
-            float closeTime = Time.time + DoorSettings.DoorCloseDelay;
+            var closeTime = Time.time + DoorSettings.DoorCloseDelay;
 
             if (m_pendingCloseDoors.ContainsKey(door))
-            {
                 m_pendingCloseDoors[door] = closeTime;
-            }
             else
-            {
                 m_pendingCloseDoors.Add(door, closeTime);
-            }
         }
 
         private void ProcessPendingDoorClosures()
@@ -192,7 +199,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             foreach (var door in doorKeys)
             {
-                if (!m_pendingCloseDoors.TryGetValue(door, out float closeTime))
+                if (!m_pendingCloseDoors.TryGetValue(door, out var closeTime))
                     continue;
 
                 if (Time.time < closeTime) continue;
@@ -221,11 +228,9 @@ namespace ValheimVillages.Villager.AI.Navigation
                 m_pendingCloseDoors.Remove(door);
         }
 
-        private const float DoorCloseBlockRadius = 3f;
-
         private bool IsSafeToCLoseDoor(Door door)
         {
-            Vector3 doorPos = door.transform.position;
+            var doorPos = door.transform.position;
             var nearby = Physics.OverlapSphere(doorPos, DoorCloseBlockRadius);
             foreach (var col in nearby)
             {
@@ -234,6 +239,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (character != null)
                     return false;
             }
+
             return true;
         }
 
@@ -259,16 +265,15 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (collider == null || collider.gameObject == null) continue;
 
                 var door = collider.GetComponentInParent<Door>();
-                if (door != null && !m_nearbyDoors.Contains(door))
-                {
-                    m_nearbyDoors.Add(door);
-                }
+                if (door != null && !m_nearbyDoors.Contains(door)) m_nearbyDoors.Add(door);
             }
+
             if (m_nearbyDoors.Count > 0)
-                DebugLog.Append("DoorHandler.cs:scan", "scan_result", new Dictionary<string, object>{
-                    {"npcPos", transform.position.ToString("F2")},
-                    {"doorsFound", m_nearbyDoors.Count},
-                    {"scanRadius", DoorSettings.DoorDetectionRadius * 2f}
+                DebugLog.Append("DoorHandler.cs:scan", "scan_result", new Dictionary<string, object>
+                {
+                    { "npcPos", transform.position.ToString("F2") },
+                    { "doorsFound", m_nearbyDoors.Count },
+                    { "scanRadius", DoorSettings.DoorDetectionRadius * 2f },
                 }, "H4", "run1");
         }
 
@@ -280,7 +285,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (nview == null || nview.GetZDO() == null)
                 return false;
 
-            return nview.GetZDO().GetInt(ZDOVars.s_state, 0) == 0;
+            return nview.GetZDO().GetInt(ZDOVars.s_state) == 0;
         }
 
         private ZNetView GetDoorZNetView(Door door)
@@ -293,18 +298,6 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             if (door == null) return false;
             return door.GetComponent<Piece>() != null;
-        }
-
-        private void OnDestroy()
-        {
-            foreach (var kvp in m_pendingCloseDoors)
-            {
-                if (kvp.Key != null)
-                {
-                    CloseDoor(kvp.Key);
-                }
-            }
-            m_pendingCloseDoors.Clear();
         }
     }
 }

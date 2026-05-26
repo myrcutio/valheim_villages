@@ -4,18 +4,21 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.UI;
 using ValheimVillages.Attributes;
-using ValheimVillages.Items;
 using ValheimVillages.Items.Icons;
+using ValheimVillages.UI.Core;
 
 namespace ValheimVillages.Items.WorkOrders
 {
     /// <summary>
-    /// Adds a small "Order" button next to the Craft button in crafting
-    /// station UIs. Creates a work order scroll in the player's inventory.
+    ///     Adds a small "Order" button next to the Craft button in crafting
+    ///     station UIs. Creates a work order scroll in the player's inventory.
     /// </summary>
     [HarmonyPatch]
     public static class CraftingStationPatch
     {
+        private const string WorkOrderTooltipText =
+            "Orders placed in a chest will be fulfilled by nearby villagers.";
+
         private static GameObject _workOrderButton;
         private static bool _buttonCreated;
 
@@ -26,9 +29,18 @@ namespace ValheimVillages.Items.WorkOrders
         private static Vector2 _cleanCraftSizeDelta;
         private static bool _cleanSizeDeltaSaved;
 
+        private static Dictionary<string, string> s_stationWorkOrderMap;
+
         /// <summary>
-        /// Reset all static state (hot reload / world unload).
-        /// The button GameObject itself is destroyed by the stale object sweep.
+        ///     Station name → work order item name, built from ItemFactory
+        ///     (physical stations + virtual stations from VillagerRegistry).
+        /// </summary>
+        private static Dictionary<string, string> StationWorkOrderMap =>
+            s_stationWorkOrderMap ??= ItemFactory.BuildStationWorkOrderMap();
+
+        /// <summary>
+        ///     Reset all static state (hot reload / world unload).
+        ///     The button GameObject itself is destroyed by the stale object sweep.
         /// </summary>
         [RegisterCleanup]
         public static void Clear()
@@ -40,9 +52,9 @@ namespace ValheimVillages.Items.WorkOrders
         }
 
         /// <summary>
-        /// Hide the work order button so custom tabs can use the craft
-        /// button area for their own actions.  Called from LateUpdate
-        /// to guarantee it stays hidden for the entire frame.
+        ///     Hide the work order button so custom tabs can use the craft
+        ///     button area for their own actions.  Called from LateUpdate
+        ///     to guarantee it stays hidden for the entire frame.
         /// </summary>
         public static void HideWorkOrderButton()
         {
@@ -50,20 +62,11 @@ namespace ValheimVillages.Items.WorkOrders
                 _workOrderButton.SetActive(false);
         }
 
-        private static Dictionary<string, string> s_stationWorkOrderMap;
-
-        /// <summary>
-        /// Station name → work order item name, built from ItemFactory
-        /// (physical stations + virtual stations from VillagerRegistry).
-        /// </summary>
-        private static Dictionary<string, string> StationWorkOrderMap
-        {
-            get => s_stationWorkOrderMap ??= ItemFactory.BuildStationWorkOrderMap();
-        }
-
         /// <summary>Virtual stations: show only Order button in place of Craft (no direct crafting).</summary>
-        private static bool IsVirtualStation(string stationName) =>
-            stationName != null && stationName.StartsWith("$vv_");
+        private static bool IsVirtualStation(string stationName)
+        {
+            return stationName != null && stationName.StartsWith("$vv_");
+        }
 
         [HarmonyPatch(typeof(InventoryGui), "UpdateCraftingPanel")]
         [HarmonyPostfix]
@@ -76,8 +79,8 @@ namespace ValheimVillages.Items.WorkOrders
         }
 
         /// <summary>
-        /// When at a villager virtual station ($vv_*), recipe list elements are
-        /// shown with full color so the player can always create work orders.
+        ///     When at a villager virtual station ($vv_*), recipe list elements are
+        ///     shown with full color so the player can always create work orders.
         /// </summary>
         private static void ForceRecipeListFullColorAtVillagerStation(InventoryGui gui)
         {
@@ -87,7 +90,7 @@ namespace ValheimVillages.Items.WorkOrders
             if (station?.m_name == null || !station.m_name.StartsWith("$vv_")) return;
 
             var white = Color.white;
-            for (int i = 0; i < gui.m_recipeListRoot.childCount; i++)
+            for (var i = 0; i < gui.m_recipeListRoot.childCount; i++)
             {
                 var child = gui.m_recipeListRoot.GetChild(i);
                 if (!child.gameObject.activeSelf) continue;
@@ -95,7 +98,6 @@ namespace ValheimVillages.Items.WorkOrders
                 if (icon != null) icon.color = white;
                 var nameT = child.Find("name");
                 if (nameT != null)
-                {
                     foreach (var comp in nameT.GetComponents<Component>())
                     {
                         var colorProp = comp?.GetType().GetProperty("color",
@@ -106,14 +108,13 @@ namespace ValheimVillages.Items.WorkOrders
                             break;
                         }
                     }
-                }
             }
         }
 
         /// <summary>
-        /// Detect and repair craft button sizeDelta corruption from previous
-        /// builds that incorrectly set sizeDelta.x = rect.width on a
-        /// stretch-anchored button (compounding each ScriptEngine reload).
+        ///     Detect and repair craft button sizeDelta corruption from previous
+        ///     builds that incorrectly set sizeDelta.x = rect.width on a
+        ///     stretch-anchored button (compounding each ScriptEngine reload).
         /// </summary>
         private static void RepairCraftButtonIfCorrupted(InventoryGui gui)
         {
@@ -121,7 +122,7 @@ namespace ValheimVillages.Items.WorkOrders
                 gui.m_craftButton?.GetComponent<RectTransform>();
             if (craftRect == null) return;
 
-            bool isStretch = craftRect.anchorMin.x < craftRect.anchorMax.x;
+            var isStretch = craftRect.anchorMin.x < craftRect.anchorMax.x;
 
             if (!_cleanSizeDeltaSaved)
             {
@@ -178,9 +179,6 @@ namespace ValheimVillages.Items.WorkOrders
             Plugin.Log?.LogInfo("Work Order button created in crafting UI");
         }
 
-        private const string WorkOrderTooltipText =
-            "Orders placed in a chest will be fulfilled by nearby villagers.";
-
         private static void SetOrderButtonTooltip(GameObject buttonGO)
         {
             if (buttonGO == null) return;
@@ -200,6 +198,7 @@ namespace ValheimVillages.Items.WorkOrders
                     return;
                 }
             }
+
             // Add UITooltip if missing (type from assembly_guiutils, same as Localization)
             var ttType = typeof(Localization).Assembly.GetType("UITooltip");
             if (ttType != null)
@@ -216,7 +215,7 @@ namespace ValheimVillages.Items.WorkOrders
 
             // Custom tabs (Info, Debug) manage the craft button area themselves;
             // hide the work order button so it doesn't cover the tab's action button.
-            if (ValheimVillages.UI.Core.VillagerTabManager.IsCustomTabActive)
+            if (VillagerTabManager.IsCustomTabActive)
             {
                 _workOrderButton.SetActive(false);
                 return;
@@ -231,8 +230,8 @@ namespace ValheimVillages.Items.WorkOrders
             }
 
             var station = player.GetCurrentCraftingStation();
-            bool hasWorkOrder = station != null && StationWorkOrderMap.ContainsKey(station.m_name);
-            bool isVirtual = station != null && IsVirtualStation(station.m_name);
+            var hasWorkOrder = station != null && StationWorkOrderMap.ContainsKey(station.m_name);
+            var isVirtual = station != null && IsVirtualStation(station.m_name);
 
             if (isVirtual)
             {
@@ -251,8 +250,8 @@ namespace ValheimVillages.Items.WorkOrders
         }
 
         /// <summary>
-        /// For virtual stations: make the Order button use the Craft button's
-        /// rect so it replaces it in place (native Valheim layout).
+        ///     For virtual stations: make the Order button use the Craft button's
+        ///     rect so it replaces it in place (native Valheim layout).
         /// </summary>
         private static void PositionWorkOrderButtonAsCraftReplacement(InventoryGui gui)
         {
@@ -274,8 +273,8 @@ namespace ValheimVillages.Items.WorkOrders
         }
 
         /// <summary>
-        /// Position the work order button identical to the craft button in size,
-        /// stacked directly above it with a small gap (for physical stations).
+        ///     Position the work order button identical to the craft button in size,
+        ///     stacked directly above it with a small gap (for physical stations).
         /// </summary>
         private static void PositionWorkOrderButton(InventoryGui gui)
         {
@@ -293,8 +292,8 @@ namespace ValheimVillages.Items.WorkOrders
             woRect.localScale = craftRect.localScale;
 
             const float gap = 6f;
-            float craftHeight = craftRect.rect.height;
-            float woHeight = woRect.rect.height;
+            var craftHeight = craftRect.rect.height;
+            var woHeight = woRect.rect.height;
             // Place Order button center above Craft button center
             woRect.anchoredPosition = new Vector2(
                 craftRect.anchoredPosition.x,
@@ -307,7 +306,7 @@ namespace ValheimVillages.Items.WorkOrders
         private static void SetButtonText(GameObject buttonGO, string text)
         {
             foreach (var comp in
-                buttonGO.GetComponentsInChildren<Component>(true))
+                     buttonGO.GetComponentsInChildren<Component>(true))
             {
                 var textProp = comp.GetType().GetProperty("text",
                     BindingFlags.Public | BindingFlags.Instance);
@@ -326,7 +325,7 @@ namespace ValheimVillages.Items.WorkOrders
         private static void SetButtonFontSize(GameObject buttonGO, float size)
         {
             foreach (var comp in
-                buttonGO.GetComponentsInChildren<Component>(true))
+                     buttonGO.GetComponentsInChildren<Component>(true))
             {
                 var fsProp = comp.GetType().GetProperty("fontSize",
                     BindingFlags.Public | BindingFlags.Instance);
@@ -347,7 +346,7 @@ namespace ValheimVillages.Items.WorkOrders
             if (station == null) return;
 
             if (!StationWorkOrderMap.TryGetValue(
-                station.m_name, out var workOrderName))
+                    station.m_name, out var workOrderName))
             {
                 player.Message(MessageHud.MessageType.Center,
                     "No work order available for this station");
@@ -362,8 +361,8 @@ namespace ValheimVillages.Items.WorkOrders
                 return;
             }
 
-            string itemPrefabName = selectedRecipe.m_item?.gameObject?.name;
-            string itemDisplayName =
+            var itemPrefabName = selectedRecipe.m_item?.gameObject?.name;
+            var itemDisplayName =
                 selectedRecipe.m_item?.m_itemData?.m_shared?.m_name
                 ?? itemPrefabName;
             if (string.IsNullOrEmpty(itemPrefabName))
@@ -416,7 +415,7 @@ namespace ValheimVillages.Items.WorkOrders
             newItemData.m_customData["wo_item_name"] = itemDisplayName;
 
             // Resolve pretty name for display and tooltip
-            string localizedName = Localization.instance.Localize(
+            var localizedName = Localization.instance.Localize(
                 itemDisplayName);
 
             // Deep-copy SharedData so this work order gets its own description

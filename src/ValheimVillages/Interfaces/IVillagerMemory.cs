@@ -6,9 +6,9 @@ using ValheimVillages.Schemas;
 namespace ValheimVillages.Interfaces
 {
     /// <summary>
-    /// Abstraction over villager memory (known locations, bed, comfort).
-    /// Implemented by Villager.AI.Memory.VillagerMemory
-    /// so POI discovery and handlers can work with either.
+    ///     Abstraction over villager memory (known locations, bed, comfort).
+    ///     Implemented by Villager.AI.Memory.VillagerMemory
+    ///     so POI discovery and handlers can work with either.
     /// </summary>
     public interface IVillagerMemory
     {

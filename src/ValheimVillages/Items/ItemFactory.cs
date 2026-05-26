@@ -5,11 +5,12 @@ using System.Reflection;
 using UnityEngine;
 using ValheimVillages.Items.Icons;
 using ValheimVillages.Villager.Registry;
+using Object = UnityEngine.Object;
 
 namespace ValheimVillages.Items
 {
     /// <summary>
-    /// Factory for creating and registering custom items from embedded JSON definitions.
+    ///     Factory for creating and registering custom items from embedded JSON definitions.
     /// </summary>
     public static class ItemFactory
     {
@@ -17,8 +18,38 @@ namespace ValheimVillages.Items
         private static List<ItemDefinition> _definitions;
 
         /// <summary>
-        /// Register all items from embedded JSON definitions.
-        /// Called from ObjectDB.Awake and ObjectDB.CopyOtherDB patches.
+        ///     Physical Valheim station → (work order key, display name, stationType for icon).
+        ///     These are engine constants; virtual station work orders come from VillagerRegistry.
+        /// </summary>
+        private static readonly (string station, string key, string displayName, string stationType)[]
+            PhysicalStations =
+            {
+                ("$piece_workbench", "workbench", "Workbench", "Workbench"),
+                ("$piece_forge", "forge", "Forge", "Forge"),
+                ("$piece_cauldron", "cauldron", "Cauldron", "Cauldron"),
+                ("$piece_artisanstation", "artisan", "Artisan Table", "ArtisanTable"),
+                ("$piece_stonecutter", "stonecutter", "Stonecutter", "Stonecutter"),
+            };
+
+        /// <summary>
+        ///     Biome fragments: (Heightmap.Biome enum, item key, biome ID, display name, ink color).
+        ///     Used to generate fragment items and the BiomeFragmentMap for loot injection.
+        /// </summary>
+        public static readonly (int biomeEnum, string key, string biomeId, string displayName, string inkColor)[]
+            FragmentBiomes =
+            {
+                ((int)Heightmap.Biome.Meadows, "meadows", "Meadows", "Meadows", "green"),
+                ((int)Heightmap.Biome.BlackForest, "blackforest", "BlackForest", "Black Forest", "dark blue"),
+                ((int)Heightmap.Biome.Swamp, "swamp", "Swamp", "Swamp", "sickly brown"),
+                ((int)Heightmap.Biome.Mountain, "mountains", "Mountain", "Mountains", "blue"),
+                ((int)Heightmap.Biome.Plains, "plains", "Plains", "Plains", "golden"),
+                ((int)Heightmap.Biome.Mistlands, "mistlands", "Mistlands", "Mistlands", "purple"),
+                ((int)Heightmap.Biome.AshLands, "ashlands", "Ashlands", "Ashlands", "crimson"),
+            };
+
+        /// <summary>
+        ///     Register all items from embedded JSON definitions.
+        ///     Called from ObjectDB.Awake and ObjectDB.CopyOtherDB patches.
         /// </summary>
         public static void RegisterAll(ObjectDB objectDB)
         {
@@ -28,10 +59,7 @@ namespace ValheimVillages.Items
                 return;
             }
 
-            foreach (var def in GetDefinitions())
-            {
-                CreatePrefabIfNeeded(objectDB, def);
-            }
+            foreach (var def in GetDefinitions()) CreatePrefabIfNeeded(objectDB, def);
 
             var itemByHash = GetPrivateDictionary(objectDB, "m_itemByHash");
             foreach (var prefab in _prefabs)
@@ -39,13 +67,13 @@ namespace ValheimVillages.Items
                 AddToCollection(objectDB.m_items, prefab);
                 AddToHashMap(itemByHash, prefab);
             }
-            
+
             Plugin.Log?.LogInfo($"Registered {_prefabs.Count} custom items in ObjectDB");
         }
 
         /// <summary>
-        /// Ensure all registered prefabs are in ZNetScene.
-        /// Called from ZNetScene.Awake patch.
+        ///     Ensure all registered prefabs are in ZNetScene.
+        ///     Called from ZNetScene.Awake patch.
         /// </summary>
         public static void RegisterAllInZNetScene(ZNetScene instance)
         {
@@ -55,13 +83,13 @@ namespace ValheimVillages.Items
                 AddToCollection(instance.m_prefabs, prefab);
                 AddToHashMap(namedPrefabs, prefab);
             }
-            
+
             Plugin.Log?.LogInfo($"Registered {_prefabs.Count} prefabs in ZNetScene");
         }
 
         /// <summary>
-        /// Get all item definitions from embedded JSON files.
-        /// Only loads resources under the Items namespace (filters out NPC definitions).
+        ///     Get all item definitions from embedded JSON files.
+        ///     Only loads resources under the Items namespace (filters out NPC definitions).
         /// </summary>
         public static List<ItemDefinition> GetDefinitions()
         {
@@ -101,38 +129,8 @@ namespace ValheimVillages.Items
         }
 
         /// <summary>
-        /// Physical Valheim station → (work order key, display name, stationType for icon).
-        /// These are engine constants; virtual station work orders come from VillagerRegistry.
-        /// </summary>
-        private static readonly (string station, string key, string displayName, string stationType)[]
-            PhysicalStations =
-        {
-            ("$piece_workbench",       "workbench",    "Workbench",      "Workbench"),
-            ("$piece_forge",           "forge",        "Forge",          "Forge"),
-            ("$piece_cauldron",        "cauldron",     "Cauldron",       "Cauldron"),
-            ("$piece_artisanstation",  "artisan",      "Artisan Table",  "ArtisanTable"),
-            ("$piece_stonecutter",     "stonecutter",  "Stonecutter",    "Stonecutter"),
-        };
-
-        /// <summary>
-        /// Biome fragments: (Heightmap.Biome enum, item key, biome ID, display name, ink color).
-        /// Used to generate fragment items and the BiomeFragmentMap for loot injection.
-        /// </summary>
-        public static readonly (int biomeEnum, string key, string biomeId, string displayName, string inkColor)[]
-            FragmentBiomes =
-        {
-            ((int)Heightmap.Biome.Meadows,     "meadows",      "Meadows",      "Meadows",      "green"),
-            ((int)Heightmap.Biome.BlackForest,  "blackforest",  "BlackForest",  "Black Forest", "dark blue"),
-            ((int)Heightmap.Biome.Swamp,        "swamp",        "Swamp",        "Swamp",        "sickly brown"),
-            ((int)Heightmap.Biome.Mountain,     "mountains",    "Mountain",     "Mountains",    "blue"),
-            ((int)Heightmap.Biome.Plains,       "plains",       "Plains",       "Plains",       "golden"),
-            ((int)Heightmap.Biome.Mistlands,    "mistlands",    "Mistlands",    "Mistlands",    "purple"),
-            ((int)Heightmap.Biome.AshLands,     "ashlands",     "Ashlands",     "Ashlands",     "crimson"),
-        };
-
-        /// <summary>
-        /// Returns the station name → work order item name mapping for all stations
-        /// (physical + virtual). Used by CraftingStationPatch to build its lookup.
+        ///     Returns the station name → work order item name mapping for all stations
+        ///     (physical + virtual). Used by CraftingStationPatch to build its lookup.
         /// </summary>
         public static Dictionary<string, string> BuildStationWorkOrderMap()
         {
@@ -140,15 +138,13 @@ namespace ValheimVillages.Items
             foreach (var (station, key, _, _) in PhysicalStations)
                 map[station] = $"vv_workorder_{key}";
             foreach (var kv in VillagerRegistry.Definitions)
-            {
                 if (!string.IsNullOrEmpty(kv.Value.stationName))
                     map[kv.Value.stationName] = $"vv_workorder_{kv.Key.ToLower()}";
-            }
             return map;
         }
 
         /// <summary>
-        /// Generates all programmatic item definitions: pawns and work orders.
+        ///     Generates all programmatic item definitions: pawns and work orders.
         /// </summary>
         private static void GenerateRegistryItems(List<ItemDefinition> definitions)
         {
@@ -162,7 +158,7 @@ namespace ValheimVillages.Items
                 description = "A villager packaged for transport.",
                 maxStackSize = 1,
                 weight = 10f,
-                itemType = "pawn"
+                itemType = "pawn",
             });
 
             // Per-type pawns + virtual station work orders from VillagerRegistry
@@ -180,46 +176,43 @@ namespace ValheimVillages.Items
                     description = $"A {def.displayName.ToLower()} villager packaged for transport. {def.description}",
                     maxStackSize = 1,
                     weight = 10f,
-                    itemType = "pawn"
+                    itemType = "pawn",
                 });
 
                 if (!string.IsNullOrEmpty(def.stationName))
-                {
                     AddIfMissing(definitions, new ItemDefinition
                     {
                         name = $"vv_workorder_{typeKey}",
                         source = "clone",
                         basePrefab = "DragonEgg",
                         displayName = $"{def.displayName} Work Order",
-                        description = $"A work order scroll for {def.displayName.ToLower()} tasks. Right-click to set production quotas.",
+                        description =
+                            $"A work order scroll for {def.displayName.ToLower()} tasks. Right-click to set production quotas.",
                         maxStackSize = 1,
                         weight = 0.3f,
                         itemType = "workorder",
-                        stationType = def.type
+                        stationType = def.type,
                     });
-                }
             }
 
             // Physical station work orders
             foreach (var (_, key, displayName, stationType) in PhysicalStations)
-            {
                 AddIfMissing(definitions, new ItemDefinition
                 {
                     name = $"vv_workorder_{key}",
                     source = "clone",
                     basePrefab = "DragonEgg",
                     displayName = $"{displayName} Work Order",
-                    description = $"A work order scroll for {displayName.ToLower()} tasks. Right-click to set production quotas.",
+                    description =
+                        $"A work order scroll for {displayName.ToLower()} tasks. Right-click to set production quotas.",
                     maxStackSize = 1,
                     weight = 0.3f,
                     itemType = "workorder",
-                    stationType = stationType
+                    stationType = stationType,
                 });
-            }
 
             // Biome fragment items
             foreach (var (_, key, biomeId, displayName, inkColor) in FragmentBiomes)
-            {
                 AddIfMissing(definitions, new ItemDefinition
                 {
                     name = $"vv_fragment_{key}",
@@ -232,9 +225,8 @@ namespace ValheimVillages.Items
                     maxStackSize = 3,
                     weight = 0.1f,
                     itemType = "fragment",
-                    biome = biomeId
+                    biome = biomeId,
                 });
-            }
         }
 
         private static void AddIfMissing(List<ItemDefinition> defs, ItemDefinition def)
@@ -244,29 +236,25 @@ namespace ValheimVillages.Items
         }
 
         /// <summary>
-        /// Get item definitions filtered by itemType (e.g., "fragment", "workorder").
+        ///     Get item definitions filtered by itemType (e.g., "fragment", "workorder").
         /// </summary>
         public static List<ItemDefinition> GetDefinitionsByType(string itemType)
         {
             var results = new List<ItemDefinition>();
             foreach (var def in GetDefinitions())
-            {
                 if (def.itemType == itemType)
                     results.Add(def);
-            }
             return results;
         }
 
         /// <summary>
-        /// Find a single item definition by name.
+        ///     Find a single item definition by name.
         /// </summary>
         public static ItemDefinition GetDefinition(string name)
         {
             foreach (var def in GetDefinitions())
-            {
                 if (def.name == name)
                     return def;
-            }
             return null;
         }
 
@@ -296,23 +284,23 @@ namespace ValheimVillages.Items
 
             var prefab = ClonePrefab(basePrefab, def.name);
             ApplyItemDefinition(prefab, def);
-            
+
             _prefabs.Add(prefab);
             Plugin.Log?.LogInfo($"Created custom item: {def.name}");
         }
 
         private static GameObject ClonePrefab(GameObject basePrefab, string newName)
         {
-            bool wasActive = basePrefab.activeSelf;
+            var wasActive = basePrefab.activeSelf;
             basePrefab.SetActive(false);
-            
-            var prefab = UnityEngine.Object.Instantiate(basePrefab);
-            
+
+            var prefab = Object.Instantiate(basePrefab);
+
             basePrefab.SetActive(wasActive);
             prefab.name = newName;
-            UnityEngine.Object.DontDestroyOnLoad(prefab);
+            Object.DontDestroyOnLoad(prefab);
             prefab.SetActive(true);
-            
+
             return prefab;
         }
 
@@ -359,7 +347,7 @@ namespace ValheimVillages.Items
         private static void AddToHashMap(Dictionary<int, GameObject> hashMap, GameObject prefab)
         {
             if (hashMap == null) return;
-            int hash = prefab.name.GetStableHashCode();
+            var hash = prefab.name.GetStableHashCode();
             hashMap[hash] = prefab;
         }
     }

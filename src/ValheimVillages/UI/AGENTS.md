@@ -1,10 +1,16 @@
 # UI
 
-Keywords: UI, user interface, tab, info tab, debug tab, InfoTab, DebugTab, VillagerTabManager, VillagerTabRenderer, VillagerUIFactory, IVillagerTab, IListPanel, IContextMenu, RegisterTab, RegisterListPanel, RegisterContextMenu, VillagerInteract, VillagerBehaviorBridge, interaction, hover text, crafting UI, InventoryGui, work order menu, WorkOrderMenu, WorkOrderMenuBuilder, context menu, list panel, patrol status, patrol map, PatrolStatusPanel, PatrolMapRenderer, VillageMapPanel, DialogPatches, VillagerCraftingPatch, TMPro, crafting panel, tab switching
+Keywords: UI, user interface, tab, info tab, debug tab, InfoTab, DebugTab, VillagerTabManager, VillagerTabRenderer,
+VillagerUIFactory, IVillagerTab, IListPanel, IContextMenu, RegisterTab, RegisterListPanel, RegisterContextMenu,
+VillagerInteract, VillagerBehaviorBridge, interaction, hover text, crafting UI, InventoryGui, work order menu,
+WorkOrderMenu, WorkOrderMenuBuilder, context menu, list panel, patrol status, patrol map, PatrolStatusPanel,
+PatrolMapRenderer, VillageMapPanel, DialogPatches, VillagerCraftingPatch, TMPro, crafting panel, tab switching
 
 ## Purpose
 
-Villager interaction UI built on top of Valheim's `InventoryGui`. Provides a tabbed interface (Info, Debug, and station-specific Orders/Upgrade tabs) with list panels, context menus, and map renderers. Reuses native Valheim UI elements via cloning and modification.
+Villager interaction UI built on top of Valheim's `InventoryGui`. Provides a tabbed interface (Info, Debug, and
+station-specific Orders/Upgrade tabs) with list panels, context menus, and map renderers. Reuses native Valheim UI
+elements via cloning and modification.
 
 ## Directory Structure
 
@@ -38,28 +44,30 @@ UI/
 
 ## Key Types
 
-| Type | Role |
-|------|------|
-| `VillagerTabManager` | Central tab controller: registers tabs, switches content, manages lifecycle |
-| `VillagerTabRenderer` | Renders list items, detail panels, map textures, and action buttons |
-| `VillagerUIFactory` | Factory for Valheim-style UI elements (uses TMPro via reflection) |
-| `VillagerInteract` | Hoverable/Interactable on NPC; pauses AI during interaction |
-| `VillagerBehaviorBridge` | MonoBehaviour exposing `VillagerAI` state to UI components |
-| `InfoTab` | Shows favorite places (bed, fire, chair) and registered list panels |
-| `DebugTab` | Shows AI state, recent activity log, movement test commands |
-| `WorkOrderMenu` | Popup for configuring work order quotas (min/max sliders) |
+| Type                     | Role                                                                        |
+|--------------------------|-----------------------------------------------------------------------------|
+| `VillagerTabManager`     | Central tab controller: registers tabs, switches content, manages lifecycle |
+| `VillagerTabRenderer`    | Renders list items, detail panels, map textures, and action buttons         |
+| `VillagerUIFactory`      | Factory for Valheim-style UI elements (uses TMPro via reflection)           |
+| `VillagerInteract`       | Hoverable/Interactable on NPC; pauses AI during interaction                 |
+| `VillagerBehaviorBridge` | MonoBehaviour exposing `VillagerAI` state to UI components                  |
+| `InfoTab`                | Shows favorite places (bed, fire, chair) and registered list panels         |
+| `DebugTab`               | Shows AI state, recent activity log, movement test commands                 |
+| `WorkOrderMenu`          | Popup for configuring work order quotas (min/max sliders)                   |
 
 ## Entry Points and Registration
 
 - `[RegisterTab]` discovered by `AttributeScanner` -> `VillagerTabManager.RegisterTab()`.
 - `[RegisterListPanel]` discovered by `AttributeScanner` -> wired to parent tab (e.g., `InfoTab`).
 - `VillagerInteract.Interact()` (E key) pauses NPC, sets crafting station, calls `VillagerTabManager.Activate()`.
-- `DialogPatches` applied via `Harmony.PatchAll()`: patches `Character.GetHoverText`, `Tameable.Interact`, `InventoryGui.Hide`, `NpcTalk.RandomTalk`.
+- `DialogPatches` applied via `Harmony.PatchAll()`: patches `Character.GetHoverText`, `Tameable.Interact`,
+  `InventoryGui.Hide`, `NpcTalk.RandomTalk`.
 - `VillagerCraftingPatch` applied via `Harmony.PatchAll()`: hides crafting panel for non-crafters.
 
 ## Integration
 
-- **Villager/** -- `VillagerBehaviorBridge` resolves AI via `VillagerAIManager.ActiveVillagers`; `VillagerStation.HasCraftingRecipes` checks the `tab:workorder` tag to determine if Orders tab appears.
+- **Villager/** -- `VillagerBehaviorBridge` resolves AI via `VillagerAIManager.ActiveVillagers`;
+  `VillagerStation.HasCraftingRecipes` checks the `tab:workorder` tag to determine if Orders tab appears.
 - **Behaviors/** -- `PatrolStatusPanel` reads `PerimeterPatrolBehavior` state for patrol/breach info.
 - **TaskQueue/** -- `DebugTab` displays `VillagerActivityLog` entries.
 - **Items/** -- `WorkOrderMenu` reads/writes `ItemDrop.ItemData.m_customData`.

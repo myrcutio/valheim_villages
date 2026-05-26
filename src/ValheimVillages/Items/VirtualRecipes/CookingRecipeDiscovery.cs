@@ -1,19 +1,18 @@
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace ValheimVillages.Items.VirtualRecipes
 {
     /// <summary>
-    /// Discovers cookable recipes from the CookingStation's m_conversion list so the farmer
-    /// (or tavernkeeper) can offer them as work orders. Mods that add custom cookable items
-    /// via the same conversion list will appear automatically.
+    ///     Discovers cookable recipes from the CookingStation's m_conversion list so the farmer
+    ///     (or tavernkeeper) can offer them as work orders. Mods that add custom cookable items
+    ///     via the same conversion list will appear automatically.
     /// </summary>
     public static class CookingRecipeDiscovery
     {
         /// <summary>
-        /// Returns virtual recipe entries for all CookingStation conversions (raw → cooked).
-        /// Uses the first CookingStation prefab found in ZNetScene; mods that add conversions
-        /// to that station will be included.
+        ///     Returns virtual recipe entries for all CookingStation conversions (raw → cooked).
+        ///     Uses the first CookingStation prefab found in ZNetScene; mods that add conversions
+        ///     to that station will be included.
         /// </summary>
         public static List<VirtualRecipeEntry> GetCookingRecipes(HashSet<string> existingOutputs)
         {
@@ -22,7 +21,7 @@ namespace ValheimVillages.Items.VirtualRecipes
             if (zns?.m_prefabs == null) return list;
 
             CookingStation cookingStation = null;
-            for (int i = 0; i < zns.m_prefabs.Count; i++)
+            for (var i = 0; i < zns.m_prefabs.Count; i++)
             {
                 var go = zns.m_prefabs[i];
                 if (go == null) continue;
@@ -38,8 +37,8 @@ namespace ValheimVillages.Items.VirtualRecipes
             foreach (var conv in cookingStation.m_conversion)
             {
                 if (conv?.m_from == null || conv.m_to == null) continue;
-                string fromName = conv.m_from.gameObject.name;
-                string toName = conv.m_to.gameObject.name;
+                var fromName = conv.m_from.gameObject.name;
+                var toName = conv.m_to.gameObject.name;
                 if (string.IsNullOrEmpty(fromName) || string.IsNullOrEmpty(toName)) continue;
                 if (existingOutputs != null && existingOutputs.Contains(toName)) continue;
 
@@ -49,7 +48,7 @@ namespace ValheimVillages.Items.VirtualRecipes
                     outputAmount = 1,
                     inputs = new[] { new VirtualRecipeInput { item = fromName, amount = 1 } },
                     minStationLevel = 1,
-                    physicalStation = "cookingstation"
+                    physicalStation = "cookingstation",
                 });
             }
 

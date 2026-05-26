@@ -1,15 +1,15 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-
 namespace ValheimVillages.Villager
 {
     /// <summary>
-    /// Lightweight replacement for Valheim's NpcTalk.
-    /// Handles greet/goodbye/random talk via Chat.SetNpcText.
+    ///     Lightweight replacement for Valheim's NpcTalk.
+    ///     Handles greet/goodbye/random talk via Chat.SetNpcText.
     /// </summary>
     public class VillagerTalk : MonoBehaviour
     {
+        private static float s_lastTalkTime;
         public List<string> randomTalk = new();
         public List<string> randomGreets = new();
         public List<string> randomGoodbye = new();
@@ -22,14 +22,13 @@ namespace ValheimVillages.Villager
         public float randomTalkInterval = 12f;
         public float randomTalkChance = 0.3f;
         public float minTalkInterval = 24f;
-
-        private static float s_lastTalkTime;
-
-        private Player m_targetPlayer;
-        private bool m_didGreet;
         private bool m_didGoodbye;
+        private bool m_didGreet;
         private float m_lastTargetUpdate;
         private float m_nextRandomTalk;
+
+        private Player m_targetPlayer;
+
         private void Start()
         {
             m_nextRandomTalk = Time.time + Random.Range(4f, randomTalkInterval);
@@ -41,7 +40,7 @@ namespace ValheimVillages.Villager
 
             if (m_targetPlayer == null) return;
 
-            float dist = Vector3.Distance(
+            var dist = Vector3.Distance(
                 m_targetPlayer.transform.position, transform.position);
 
             if (!m_didGreet && dist < greetRange)
@@ -82,7 +81,7 @@ namespace ValheimVillages.Villager
             if (lines == null || lines.Count == 0) return;
             if (Time.time - s_lastTalkTime < minTalkInterval) return;
 
-            string text = lines[Random.Range(0, lines.Count)];
+            var text = lines[Random.Range(0, lines.Count)];
             Say(text);
         }
 

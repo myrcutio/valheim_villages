@@ -3,13 +3,13 @@ using UnityEngine;
 namespace ValheimVillages.Villages
 {
     /// <summary>
-    /// Utility for identifying wall and door pieces in the game world.
-    /// Used by patrollers to detect village boundaries during patrol route discovery.
+    ///     Utility for identifying wall and door pieces in the game world.
+    ///     Used by patrollers to detect village boundaries during patrol route discovery.
     /// </summary>
     public static class WallDetection
     {
         /// <summary>
-        /// Known wall prefab name prefixes. Doors also count as walls (open or closed).
+        ///     Known wall prefab name prefixes. Doors also count as walls (open or closed).
         /// </summary>
         private static readonly string[] WallPrefixes =
         {
@@ -34,8 +34,8 @@ namespace ValheimVillages.Villages
         };
 
         /// <summary>
-        /// Layer mask for piece colliders (used in raycasts).
-        /// Valheim pieces typically use the "piece" or "static_solid" layers.
+        ///     Layer mask for piece colliders (used in raycasts).
+        ///     Valheim pieces typically use the "piece" or "static_solid" layers.
         /// </summary>
         private static int? s_pieceMask;
 
@@ -49,7 +49,7 @@ namespace ValheimVillages.Villages
         }
 
         /// <summary>
-        /// Check if a GameObject is a wall or door piece.
+        ///     Check if a GameObject is a wall or door piece.
         /// </summary>
         public static bool IsWallPiece(GameObject obj)
         {
@@ -58,12 +58,12 @@ namespace ValheimVillages.Villages
             var piece = obj.GetComponentInParent<Piece>();
             if (piece == null) return false;
 
-            string name = obj.name.ToLower();
+            var name = obj.name.ToLower();
             return IsWallName(name) || IsDoorName(name);
         }
 
         /// <summary>
-        /// Check if a Collider belongs to a wall or door piece.
+        ///     Check if a Collider belongs to a wall or door piece.
         /// </summary>
         public static bool IsWallCollider(Collider collider)
         {
@@ -72,16 +72,16 @@ namespace ValheimVillages.Villages
         }
 
         /// <summary>
-        /// Raycast to find the nearest wall piece in a given direction.
-        /// Returns true if a wall was found, with hit info.
+        ///     Raycast to find the nearest wall piece in a given direction.
+        ///     Returns true if a wall was found, with hit info.
         /// </summary>
         public static bool RaycastForWall(Vector3 origin, Vector3 direction, float maxDist, out RaycastHit wallHit)
         {
             wallHit = default;
             var hits = Physics.RaycastAll(origin, direction.normalized, maxDist, PieceMask);
 
-            float closestDist = float.MaxValue;
-            bool found = false;
+            var closestDist = float.MaxValue;
+            var found = false;
 
             foreach (var hit in hits)
             {
@@ -100,16 +100,17 @@ namespace ValheimVillages.Villages
         }
 
         /// <summary>
-        /// Raycast to find the farthest wall piece in a given direction (within maxDist).
-        /// Used during scouting to find the outermost wall.
+        ///     Raycast to find the farthest wall piece in a given direction (within maxDist).
+        ///     Used during scouting to find the outermost wall.
         /// </summary>
-        public static bool RaycastForFarthestWall(Vector3 origin, Vector3 direction, float maxDist, out RaycastHit wallHit)
+        public static bool RaycastForFarthestWall(Vector3 origin, Vector3 direction, float maxDist,
+            out RaycastHit wallHit)
         {
             wallHit = default;
             var hits = Physics.RaycastAll(origin, direction.normalized, maxDist, PieceMask);
 
-            float farthestDist = -1f;
-            bool found = false;
+            var farthestDist = -1f;
+            var found = false;
 
             foreach (var hit in hits)
             {
@@ -130,9 +131,8 @@ namespace ValheimVillages.Villages
         private static bool IsWallName(string lowerName)
         {
             foreach (var prefix in WallPrefixes)
-            {
-                if (lowerName.Contains(prefix)) return true;
-            }
+                if (lowerName.Contains(prefix))
+                    return true;
 
             // Fallback: any piece with "wall" in the name
             return lowerName.Contains("wall");
@@ -141,9 +141,8 @@ namespace ValheimVillages.Villages
         private static bool IsDoorName(string lowerName)
         {
             foreach (var prefix in DoorPrefixes)
-            {
-                if (lowerName.Contains(prefix)) return true;
-            }
+                if (lowerName.Contains(prefix))
+                    return true;
 
             return false;
         }

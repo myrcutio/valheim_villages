@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using ValheimVillages.Enums;
 using ValheimVillages.Schemas;
 using Xunit;
@@ -6,7 +5,7 @@ using Xunit;
 namespace ValheimVillages.Tests.TaskQueue;
 
 /// <summary>
-/// Tests for task queue data types: priority ordering, settings, result factory.
+///     Tests for task queue data types: priority ordering, settings, result factory.
 /// </summary>
 public class TaskQueueTests
 {
@@ -64,7 +63,7 @@ public class TaskQueueTests
         {
             Name = "test_task",
             SourceId = "villager_1",
-            Priority = TaskPriority.Medium
+            Priority = TaskPriority.Medium,
         };
 
         Assert.Equal("test_task", task.Name);

@@ -1,5 +1,3 @@
-using System;
-using System.Linq;
 using System.Reflection;
 using ValheimVillages.Attributes;
 using ValheimVillages.UI.Core;
@@ -8,7 +6,7 @@ using Xunit;
 namespace ValheimVillages.Tests.Contracts;
 
 /// <summary>
-/// Verify that every class annotated with [RegisterTab] implements IVillagerTab.
+///     Verify that every class annotated with [RegisterTab] implements IVillagerTab.
 /// </summary>
 public class TabContractTests
 {

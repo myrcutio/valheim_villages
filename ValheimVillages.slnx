@@ -1,8 +1,8 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/ValheimVillages/ValheimVillages.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/ValheimVillages.Tests/ValheimVillages.Tests.csproj" />
-  </Folder>
+    <Folder Name="/src/">
+        <Project Path="src/ValheimVillages/ValheimVillages.csproj"/>
+    </Folder>
+    <Folder Name="/tests/">
+        <Project Path="tests/ValheimVillages.Tests/ValheimVillages.Tests.csproj"/>
+    </Folder>
 </Solution>

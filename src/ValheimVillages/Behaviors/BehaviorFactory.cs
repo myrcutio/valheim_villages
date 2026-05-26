@@ -1,17 +1,17 @@
 using System;
 using System.Collections.Generic;
-using ValheimVillages.Behaviors.Patrol;
-using ValheimVillages.Behaviors.Work;
 using ValheimVillages.Behaviors.Explore;
+using ValheimVillages.Behaviors.Patrol;
 using ValheimVillages.Behaviors.Tidy;
+using ValheimVillages.Behaviors.Work;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Villager.AI;
 
 namespace ValheimVillages.Behaviors
 {
     /// <summary>
-    /// Maps behavior tags from NPC JSON definitions to concrete IBehavior types.
-    /// Phase 4 adds [RegisterBehavior] attribute scanning; in this phase, the map is manual.
+    ///     Maps behavior tags from NPC JSON definitions to concrete IBehavior types.
+    ///     Phase 4 adds [RegisterBehavior] attribute scanning; in this phase, the map is manual.
     /// </summary>
     public static class BehaviorFactory
     {
@@ -25,8 +25,8 @@ namespace ValheimVillages.Behaviors
         };
 
         /// <summary>
-        /// Create all behaviors for an NPC based on its definition's behavior tags.
-        /// Returns a list sorted by descending priority.
+        ///     Create all behaviors for an NPC based on its definition's behavior tags.
+        ///     Returns a list sorted by descending priority.
         /// </summary>
         public static List<IBehavior> CreateBehaviors(VillagerAI ai, IReadOnlyList<string> behaviorTags)
         {
@@ -34,16 +34,10 @@ namespace ValheimVillages.Behaviors
             if (behaviorTags == null) return behaviors;
 
             foreach (var tag in behaviorTags)
-            {
                 if (s_creators.TryGetValue(tag, out var creator))
-                {
                     behaviors.Add(creator(ai));
-                }
                 else
-                {
                     Plugin.Log?.LogWarning($"[BehaviorFactory] Unknown behavior tag: '{tag}'");
-                }
-            }
 
             behaviors.Sort((a, b) => b.Priority.CompareTo(a.Priority));
             return behaviors;

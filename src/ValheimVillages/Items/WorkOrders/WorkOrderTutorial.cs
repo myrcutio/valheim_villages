@@ -1,17 +1,18 @@
+using System;
 using System.Reflection;
 using HarmonyLib;
-using UnityEngine;
 
 namespace ValheimVillages.Items.WorkOrders
 {
     /// <summary>
-    /// Registers a Hugin tutorial for work orders and triggers it when the player
-    /// first obtains a work order. Uses Player.m_shownTutorials for "show once" tracking.
+    ///     Registers a Hugin tutorial for work orders and triggers it when the player
+    ///     first obtains a work order. Uses Player.m_shownTutorials for "show once" tracking.
     /// </summary>
     public static class WorkOrderTutorial
     {
         public const string TutorialName = "vv_workorder";
         private const string Topic = "Work orders";
+
         private const string Text =
             "Place work orders in a chest. Villagers who use that station will find them and craft the requested items.";
 
@@ -39,7 +40,7 @@ namespace ValheimVillages.Items.WorkOrders
 
             var ttType = typeof(Tutorial).Assembly.GetType("Tutorial+TutorialText");
             if (ttType == null) return;
-            var entry = System.Activator.CreateInstance(ttType);
+            var entry = Activator.CreateInstance(ttType);
             if (entry == null) return;
 
             SetField(entry, ttType, "m_name", TutorialName);
@@ -54,7 +55,7 @@ namespace ValheimVillages.Items.WorkOrders
             Plugin.Log?.LogInfo($"[Valheim Villages] Registered work order tutorial: {TutorialName}");
         }
 
-        private static void SetField(object obj, System.Type type, string name, object value)
+        private static void SetField(object obj, Type type, string name, object value)
         {
             var f = type.GetField(name, BindingFlags.Public | BindingFlags.Instance);
             if (f != null)
@@ -62,13 +63,13 @@ namespace ValheimVillages.Items.WorkOrders
         }
 
         /// <summary>
-        /// Call when the player has just received a work order. Shows the tutorial
-        /// only if they have not seen it before (Player.m_shownTutorials).
+        ///     Call when the player has just received a work order. Shows the tutorial
+        ///     only if they have not seen it before (Player.m_shownTutorials).
         /// </summary>
         public static void MaybeShowWorkOrderTutorial(Player player)
         {
             if (player == null) return;
-            player.ShowTutorial(TutorialName, false);
+            player.ShowTutorial(TutorialName);
         }
     }
 }

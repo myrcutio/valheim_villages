@@ -1,15 +1,15 @@
+using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Enums;
 using ValheimVillages.Villager.AI.Navigation;
-using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Pathfinding;
 using ValheimVillages.Villager.AI.Work;
 
 namespace ValheimVillages.Behaviors.Farming
 {
     /// <summary>
-    /// Sub-state transition handlers for FarmingBehavior: harvesting pass.
-    /// Manages: travel to crop -> harvest -> collect drops -> deposit/repeat.
+    ///     Sub-state transition handlers for FarmingBehavior: harvesting pass.
+    ///     Manages: travel to crop -> harvest -> collect drops -> deposit/repeat.
     /// </summary>
     public partial class FarmingBehavior
     {
@@ -33,10 +33,11 @@ namespace ValheimVillages.Behaviors.Farming
                         FinishWork();
                     return;
                 }
+
                 m_context.CurrentHarvestTarget = crop;
             }
 
-            m_subState = FarmSubState.TravelingToHarvest;
+            SubState = FarmSubState.TravelingToHarvest;
             var cropTarget = VillagerMovement.GetWalkableDestination(m_context.CurrentHarvestTarget.transform.position);
             m_ai.SetState(BehaviorState.Working, cropTarget);
             Plugin.Log?.LogDebug(
@@ -56,13 +57,18 @@ namespace ValheimVillages.Behaviors.Farming
                 return;
             }
 
-            DebugLog.Append("FarmingHarvestWorkflow.cs:OnArrivedAtCrop", "About to harvest crop", new System.Collections.Generic.Dictionary<string, object>{{"targetName",target.m_itemPrefab?.name ?? "NULL"},{"targetPos",target.transform.position.ToString()},{"targetGO",target.gameObject.name}}, "A,D", "run1");
+            DebugLog.Append("FarmingHarvestWorkflow.cs:OnArrivedAtCrop", "About to harvest crop",
+                new Dictionary<string, object>
+                {
+                    { "targetName", target.m_itemPrefab?.name ?? "NULL" },
+                    { "targetPos", target.transform.position.ToString() }, { "targetGO", target.gameObject.name },
+                }, "A,D", "run1");
 
             var character = m_ai.Character as Humanoid;
             HarvestHelper.HarvestCrop(target, character);
             m_context.CurrentHarvestTarget = null;
 
-            Vector3 harvestPos = target.transform.position;
+            var harvestPos = target.transform.position;
             CollectDropsThenReturnToChest(harvestPos);
         }
 
@@ -79,8 +85,9 @@ namespace ValheimVillages.Behaviors.Farming
                     AbandonWork("output container lost");
                     return;
                 }
-                string outputName = m_context.WorkOrder.ItemPrefabName;
-                int toDeposit = m_context.CarriedHarvestCount;
+
+                var outputName = m_context.WorkOrder.ItemPrefabName;
+                var toDeposit = m_context.CarriedHarvestCount;
                 if (ContainerScanner.TryDepositItem(container, outputName, toDeposit))
                 {
                     m_context.HarvestedCount += toDeposit;
@@ -109,20 +116,20 @@ namespace ValheimVillages.Behaviors.Farming
         }
 
         /// <summary>
-        /// Collect dropped items near the harvest point into CarriedHarvestCount (capped per trip),
-        /// then walk to the work order container to deposit. No teleportation.
+        ///     Collect dropped items near the harvest point into CarriedHarvestCount (capped per trip),
+        ///     then walk to the work order container to deposit. No teleportation.
         /// </summary>
         private void CollectDropsThenReturnToChest(Vector3 harvestPos)
         {
-            string outputName = m_context.WorkOrder.ItemPrefabName;
-            int spaceInCarry = FarmSettings.MaxHarvestCarryPerTrip - m_context.CarriedHarvestCount;
+            var outputName = m_context.WorkOrder.ItemPrefabName;
+            var spaceInCarry = FarmSettings.MaxHarvestCarryPerTrip - m_context.CarriedHarvestCount;
             if (spaceInCarry <= 0)
             {
                 WalkToOutputChest();
                 return;
             }
 
-            int collected = CollectItemDropsIntoCarry(harvestPos, 3f, outputName, spaceInCarry);
+            var collected = CollectItemDropsIntoCarry(harvestPos, 3f, outputName, spaceInCarry);
             if (collected > 0)
             {
                 m_context.CarriedHarvestCount += collected;
@@ -143,6 +150,7 @@ namespace ValheimVillages.Behaviors.Farming
                 FinishWork();
                 return;
             }
+
             BeginHarvestPass();
         }
 
@@ -154,25 +162,26 @@ namespace ValheimVillages.Behaviors.Farming
                 AbandonWork("output container lost");
                 return;
             }
-            m_subState = FarmSubState.ReturningToChest;
+
+            SubState = FarmSubState.ReturningToChest;
             var chestTarget = VillagerMovement.GetWalkableDestination(container.transform.position);
-            m_ai.SetState(BehaviorState.Working, new ValheimVillages.Villager.AI.Pathfinding.VillagerWaypoint(chestTarget, ValheimVillages.Villager.AI.Pathfinding.VillagerWaypoint.DefaultStrategyId));
+            m_ai.SetState(BehaviorState.Working, new VillagerWaypoint(chestTarget, VillagerWaypoint.DefaultStrategyId));
             Plugin.Log?.LogDebug(
                 $"[Farming:{m_ai.NpcName}] Walking to container to deposit {m_context.CarriedHarvestCount}x");
         }
 
         /// <summary>
-        /// Collect ItemDrop objects near a position into carried count (up to maxTake), destroy the drops.
-        /// Returns number added to carry.
+        ///     Collect ItemDrop objects near a position into carried count (up to maxTake), destroy the drops.
+        ///     Returns number added to carry.
         /// </summary>
         private static int CollectItemDropsIntoCarry(
             Vector3 center, float radius, string prefabName, int maxTake)
         {
-            int total = 0;
+            var total = 0;
             var colliders = Physics.OverlapSphere(center, radius);
 
             int colCount = 0, dropCount = 0, nullPrefabCount = 0, nameMismatchCount = 0;
-            var mismatchNames = new System.Collections.Generic.List<string>();
+            var mismatchNames = new List<string>();
 
             foreach (var col in colliders)
             {
@@ -188,23 +197,33 @@ namespace ValheimVillages.Behaviors.Farming
                     mismatchNames.Add("NULL_PREFAB|go=" + drop.gameObject.name);
                     continue;
                 }
+
                 if (drop.m_itemData.m_dropPrefab.name != prefabName)
                 {
                     nameMismatchCount++;
                     mismatchNames.Add(drop.m_itemData.m_dropPrefab.name + "|go=" + drop.gameObject.name);
                     continue;
                 }
-                int stack = drop.m_itemData.m_stack;
+
+                var stack = drop.m_itemData.m_stack;
                 if (stack <= 0) continue;
 
-                int take = Mathf.Min(stack, maxTake - total);
+                var take = Mathf.Min(stack, maxTake - total);
                 drop.m_itemData.m_stack -= take;
                 if (drop.m_itemData.m_stack <= 0)
                     Object.Destroy(drop.gameObject);
                 total += take;
             }
 
-            DebugLog.Append("FarmingHarvestWorkflow.cs:CollectItemDropsIntoCarry", "Collect result", new System.Collections.Generic.Dictionary<string, object>{{"prefabName",prefabName},{"maxTake",maxTake},{"totalCollected",total},{"collidersFound",colCount},{"itemDropsFound",dropCount},{"nullPrefabCount",nullPrefabCount},{"nameMismatchCount",nameMismatchCount},{"mismatchNames",string.Join(";",mismatchNames)},{"center",center.ToString()},{"radius",radius}}, "A,D", "run1");
+            DebugLog.Append("FarmingHarvestWorkflow.cs:CollectItemDropsIntoCarry", "Collect result",
+                new Dictionary<string, object>
+                {
+                    { "prefabName", prefabName }, { "maxTake", maxTake }, { "totalCollected", total },
+                    { "collidersFound", colCount }, { "itemDropsFound", dropCount },
+                    { "nullPrefabCount", nullPrefabCount }, { "nameMismatchCount", nameMismatchCount },
+                    { "mismatchNames", string.Join(";", mismatchNames) }, { "center", center.ToString() },
+                    { "radius", radius },
+                }, "A,D", "run1");
 
             return total;
         }

@@ -5,10 +5,10 @@ using ValheimVillages.UI.Core;
 namespace ValheimVillages.UI.Patches
 {
     /// <summary>
-    /// Patches to support the villager crafting UI tab system.
-    /// Non-crafter NPCs: hides the crafting panel entirely via CanvasGroup.
-    /// Custom tabs on crafters are handled by VillagerTabManager.LateUpdate
-    /// which re-applies content after Valheim's UpdateCraftingPanel.
+    ///     Patches to support the villager crafting UI tab system.
+    ///     Non-crafter NPCs: hides the crafting panel entirely via CanvasGroup.
+    ///     Custom tabs on crafters are handled by VillagerTabManager.LateUpdate
+    ///     which re-applies content after Valheim's UpdateCraftingPanel.
     /// </summary>
     [HarmonyPatch]
     public static class VillagerCraftingPatch
@@ -16,7 +16,7 @@ namespace ValheimVillages.UI.Patches
         private static CanvasGroup s_craftingCanvasGroup;
 
         /// <summary>
-        /// After UpdateCraftingPanel, hide the whole panel for non-crafters.
+        ///     After UpdateCraftingPanel, hide the whole panel for non-crafters.
         /// </summary>
         [HarmonyPatch(typeof(InventoryGui), "UpdateCraftingPanel")]
         [HarmonyPostfix]
@@ -26,12 +26,10 @@ namespace ValheimVillages.UI.Patches
             if (!VillagerTabManager.IsNonCrafterActive) return;
 
             if (s_craftingCanvasGroup == null)
-            {
                 s_craftingCanvasGroup =
                     __instance.m_crafting.GetComponent<CanvasGroup>()
                     ?? __instance.m_crafting.gameObject
                         .AddComponent<CanvasGroup>();
-            }
 
             s_craftingCanvasGroup.interactable = false;
             s_craftingCanvasGroup.blocksRaycasts = false;
@@ -39,7 +37,7 @@ namespace ValheimVillages.UI.Patches
         }
 
         /// <summary>
-        /// Clean up on InventoryGui.Hide to restore the crafting panel.
+        ///     Clean up on InventoryGui.Hide to restore the crafting panel.
         /// </summary>
         [HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.Hide))]
         [HarmonyPrefix]

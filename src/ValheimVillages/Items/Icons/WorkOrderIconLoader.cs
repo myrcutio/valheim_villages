@@ -6,9 +6,9 @@ using UnityEngine;
 namespace ValheimVillages.Items.Icons
 {
     /// <summary>
-    /// Loads scroll-with-ribbon icons for work order items from embedded PNG resources.
-    /// Each crafting station type has a pre-generated PNG with a distinct ribbon colour.
-    /// PNGs live in Items/Icons/WorkOrders/ and are embedded at build time.
+    ///     Loads scroll-with-ribbon icons for work order items from embedded PNG resources.
+    ///     Each crafting station type has a pre-generated PNG with a distinct ribbon colour.
+    ///     PNGs live in Items/Icons/WorkOrders/ and are embedded at build time.
     /// </summary>
     public static class WorkOrderIconLoader
     {
@@ -16,8 +16,8 @@ namespace ValheimVillages.Items.Icons
         private static MethodInfo _loadImageMethod;
 
         /// <summary>
-        /// Load (or return cached) the work order icon for a given station type.
-        /// Station type maps to embedded resource: workorder_{type_lower}.png
+        ///     Load (or return cached) the work order icon for a given station type.
+        ///     Station type maps to embedded resource: workorder_{type_lower}.png
         /// </summary>
         public static Sprite Load(string stationType)
         {
@@ -58,24 +58,22 @@ namespace ValheimVillages.Items.Icons
         }
 
         /// <summary>
-        /// Calls ImageConversion.LoadImage via reflection to avoid compile-time
-        /// assembly version mismatch (ImageConversionModule targets netstandard 2.1
-        /// while the mod project targets net472).
+        ///     Calls ImageConversion.LoadImage via reflection to avoid compile-time
+        ///     assembly version mismatch (ImageConversionModule targets netstandard 2.1
+        ///     while the mod project targets net472).
         /// </summary>
         private static bool InvokeLoadImage(Texture2D tex, byte[] data)
         {
             if (_loadImageMethod == null)
-            {
                 foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
                 {
                     var type = asm.GetType("UnityEngine.ImageConversion");
                     if (type == null) continue;
 
                     _loadImageMethod = type.GetMethod("LoadImage",
-                        new Type[] { typeof(Texture2D), typeof(byte[]) });
+                        new[] { typeof(Texture2D), typeof(byte[]) });
                     break;
                 }
-            }
 
             if (_loadImageMethod == null)
             {

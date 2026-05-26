@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Enums;
@@ -12,23 +13,57 @@ using ValheimVillages.UI.Interaction;
 namespace ValheimVillages.UI.Tabs
 {
     /// <summary>
-    /// Tab showing villager information.  Provides favourite places as
-    /// list items (left pane) and place details + "Mark" action (right pane).
+    ///     Tab showing villager information.  Provides favourite places as
+    ///     list items (left pane) and place details + "Mark" action (right pane).
     /// </summary>
     [RegisterTab("info", Order = 0)]
     public class InfoTab : IVillagerTabUI
     {
+        private List<KnownLocation> m_topLocations = new();
         public string TabName => "Info";
 
-        private List<KnownLocation> m_topLocations = new();
-
-        public void OnSelected(VillagerBehaviorBridge villager) =>
+        public void OnSelected(VillagerBehaviorBridge villager)
+        {
             RefreshLocations(villager);
+        }
 
-        public void OnDeselected() => m_topLocations.Clear();
+        public void OnDeselected()
+        {
+            m_topLocations.Clear();
+        }
 
-        public void OnUpdate(VillagerBehaviorBridge villager) =>
+        public void OnUpdate(VillagerBehaviorBridge villager)
+        {
             RefreshLocations(villager);
+        }
+
+        #region Place Data
+
+        private TabDetailDataUI GetPlaceDetail(
+            int index, VillagerBehaviorBridge villager)
+        {
+            var loc = m_topLocations[index];
+            var dist = villager != null
+                ? Vector3.Distance(
+                    villager.transform.position, loc.Position)
+                : 0f;
+
+            var shelter = loc.HasShelter ? " (sheltered)" : "";
+            var desc = $"{GetLocationDescription(loc)}{shelter}\n" +
+                       $"Distance: {dist:F0}m\n" +
+                       $"Comfort: {loc.ComfortValue:F0}";
+
+            var captured = loc;
+            return new TabDetailDataUI
+            {
+                Title = GetShortName(loc),
+                Description = desc,
+                ActionText = "Mark on Map",
+                OnAction = () => AddMapPin(captured, villager),
+            };
+        }
+
+        #endregion
 
         #region IVillagerTab — List + Detail
 
@@ -36,13 +71,11 @@ namespace ValheimVillages.UI.Tabs
         {
             var items = new List<TabListItemUI>();
             foreach (var loc in m_topLocations)
-            {
                 items.Add(new TabListItemUI
                 {
                     TabName = $"{GetLocationIcon(loc.Type)} {GetShortName(loc)}",
-                    Icon = null // could map to real sprites later
+                    Icon = null, // could map to real sprites later
                 });
-            }
 
             // Add ability entries below the places
             AddAbilityItems(items, villager);
@@ -57,36 +90,8 @@ namespace ValheimVillages.UI.Tabs
                 return GetPlaceDetail(index, villager);
 
             // Ability items (after places)
-            int abilityIdx = index - m_topLocations.Count;
+            var abilityIdx = index - m_topLocations.Count;
             return GetAbilityDetail(abilityIdx, villager);
-        }
-
-        #endregion
-
-        #region Place Data
-
-        private TabDetailDataUI GetPlaceDetail(
-            int index, VillagerBehaviorBridge villager)
-        {
-            var loc = m_topLocations[index];
-            float dist = villager != null
-                ? Vector3.Distance(
-                    villager.transform.position, loc.Position)
-                : 0f;
-
-            string shelter = loc.HasShelter ? " (sheltered)" : "";
-            string desc = $"{GetLocationDescription(loc)}{shelter}\n" +
-                $"Distance: {dist:F0}m\n" +
-                $"Comfort: {loc.ComfortValue:F0}";
-
-            var captured = loc;
-            return new TabDetailDataUI
-            {
-                Title = GetShortName(loc),
-                Description = desc,
-                ActionText = "Mark on Map",
-                OnAction = () => AddMapPin(captured, villager)
-            };
         }
 
         #endregion
@@ -109,7 +114,6 @@ namespace ValheimVillages.UI.Tabs
         {
             m_panelRanges.Clear();
             foreach (var panel in s_panels)
-            {
                 if (panel is IListPanelUI panelUI)
                 {
                     var panelItems = panelUI.GetListItems(villager);
@@ -119,18 +123,15 @@ namespace ValheimVillages.UI.Tabs
                         foreach (var p in panelItems) items.Add(p);
                     }
                 }
-            }
         }
 
         private TabDetailDataUI GetAbilityDetail(
             int abilityIdx, VillagerBehaviorBridge villager)
         {
-            int globalIdx = m_topLocations.Count + abilityIdx;
+            var globalIdx = m_topLocations.Count + abilityIdx;
             foreach (var (panel, startIdx, count) in m_panelRanges)
-            {
                 if (globalIdx >= startIdx && globalIdx < startIdx + count)
                     return panel is IListPanelUI panelUI ? panelUI.GetDetail(globalIdx - startIdx, villager) : null;
-            }
             return null;
         }
 
@@ -152,42 +153,49 @@ namespace ValheimVillages.UI.Tabs
 
         private static float ScoreLocation(KnownLocation loc)
         {
-            float s = loc.Type switch
+            var s = loc.Type switch
             {
                 LocationType.Bed => 100f, LocationType.Fire => 50f,
                 LocationType.Farm => 30f, LocationType.Animals => 30f,
                 LocationType.Shelter => 10f,
-                _ => 0f
+                _ => 0f,
             };
             if (loc.HasShelter) s += 15f;
             s += loc.ComfortValue * 10f;
             return s;
         }
 
-        private static string GetShortName(KnownLocation loc) => loc.Type switch
+        private static string GetShortName(KnownLocation loc)
         {
-            LocationType.Bed => "Cozy Bed",
-            LocationType.Fire => loc.HasShelter ? "Warm Hearth" : "Campfire",
-            LocationType.Table => "Gathering Table",
-            LocationType.Shelter => "Dry Spot",
-            LocationType.Farm => "Open Fields",
-            LocationType.Animals => "Friendly Creatures",
-            _ => "Interesting Spot"
-        };
+            return loc.Type switch
+            {
+                LocationType.Bed => "Cozy Bed",
+                LocationType.Fire => loc.HasShelter ? "Warm Hearth" : "Campfire",
+                LocationType.Table => "Gathering Table",
+                LocationType.Shelter => "Dry Spot",
+                LocationType.Farm => "Open Fields",
+                LocationType.Animals => "Friendly Creatures",
+                _ => "Interesting Spot",
+            };
+        }
 
-        private static string GetLocationIcon(LocationType t) => t switch
+        private static string GetLocationIcon(LocationType t)
         {
-            LocationType.Bed => "[Bed]",
-            LocationType.Fire => "[Fire]",
-            LocationType.Table => "[Table]",
-            LocationType.Shelter => "[Roof]",
-            LocationType.Farm => "[Field]",
-            LocationType.Animals => "[Beasts]",
-            _ => "[?]"
-        };
+            return t switch
+            {
+                LocationType.Bed => "[Bed]",
+                LocationType.Fire => "[Fire]",
+                LocationType.Table => "[Table]",
+                LocationType.Shelter => "[Roof]",
+                LocationType.Farm => "[Field]",
+                LocationType.Animals => "[Beasts]",
+                _ => "[?]",
+            };
+        }
 
-        private static string GetLocationDescription(KnownLocation loc) =>
-            loc.Type switch
+        private static string GetLocationDescription(KnownLocation loc)
+        {
+            return loc.Type switch
             {
                 LocationType.Bed => "A cozy bed",
                 LocationType.Fire =>
@@ -196,8 +204,9 @@ namespace ValheimVillages.UI.Tabs
                 LocationType.Shelter => "A dry spot",
                 LocationType.Farm => "Open fields",
                 LocationType.Animals => "Friendly creatures",
-                _ => "An interesting spot"
+                _ => "An interesting spot",
             };
+        }
 
         private static void AddMapPin(
             KnownLocation loc, VillagerBehaviorBridge villager)
@@ -210,22 +219,25 @@ namespace ValheimVillages.UI.Tabs
                 return;
             }
 
-            string desc = GetLocationDescription(loc);
-            string name = villager?.GetComponent<Humanoid>()?.m_name
-                ?? "Villager";
+            var desc = GetLocationDescription(loc);
+            var name = villager?.GetComponent<Humanoid>()?.m_name
+                       ?? "Villager";
             try
             {
                 var method = typeof(Minimap).GetMethod("AddPin",
-                    System.Reflection.BindingFlags.Public |
-                    System.Reflection.BindingFlags.Instance,
+                    BindingFlags.Public |
+                    BindingFlags.Instance,
                     null,
-                    new[] { typeof(Vector3), typeof(Minimap.PinType),
-                        typeof(string), typeof(bool), typeof(bool) },
+                    new[]
+                    {
+                        typeof(Vector3), typeof(Minimap.PinType),
+                        typeof(string), typeof(bool), typeof(bool),
+                    },
                     null);
                 method?.Invoke(minimap, new object[]
                 {
                     loc.Position, Minimap.PinType.Icon3,
-                    $"{name}: {desc}", true, false
+                    $"{name}: {desc}", true, false,
                 });
                 Player.m_localPlayer?.Message(
                     MessageHud.MessageType.TopLeft, $"Marked: {desc}");

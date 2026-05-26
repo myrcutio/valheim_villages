@@ -1,20 +1,27 @@
 using System;
 using System.IO;
+using BepInEx;
 using UnityEngine;
+using ValheimVillages.Villager.AI.Navigation;
 
 namespace ValheimVillages
 {
     /// <summary>
-    /// Writes HNA telemetry to NDJSON for debugging.
+    ///     Writes HNA telemetry to NDJSON for debugging.
     /// </summary>
     public static class PathTelemetry
     {
         private static readonly string LogPath = Path.Combine(
-            BepInEx.Paths.ConfigPath, "vv_dumps", "path_telemetry.ndjson");
-        private static readonly object Lock = new object();
+            Paths.ConfigPath, "vv_dumps", "path_telemetry.ndjson");
 
-        /// <summary>Log HNA graph for analysis: region count, link count, bounds, region centers (id,x,y,z;...), links (fromId,toId,type;...).</summary>
-        public static void LogRegionGraph(int regionCount, int linkCount, float minX, float minZ, float maxX, float maxZ, string regionCenters, string linksSummary)
+        private static readonly object Lock = new();
+
+        /// <summary>
+        ///     Log HNA graph for analysis: region count, link count, bounds, region centers (id,x,y,z;...), links
+        ///     (fromId,toId,type;...).
+        /// </summary>
+        public static void LogRegionGraph(int regionCount, int linkCount, float minX, float minZ, float maxX,
+            float maxZ, string regionCenters, string linksSummary)
         {
             var data = new HnaGraphData
             {
@@ -25,24 +32,28 @@ namespace ValheimVillages
                 maxX = (float)Math.Round(maxX, 2),
                 maxZ = (float)Math.Round(maxZ, 2),
                 regionCenters = regionCenters ?? "",
-                linksSummary = linksSummary ?? ""
+                linksSummary = linksSummary ?? "",
             };
             Write("hna_graph", JsonUtility.ToJson(data), "hna");
         }
 
-        /// <summary>Log HNA attributes for a world position (e.g. player): region id, validity, solid height, cell bounds, vertical sample heights.</summary>
+        /// <summary>
+        ///     Log HNA attributes for a world position (e.g. player): region id, validity, solid height, cell bounds,
+        ///     vertical sample heights.
+        /// </summary>
         public static void LogHnaPlayerDebug(Vector3 position)
         {
-            float px = (float)Math.Round(position.x, 2);
-            float py = (float)Math.Round(position.y, 2);
-            float pz = (float)Math.Round(position.z, 2);
-            var graph = Villager.AI.Navigation.RegionGraph.GetNearest(position);
-            string regionId = graph?.PointToRegionId(position);
-            bool graphAvailable = graph != null && graph.GetOrigin(out _, out _);
-            bool regionValid = graph != null && !string.IsNullOrEmpty(regionId) && graph.IsValidRegion(regionId);
-            float solidHeightAtPosition = 0f;
+            var px = (float)Math.Round(position.x, 2);
+            var py = (float)Math.Round(position.y, 2);
+            var pz = (float)Math.Round(position.z, 2);
+            var graph = RegionGraph.GetNearest(position);
+            var regionId = graph?.PointToRegionId(position);
+            var graphAvailable = graph != null && graph.GetOrigin(out _, out _);
+            var regionValid = graph != null && !string.IsNullOrEmpty(regionId) && graph.IsValidRegion(regionId);
+            var solidHeightAtPosition = 0f;
             if (ZoneSystem.instance != null)
-                ZoneSystem.instance.GetSolidHeight(new Vector3(position.x, 0f, position.z), out solidHeightAtPosition, 500);
+                ZoneSystem.instance.GetSolidHeight(new Vector3(position.x, 0f, position.z), out solidHeightAtPosition,
+                    500);
             float cellMinX = 0f, cellMaxX = 0f, cellMinZ = 0f, cellMaxZ = 0f;
             float centerY = 0f, minY = 0f, maxY = 0f;
             float mx = 0f, mx2 = 0f, mz = 0f, mz2 = 0f;
@@ -53,6 +64,7 @@ namespace ValheimVillages
                 cellMinZ = (float)Math.Round(mz, 2);
                 cellMaxZ = (float)Math.Round(mz2, 2);
             }
+
             float cy = 0f, mnY = 0f, mxY = 0f;
             if (regionValid && graph.GetRegionSampleHeights(regionId, out cy, out mnY, out mxY))
             {
@@ -60,6 +72,7 @@ namespace ValheimVillages
                 minY = (float)Math.Round(mnY, 2);
                 maxY = (float)Math.Round(mxY, 2);
             }
+
             var data = new HnaPlayerDebugData
             {
                 px = px,
@@ -76,7 +89,7 @@ namespace ValheimVillages
                 centerY = centerY,
                 minY = minY,
                 maxY = maxY,
-                verticalSpread = (float)Math.Round(maxY - minY, 2)
+                verticalSpread = (float)Math.Round(maxY - minY, 2),
             };
             Write("hna_player_debug", JsonUtility.ToJson(data), "hna_debug");
         }
@@ -85,10 +98,12 @@ namespace ValheimVillages
         {
             try
             {
-                long ts = (long)(Time.time * 1000);
-                string id = "pt_" + ts;
-                string line = "{\"id\":\"" + id + "\",\"timestamp\":" + ts + ",\"location\":\"PathTelemetry\",\"message\":\"" +
-                    Escape(message) + "\",\"data\":" + dataJson + ",\"runId\":\"" + Escape(runId) + "\",\"hypothesisId\":\"path_compare\"}\n";
+                var ts = (long)(Time.time * 1000);
+                var id = "pt_" + ts;
+                var line = "{\"id\":\"" + id + "\",\"timestamp\":" + ts +
+                           ",\"location\":\"PathTelemetry\",\"message\":\"" +
+                           Escape(message) + "\",\"data\":" + dataJson + ",\"runId\":\"" + Escape(runId) +
+                           "\",\"hypothesisId\":\"path_compare\"}\n";
                 lock (Lock)
                 {
                     File.AppendAllText(LogPath, line);

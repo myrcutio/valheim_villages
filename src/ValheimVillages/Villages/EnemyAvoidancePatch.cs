@@ -4,11 +4,10 @@ using UnityEngine;
 namespace ValheimVillages.Villages
 {
     /// <summary>
-    /// Harmony patch on BaseAI.RandomMovement to make enemies and wildlife
-    /// prefer to avoid random wandering within 20m of a village area.
-    /// 
-    /// When an enemy picks a random movement target, if that target is near
-    /// a village boundary, the target is nudged away from the village.
+    ///     Harmony patch on BaseAI.RandomMovement to make enemies and wildlife
+    ///     prefer to avoid random wandering within 20m of a village area.
+    ///     When an enemy picks a random movement target, if that target is near
+    ///     a village boundary, the target is nudged away from the village.
     /// </summary>
     [HarmonyPatch(typeof(BaseAI), "RandomMovement")]
     public static class EnemyAvoidancePatch
@@ -20,12 +19,11 @@ namespace ValheimVillages.Villages
         private const int MaxRerollAttempts = 3;
 
         /// <summary>
-        /// Prefix: check and modify the random move target field before movement.
-        /// If the AI's random target is near a village, nudge it away.
-        /// 
-        /// Only applies to non-player-faction creatures (enemies and wildlife).
+        ///     Prefix: check and modify the random move target field before movement.
+        ///     If the AI's random target is near a village, nudge it away.
+        ///     Only applies to non-player-faction creatures (enemies and wildlife).
         /// </summary>
-        static void Prefix(BaseAI __instance)
+        private static void Prefix(BaseAI __instance)
         {
             // No village areas -- skip entirely
             if (VillageAreaManager.AreaCount == 0) return;
@@ -50,11 +48,11 @@ namespace ValheimVillages.Villages
             var currentPos = __instance.transform.position;
             var moveRange = __instance.m_randomMoveRange;
 
-            for (int attempt = 0; attempt < MaxRerollAttempts; attempt++)
+            for (var attempt = 0; attempt < MaxRerollAttempts; attempt++)
             {
                 // Pick a new random direction
-                float angle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
-                float dist = Random.Range(moveRange * 0.3f, moveRange);
+                var angle = Random.Range(0f, 360f) * Mathf.Deg2Rad;
+                var dist = Random.Range(moveRange * 0.3f, moveRange);
                 var newTarget = currentPos + new Vector3(
                     Mathf.Cos(angle) * dist,
                     0f,

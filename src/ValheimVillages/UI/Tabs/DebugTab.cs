@@ -13,19 +13,20 @@ using ValheimVillages.Villager.AI.Pathfinding;
 namespace ValheimVillages.UI.Tabs
 {
     /// <summary>
-    /// Tab showing debug commands and registered panels for villager NPCs.
-    /// Provides commands as list items with action buttons, plus panel-driven
-    /// items (e.g. Village Map for patrollers) via [RegisterListPanel].
+    ///     Tab showing debug commands and registered panels for villager NPCs.
+    ///     Provides commands as list items with action buttons, plus panel-driven
+    ///     items (e.g. Village Map for patrollers) via [RegisterListPanel].
     /// </summary>
     [RegisterTab("debug", Order = 1)]
     public class DebugTab : IVillagerTabUI
     {
+        private readonly List<DebugCommand> m_commands = new();
         public string TabName => "Debug";
 
-        private readonly List<DebugCommand> m_commands = new();
-
-        public void OnSelected(VillagerBehaviorBridge villager) =>
+        public void OnSelected(VillagerBehaviorBridge villager)
+        {
             BuildCommands(villager);
+        }
 
         public void OnDeselected()
         {
@@ -33,8 +34,18 @@ namespace ValheimVillages.UI.Tabs
             m_panelRanges.Clear();
         }
 
-        public void OnUpdate(VillagerBehaviorBridge villager) =>
+        public void OnUpdate(VillagerBehaviorBridge villager)
+        {
             BuildCommands(villager);
+        }
+
+        private class DebugCommand
+        {
+            public string ActionText;
+            public string CommandName;
+            public string Description;
+            public Action OnAction;
+        }
 
         #region IVillagerTabUI — List + Detail
 
@@ -61,7 +72,7 @@ namespace ValheimVillages.UI.Tabs
                     Title = cmd.CommandName,
                     Description = cmd.Description,
                     ActionText = cmd.ActionText,
-                    OnAction = cmd.OnAction
+                    OnAction = cmd.OnAction,
                 };
             }
 
@@ -88,7 +99,6 @@ namespace ValheimVillages.UI.Tabs
         {
             m_panelRanges.Clear();
             foreach (var panel in s_panels)
-            {
                 if (panel is IListPanelUI panelUI)
                 {
                     var panelItems = panelUI.GetListItems(villager);
@@ -98,19 +108,16 @@ namespace ValheimVillages.UI.Tabs
                         foreach (var p in panelItems) items.Add(p);
                     }
                 }
-            }
         }
 
         private TabDetailDataUI GetPanelDetail(
             int index, VillagerBehaviorBridge villager)
         {
             foreach (var (panel, startIdx, count) in m_panelRanges)
-            {
                 if (index >= startIdx && index < startIdx + count)
                     return panel is IListPanelUI panelUI
                         ? panelUI.GetDetail(index - startIdx, villager)
                         : null;
-            }
             return null;
         }
 
@@ -131,15 +138,16 @@ namespace ValheimVillages.UI.Tabs
 
         private void AddStateInfo(VillagerBehaviorBridge villager)
         {
-            string info = $"State: {villager.CurrentState}";
+            var info = $"State: {villager.CurrentState}";
             var waypoint = villager.villagerInstance?.villagerAI?.GetCurrentWaypoint();
             if (waypoint != null)
             {
-                float dist = Vector3.Distance(
+                var dist = Vector3.Distance(
                     villager.transform.position, waypoint.Position);
                 info += $"\nTarget: {dist:F0}m away";
             }
-            int variety = villager.Memory?.GetLocationTypeVariety() ?? 0;
+
+            var variety = villager.Memory?.GetLocationTypeVariety() ?? 0;
             info += $"\nVariety: {variety} types";
 
             m_commands.Add(new DebugCommand
@@ -147,24 +155,25 @@ namespace ValheimVillages.UI.Tabs
                 CommandName = "Current State",
                 Description = info,
                 ActionText = null,
-                OnAction = null
+                OnAction = null,
             });
         }
 
         private void AddRecentTasks(VillagerBehaviorBridge villager)
         {
             var entries = VillagerActivityLog.Instance.GetEntries(villager.UniqueId);
-            int take = Math.Min(10, entries.Count);
+            var take = Math.Min(10, entries.Count);
             var recent = take == 0
                 ? new List<ActivityLogEntry>()
                 : entries.Skip(entries.Count - take).ToList();
             var lines = new List<string>();
-            for (int i = recent.Count - 1; i >= 0; i--)
+            for (var i = recent.Count - 1; i >= 0; i--)
             {
                 var e = recent[i];
                 lines.Add($"{e.TaskName} / {e.Action}: {e.Description}");
             }
-            string description = lines.Count == 0
+
+            var description = lines.Count == 0
                 ? "No recent tasks recorded."
                 : string.Join("\n", lines);
 
@@ -173,7 +182,7 @@ namespace ValheimVillages.UI.Tabs
                 CommandName = "Recent tasks",
                 Description = description,
                 ActionText = null,
-                OnAction = null
+                OnAction = null,
             });
         }
 
@@ -185,14 +194,14 @@ namespace ValheimVillages.UI.Tabs
             var lines = lastProblems.Count == 0
                 ? new List<string> { "No problems (no abandoned tasks)." }
                 : lastProblems.Select(e => $"{e.TaskName}: {e.Description}").ToList();
-            string description = string.Join("\n", lines);
+            var description = string.Join("\n", lines);
 
             m_commands.Add(new DebugCommand
             {
                 CommandName = $"Work Issues ({problems.Count})",
                 Description = description,
                 ActionText = null,
-                OnAction = null
+                OnAction = null,
             });
         }
 
@@ -216,35 +225,32 @@ namespace ValheimVillages.UI.Tabs
                     var memory = v.villagerInstance?.villagerAI?.GetMemory();
                     if (memory == null)
                     {
-                        Msg($"No memory available.");
+                        Msg("No memory available.");
                         return;
                     }
+
                     var nearestKnownLocation = memory.FirstLocationByType(type);
                     if (nearestKnownLocation == null)
                     {
                         Msg($"No {type} location known.");
                         return;
                     }
-                    var newDestination = new VillagerWaypoint(nearestKnownLocation.Position, "default", $"{name} destination");
+
+                    var newDestination =
+                        new VillagerWaypoint(nearestKnownLocation.Position, "default", $"{name} destination");
                     v.villagerInstance.villagerAI.FindPath(newDestination);
                     Msg($"Going to {type}");
                     InventoryGui.instance?.Hide();
-                }
+                },
             });
         }
 
-        private static void Msg(string text) =>
+        private static void Msg(string text)
+        {
             Player.m_localPlayer?.Message(
                 MessageHud.MessageType.TopLeft, text);
+        }
 
         #endregion
-
-        private class DebugCommand
-        {
-            public string CommandName;
-            public string Description;
-            public string ActionText;
-            public Action OnAction;
-        }
     }
 }

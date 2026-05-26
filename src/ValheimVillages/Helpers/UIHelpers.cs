@@ -1,15 +1,15 @@
 namespace ValheimVillages.Helpers
 {
     /// <summary>
-    /// Shared helper methods for common UI operations.
-    /// Reduces inline boilerplate for HUD messages, console output,
-    /// and inventory panel management.
+    ///     Shared helper methods for common UI operations.
+    ///     Reduces inline boilerplate for HUD messages, console output,
+    ///     and inventory panel management.
     /// </summary>
     public static class UIHelpers
     {
         /// <summary>
-        /// Show a centered HUD message to the local player.
-        /// No-op if the local player is null.
+        ///     Show a centered HUD message to the local player.
+        ///     No-op if the local player is null.
         /// </summary>
         public static void ShowHudMessage(string text)
         {
@@ -17,8 +17,8 @@ namespace ValheimVillages.Helpers
         }
 
         /// <summary>
-        /// Show a top-left HUD notification to the local player.
-        /// No-op if the local player is null.
+        ///     Show a top-left HUD notification to the local player.
+        ///     No-op if the local player is null.
         /// </summary>
         public static void ShowHudNotification(string text)
         {
@@ -26,8 +26,8 @@ namespace ValheimVillages.Helpers
         }
 
         /// <summary>
-        /// Print a message to the in-game console.
-        /// No-op if the console instance is null.
+        ///     Print a message to the in-game console.
+        ///     No-op if the console instance is null.
         /// </summary>
         public static void PrintConsole(string text)
         {
@@ -35,7 +35,7 @@ namespace ValheimVillages.Helpers
         }
 
         /// <summary>
-        /// Close the inventory GUI if it's currently visible.
+        ///     Close the inventory GUI if it's currently visible.
         /// </summary>
         public static void CloseInventoryUI()
         {

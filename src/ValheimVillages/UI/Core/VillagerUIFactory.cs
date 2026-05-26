@@ -1,13 +1,15 @@
+using System;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+using Object = UnityEngine.Object;
 
 namespace ValheimVillages.UI.Core
 {
     /// <summary>
-    /// Factory for creating Unity UI elements that match Valheim's native style.
-    /// Clones text/button elements from InventoryGui for consistent look.
+    ///     Factory for creating Unity UI elements that match Valheim's native style.
+    ///     Clones text/button elements from InventoryGui for consistent look.
     /// </summary>
     public static partial class VillagerUIFactory
     {
@@ -15,9 +17,9 @@ namespace ValheimVillages.UI.Core
         private static readonly Color ValheimYellow = new(1f, 0.889f, 0f, 1f);
 
         /// <summary>
-        /// Cached reference to a text template GameObject (found once, reused).
-        /// We avoid accessing m_craftingStationName.gameObject directly because
-        /// it pulls in the TMPro assembly dependency at compile time.
+        ///     Cached reference to a text template GameObject (found once, reused).
+        ///     We avoid accessing m_craftingStationName.gameObject directly because
+        ///     it pulls in the TMPro assembly dependency at compile time.
         /// </summary>
         private static GameObject s_textTemplate;
 
@@ -37,7 +39,7 @@ namespace ValheimVillages.UI.Core
 
             // Auto-height for vertical layout
             var csf = labelGO.GetComponent<ContentSizeFitter>()
-                ?? labelGO.AddComponent<ContentSizeFitter>();
+                      ?? labelGO.AddComponent<ContentSizeFitter>();
             csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             csf.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
 
@@ -65,7 +67,7 @@ namespace ValheimVillages.UI.Core
             SetTMPText(btnGO, text);
 
             var le = btnGO.GetComponent<LayoutElement>()
-                ?? btnGO.AddComponent<LayoutElement>();
+                     ?? btnGO.AddComponent<LayoutElement>();
             le.preferredHeight = 36f;
             le.flexibleWidth = 1f;
 
@@ -191,8 +193,8 @@ namespace ValheimVillages.UI.Core
         #region Template & TMPro Reflection Helpers
 
         /// <summary>
-        /// Find a TMPro text template from the InventoryGui via reflection
-        /// to avoid compile-time TMPro assembly dependency.
+        ///     Find a TMPro text template from the InventoryGui via reflection
+        ///     to avoid compile-time TMPro assembly dependency.
         /// </summary>
         private static void EnsureTextTemplate()
         {
@@ -232,17 +234,15 @@ namespace ValheimVillages.UI.Core
             var alignProp = type.GetProperty("alignment");
             if (alignProp != null)
                 alignProp.SetValue(comp,
-                    System.Enum.ToObject(alignProp.PropertyType, alignment));
+                    Enum.ToObject(alignProp.PropertyType, alignment));
         }
 
         private static Component FindTMP(GameObject go)
         {
             foreach (var comp in go.GetComponentsInChildren<Component>(true))
-            {
                 if (comp != null &&
                     comp.GetType().Name.Contains("TextMeshPro"))
                     return comp;
-            }
             return null;
         }
 

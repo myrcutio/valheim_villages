@@ -4,8 +4,8 @@ using System.Collections.Generic;
 namespace ValheimVillages.Schemas
 {
     /// <summary>
-    /// Villager type definition loaded from JSON.
-    /// Field names must match JSON keys exactly.
+    ///     Villager type definition loaded from JSON.
+    ///     Field names must match JSON keys exactly.
     /// </summary>
     [Serializable]
     public class VillagerDef
@@ -16,44 +16,44 @@ namespace ValheimVillages.Schemas
         public string description = "";
 
         // Requirements
-        public List<WorkbenchRequirement> workbenches = new List<WorkbenchRequirement>();
-        public List<string> requiredBiomes = new List<string>();
-        public List<string> preferredBiomes = new List<string>();
-        public bool requiresCoastal = false;
+        public List<WorkbenchRequirement> workbenches = new();
+        public List<string> requiredBiomes = new();
+        public List<string> preferredBiomes = new();
+        public bool requiresCoastal;
         public int minComfortLevel = 2;
         public string materialRequirements = "";
 
         // Benefits
         public string scalingType = "Comfort";
         public string dependentOnNpcType = "";
-        public List<TieredBenefit> tieredBenefits = new List<TieredBenefit>();
-        public List<ProductionOutput> productions = new List<ProductionOutput>();
+        public List<TieredBenefit> tieredBenefits = new();
+        public List<ProductionOutput> productions = new();
 
         // Villager interdependence
-        public List<string> providesLevelTo = new List<string>();
-        public List<string> receivesLevelFrom = new List<string>();
+        public List<string> providesLevelTo = new();
+        public List<string> receivesLevelFrom = new();
         public string interdependenceDescription = "";
 
         // Visual / equipment
         public string preferredPrefab = "";
-        public List<string> equipment = new List<string>();
+        public List<string> equipment = new();
         public string skinColor = "";
 
         // Station configuration
         public string stationName = "";
         public string stationIcon = "";
-        public List<string> workStations = new List<string>();
-        public List<StationRecipe> stationRecipes = new List<StationRecipe>();
-        public List<string> cultivatorExclusions = new List<string>();
+        public List<string> workStations = new();
+        public List<StationRecipe> stationRecipes = new();
+        public List<string> cultivatorExclusions = new();
 
         // Behavior composition
-        public List<string> behaviors = new List<string>();
-        public List<string> tags = new List<string>();
+        public List<string> behaviors = new();
+        public List<string> tags = new();
 
         // Dialog lines (override Dverger defaults on NpcTalk component)
-        public List<string> randomTalk = new List<string>();
-        public List<string> randomGreets = new List<string>();
-        public List<string> randomGoodbye = new List<string>();
+        public List<string> randomTalk = new();
+        public List<string> randomGreets = new();
+        public List<string> randomGoodbye = new();
     }
 
     [Serializable]
@@ -81,8 +81,8 @@ namespace ValheimVillages.Schemas
     }
 
     /// <summary>
-    /// A single-input recipe for a villager's virtual station.
-    /// Flat schema (no nested arrays) to avoid Unity JsonUtility deserialization issues.
+    ///     A single-input recipe for a villager's virtual station.
+    ///     Flat schema (no nested arrays) to avoid Unity JsonUtility deserialization issues.
     /// </summary>
     [Serializable]
     public class StationRecipe

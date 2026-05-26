@@ -1,8 +1,11 @@
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using BepInEx;
 using UnityEngine;
-using ValheimVillages.Behaviors.Patrol;
 using ValheimVillages.Attributes;
+using ValheimVillages.Behaviors.Patrol;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
 using ValheimVillages.Villager.AI.Navigation;
@@ -11,30 +14,26 @@ using ValheimVillages.Villager.AI.Pathfinding;
 namespace ValheimVillages.UI.Panels
 {
     /// <summary>
-    /// List panel showing the village map visualization in the Debug tab.
-    /// Discovered via NPC tag "listpanel:villagemap".
-    /// Shows for any villager with the patrol behavior.
+    ///     List panel showing the village map visualization in the Debug tab.
+    ///     Discovered via NPC tag "listpanel:villagemap".
+    ///     Shows for any villager with the patrol behavior.
     /// </summary>
     [RegisterListPanel("villagemap", "debug")]
     public class VillageMapPanel : IListPanelUI
     {
-        public string Tag => "villagemap";
-        public string ParentTab => "debug";
+        private static List<Vector3> s_groundTruthPath;
+        private static bool s_groundTruthLoaded;
 
         private Texture2D m_cachedMapTexture;
         private int m_mapWaypointHash;
-
-        private static List<Vector3> s_groundTruthPath;
-        private static bool s_groundTruthLoaded;
+        public string Tag => "villagemap";
+        public string ParentTab => "debug";
 
         public List<TabListItemUI> GetListItems(VillagerBehaviorBridge villager)
         {
             var items = new List<TabListItemUI>();
 
-            if (villager.villagerInstance)
-            {
-                items.Add(new TabListItemUI { TabName = "Village Map" });
-            }
+            if (villager.villagerInstance) items.Add(new TabListItemUI { TabName = "Village Map" });
             return items;
         }
 
@@ -44,10 +43,10 @@ namespace ValheimVillages.UI.Panels
             if (patrol == null) return null;
 
             var waypoints = patrol.PatrolWaypoints;
-            int count = waypoints?.Count ?? 0;
+            var count = waypoints?.Count ?? 0;
 
             List<Vector3> floodFillCells = null;
-            int regionCount = 0;
+            var regionCount = 0;
             foreach (var graph in RegionGraph.GetAll())
             {
                 var centers = graph.GetAllRegionCenters();
@@ -61,20 +60,20 @@ namespace ValheimVillages.UI.Panels
 
             var groundTruth = LoadGroundTruth();
 
-            int hash = ComputeWaypointHash(waypoints, floodFillCells?.Count ?? 0, groundTruth?.Count ?? 0);
+            var hash = ComputeWaypointHash(waypoints, floodFillCells?.Count ?? 0, groundTruth?.Count ?? 0);
             if (m_cachedMapTexture == null || hash != m_mapWaypointHash)
             {
                 m_mapWaypointHash = hash;
                 m_cachedMapTexture = PatrolMapRenderer.Render(
                     waypoints, patrol.BedPosition, villager.transform.position,
-                    floodFillCells, groundTruth, RegionGraph.CellSize);
+                    floodFillCells, groundTruth);
             }
 
-            int activeCount = patrol.ActiveWaypointCount;
-            int inactiveCount = count - activeCount;
+            var activeCount = patrol.ActiveWaypointCount;
+            var inactiveCount = count - activeCount;
 
-            string source = patrol.IsHnaRoute ? "HNA boundary" : "Discovery";
-            string desc = patrol.IsDiscoveryComplete
+            var source = patrol.IsHnaRoute ? "HNA boundary" : "Discovery";
+            var desc = patrol.IsDiscoveryComplete
                 ? $"{activeCount} active waypoints | {source}"
                 : $"{activeCount} active waypoints | Mapping...";
             if (inactiveCount > 0)
@@ -99,7 +98,7 @@ namespace ValheimVillages.UI.Panels
                         MessageHud.MessageType.TopLeft,
                         "Villager will re-map the village");
                     InventoryGui.instance?.Hide();
-                }
+                },
             };
         }
 
@@ -117,7 +116,7 @@ namespace ValheimVillages.UI.Panels
             {
                 s_groundTruthLoaded = true;
 
-                var scriptDir = Path.Combine(BepInEx.Paths.BepInExRootPath, "scripts");
+                var scriptDir = Path.Combine(Paths.BepInExRootPath, "scripts");
                 if (!Directory.Exists(scriptDir)) return null;
 
                 var jsonPath = Path.Combine(scriptDir, "hna_walkable_path.json");
@@ -132,7 +131,7 @@ namespace ValheimVillages.UI.Panels
                 Plugin.Log?.LogInfo(
                     $"[VillageMap] Loaded ground truth: {s_groundTruthPath.Count} points from {jsonPath}");
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 Plugin.Log?.LogWarning($"[VillageMap] Failed to load ground truth: {ex.Message}");
                 s_groundTruthLoaded = true;
@@ -142,24 +141,24 @@ namespace ValheimVillages.UI.Panels
         }
 
         /// <summary>
-        /// Minimal JSON parser for the positions array in hna_walkable_path.json.
-        /// Expects format: { "positions": [ [x,y,z], [x,y,z], ... ] }
+        ///     Minimal JSON parser for the positions array in hna_walkable_path.json.
+        ///     Expects format: { "positions": [ [x,y,z], [x,y,z], ... ] }
         /// </summary>
         internal static List<Vector3> ParsePositionsJson(string json)
         {
             var result = new List<Vector3>();
 
-            int posIdx = json.IndexOf("\"positions\"");
+            var posIdx = json.IndexOf("\"positions\"");
             if (posIdx < 0) return result;
 
-            int arrStart = json.IndexOf('[', posIdx);
+            var arrStart = json.IndexOf('[', posIdx);
             if (arrStart < 0) return result;
 
-            int depth = 0;
-            int tripleStart = -1;
-            for (int i = arrStart; i < json.Length; i++)
+            var depth = 0;
+            var tripleStart = -1;
+            for (var i = arrStart; i < json.Length; i++)
             {
-                char c = json[i];
+                var c = json[i];
                 if (c == '[')
                 {
                     depth++;
@@ -172,16 +171,15 @@ namespace ValheimVillages.UI.Panels
                         var triplet = json.Substring(tripleStart, i - tripleStart);
                         var parts = triplet.Split(',');
                         if (parts.Length >= 3 &&
-                            float.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float,
-                                System.Globalization.CultureInfo.InvariantCulture, out float x) &&
-                            float.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float,
-                                System.Globalization.CultureInfo.InvariantCulture, out float y) &&
-                            float.TryParse(parts[2].Trim(), System.Globalization.NumberStyles.Float,
-                                System.Globalization.CultureInfo.InvariantCulture, out float z))
-                        {
+                            float.TryParse(parts[0].Trim(), NumberStyles.Float,
+                                CultureInfo.InvariantCulture, out var x) &&
+                            float.TryParse(parts[1].Trim(), NumberStyles.Float,
+                                CultureInfo.InvariantCulture, out var y) &&
+                            float.TryParse(parts[2].Trim(), NumberStyles.Float,
+                                CultureInfo.InvariantCulture, out var z))
                             result.Add(new Vector3(x, y, z));
-                        }
                     }
+
                     depth--;
                     if (depth <= 0) break;
                 }
@@ -193,16 +191,17 @@ namespace ValheimVillages.UI.Panels
         private static int ComputeWaypointHash(
             IReadOnlyList<VillagerWaypoint> waypoints, int floodFillCount, int groundTruthCount)
         {
-            int hash = floodFillCount * 7919 + groundTruthCount * 6271;
+            var hash = floodFillCount * 7919 + groundTruthCount * 6271;
             if (waypoints == null || waypoints.Count == 0) return hash;
             hash += waypoints.Count;
-            for (int i = 0; i < waypoints.Count; i++)
+            for (var i = 0; i < waypoints.Count; i++)
             {
                 var p = waypoints[i].Position;
                 hash = hash * 31 + p.x.GetHashCode();
                 hash = hash * 31 + p.z.GetHashCode();
                 hash = hash * 31 + (waypoints[i].Active ? 1 : 0);
             }
+
             return hash;
         }
     }

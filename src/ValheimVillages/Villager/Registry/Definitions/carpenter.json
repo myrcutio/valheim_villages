@@ -4,7 +4,10 @@
   "displayName": "Carpenter",
   "description": "Skilled in woodworking, construction, and toolmaking",
   "workbenches": [
-    { "name": "Workbench", "minLevel": 1 }
+    {
+      "name": "Workbench",
+      "minLevel": 1
+    }
   ],
   "requiredBiomes": [],
   "preferredBiomes": [],
@@ -15,16 +18,32 @@
   "dependentOnNpcType": "",
   "tieredBenefits": [],
   "productions": [
-    { "requiredLevel": 1, "outputItem": "Wood", "description": "Produces tools and crafted items daily" }
+    {
+      "requiredLevel": 1,
+      "outputItem": "Wood",
+      "description": "Produces tools and crafted items daily"
+    }
   ],
-  "providesLevelTo": ["Farmer", "Miner", "Blacksmith"],
+  "providesLevelTo": [
+    "Farmer",
+    "Miner",
+    "Blacksmith"
+  ],
   "receivesLevelFrom": [],
   "interdependenceDescription": "Adds levels to all production villagers through better tools",
   "stationName": "",
   "stationIcon": "Hammer",
-  "workStations": ["$piece_workbench"],
-  "behaviors": ["craft"],
-  "tags": ["tab:info", "tab:debug", "tab:workorder"],
+  "workStations": [
+    "$piece_workbench"
+  ],
+  "behaviors": [
+    "craft"
+  ],
+  "tags": [
+    "tab:info",
+    "tab:debug",
+    "tab:workorder"
+  ],
   "randomTalk": [
     "Wood is honest. It tells you exactly where it wants to split. Usually through your thumbnail.",
     "People think carpentry is simple. 'Just nail bits of wood together,' they say. Then their house falls down and suddenly I'm the expert.",

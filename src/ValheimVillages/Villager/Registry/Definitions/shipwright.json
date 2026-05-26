@@ -4,7 +4,10 @@
   "displayName": "Shipwright",
   "description": "Specialized in shipbuilding, boat repair, and maritime navigation",
   "workbenches": [
-    { "name": "Workbench", "minLevel": 1 }
+    {
+      "name": "Workbench",
+      "minLevel": 1
+    }
   ],
   "requiredBiomes": [],
   "preferredBiomes": [],
@@ -14,9 +17,24 @@
   "scalingType": "Comfort",
   "dependentOnNpcType": "",
   "tieredBenefits": [
-    { "minLevel": 3, "maxLevel": 5, "description": "10% faster sailing, better wind handling, basic ship repair", "effectMultiplier": 1.1 },
-    { "minLevel": 6, "maxLevel": 8, "description": "20% faster sailing, can tack at wider angles", "effectMultiplier": 1.2 },
-    { "minLevel": 9, "maxLevel": 99, "description": "30% faster sailing, excellent wind handling, smaller turning radius", "effectMultiplier": 1.3 }
+    {
+      "minLevel": 3,
+      "maxLevel": 5,
+      "description": "10% faster sailing, better wind handling, basic ship repair",
+      "effectMultiplier": 1.1
+    },
+    {
+      "minLevel": 6,
+      "maxLevel": 8,
+      "description": "20% faster sailing, can tack at wider angles",
+      "effectMultiplier": 1.2
+    },
+    {
+      "minLevel": 9,
+      "maxLevel": 99,
+      "description": "30% faster sailing, excellent wind handling, smaller turning radius",
+      "effectMultiplier": 1.3
+    }
   ],
   "productions": [],
   "providesLevelTo": [],
@@ -25,8 +43,14 @@
   "stationName": "",
   "stationIcon": "Hammer",
   "workStations": [],
-  "behaviors": ["craft"],
-  "tags": ["tab:info", "tab:debug", "tab:workorder"],
+  "behaviors": [
+    "craft"
+  ],
+  "tags": [
+    "tab:info",
+    "tab:debug",
+    "tab:workorder"
+  ],
   "randomTalk": [
     "The sea is a harsh mistress. Well, I say 'mistress.' More of a salty wench who occasionally tries to murder you.",
     "I've been building boats for twenty years. The trick is knowing which end goes in the water. You'd be SURPRISED how many people get that wrong.",

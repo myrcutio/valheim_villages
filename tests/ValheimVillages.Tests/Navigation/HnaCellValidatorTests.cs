@@ -1,4 +1,3 @@
-using System;
 using ValheimVillages.TaskQueue.Handlers;
 using Xunit;
 
@@ -6,6 +5,9 @@ namespace ValheimVillages.Tests.Navigation;
 
 public class CellValidatorTests
 {
+    // ── Case 2: Slope ─────────────────────────────────────────────────
+
+    private const float CellSize = 3f;
     // ── Case 1: Ledge drop ────────────────────────────────────────────
 
     [Fact]
@@ -45,10 +47,6 @@ public class CellValidatorTests
         Assert.True(CellValidator.IsLedgeDrop(40f, 37f));
     }
 
-    // ── Case 2: Slope ─────────────────────────────────────────────────
-
-    private const float CellSize = 3f;
-
     [Fact]
     public void IsTooSteep_FlatGround_ReturnsFalse()
     {
@@ -58,7 +56,7 @@ public class CellValidatorTests
     [Fact]
     public void IsTooSteep_GentleSlope15Deg_ReturnsFalse()
     {
-        float dy = CellSize * (float)Math.Tan(15.0 * Math.PI / 180.0);
+        var dy = CellSize * (float)Math.Tan(15.0 * Math.PI / 180.0);
         Assert.False(CellValidator.IsTooSteep(0, 0, 0, CellSize, dy, 0));
     }
 
@@ -66,14 +64,14 @@ public class CellValidatorTests
     public void IsTooSteep_JustBelowThreshold_ReturnsFalse()
     {
         // 29.9° is safely under the 30° threshold even with float rounding
-        float dy = CellSize * (float)Math.Tan(29.9 * Math.PI / 180.0);
+        var dy = CellSize * (float)Math.Tan(29.9 * Math.PI / 180.0);
         Assert.False(CellValidator.IsTooSteep(0, 0, 0, CellSize, dy, 0));
     }
 
     [Fact]
     public void IsTooSteep_JustOverThreshold_ReturnsTrue()
     {
-        float dy = CellSize * (float)Math.Tan(31.0 * Math.PI / 180.0);
+        var dy = CellSize * (float)Math.Tan(31.0 * Math.PI / 180.0);
         Assert.True(CellValidator.IsTooSteep(0, 0, 0, CellSize, dy, 0));
     }
 
@@ -86,7 +84,7 @@ public class CellValidatorTests
     [Fact]
     public void IsTooSteep_DownhillSameAngle_MatchesUphill()
     {
-        float dy = CellSize * (float)Math.Tan(31.0 * Math.PI / 180.0);
+        var dy = CellSize * (float)Math.Tan(31.0 * Math.PI / 180.0);
         // Going downhill: fromY higher than toY -- same absolute angle
         Assert.True(CellValidator.IsTooSteep(0, dy, 0, CellSize, 0, 0));
     }
@@ -110,8 +108,8 @@ public class CellValidatorTests
     {
         // Diagonal neighbor: dx=3, dz=3 → horiz=√18≈4.24m
         // A height that's steep for 3m but gentle for 4.24m
-        float horiz = (float)Math.Sqrt(CellSize * CellSize + CellSize * CellSize);
-        float dy = horiz * (float)Math.Tan(29.0 * Math.PI / 180.0);
+        var horiz = (float)Math.Sqrt(CellSize * CellSize + CellSize * CellSize);
+        var dy = horiz * (float)Math.Tan(29.0 * Math.PI / 180.0);
         Assert.False(CellValidator.IsTooSteep(0, 0, 0, CellSize, dy, CellSize));
     }
 }

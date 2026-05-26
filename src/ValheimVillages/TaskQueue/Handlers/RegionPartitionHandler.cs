@@ -4,21 +4,21 @@ using System.Linq;
 using System.Text;
 using UnityEngine;
 using ValheimVillages.Attributes;
+using ValheimVillages.Schemas;
+using ValheimVillages.TaskQueue.ActivityLog;
+using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
-using ValheimVillages.Schemas;
-using ValheimVillages.TaskQueue;
-using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villages;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
     /// <summary>
-    /// Low-priority task that builds the region graph for village pathfinding.
-    /// Extracts NavMesh triangulation within village bounds, merges adjacent
-    /// triangles into regions, and adds door links.
-    /// Grid sampling, triangulation, and link detection are delegated to
-    /// <see cref="RegionBuilder"/>.
+    ///     Low-priority task that builds the region graph for village pathfinding.
+    ///     Extracts NavMesh triangulation within village bounds, merges adjacent
+    ///     triangles into regions, and adds door links.
+    ///     Grid sampling, triangulation, and link detection are delegated to
+    ///     <see cref="RegionBuilder" />.
     /// </summary>
     [RegisterTaskHandler]
     public class RegionPartitionHandler : ITaskHandlerWithLog
@@ -29,24 +29,26 @@ namespace ValheimVillages.TaskQueue.Handlers
         internal const float FloodFillRadius = 30f;
         private const float RegionBuildRadius = 30f;
 
-        public string TaskName => RegionPartitionTaskName;
-
         private const float VillageClusterRadius = 50f;
+
+        public string TaskName => RegionPartitionTaskName;
 
         public TaskResult Handle(VillagerTask task, VillagerActivityLog activityLog)
         {
-            var allBeds = ValheimVillages.Villager.AI.VillagerAIManager.GetAllBedPositions();
+            var allBeds = VillagerAIManager.GetAllBedPositions();
             var beds = FilterBedsByAnchor(allBeds, task);
-            bool hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(
-                out float patrolMinX, out float patrolMinZ, out float patrolMaxX, out float patrolMaxZ);
+            var hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(
+                out var patrolMinX, out var patrolMinZ, out var patrolMaxX, out var patrolMaxZ);
 
-            string villageKey = ExtractVillageKey(task);
+            var villageKey = ExtractVillageKey(task);
 
             float minX, minZ, maxX, maxZ;
             if (hasPatrolBounds && beds != null && beds.Count > 0)
             {
-                minX = patrolMinX; minZ = patrolMinZ;
-                maxX = patrolMaxX; maxZ = patrolMaxZ;
+                minX = patrolMinX;
+                minZ = patrolMinZ;
+                maxX = patrolMaxX;
+                maxZ = patrolMaxZ;
                 foreach (var bed in beds)
                 {
                     if (bed.x - RegionBuildRadius < minX) minX = bed.x - RegionBuildRadius;
@@ -57,8 +59,10 @@ namespace ValheimVillages.TaskQueue.Handlers
             }
             else if (hasPatrolBounds)
             {
-                minX = patrolMinX; minZ = patrolMinZ;
-                maxX = patrolMaxX; maxZ = patrolMaxZ;
+                minX = patrolMinX;
+                minZ = patrolMinZ;
+                maxX = patrolMaxX;
+                maxZ = patrolMaxZ;
             }
             else if (beds != null && beds.Count > 0)
             {
@@ -77,7 +81,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 Plugin.Log?.LogInfo("[Region] Partition skipped: no village areas and no villager beds.");
                 return TaskResult.Ok(new Dictionary<string, string>
                 {
-                    { "regions", "0" }, { "links", "0" }, { "reason", "no_beds_or_areas" }
+                    { "regions", "0" }, { "links", "0" }, { "reason", "no_beds_or_areas" },
                 });
             }
 
@@ -92,15 +96,17 @@ namespace ValheimVillages.TaskQueue.Handlers
                     "Cannot determine bake elevation without beds — refusing to bake at sea-level fallback.");
                 return TaskResult.Ok(new Dictionary<string, string>
                 {
-                    { "regions", "0" }, { "links", "0" }, { "reason", "no_beds_for_bake_y" }
+                    { "regions", "0" }, { "links", "0" }, { "reason", "no_beds_for_bake_y" },
                 });
             }
+
             float bakeMinY = float.MaxValue, bakeMaxY = float.MinValue;
             foreach (var bed in beds)
             {
                 if (bed.y < bakeMinY) bakeMinY = bed.y;
                 if (bed.y > bakeMaxY) bakeMaxY = bed.y;
             }
+
             const float bakeYPadding = 30f;
             var bakeBounds = new Bounds();
             bakeBounds.SetMinMax(
@@ -195,10 +201,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("seed_perimeter_cells", rbStats.PerimeterSeeds),
                 ("regions_kept", combinedRegionIds.Count));
             if (droppedRubberBand.Count > 0)
-            {
                 DebugLog.List("RubberBandPrune", "dropped_region_ids",
                     droppedRubberBand.Select(r => (object)r));
-            }
 
             var graph = RegionGraph.GetOrCreate(villageKey);
             graph.SetGraph(combinedRegionIds, combinedLinks,
@@ -209,8 +213,8 @@ namespace ValheimVillages.TaskQueue.Handlers
             // TODO: re-enable door links once the region graph is validated
             // RegionBuilder.CollectDoorLinks(graph, minX, minZ, maxX, maxZ, doorLinks);
 
-            string regionCentersStr = BuildRegionCentersString(graph);
-            string linksStr = BuildLinksSummaryString(combinedLinks);
+            var regionCentersStr = BuildRegionCentersString(graph);
+            var linksStr = BuildLinksSummaryString(combinedLinks);
             PathTelemetry.LogRegionGraph(combinedRegionIds.Count, combinedLinks.Count,
                 minX, minZ, maxX, maxZ, regionCentersStr, linksStr);
 
@@ -226,26 +230,27 @@ namespace ValheimVillages.TaskQueue.Handlers
                 { "regions_terrain", terrainResult.RegionIds.Count.ToString() },
                 { "regions_piece", pieceResult.RegionIds.Count.ToString() },
                 { "links", combinedLinks.Count.ToString() },
-                { "village_key", villageKey }
+                { "village_key", villageKey },
             });
         }
 
         private static string BuildRegionCentersString(RegionGraph graph)
         {
             var sb = new StringBuilder();
-            foreach (string id in graph.GetRegionIds())
+            foreach (var id in graph.GetRegionIds())
             {
                 if (string.IsNullOrEmpty(id)) continue;
-                if (!graph.GetCellWorldXZ(id, out float wx, out float wz)) continue;
-                float wy = 0f;
-                if (graph.TryGetCellHeight(id, out float bfsY)) wy = bfsY;
-                else if (RegionGraph.GetSolidHeightAt(wx, wz, out float h)) wy = h;
+                if (!graph.GetCellWorldXZ(id, out var wx, out var wz)) continue;
+                var wy = 0f;
+                if (graph.TryGetCellHeight(id, out var bfsY)) wy = bfsY;
+                else if (RegionGraph.GetSolidHeightAt(wx, wz, out var h)) wy = h;
                 if (sb.Length > 0) sb.Append(';');
                 sb.Append(id).Append(',')
                     .Append(wx.ToString("F1", CultureInfo.InvariantCulture)).Append(',')
                     .Append(wy.ToString("F1", CultureInfo.InvariantCulture)).Append(',')
                     .Append(wz.ToString("F1", CultureInfo.InvariantCulture));
             }
+
             return sb.ToString();
         }
 
@@ -255,21 +260,22 @@ namespace ValheimVillages.TaskQueue.Handlers
             foreach (var link in links)
             {
                 if (sb.Length > 0) sb.Append(';');
-                string typeStr = link.LinkType == RegionLinkType.Door ? "door"
+                var typeStr = link.LinkType == RegionLinkType.Door ? "door"
                     : link.LinkType == RegionLinkType.Slope ? "slope" : "stair";
                 sb.Append(link.FromRegionId).Append(',')
                     .Append(link.ToRegionId).Append(',').Append(typeStr);
             }
+
             return sb.ToString();
         }
 
         private static string ExtractVillageKey(VillagerTask task)
         {
             if (task?.Attributes != null &&
-                task.Attributes.TryGetValue("anchor_x", out string axStr) &&
-                task.Attributes.TryGetValue("anchor_z", out string azStr) &&
-                float.TryParse(axStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float ax) &&
-                float.TryParse(azStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float az))
+                task.Attributes.TryGetValue("anchor_x", out var axStr) &&
+                task.Attributes.TryGetValue("anchor_z", out var azStr) &&
+                float.TryParse(axStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var ax) &&
+                float.TryParse(azStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var az))
                 return RegionGraph.VillageKey(ax, az);
             return "_default";
         }
@@ -278,15 +284,15 @@ namespace ValheimVillages.TaskQueue.Handlers
         {
             if (allBeds == null || allBeds.Count == 0) return allBeds;
             if (task?.Attributes == null ||
-                !task.Attributes.TryGetValue("anchor_x", out string axStr) ||
-                !task.Attributes.TryGetValue("anchor_z", out string azStr))
+                !task.Attributes.TryGetValue("anchor_x", out var axStr) ||
+                !task.Attributes.TryGetValue("anchor_z", out var azStr))
                 return allBeds;
 
-            if (!float.TryParse(axStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float anchorX) ||
-                !float.TryParse(azStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float anchorZ))
+            if (!float.TryParse(axStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var anchorX) ||
+                !float.TryParse(azStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var anchorZ))
                 return allBeds;
 
-            float r2 = VillageClusterRadius * VillageClusterRadius;
+            var r2 = VillageClusterRadius * VillageClusterRadius;
             var filtered = new List<Vector3>();
             foreach (var bed in allBeds)
             {
@@ -304,15 +310,15 @@ namespace ValheimVillages.TaskQueue.Handlers
         }
 
         /// <summary>
-        /// Builds the cross-kind region adjacency graph (terrain↔terrain +
-        /// piece↔piece in-pass edges, plus terrain↔piece cross-kind edges via
-        /// shared quantized vertex positions and via vertex-to-vertex
-        /// proximity) and locates bed-anchored terrain seeds. Persists both
-        /// to <see cref="BfsAdjacencyStore"/> so the <c>vv_bfs_trace</c> dev
-        /// command can compute paths back to a bed without re-running the
-        /// partition. Read-only: does NOT mutate inputs and does NOT prune
-        /// regions; downstream <see cref="RubberBandPrune"/> handles cell-grid
-        /// reachability via the outermost wall layer.
+        ///     Builds the cross-kind region adjacency graph (terrain↔terrain +
+        ///     piece↔piece in-pass edges, plus terrain↔piece cross-kind edges via
+        ///     shared quantized vertex positions and via vertex-to-vertex
+        ///     proximity) and locates bed-anchored terrain seeds. Persists both
+        ///     to <see cref="BfsAdjacencyStore" /> so the <c>vv_bfs_trace</c> dev
+        ///     command can compute paths back to a bed without re-running the
+        ///     partition. Read-only: does NOT mutate inputs and does NOT prune
+        ///     regions; downstream <see cref="RubberBandPrune" /> handles cell-grid
+        ///     reachability via the outermost wall layer.
         /// </summary>
         private static void RecordCrossKindAdjacency(
             RegionBuilder.BuildResult terrainResult,
@@ -329,46 +335,49 @@ namespace ValheimVillages.TaskQueue.Handlers
             // representative bridge position for cross-kind edges. Keyed by
             // BfsAdjacencyStore.EdgeKey(a, b) so undirected lookups are
             // canonical regardless of insertion order.
-            var edgeMeta = new Dictionary<string, ValheimVillages.Villager.AI.Navigation.BfsEdgeMeta>();
+            var edgeMeta = new Dictionary<string, BfsEdgeMeta>();
 
             void EnsureNode(string id)
             {
                 if (!combinedAdj.ContainsKey(id))
                     combinedAdj[id] = new HashSet<string>();
             }
+
             void AddEdgeBoth(string a, string b)
             {
-                EnsureNode(a); EnsureNode(b);
+                EnsureNode(a);
+                EnsureNode(b);
                 combinedAdj[a].Add(b);
                 combinedAdj[b].Add(a);
             }
+
             // Adds the directed pair in both directions AND records / merges
             // the edge's kind + (optional) representative position into
             // edgeMeta. Multi-kind ORs together; first non-null RepresentativePos
             // wins; ProxMinDist tracks the min across CrossProx insertions.
             void RecordEdge(string a, string b,
-                            ValheimVillages.Villager.AI.Navigation.BfsEdgeKind kind,
-                            Vector3? repPos, float proxDist)
+                BfsEdgeKind kind,
+                Vector3? repPos, float proxDist)
             {
                 AddEdgeBoth(a, b);
-                string key = ValheimVillages.Villager.AI.Navigation.BfsAdjacencyStore.EdgeKey(a, b);
+                var key = BfsAdjacencyStore.EdgeKey(a, b);
                 if (edgeMeta.TryGetValue(key, out var meta))
                 {
                     meta.Kinds |= kind;
                     if (!meta.RepresentativePos.HasValue && repPos.HasValue)
                         meta.RepresentativePos = repPos;
-                    if (kind == ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.CrossProx &&
+                    if (kind == BfsEdgeKind.CrossProx &&
                         (meta.ProxMinDist == 0f || proxDist < meta.ProxMinDist))
                         meta.ProxMinDist = proxDist;
                     edgeMeta[key] = meta;
                 }
                 else
                 {
-                    edgeMeta[key] = new ValheimVillages.Villager.AI.Navigation.BfsEdgeMeta
+                    edgeMeta[key] = new BfsEdgeMeta
                     {
                         Kinds = kind,
                         RepresentativePos = repPos,
-                        ProxMinDist = (kind == ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.CrossProx) ? proxDist : 0f,
+                        ProxMinDist = kind == BfsEdgeKind.CrossProx ? proxDist : 0f,
                     };
                 }
             }
@@ -380,15 +389,16 @@ namespace ValheimVillages.TaskQueue.Handlers
                     EnsureNode(kv.Key);
                     foreach (var n in kv.Value)
                         RecordEdge(kv.Key, n,
-                            ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.InPassEdge, null, 0f);
+                            BfsEdgeKind.InPassEdge, null, 0f);
                 }
+
             if (pieceResult.Adjacency != null)
                 foreach (var kv in pieceResult.Adjacency)
                 {
                     EnsureNode(kv.Key);
                     foreach (var n in kv.Value)
                         RecordEdge(kv.Key, n,
-                            ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.InPassEdge, null, 0f);
+                            BfsEdgeKind.InPassEdge, null, 0f);
                 }
 
             // --- Build quantized-vertex → world-position map ---
@@ -400,60 +410,64 @@ namespace ValheimVillages.TaskQueue.Handlers
             var quantPosToWorld = new Dictionary<long, Vector3>();
             if (terrainResult.RegionVertexList != null)
                 foreach (var kv in terrainResult.RegionVertexList)
-                    foreach (var v in kv.Value)
-                    {
-                        long q = RegionBuilder.PackQuantizedPos(v);
-                        if (!quantPosToWorld.ContainsKey(q)) quantPosToWorld[q] = v;
-                    }
+                foreach (var v in kv.Value)
+                {
+                    var q = RegionBuilder.PackQuantizedPos(v);
+                    if (!quantPosToWorld.ContainsKey(q)) quantPosToWorld[q] = v;
+                }
+
             if (pieceResult.RegionVertexList != null)
                 foreach (var kv in pieceResult.RegionVertexList)
-                    foreach (var v in kv.Value)
-                    {
-                        long q = RegionBuilder.PackQuantizedPos(v);
-                        if (!quantPosToWorld.ContainsKey(q)) quantPosToWorld[q] = v;
-                    }
+                foreach (var v in kv.Value)
+                {
+                    var q = RegionBuilder.PackQuantizedPos(v);
+                    if (!quantPosToWorld.ContainsKey(q)) quantPosToWorld[q] = v;
+                }
 
             // Cross-kind adjacency: terrain region T and piece region P are
             // adjacent iff they share any quantized vertex position. Build
             // an index from position → set of piece regions, then for each
             // terrain region scan its positions and union the matched piece
             // regions.
-            int crossKindEdges = 0;
-            int crossKindEdgesProx = 0;
+            var crossKindEdges = 0;
+            var crossKindEdgesProx = 0;
             if (terrainResult.RegionVertexPositions != null &&
                 pieceResult.RegionVertexPositions != null)
             {
                 var posToPieces = new Dictionary<long, List<string>>();
                 foreach (var kv in pieceResult.RegionVertexPositions)
+                foreach (var q in kv.Value)
                 {
-                    foreach (long q in kv.Value)
+                    if (!posToPieces.TryGetValue(q, out var list))
                     {
-                        if (!posToPieces.TryGetValue(q, out var list))
-                        {
-                            list = new List<string>();
-                            posToPieces[q] = list;
-                        }
-                        list.Add(kv.Key);
+                        list = new List<string>();
+                        posToPieces[q] = list;
                     }
+
+                    list.Add(kv.Key);
                 }
+
                 foreach (var kv in terrainResult.RegionVertexPositions)
                 {
                     // Track the FIRST matching quantized vertex per piece
                     // region so each CrossVert edge has a representative
                     // bridge position for the diagnostic.
                     var firstMatchPos = new Dictionary<string, long>();
-                    foreach (long q in kv.Value)
+                    foreach (var q in kv.Value)
                     {
                         if (!posToPieces.TryGetValue(q, out var list)) continue;
                         foreach (var pid in list)
-                            if (!firstMatchPos.ContainsKey(pid)) firstMatchPos[pid] = q;
+                            if (!firstMatchPos.ContainsKey(pid))
+                                firstMatchPos[pid] = q;
                     }
+
                     foreach (var pair in firstMatchPos)
                     {
-                        Vector3? repPos = quantPosToWorld.TryGetValue(pair.Value, out var wp)
-                            ? (Vector3?)wp : null;
+                        var repPos = quantPosToWorld.TryGetValue(pair.Value, out var wp)
+                            ? (Vector3?)wp
+                            : null;
                         RecordEdge(kv.Key, pair.Key,
-                            ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.CrossVert,
+                            BfsEdgeKind.CrossVert,
                             repPos, 0f);
                         crossKindEdges++;
                     }
@@ -474,7 +488,6 @@ namespace ValheimVillages.TaskQueue.Handlers
                 pieceResult.RegionVertexList != null &&
                 terrainResult.RegionBounds != null &&
                 pieceResult.RegionBounds != null)
-            {
                 foreach (var tkv in terrainResult.RegionVertexList)
                 {
                     if (!terrainResult.RegionBounds.TryGetValue(tkv.Key, out var tb)) continue;
@@ -484,24 +497,24 @@ namespace ValheimVillages.TaskQueue.Handlers
                         if (!pieceResult.RegionBounds.TryGetValue(pkv.Key, out var pb)) continue;
                         // Cheap AABB prefilter — if the boxes are further apart
                         // than the threshold, no vertex pair can be within it.
-                        float adx = Mathf.Max(0f, Mathf.Max(tb.min.x - pb.max.x, pb.min.x - tb.max.x));
-                        float ady = Mathf.Max(0f, Mathf.Max(tb.min.y - pb.max.y, pb.min.y - tb.max.y));
-                        float adz = Mathf.Max(0f, Mathf.Max(tb.min.z - pb.max.z, pb.min.z - tb.max.z));
+                        var adx = Mathf.Max(0f, Mathf.Max(tb.min.x - pb.max.x, pb.min.x - tb.max.x));
+                        var ady = Mathf.Max(0f, Mathf.Max(tb.min.y - pb.max.y, pb.min.y - tb.max.y));
+                        var adz = Mathf.Max(0f, Mathf.Max(tb.min.z - pb.max.z, pb.min.z - tb.max.z));
                         if (adx * adx + ady * ady + adz * adz > proxMaxDistSq) continue;
 
                         // Precise vertex-to-vertex min distance.
                         var pVerts = pkv.Value;
-                        bool matched = false;
+                        var matched = false;
                         Vector3 matchedMidpoint = default;
-                        float matchedDistSq = 0f;
-                        for (int i = 0; i < tVerts.Count && !matched; i++)
+                        var matchedDistSq = 0f;
+                        for (var i = 0; i < tVerts.Count && !matched; i++)
                         {
-                            Vector3 ta = tVerts[i];
-                            for (int j = 0; j < pVerts.Count; j++)
+                            var ta = tVerts[i];
+                            for (var j = 0; j < pVerts.Count; j++)
                             {
-                                Vector3 pa = pVerts[j];
+                                var pa = pVerts[j];
                                 float dx = ta.x - pa.x, dy = ta.y - pa.y, dz = ta.z - pa.z;
-                                float dSq = dx * dx + dy * dy + dz * dz;
+                                var dSq = dx * dx + dy * dy + dz * dz;
                                 if (dSq <= proxMaxDistSq)
                                 {
                                     matched = true;
@@ -511,16 +524,16 @@ namespace ValheimVillages.TaskQueue.Handlers
                                 }
                             }
                         }
+
                         if (matched)
                         {
                             RecordEdge(tkv.Key, pkv.Key,
-                                ValheimVillages.Villager.AI.Navigation.BfsEdgeKind.CrossProx,
+                                BfsEdgeKind.CrossProx,
                                 matchedMidpoint, Mathf.Sqrt(matchedDistSq));
                             crossKindEdgesProx++;
                         }
                     }
                 }
-            }
 
             // --- Find seeds: closest terrain region centroid to each bed ---
             var seeds = new HashSet<string>();
@@ -528,43 +541,46 @@ namespace ValheimVillages.TaskQueue.Handlers
             const float bedXZTol = 30f;
             const float bedXZTolSq = bedXZTol * bedXZTol;
             if (beds != null)
-            {
                 foreach (var bed in beds)
                 {
                     string closest = null;
-                    float closestDistSq = float.MaxValue;
+                    var closestDistSq = float.MaxValue;
                     foreach (var rid in terrainResult.RegionIds)
                     {
-                        if (!terrainResult.Centroids.TryGetValue(rid, out Vector3 c)) continue;
+                        if (!terrainResult.Centroids.TryGetValue(rid, out var c)) continue;
                         if (Mathf.Abs(c.y - bed.y) > bedYTol) continue;
                         float dx = c.x - bed.x, dz = c.z - bed.z;
-                        float dSq = dx * dx + dz * dz;
+                        var dSq = dx * dx + dz * dz;
                         if (dSq > bedXZTolSq) continue;
-                        if (dSq < closestDistSq) { closestDistSq = dSq; closest = rid; }
+                        if (dSq < closestDistSq)
+                        {
+                            closestDistSq = dSq;
+                            closest = rid;
+                        }
                     }
+
                     if (closest != null) seeds.Add(closest);
                 }
-            }
 
             if (seeds.Count == 0)
             {
-                int bedCount = beds?.Count ?? 0;
-                int regionCount = terrainResult.RegionIds?.Count ?? 0;
+                var bedCount = beds?.Count ?? 0;
+                var regionCount = terrainResult.RegionIds?.Count ?? 0;
                 Plugin.Log?.LogError(
-                    $"[Region] CrossKind adjacency aborted: no bed mapped to any terrain region " +
+                    "[Region] CrossKind adjacency aborted: no bed mapped to any terrain region " +
                     $"(beds={bedCount}, terrain_regions={regionCount}). " +
                     "Refusing to seed BFS from a synthetic largest-region fallback; vv_bfs_trace will report no data.");
                 return;
             }
 
             // Persist for vv_bfs_trace diagnostic.
-            ValheimVillages.Villager.AI.Navigation.BfsAdjacencyStore.Set(combinedAdj, seeds, edgeMeta);
+            BfsAdjacencyStore.Set(combinedAdj, seeds, edgeMeta);
 
             Plugin.Log?.LogInfo(
                 $"[Region] CrossKind adjacency built: {combinedAdj.Count} nodes, " +
                 $"seeds={seeds.Count}, edges={edgeMeta.Count}, " +
                 $"cross_vert={crossKindEdges}, cross_prox={crossKindEdgesProx} " +
-                $"(prune handled downstream by RubberBandPrune)");
+                "(prune handled downstream by RubberBandPrune)");
         }
     }
 }

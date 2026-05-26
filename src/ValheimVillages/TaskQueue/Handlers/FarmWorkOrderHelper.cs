@@ -1,27 +1,25 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using ValheimVillages;
 using ValheimVillages.Behaviors;
 using ValheimVillages.Behaviors.Farming;
-using ValheimVillages.Schemas;
 using ValheimVillages.Enums;
-using ValheimVillages.Items.VirtualRecipes;
 using ValheimVillages.Interfaces;
-using ValheimVillages.Villager.AI.Work;
+using ValheimVillages.Items.VirtualRecipes;
+using ValheimVillages.Schemas;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
     /// <summary>
-    /// Helper for building FarmingContext from work order scan results.
-    /// Used by WorkOrderScanHandler when physicalStation == "farm".
+    ///     Helper for building FarmingContext from work order scan results.
+    ///     Used by WorkOrderScanHandler when physicalStation == "farm".
     /// </summary>
     public static class FarmWorkOrderHelper
     {
         /// <summary>
-        /// Build a FarmingContext for a farming work order.
-        /// Checks for harvestable crops first, then planting needs.
-        /// Returns null if no farming action is possible (no farm location, etc.).
+        ///     Build a FarmingContext for a farming work order.
+        ///     Checks for harvestable crops first, then planting needs.
+        ///     Returns null if no farming action is possible (no farm location, etc.).
         /// </summary>
         public static FarmingContext BuildFarmingContext(
             IVillagerWorkContext ai,
@@ -30,7 +28,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             List<IngredientSource> ingredients,
             int existingCount)
         {
-            string outputItem = match.ItemPrefabName;
+            var outputItem = match.ItemPrefabName;
             var bedPos = ai.BedPosition;
 
             // Find a farm location in the NPC's memory
@@ -55,6 +53,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                         $"[FarmScan:{ai.NpcName}] No farm location or cultivated ground found");
                     return null;
                 }
+
                 farmPosition = cultivatedPos.Value;
                 Plugin.Log?.LogInfo(
                     $"[FarmScan:{ai.NpcName}] Using cultivated ground at {farmPosition}");
@@ -77,7 +76,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                     FarmPosition = farmPosition,
                     HarvestedCount = existingCount,
                     IsHarvestingPass = true,
-                    CurrentHarvestTarget = harvestTarget
+                    CurrentHarvestTarget = harvestTarget,
                 };
             }
 
@@ -100,7 +99,7 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             // Get grow radius from the Plant component
             var plantComp = piecePrefab.GetComponent<Plant>();
-            float growRadius = plantComp != null ? plantComp.m_growRadius : 0.5f;
+            var growRadius = plantComp != null ? plantComp.m_growRadius : 0.5f;
 
             // Verify there's at least one valid planting position
             var testPos = PlantingHelper.FindPlantingPosition(
@@ -124,32 +123,32 @@ namespace ValheimVillages.TaskQueue.Handlers
                 PlantPiecePrefab = piecePrefab,
                 PlantGrowRadius = growRadius,
                 HarvestedCount = existingCount,
-                IsHarvestingPass = false
+                IsHarvestingPass = false,
             };
         }
 
         /// <summary>
-        /// Search for cultivated ground in a spiral pattern around the bed.
-        /// Cultivated ground is a Heightmap property, not a discoverable object,
-        /// so normal POI discovery can't find it.
+        ///     Search for cultivated ground in a spiral pattern around the bed.
+        ///     Cultivated ground is a Heightmap property, not a discoverable object,
+        ///     so normal POI discovery can't find it.
         /// </summary>
         private static Vector3? FindCultivatedGroundNearBed(Vector3 bedPos)
         {
             const float maxRadius = 30f;
             const float step = 3f;
 
-            for (float r = 5f; r <= maxRadius; r += step)
+            for (var r = 5f; r <= maxRadius; r += step)
             {
-                int steps = Mathf.Max(8, Mathf.RoundToInt(2f * Mathf.PI * r / step));
-                for (int i = 0; i < steps; i++)
+                var steps = Mathf.Max(8, Mathf.RoundToInt(2f * Mathf.PI * r / step));
+                for (var i = 0; i < steps; i++)
                 {
-                    float angle = (2f * Mathf.PI * i) / steps;
+                    var angle = 2f * Mathf.PI * i / steps;
                     var candidate = bedPos + new Vector3(
                         Mathf.Cos(angle) * r, 0f, Mathf.Sin(angle) * r);
 
                     // Snap to terrain height
                     if (ZoneSystem.instance == null) continue;
-                    float height = ZoneSystem.instance.GetGroundHeight(candidate);
+                    var height = ZoneSystem.instance.GetGroundHeight(candidate);
                     if (height <= -1000f) continue;
                     candidate.y = height;
 
@@ -157,6 +156,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                         return candidate;
                 }
             }
+
             return null;
         }
     }

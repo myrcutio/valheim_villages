@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
+using BepInEx;
 using UnityEngine;
 
 namespace ValheimVillages
@@ -15,13 +16,13 @@ namespace ValheimVillages
         private static DebugCaptureBehaviour _captureBehaviour;
 
         /// <summary>
-        /// Request a screenshot capture from the active player camera plus a
-        /// sidecar JSON (counter, trigger, world time, camera pose). Safe to
-        /// call from any thread; the actual capture marshals onto the main
-        /// Unity thread via a queued coroutine. Silently no-ops if
-        /// <see cref="Plugin.Instance"/> or <see cref="Camera.main"/> is
-        /// unavailable (e.g. main-menu reload). Output overwrites
-        /// &lt;SidecarDir&gt;/last_capture.png and last_capture.json on every call.
+        ///     Request a screenshot capture from the active player camera plus a
+        ///     sidecar JSON (counter, trigger, world time, camera pose). Safe to
+        ///     call from any thread; the actual capture marshals onto the main
+        ///     Unity thread via a queued coroutine. Silently no-ops if
+        ///     <see cref="Plugin.Instance" /> or <see cref="Camera.main" /> is
+        ///     unavailable (e.g. main-menu reload). Output overwrites
+        ///     &lt;SidecarDir&gt;/last_capture.png and last_capture.json on every call.
         /// </summary>
         public static void Capture(string trigger)
         {
@@ -31,31 +32,38 @@ namespace ValheimVillages
                 if (plugin == null) return;
 
                 if (_captureBehaviour == null)
-                {
                     _captureBehaviour = plugin.gameObject.GetComponent<DebugCaptureBehaviour>()
-                        ?? plugin.gameObject.AddComponent<DebugCaptureBehaviour>();
-                }
+                                        ?? plugin.gameObject.AddComponent<DebugCaptureBehaviour>();
                 _captureBehaviour.Enqueue(trigger ?? "unknown");
             }
-            catch { /* capture must never break the mod */ }
+            catch
+            {
+                /* capture must never break the mod */
+            }
         }
 
-        internal static int NextCaptureCounter() => Interlocked.Increment(ref _captureCounter);
+        internal static int NextCaptureCounter()
+        {
+            return Interlocked.Increment(ref _captureCounter);
+        }
     }
 
     internal class DebugCaptureBehaviour : MonoBehaviour
     {
-        private readonly ConcurrentQueue<string> _pending = new ConcurrentQueue<string>();
-
-        public void Enqueue(string trigger) => _pending.Enqueue(trigger);
+        private readonly ConcurrentQueue<string> _pending = new();
 
         private void Update()
         {
-            while (_pending.TryDequeue(out string trigger))
+            while (_pending.TryDequeue(out var trigger))
             {
-                int counter = DebugLog.NextCaptureCounter();
+                var counter = DebugLog.NextCaptureCounter();
                 StartCoroutine(CaptureRoutine(trigger, counter));
             }
+        }
+
+        public void Enqueue(string trigger)
+        {
+            _pending.Enqueue(trigger);
         }
 
         private IEnumerator CaptureRoutine(string trigger, int counter)
@@ -64,17 +72,20 @@ namespace ValheimVillages
             // against post-event state before we grab the frame.
             yield return new WaitForSecondsRealtime(0.6f);
 
-            Camera cam = Camera.main;
+            var cam = Camera.main;
             if (cam == null) yield break;
 
-            Vector3 pos = cam.transform.position;
-            Vector3 euler = cam.transform.eulerAngles;
-            float worldTime = -1f;
+            var pos = cam.transform.position;
+            var euler = cam.transform.eulerAngles;
+            var worldTime = -1f;
             try
             {
                 if (EnvMan.instance != null) worldTime = EnvMan.instance.GetDayFraction();
             }
-            catch { /* EnvMan may be missing on early reload */ }
+            catch
+            {
+                /* EnvMan may be missing on early reload */
+            }
 
             // CaptureScreenshotAsTexture requires end-of-frame so all camera
             // passes (incl. debug overlays) have rendered.
@@ -90,27 +101,40 @@ namespace ValheimVillages
             try
             {
                 string root;
-                try { root = BepInEx.Paths.ConfigPath; }
-                catch { root = "."; }
+                try
+                {
+                    root = Paths.ConfigPath;
+                }
+                catch
+                {
+                    root = ".";
+                }
+
                 dir = Path.Combine(root, "vv_dumps");
                 Directory.CreateDirectory(dir);
             }
-            catch { return; }
+            catch
+            {
+                return;
+            }
 
-            string pngPath = Path.Combine(dir, "last_capture.png");
-            string jsonPath = Path.Combine(dir, "last_capture.json");
+            var pngPath = Path.Combine(dir, "last_capture.png");
+            var jsonPath = Path.Combine(dir, "last_capture.json");
 
             Texture2D tex = null;
             try
             {
                 tex = ScreenCapture.CaptureScreenshotAsTexture();
-                byte[] png = tex.EncodeToPNG();
+                var png = tex.EncodeToPNG();
                 File.WriteAllBytes(pngPath, png);
             }
-            catch { /* swallow — sidecar below still useful */ }
+            catch
+            {
+                /* swallow — sidecar below still useful */
+            }
             finally
             {
-                if (tex != null) UnityEngine.Object.Destroy(tex);
+                if (tex != null) Destroy(tex);
             }
 
             // Write sidecar AFTER the PNG so a polling reader can use the
@@ -136,11 +160,16 @@ namespace ValheimVillages
                 sb.Append('}');
                 File.WriteAllText(jsonPath, sb.ToString());
             }
-            catch { /* swallow */ }
+            catch
+            {
+                /* swallow */
+            }
         }
 
         private static string JsonEscape(string s)
-            => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"")
-                        .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+        {
+            return (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"")
+                .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+        }
     }
 }

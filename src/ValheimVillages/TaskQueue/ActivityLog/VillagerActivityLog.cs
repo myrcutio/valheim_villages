@@ -8,9 +8,9 @@ using ValheimVillages.Schemas;
 namespace ValheimVillages.TaskQueue.ActivityLog
 {
     /// <summary>
-    /// Singleton per-villager activity/audit log for debugging. Records state-changing
-    /// actions taken by task handlers. Entries are persisted to ZDO on save; the log
-    /// is bounded and does not support replay.
+    ///     Singleton per-villager activity/audit log for debugging. Records state-changing
+    ///     actions taken by task handlers. Entries are persisted to ZDO on save; the log
+    ///     is bounded and does not support replay.
     /// </summary>
     public class VillagerActivityLog
     {
@@ -20,14 +20,14 @@ namespace ValheimVillages.TaskQueue.ActivityLog
 
         private static VillagerActivityLog s_instance;
 
-        /// <summary>Singleton instance.</summary>
-        public static VillagerActivityLog Instance => s_instance ??= new VillagerActivityLog();
-
         // Per-villager log storage
         private readonly Dictionary<string, List<ActivityLogEntry>> m_logs = new();
 
+        /// <summary>Singleton instance.</summary>
+        public static VillagerActivityLog Instance => s_instance ??= new VillagerActivityLog();
+
         /// <summary>
-        /// Record a state-changing action for a villager.
+        ///     Record a state-changing action for a villager.
         /// </summary>
         public void Record(string villagerId, string taskName, string action, string description)
         {
@@ -50,7 +50,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                 TaskName = taskName,
                 Action = action,
                 Description = description,
-                Committed = false
+                Committed = false,
             });
 
             Plugin.Log?.LogDebug(
@@ -58,7 +58,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         }
 
         /// <summary>
-        /// Get all log entries for a villager (read-only snapshot).
+        ///     Get all log entries for a villager (read-only snapshot).
         /// </summary>
         public IReadOnlyList<ActivityLogEntry> GetEntries(string villagerId)
         {
@@ -68,7 +68,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         }
 
         /// <summary>
-        /// Get only uncommitted entries for a villager.
+        ///     Get only uncommitted entries for a villager.
         /// </summary>
         public List<ActivityLogEntry> GetUncommitted(string villagerId)
         {
@@ -79,8 +79,8 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         }
 
         /// <summary>
-        /// Mark all entries for a villager as committed.
-        /// Called after a successful ZDO save.
+        ///     Mark all entries for a villager as committed.
+        ///     Called after a successful ZDO save.
         /// </summary>
         public void MarkCommitted(string villagerId)
         {
@@ -91,8 +91,8 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         }
 
         /// <summary>
-        /// Remove committed entries, keeping the most recent ones for debugging.
-        /// Keeps the last 10 committed entries as a rolling history.
+        ///     Remove committed entries, keeping the most recent ones for debugging.
+        ///     Keeps the last 10 committed entries as a rolling history.
         /// </summary>
         public void TrimCommitted(string villagerId)
         {
@@ -103,13 +103,13 @@ namespace ValheimVillages.TaskQueue.ActivityLog
 
             if (committed.Count <= keepCommitted) return;
 
-            int removeCount = committed.Count - keepCommitted;
+            var removeCount = committed.Count - keepCommitted;
             var toRemove = new HashSet<ActivityLogEntry>(committed.Take(removeCount));
             entries.RemoveAll(e => toRemove.Contains(e));
         }
 
         /// <summary>
-        /// Serialize uncommitted activity log entries to a ZDO string.
+        ///     Serialize uncommitted activity log entries to a ZDO string.
         /// </summary>
         public void SaveToZDO(string villagerId, ZDO zdo)
         {
@@ -123,7 +123,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
             }
 
             var sb = new StringBuilder();
-            for (int i = 0; i < uncommitted.Count; i++)
+            for (var i = 0; i < uncommitted.Count; i++)
             {
                 var e = uncommitted[i];
                 if (i > 0) sb.Append(EntrySeparator);
@@ -140,14 +140,14 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         }
 
         /// <summary>
-        /// Load activity log entries from a ZDO string. Loaded entries start as uncommitted
-        /// so they'll be re-saved on the next ZDO save cycle.
+        ///     Load activity log entries from a ZDO string. Loaded entries start as uncommitted
+        ///     so they'll be re-saved on the next ZDO save cycle.
         /// </summary>
         public void LoadFromZDO(string villagerId, ZDO zdo)
         {
             if (zdo == null) return;
 
-            var data = zdo.GetString(ZdoKey, "");
+            var data = zdo.GetString(ZdoKey);
             if (string.IsNullOrEmpty(data)) return;
 
             if (!m_logs.TryGetValue(villagerId, out var entries))
@@ -162,7 +162,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                 var fields = record.Split(FieldSeparator);
                 if (fields.Length < 4) continue;
 
-                if (!float.TryParse(fields[0], out float timestamp))
+                if (!float.TryParse(fields[0], out var timestamp))
                     continue;
 
                 entries.Add(new ActivityLogEntry
@@ -172,7 +172,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                     TaskName = fields[1],
                     Action = fields[2],
                     Description = fields[3],
-                    Committed = false
+                    Committed = false,
                 });
             }
 
@@ -181,7 +181,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         }
 
         /// <summary>
-        /// Remove all entries for a villager (e.g. on villager death/removal).
+        ///     Remove all entries for a villager (e.g. on villager death/removal).
         /// </summary>
         public void ClearVillager(string villagerId)
         {
@@ -189,7 +189,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         }
 
         /// <summary>
-        /// Clear all activity log data (e.g. on world unload).
+        ///     Clear all activity log data (e.g. on world unload).
         /// </summary>
         public void Clear()
         {
@@ -197,8 +197,8 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         }
 
         /// <summary>
-        /// Reset the singleton instance (e.g. on hot reload so the new
-        /// assembly gets a fresh instance).
+        ///     Reset the singleton instance (e.g. on hot reload so the new
+        ///     assembly gets a fresh instance).
         /// </summary>
         [RegisterCleanup]
         public static void ResetInstance()
@@ -208,11 +208,11 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         }
 
         /// <summary>
-        /// Trim oldest entries when a villager's log exceeds capacity.
+        ///     Trim oldest entries when a villager's log exceeds capacity.
         /// </summary>
         private static void TrimOldest(List<ActivityLogEntry> entries)
         {
-            int removeCount = entries.Count - TaskSettings.MaxActivityLogEntriesPerVillager + 1;
+            var removeCount = entries.Count - TaskSettings.MaxActivityLogEntriesPerVillager + 1;
             if (removeCount > 0)
                 entries.RemoveRange(0, removeCount);
         }

@@ -6,7 +6,7 @@ using ValheimVillages.Villager;
 namespace ValheimVillages.Patches
 {
     /// <summary>
-    /// Matches Azumatt's ItemManager pattern exactly.
+    ///     Matches Azumatt's ItemManager pattern exactly.
     /// </summary>
     [HarmonyPatch(typeof(ObjectDB), "Awake")]
     [HarmonyPriority(Priority.VeryHigh)]
@@ -42,7 +42,7 @@ namespace ValheimVillages.Patches
             ItemFactory.RegisterAllInZNetScene(__instance);
             VirtualRecipeLoader.RegisterCookingRecipesIfNeeded(ObjectDB.instance);
             // Log available Dvergr prefabs for debugging (single spawn path: Villager)
-            ValheimVillages.Villager.VillagerPawnPatch.LogAvailableDvergrPrefabs();
+            VillagerPawnPatch.LogAvailableDvergrPrefabs();
         }
     }
 }

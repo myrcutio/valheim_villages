@@ -7,9 +7,9 @@ using ValheimVillages.Villager.AI.Pathfinding;
 namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
-    /// Handles saving and loading patrol state to/from ZDO.
-    /// Persists patrol waypoints, current index, and discovery completion
-    /// so patrollers don't have to redo discovery after every save/load.
+    ///     Handles saving and loading patrol state to/from ZDO.
+    ///     Persists patrol waypoints, current index, and discovery completion
+    ///     so patrollers don't have to redo discovery after every save/load.
     /// </summary>
     public static class PatrolPersistence
     {
@@ -42,15 +42,15 @@ namespace ValheimVillages.Behaviors.Patrol
         }
 
         /// <summary>
-        /// Try to restore the HNA region graph from ZDO into the registry
-        /// under the given village key. If the persisted payload is a legacy
-        /// non-v2 format (or otherwise unparseable), the ZDO entry is wiped
-        /// so the next access triggers a fresh hna_partition build.
+        ///     Try to restore the HNA region graph from ZDO into the registry
+        ///     under the given village key. If the persisted payload is a legacy
+        ///     non-v2 format (or otherwise unparseable), the ZDO entry is wiped
+        ///     so the next access triggers a fresh hna_partition build.
         /// </summary>
         public static bool TryRestoreHnaGraph(ZDO zdo, string villageKey)
         {
             if (zdo == null) return false;
-            string data = zdo.GetString(ZdoHnaGraph, "");
+            var data = zdo.GetString(ZdoHnaGraph);
             if (string.IsNullOrEmpty(data)) return false;
             var graph = RegionGraph.GetOrCreate(villageKey);
             if (graph.Restore(data)) return true;
@@ -59,7 +59,7 @@ namespace ValheimVillages.Behaviors.Patrol
             // (most often a legacy v1 grid payload). Wipe so the patrol
             // behavior falls through to its existing rebuild path.
             Plugin.Log?.LogInfo(
-                $"[Region] Wiping legacy/unparseable HNA graph from ZDO " +
+                "[Region] Wiping legacy/unparseable HNA graph from ZDO " +
                 $"(key={villageKey}, bytes={data.Length}); will rebuild on next request");
             zdo.Set(ZdoHnaGraph, "");
             return false;
@@ -70,10 +70,10 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             if (patrol == null || zdo == null) return;
 
-            bool complete = zdo.GetInt(ZdoDiscovery, 0) == 1;
-            int wpIndex = zdo.GetInt(ZdoWpIndex, 0);
-            var waypoints = DeserializeWaypoints(zdo.GetString(ZdoWaypoints, ""));
-            bool isHna = zdo.GetInt(ZdoHnaRoute, 0) == 1;
+            var complete = zdo.GetInt(ZdoDiscovery) == 1;
+            var wpIndex = zdo.GetInt(ZdoWpIndex);
+            var waypoints = DeserializeWaypoints(zdo.GetString(ZdoWaypoints));
+            var isHna = zdo.GetInt(ZdoHnaRoute) == 1;
 
             if (!complete || waypoints == null || waypoints.Count == 0) return;
 
@@ -85,15 +85,16 @@ namespace ValheimVillages.Behaviors.Patrol
             if (waypoints == null || waypoints.Count == 0) return "";
 
             var parts = new string[waypoints.Count];
-            for (int i = 0; i < waypoints.Count; i++)
+            for (var i = 0; i < waypoints.Count; i++)
             {
                 var wp = waypoints[i];
                 var p = wp.Position;
                 var sid = string.IsNullOrEmpty(wp.StrategyId) ? VillagerWaypoint.DefaultStrategyId : wp.StrategyId;
-                int active = wp.Active ? 1 : 0;
+                var active = wp.Active ? 1 : 0;
                 parts[i] = string.Format(CultureInfo.InvariantCulture,
                     "{0:F1},{1:F1},{2:F1},{3},{4}", p.x, p.y, p.z, sid, active);
             }
+
             return string.Join("|", parts);
         }
 
@@ -110,12 +111,15 @@ namespace ValheimVillages.Behaviors.Patrol
                     float.TryParse(f[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) &&
                     float.TryParse(f[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var z))
                 {
-                    var strategyId = (f.Length >= 4 && !string.IsNullOrEmpty(f[3])) ? f[3] : VillagerWaypoint.DefaultStrategyId;
-                    bool active = f.Length < 5 || f[4] != "0";
+                    var strategyId = f.Length >= 4 && !string.IsNullOrEmpty(f[3])
+                        ? f[3]
+                        : VillagerWaypoint.DefaultStrategyId;
+                    var active = f.Length < 5 || f[4] != "0";
                     var wp = new VillagerWaypoint(new Vector3(x, y, z), strategyId) { Active = active };
                     result.Add(wp);
                 }
             }
+
             return result.Count > 0 ? result : null;
         }
     }

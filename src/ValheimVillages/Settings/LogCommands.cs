@@ -3,8 +3,8 @@ using ValheimVillages.Attributes;
 namespace ValheimVillages.Settings
 {
     /// <summary>
-    /// Dev console commands for toggling runtime logging verbosity.
-    /// Companion to <see cref="LogSettings"/>.
+    ///     Dev console commands for toggling runtime logging verbosity.
+    ///     Companion to <see cref="LogSettings" />.
     /// </summary>
     internal static class LogCommands
     {
@@ -12,8 +12,8 @@ namespace ValheimVillages.Settings
         public static void ToggleVerboseNavMesh(Terminal.ConsoleEventArgs args)
         {
             LogSettings.VerboseNavMesh = !LogSettings.VerboseNavMesh;
-            string state = LogSettings.VerboseNavMesh ? "ON" : "OFF";
-            string msg = $"[LogSettings] VerboseNavMesh = {state}";
+            var state = LogSettings.VerboseNavMesh ? "ON" : "OFF";
+            var msg = $"[LogSettings] VerboseNavMesh = {state}";
             Console.instance?.Print(msg);
             Plugin.Log?.LogInfo(msg);
         }

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Algorithms;
 using Xunit;
@@ -7,12 +5,12 @@ using Xunit;
 namespace ValheimVillages.Tests.Algorithms;
 
 /// <summary>
-/// Tests for BoundaryPipeline geometry operations:
-/// Chaikin smoothing, RDP simplification, clockwise sort, XZ dedup.
+///     Tests for BoundaryPipeline geometry operations:
+///     Chaikin smoothing, RDP simplification, clockwise sort, XZ dedup.
 /// </summary>
 public class BoundaryPipelineTests
 {
-    private static readonly Vector3 Origin = new Vector3(0, 0, 0);
+    private static readonly Vector3 Origin = new(0, 0, 0);
 
     [Fact]
     public void ChaikinSmooth_DoublesPointCount()
@@ -26,7 +24,7 @@ public class BoundaryPipelineTests
     [Fact]
     public void ChaikinSmooth_TooFewPoints_ReturnsUnchanged()
     {
-        var points = new List<Vector3> { new Vector3(0, 0, 0), new Vector3(1, 0, 1) };
+        var points = new List<Vector3> { new(0, 0, 0), new(1, 0, 1) };
         var result = BoundaryPipeline.ChaikinSmooth(points);
 
         Assert.Equal(2, result.Count);
@@ -60,19 +58,19 @@ public class BoundaryPipelineTests
     {
         var points = new List<Vector3>
         {
-            new Vector3(1, 0, 0),   // 0°
-            new Vector3(0, 0, 1),   // 90°
-            new Vector3(-1, 0, 0),  // 180°
-            new Vector3(0, 0, -1)   // 270°/-90°
+            new(1, 0, 0), // 0°
+            new(0, 0, 1), // 90°
+            new(-1, 0, 0), // 180°
+            new(0, 0, -1), // 270°/-90°
         };
 
         BoundaryPipeline.SortClockwise(points, Origin);
 
         // After clockwise sort, angles should be descending
-        for (int i = 0; i < points.Count - 1; i++)
+        for (var i = 0; i < points.Count - 1; i++)
         {
-            float a1 = MathF.Atan2(points[i].z, points[i].x);
-            float a2 = MathF.Atan2(points[i + 1].z, points[i + 1].x);
+            var a1 = MathF.Atan2(points[i].z, points[i].x);
+            var a2 = MathF.Atan2(points[i + 1].z, points[i + 1].x);
             Assert.True(a1 >= a2, $"Angle at {i} ({a1:F2}) should be >= angle at {i + 1} ({a2:F2})");
         }
     }
@@ -82,9 +80,9 @@ public class BoundaryPipelineTests
     {
         var points = new List<Vector3>
         {
-            new Vector3(0, 5, 0),
-            new Vector3(0.5f, 10, 0.5f),  // within radius 1.0 of first, higher Y
-            new Vector3(10, 0, 10)
+            new(0, 5, 0),
+            new(0.5f, 10, 0.5f), // within radius 1.0 of first, higher Y
+            new(10, 0, 10),
         };
 
         var result = BoundaryPipeline.DeduplicateByXZ(points, 1.0f);
@@ -101,15 +99,15 @@ public class BoundaryPipelineTests
         // Create a polygon with one very sharp angle
         var points = new List<Vector3>
         {
-            new Vector3(0, 0, 0),
-            new Vector3(5, 0, 0),
-            new Vector3(5.1f, 0, 0.1f),  // Very sharp turn
-            new Vector3(10, 0, 0),
-            new Vector3(10, 0, 10),
-            new Vector3(0, 0, 10)
+            new(0, 0, 0),
+            new(5, 0, 0),
+            new(5.1f, 0, 0.1f), // Very sharp turn
+            new(10, 0, 0),
+            new(10, 0, 10),
+            new(0, 0, 10),
         };
 
-        int pruned = BoundaryPipeline.PruneSharpAngles(points, 170f);
+        var pruned = BoundaryPipeline.PruneSharpAngles(points, 170f);
         Assert.True(pruned > 0, "Should have pruned at least one sharp angle");
     }
 
@@ -131,7 +129,7 @@ public class BoundaryPipelineTests
     [Fact]
     public void FullPipeline_TooFewInputPoints_ReturnsInput()
     {
-        var edgeSnapped = new List<Vector3> { new Vector3(0, 0, 0), new Vector3(1, 0, 0) };
+        var edgeSnapped = new List<Vector3> { new(0, 0, 0), new(1, 0, 0) };
         var p = new BoundaryPipeline.PipelineParams(1.5f, 160f, true, 1.0f);
 
         var result = BoundaryPipeline.Run(edgeSnapped, Origin, p);
@@ -145,23 +143,24 @@ public class BoundaryPipelineTests
     {
         return new List<Vector3>
         {
-            new Vector3(size, 0, size),
-            new Vector3(-size, 0, size),
-            new Vector3(-size, 0, -size),
-            new Vector3(size, 0, -size)
+            new(size, 0, size),
+            new(-size, 0, size),
+            new(-size, 0, -size),
+            new(size, 0, -size),
         };
     }
 
     private static List<Vector3> MakeCircle(float radius, int points)
     {
         var result = new List<Vector3>(points);
-        for (int i = 0; i < points; i++)
+        for (var i = 0; i < points; i++)
         {
-            float angle = 2f * MathF.PI * i / points;
+            var angle = 2f * MathF.PI * i / points;
             result.Add(new Vector3(
                 radius * MathF.Cos(angle), 0,
                 radius * MathF.Sin(angle)));
         }
+
         return result;
     }
 

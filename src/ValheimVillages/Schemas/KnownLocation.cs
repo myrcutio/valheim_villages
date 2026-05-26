@@ -1,26 +1,25 @@
-using System;
 using UnityEngine;
 using ValheimVillages.Enums;
 
 namespace ValheimVillages.Schemas
 {
     /// <summary>
-    /// A known location that the NPC has discovered.
+    ///     A known location that the NPC has discovered.
     /// </summary>
     public class KnownLocation
     {
+        /// <summary>
+        ///     Distance threshold for considering two locations as exactly the same spot.
+        /// </summary>
+        public const float SameLocationThreshold = 2f;
+
         public Vector3 Position { get; set; }
         public LocationType Type { get; set; }
         public bool HasShelter { get; set; }
         public float ComfortValue { get; set; }
 
         /// <summary>
-        /// Distance threshold for considering two locations as exactly the same spot.
-        /// </summary>
-        public const float SameLocationThreshold = 2f;
-
-        /// <summary>
-        /// Check if this is the exact same spot (within 2m).
+        ///     Check if this is the exact same spot (within 2m).
         /// </summary>
         public bool IsSameLocation(Vector3 other)
         {
@@ -28,17 +27,17 @@ namespace ValheimVillages.Schemas
         }
 
         /// <summary>
-        /// Check if another location of the same type is too close.
-        /// Different location types have different minimum spacing requirements.
+        ///     Check if another location of the same type is too close.
+        ///     Different location types have different minimum spacing requirements.
         /// </summary>
         public bool IsTooCloseForSameType(Vector3 other)
         {
-            float minDistance = GetMinDistanceForType(Type);
+            var minDistance = GetMinDistanceForType(Type);
             return Vector3.Distance(Position, other) < minDistance;
         }
 
         /// <summary>
-        /// Get the minimum distance between locations of the same type.
+        ///     Get the minimum distance between locations of the same type.
         /// </summary>
         public static float GetMinDistanceForType(LocationType type)
         {
@@ -57,7 +56,7 @@ namespace ValheimVillages.Schemas
         }
 
         /// <summary>
-        /// Get the maximum number of locations to remember per type.
+        ///     Get the maximum number of locations to remember per type.
         /// </summary>
         public static int GetMaxLocationsForType(LocationType type)
         {
@@ -76,12 +75,12 @@ namespace ValheimVillages.Schemas
         }
 
         /// <summary>
-        /// Calculate a quality score for this location (for comparison).
-        /// Higher is better.
+        ///     Calculate a quality score for this location (for comparison).
+        ///     Higher is better.
         /// </summary>
         public float GetQualityScore()
         {
-            float score = ComfortValue * 10f;
+            var score = ComfortValue * 10f;
             if (HasShelter) score += 5f;
             return score;
         }

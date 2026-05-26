@@ -2,15 +2,14 @@ using System;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
-using ValheimVillages;
 using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
 
 namespace ValheimVillages.Villager.AI.Work
 {
     /// <summary>
-    /// Shared logic for resolving crafting/cooking stations from an NPC's known locations.
-    /// Used by WorkOrderScanHandler and available for CraftingBehavior if needed.
+    ///     Shared logic for resolving crafting/cooking stations from an NPC's known locations.
+    ///     Used by WorkOrderScanHandler and available for CraftingBehavior if needed.
     /// </summary>
     public static class StationFinder
     {
@@ -23,20 +22,26 @@ namespace ValheimVillages.Villager.AI.Work
             .GetMethod("GetFuel", BindingFlags.NonPublic | BindingFlags.Instance);
 
         /// <summary>
-        /// Raw call to CookingStation.IsFireLit() via reflection.
-        /// Returns false if reflection fails or fire is not lit.
+        ///     Raw call to CookingStation.IsFireLit() via reflection.
+        ///     Returns false if reflection fails or fire is not lit.
         /// </summary>
         private static bool InvokeIsFireLit(CookingStation station)
         {
             if (station == null || s_isFireLit == null) return false;
-            try { return (bool)s_isFireLit.Invoke(station, null); }
-            catch { return false; }
+            try
+            {
+                return (bool)s_isFireLit.Invoke(station, null);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>
-        /// Returns true when the fire-underneath requirement is satisfied:
-        /// either fire is not required, or it is required and IsFireLit() returns true.
-        /// Used by StationFuelHelper.DiagnoseFuelNeed to check the fire condition independently.
+        ///     Returns true when the fire-underneath requirement is satisfied:
+        ///     either fire is not required, or it is required and IsFireLit() returns true.
+        ///     Used by StationFuelHelper.DiagnoseFuelNeed to check the fire condition independently.
         /// </summary>
         public static bool IsCookingStationFireLit(CookingStation station)
         {
@@ -46,10 +51,10 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Matches the server's FixedUpdate ready check exactly:
-        ///   isReady = (m_requireFire AND IsFireLit()) OR (m_useFuel AND GetFuel() > 0)
-        /// A station is ready when EITHER fire is lit (for fire-based stations)
-        /// OR it has internal fuel (for fuel-based stations).
+        ///     Matches the server's FixedUpdate ready check exactly:
+        ///     isReady = (m_requireFire AND IsFireLit()) OR (m_useFuel AND GetFuel() > 0)
+        ///     A station is ready when EITHER fire is lit (for fire-based stations)
+        ///     OR it has internal fuel (for fuel-based stations).
         /// </summary>
         public static bool IsCookingStationReady(CookingStation station)
         {
@@ -60,19 +65,25 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Returns the current fuel level of a CookingStation via reflection (GetFuel is private).
-        /// Returns 0 on failure.
+        ///     Returns the current fuel level of a CookingStation via reflection (GetFuel is private).
+        ///     Returns 0 on failure.
         /// </summary>
         public static float GetCookingStationFuel(CookingStation station)
         {
             if (station == null || s_getFuel == null) return 0f;
-            try { return (float)s_getFuel.Invoke(station, null); }
-            catch { return 0f; }
+            try
+            {
+                return (float)s_getFuel.Invoke(station, null);
+            }
+            catch
+            {
+                return 0f;
+            }
         }
 
         /// <summary>
-        /// Returns true if the cooking station has at least one empty slot.
-        /// Reads slot data from ZDO, matching the server's GetFreeSlot() logic.
+        ///     Returns true if the cooking station has at least one empty slot.
+        ///     Reads slot data from ZDO, matching the server's GetFreeSlot() logic.
         /// </summary>
         public static bool HasFreeSlot(CookingStation station)
         {
@@ -80,19 +91,17 @@ namespace ValheimVillages.Villager.AI.Work
             var nview = station.GetComponent<ZNetView>();
             if (nview == null || nview.GetZDO() == null) return false;
 
-            int slotCount = station.m_slots != null ? station.m_slots.Length : 0;
+            var slotCount = station.m_slots != null ? station.m_slots.Length : 0;
             var zdo = nview.GetZDO();
-            for (int i = 0; i < slotCount; i++)
-            {
-                if (string.IsNullOrEmpty(zdo.GetString("slot" + i, "")))
+            for (var i = 0; i < slotCount; i++)
+                if (string.IsNullOrEmpty(zdo.GetString("slot" + i)))
                     return true;
-            }
             return false;
         }
 
         /// <summary>
-        /// Find the first station of type T at the NPC's known CraftStation locations,
-        /// ordered by distance from bed. Returns position and component when filter passes.
+        ///     Find the first station of type T at the NPC's known CraftStation locations,
+        ///     ordered by distance from bed. Returns position and component when filter passes.
         /// </summary>
         public static bool TryFindStationAtKnownLocations<T>(
             IVillagerStationLookup ai,

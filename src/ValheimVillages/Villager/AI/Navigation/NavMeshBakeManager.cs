@@ -1,26 +1,26 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.AI;
 using ValheimVillages.Attributes;
 using ValheimVillages.Villager.AI.Pathfinding;
+using Object = UnityEngine.Object;
 
 namespace ValheimVillages.Villager.AI.Navigation
 {
     /// <summary>
-    /// Runtime NavMesh bake for the custom villager agent (slot 31).
-    ///
-    /// Valheim bakes the Humanoid agent (slot 1) for its own NPCs but the
-    /// custom slot 31 has no baked surface — `EnsureRegistered()` only adds
-    /// the settings, it does not bake. This manager owns the per-village bake
-    /// lifecycle: collect sources from colliders in the village bounds,
-    /// `BuildNavMeshData` for slot 31, and `AddNavMeshData` so that queries
-    /// against slot 31 (RegionBuilder, NavMeshLinkPlacer, patrol) return real
-    /// triangles instead of misses.
-    ///
-    /// One bake per `hna_partition` run; the previous instance is removed
-    /// before the next add so NavMesh data does not accumulate. Hot reload
-    /// cleanup via `[RegisterCleanup]`.
+    ///     Runtime NavMesh bake for the custom villager agent (slot 31).
+    ///     Valheim bakes the Humanoid agent (slot 1) for its own NPCs but the
+    ///     custom slot 31 has no baked surface — `EnsureRegistered()` only adds
+    ///     the settings, it does not bake. This manager owns the per-village bake
+    ///     lifecycle: collect sources from colliders in the village bounds,
+    ///     `BuildNavMeshData` for slot 31, and `AddNavMeshData` so that queries
+    ///     against slot 31 (RegionBuilder, NavMeshLinkPlacer, patrol) return real
+    ///     triangles instead of misses.
+    ///     One bake per `hna_partition` run; the previous instance is removed
+    ///     before the next add so NavMesh data does not accumulate. Hot reload
+    ///     cleanup via `[RegisterCleanup]`.
     /// </summary>
     public static class NavMeshBakeManager
     {
@@ -39,6 +39,24 @@ namespace ValheimVillages.Villager.AI.Navigation
         // after layer of village geometry across reloads.
         private const string HolderName = "VV_NavMeshBakeHolder";
         private static NavMeshBakeHolder s_holder;
+
+        private static readonly List<NavMeshBuildSource> s_terrainSources = new();
+        private static readonly List<NavMeshBuildSource> s_pieceSources = new();
+
+        /// <summary>
+        ///     Count of phantom door-blocker sources appended at the END of
+        ///     <see cref="s_pieceSources" /> for the most recent bake. Excluded
+        ///     from triangle extraction (they're synthetic obstacles, not
+        ///     extractable walkable geometry). Door blockers attach to the piece
+        ///     bake because doors are piece-adjacent.
+        /// </summary>
+        private static int s_piecePhantomCount;
+
+        private static readonly int s_terrainMask = LayerMask.GetMask("terrain");
+
+        private static readonly int s_pieceMask =
+            LayerMask.GetMask("Default", "static_solid", "piece");
+
         private static NavMeshBakeHolder Holder
         {
             get
@@ -53,6 +71,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                                ?? existing.AddComponent<NavMeshBakeHolder>();
                     return s_holder;
                 }
+
                 var go = new GameObject(HolderName);
                 Object.DontDestroyOnLoad(go);
                 go.hideFlags = HideFlags.HideInHierarchy;
@@ -61,42 +80,29 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
         }
 
-        private static readonly List<NavMeshBuildSource> s_terrainSources = new List<NavMeshBuildSource>();
-        private static readonly List<NavMeshBuildSource> s_pieceSources = new List<NavMeshBuildSource>();
+        /// <summary>Whether any bake is currently active.</summary>
+        public static bool HasBakedData => Holder.HasAny;
 
         /// <summary>
-        /// Count of phantom door-blocker sources appended at the END of
-        /// <see cref="s_pieceSources"/> for the most recent bake. Excluded
-        /// from triangle extraction (they're synthetic obstacles, not
-        /// extractable walkable geometry). Door blockers attach to the piece
-        /// bake because doors are piece-adjacent.
+        ///     Snapshot of the source list used by the most recent bake (terrain
+        ///     + piece concatenated). Diagnostics-only; per-kind callers should
+        ///     use <see cref="GetSources" />.
         /// </summary>
-        private static int s_piecePhantomCount;
-
-        private static readonly int s_terrainMask = LayerMask.GetMask("terrain");
-        private static readonly int s_pieceMask =
-            LayerMask.GetMask("Default", "static_solid", "piece");
-
-        public struct BakeResult
+        public static IReadOnlyList<NavMeshBuildSource> LastSources
         {
-            public bool Success;
-            public int SourceCount;
-            public int DoorsBlocked;
-            public float DurationMs;
-            public string FailureReason;
-
-            // Per-kind sub-counts so the caller can log each bake separately
-            // while still seeing the rollup totals in SourceCount / DurationMs.
-            public int TerrainSourceCount;
-            public int PieceSourceCount;
-            public float TerrainDurationMs;
-            public float PieceDurationMs;
+            get
+            {
+                var combined = new List<NavMeshBuildSource>(s_terrainSources.Count + s_pieceSources.Count);
+                combined.AddRange(s_terrainSources);
+                combined.AddRange(s_pieceSources);
+                return combined;
+            }
         }
 
         /// <summary>
-        /// Bake a fresh NavMesh for the villager agent over <paramref name="bounds"/>.
-        /// Two passes (terrain + piece) both register into slot 31; queries
-        /// union the results. Removes any previous bakes first.
+        ///     Bake a fresh NavMesh for the villager agent over <paramref name="bounds" />.
+        ///     Two passes (terrain + piece) both register into slot 31; queries
+        ///     union the results. Removes any previous bakes first.
         /// </summary>
         public static BakeResult BakeVillage(Bounds bounds)
         {
@@ -124,7 +130,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             var terrainSources = new List<NavMeshBuildSource>();
             NavMeshBuilder.CollectSources(
                 bounds, s_terrainMask, NavMeshCollectGeometry.PhysicsColliders,
-                defaultArea: 0, new List<NavMeshBuildMarkup>(), terrainSources);
+                0, new List<NavMeshBuildMarkup>(), terrainSources);
 
             s_terrainSources.Clear();
             s_terrainSources.AddRange(terrainSources);
@@ -136,6 +142,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     settings, terrainSources, bounds, Vector3.zero, Quaternion.identity);
                 if (data != null) Holder.SetTerrain(NavMesh.AddNavMeshData(data));
             }
+
             terrainSw.Stop();
             result.TerrainDurationMs = (float)terrainSw.Elapsed.TotalMilliseconds;
 
@@ -144,7 +151,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             var pieceSources = new List<NavMeshBuildSource>();
             NavMeshBuilder.CollectSources(
                 bounds, s_pieceMask, NavMeshCollectGeometry.PhysicsColliders,
-                defaultArea: 0, new List<NavMeshBuildMarkup>(), pieceSources);
+                0, new List<NavMeshBuildMarkup>(), pieceSources);
 
             // Add phantom solid blockers for every Door in bounds. Doors are
             // dynamic (rotate to open/close), but the bake snapshots one
@@ -155,7 +162,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             // orientation, ensuring the bake always sees the doorway as
             // solid. area=1 (NotWalkable) prevents the bake from making the
             // phantom's top face walkable.
-            int phantomDoors = AddDoorBlockers(pieceSources, bounds);
+            var phantomDoors = AddDoorBlockers(pieceSources, bounds);
             result.DoorsBlocked = phantomDoors;
 
             s_pieceSources.Clear();
@@ -169,6 +176,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     settings, pieceSources, bounds, Vector3.zero, Quaternion.identity);
                 if (data != null) Holder.SetPiece(NavMesh.AddNavMeshData(data));
             }
+
             pieceSw.Stop();
             result.PieceDurationMs = (float)pieceSw.Elapsed.TotalMilliseconds;
 
@@ -189,34 +197,17 @@ namespace ValheimVillages.Villager.AI.Navigation
             return result;
         }
 
-        /// <summary>Whether any bake is currently active.</summary>
-        public static bool HasBakedData => Holder.HasAny;
-
-        /// <summary>
-        /// Snapshot of the source list used by the most recent bake (terrain
-        /// + piece concatenated). Diagnostics-only; per-kind callers should
-        /// use <see cref="GetSources"/>.
-        /// </summary>
-        public static System.Collections.Generic.IReadOnlyList<NavMeshBuildSource> LastSources
+        public static IReadOnlyList<NavMeshBuildSource> GetSources(SurfaceKind kind)
         {
-            get
-            {
-                var combined = new List<NavMeshBuildSource>(s_terrainSources.Count + s_pieceSources.Count);
-                combined.AddRange(s_terrainSources);
-                combined.AddRange(s_pieceSources);
-                return combined;
-            }
+            return kind == SurfaceKind.Terrain ? (IReadOnlyList<NavMeshBuildSource>)s_terrainSources : s_pieceSources;
         }
 
-        public static System.Collections.Generic.IReadOnlyList<NavMeshBuildSource> GetSources(SurfaceKind kind)
-            => kind == SurfaceKind.Terrain ? (IReadOnlyList<NavMeshBuildSource>)s_terrainSources : s_pieceSources;
-
         /// <summary>
-        /// Extract a triangulation (vertices + indices, world space) from
-        /// every cached source list (terrain + piece concatenated). Diagnostics
-        /// path only; per-kind callers should use the
-        /// <see cref="ExtractBakedTriangles(SurfaceKind)"/> overload so they
-        /// can run separate filter passes.
+        ///     Extract a triangulation (vertices + indices, world space) from
+        ///     every cached source list (terrain + piece concatenated). Diagnostics
+        ///     path only; per-kind callers should use the
+        ///     <see cref="ExtractBakedTriangles(SurfaceKind)" /> overload so they
+        ///     can run separate filter passes.
         /// </summary>
         public static (Vector3[] vertices, int[] indices, int[] triangleLayers) ExtractBakedTriangles()
         {
@@ -226,30 +217,30 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (pv.Length == 0) return (tv, ti, tl);
 
             var verts = new Vector3[tv.Length + pv.Length];
-            System.Array.Copy(tv, 0, verts, 0, tv.Length);
-            System.Array.Copy(pv, 0, verts, tv.Length, pv.Length);
+            Array.Copy(tv, 0, verts, 0, tv.Length);
+            Array.Copy(pv, 0, verts, tv.Length, pv.Length);
 
             var idx = new int[ti.Length + pi.Length];
-            System.Array.Copy(ti, 0, idx, 0, ti.Length);
-            for (int i = 0; i < pi.Length; i++) idx[ti.Length + i] = pi[i] + tv.Length;
+            Array.Copy(ti, 0, idx, 0, ti.Length);
+            for (var i = 0; i < pi.Length; i++) idx[ti.Length + i] = pi[i] + tv.Length;
 
             var layers = new int[tl.Length + pl.Length];
-            System.Array.Copy(tl, 0, layers, 0, tl.Length);
-            System.Array.Copy(pl, 0, layers, tl.Length, pl.Length);
+            Array.Copy(tl, 0, layers, 0, tl.Length);
+            Array.Copy(pl, 0, layers, tl.Length, pl.Length);
 
             return (verts, idx, layers);
         }
 
         /// <summary>
-        /// Extract a triangulation (vertices + indices, world space) from the
-        /// source list of the requested kind. This is the canonical way to get
-        /// triangles for runtime-baked data: <c>NavMesh.CalculateTriangulation()</c>
-        /// returns only static scene-baked data, missing both Valheim's runtime
-        /// bakes and ours. Handles Mesh and Box source shapes; other shapes
-        /// (Sphere, Capsule, ModifierBox) are skipped — they're rare in Valheim
-        /// piece geometry. Phantom door blockers at the tail of the piece
-        /// sources are skipped (they're synthetic obstacles, not extractable
-        /// walkable geometry).
+        ///     Extract a triangulation (vertices + indices, world space) from the
+        ///     source list of the requested kind. This is the canonical way to get
+        ///     triangles for runtime-baked data: <c>NavMesh.CalculateTriangulation()</c>
+        ///     returns only static scene-baked data, missing both Valheim's runtime
+        ///     bakes and ours. Handles Mesh and Box source shapes; other shapes
+        ///     (Sphere, Capsule, ModifierBox) are skipped — they're rare in Valheim
+        ///     piece geometry. Phantom door blockers at the tail of the piece
+        ///     sources are skipped (they're synthetic obstacles, not extractable
+        ///     walkable geometry).
         /// </summary>
         public static (Vector3[] vertices, int[] indices, int[] triangleLayers) ExtractBakedTriangles(SurfaceKind kind)
         {
@@ -260,43 +251,53 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
         /// <summary>
-        /// Same as <see cref="ExtractBakedTriangles(SurfaceKind)"/> but drops
-        /// triangles whose centroid is outside the XZ bounds. Terrain meshes
-        /// are full Valheim TerrainComp tiles (~32m × ~32m each, ~8k tris
-        /// each); a village spanning 60m × 60m typically pulls in 4 tiles ≈
-        /// 32k tris of which ~80% are outside village bounds. Filtering at
-        /// extraction skips the per-triangle work RegionBuilder would have
-        /// otherwise wasted on rej_bounds.
+        ///     Same as <see cref="ExtractBakedTriangles(SurfaceKind)" /> but drops
+        ///     triangles whose centroid is outside the XZ bounds. Terrain meshes
+        ///     are full Valheim TerrainComp tiles (~32m × ~32m each, ~8k tris
+        ///     each); a village spanning 60m × 60m typically pulls in 4 tiles ≈
+        ///     32k tris of which ~80% are outside village bounds. Filtering at
+        ///     extraction skips the per-triangle work RegionBuilder would have
+        ///     otherwise wasted on rej_bounds.
         /// </summary>
         public static (Vector3[] vertices, int[] indices, int[] triangleLayers) ExtractBakedTriangles(
             SurfaceKind kind, float minX, float minZ, float maxX, float maxZ)
         {
             var sources = kind == SurfaceKind.Terrain ? s_terrainSources : s_pieceSources;
-            int phantom = kind == SurfaceKind.Piece ? s_piecePhantomCount : 0;
+            var phantom = kind == SurfaceKind.Piece ? s_piecePhantomCount : 0;
             if (sources.Count == 0)
-                return (System.Array.Empty<Vector3>(), System.Array.Empty<int>(), System.Array.Empty<int>());
+                return (Array.Empty<Vector3>(), Array.Empty<int>(), Array.Empty<int>());
 
             var verts = new List<Vector3>(sources.Count * 32);
             var idx = new List<int>(sources.Count * 96);
             var triLayers = new List<int>(sources.Count * 32);
-            int skippedUnreadable = 0;
-            int skippedShape = 0;
+            var skippedUnreadable = 0;
+            var skippedShape = 0;
 
-            int realCount = sources.Count - phantom;
-            for (int i = 0; i < realCount; i++)
+            var realCount = sources.Count - phantom;
+            for (var i = 0; i < realCount; i++)
             {
                 var src = sources[i];
                 // Layer is read from the source Collider's GameObject. Box
                 // sources we synthesize (door blockers) have no component
                 // and get -1; they're phantom obstacles and excluded from
                 // extraction by realCount anyway.
-                int layer = src.component != null ? src.component.gameObject.layer : -1;
+                var layer = src.component != null ? src.component.gameObject.layer : -1;
                 switch (src.shape)
                 {
                     case NavMeshBuildSourceShape.Mesh:
                         var mesh = src.sourceObject as Mesh;
-                        if (mesh == null) { skippedShape++; continue; }
-                        if (!mesh.isReadable) { skippedUnreadable++; continue; }
+                        if (mesh == null)
+                        {
+                            skippedShape++;
+                            continue;
+                        }
+
+                        if (!mesh.isReadable)
+                        {
+                            skippedUnreadable++;
+                            continue;
+                        }
+
                         AppendMesh(verts, idx, triLayers, layer, src.transform, mesh, minX, minZ, maxX, maxZ);
                         break;
                     case NavMeshBuildSourceShape.Box:
@@ -309,11 +310,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             if (skippedUnreadable > 0 || skippedShape > 0)
-            {
                 Plugin.Log?.LogDebug(
                     $"[NavMeshBake] extract({kind}): {skippedUnreadable} unreadable mesh(es) skipped, " +
                     $"{skippedShape} non-Mesh/Box source(s) skipped");
-            }
 
             // Terrain-only: weld coincident vertices across source meshes
             // (heightmap + cultivated_ground + paved_road + other terrain-
@@ -336,11 +335,11 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
         /// <summary>
-        /// In-place vertex welding via spatial hash. Vertices within the
-        /// same 5cm quantum bucket are unified to a single index. Triangle
-        /// indices are remapped accordingly. Unused vertices are NOT pruned
-        /// (they just become orphans in the vertex array — cheap to leave
-        /// since downstream only iterates triangles).
+        ///     In-place vertex welding via spatial hash. Vertices within the
+        ///     same 5cm quantum bucket are unified to a single index. Triangle
+        ///     indices are remapped accordingly. Unused vertices are NOT pruned
+        ///     (they just become orphans in the vertex array — cheap to leave
+        ///     since downstream only iterates triangles).
         /// </summary>
         private static void WeldCoincidentVertices(List<Vector3> verts, List<int> idx)
         {
@@ -351,17 +350,19 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             var posToIndex = new Dictionary<long, int>(verts.Count);
             var remap = new int[verts.Count];
-            for (int i = 0; i < verts.Count; i++)
+            for (var i = 0; i < verts.Count; i++)
             {
                 var v = verts[i];
                 long qx = Mathf.RoundToInt(v.x / weldQuantum);
                 long qy = Mathf.RoundToInt(v.y / weldQuantum);
                 long qz = Mathf.RoundToInt(v.z / weldQuantum);
-                long key = ((qx + bias) & mask) << 42
-                         | ((qy + bias) & mask) << 21
-                         | ((qz + bias) & mask);
-                if (posToIndex.TryGetValue(key, out int existing))
+                var key = (((qx + bias) & mask) << 42)
+                          | (((qy + bias) & mask) << 21)
+                          | ((qz + bias) & mask);
+                if (posToIndex.TryGetValue(key, out var existing))
+                {
                     remap[i] = existing;
+                }
                 else
                 {
                     posToIndex[key] = i;
@@ -369,17 +370,18 @@ namespace ValheimVillages.Villager.AI.Navigation
                 }
             }
 
-            int welded = 0;
-            for (int j = 0; j < idx.Count; j++)
+            var welded = 0;
+            for (var j = 0; j < idx.Count; j++)
             {
-                int oldIdx = idx[j];
-                int newIdx = remap[oldIdx];
+                var oldIdx = idx[j];
+                var newIdx = remap[oldIdx];
                 if (newIdx != oldIdx)
                 {
                     idx[j] = newIdx;
                     welded++;
                 }
             }
+
             Plugin.Log?.LogInfo(
                 $"[NavMeshBake] terrain weld: {welded} index refs re-pointed across " +
                 $"{verts.Count - posToIndex.Count} merged vertex positions " +
@@ -387,13 +389,13 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
         /// <summary>
-        /// Append a phantom solid box source for every <see cref="Door"/> in
-        /// bounds. These block the bake from producing NavMesh through
-        /// doorways regardless of the door's current open/closed orientation.
+        ///     Append a phantom solid box source for every <see cref="Door" /> in
+        ///     bounds. These block the bake from producing NavMesh through
+        ///     doorways regardless of the door's current open/closed orientation.
         /// </summary>
         private static int AddDoorBlockers(List<NavMeshBuildSource> sources, Bounds bounds)
         {
-            int added = 0;
+            var added = 0;
             var allDoors = Object.FindObjectsByType<Door>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
             foreach (var door in allDoors)
@@ -406,7 +408,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 // rotation so the thin axis aligns with the doorway plane.
                 // Slightly wider than a standard 1m Valheim door to ensure
                 // full blockage even at angled placements.
-                Matrix4x4 transform = Matrix4x4.TRS(
+                var transform = Matrix4x4.TRS(
                     door.transform.position + Vector3.up * 1.0f,
                     door.transform.rotation,
                     Vector3.one);
@@ -419,6 +421,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 });
                 added++;
             }
+
             return added;
         }
 
@@ -445,25 +448,44 @@ namespace ValheimVillages.Villager.AI.Navigation
             // dropped here; unused vertices are pruned by tracking which
             // local indices actually get used.
             var worldVerts = new Vector3[localVerts.Length];
-            for (int i = 0; i < localVerts.Length; i++)
+            for (var i = 0; i < localVerts.Length; i++)
                 worldVerts[i] = t.MultiplyPoint3x4(localVerts[i]);
 
             // Map local-index -> output-index (lazy, only for used vertices).
             var remap = new int[localVerts.Length];
-            for (int i = 0; i < remap.Length; i++) remap[i] = -1;
+            for (var i = 0; i < remap.Length; i++) remap[i] = -1;
 
-            for (int i = 0; i < localTris.Length; i += 3)
+            for (var i = 0; i < localTris.Length; i += 3)
             {
                 int li0 = localTris[i], li1 = localTris[i + 1], li2 = localTris[i + 2];
-                var v0 = worldVerts[li0]; var v1 = worldVerts[li1]; var v2 = worldVerts[li2];
-                float cx = (v0.x + v1.x + v2.x) * (1f / 3f);
-                float cz = (v0.z + v1.z + v2.z) * (1f / 3f);
+                var v0 = worldVerts[li0];
+                var v1 = worldVerts[li1];
+                var v2 = worldVerts[li2];
+                var cx = (v0.x + v1.x + v2.x) * (1f / 3f);
+                var cz = (v0.z + v1.z + v2.z) * (1f / 3f);
                 if (cx < minX || cx > maxX || cz < minZ || cz > maxZ) continue;
 
-                if (remap[li0] < 0) { remap[li0] = verts.Count; verts.Add(v0); }
-                if (remap[li1] < 0) { remap[li1] = verts.Count; verts.Add(v1); }
-                if (remap[li2] < 0) { remap[li2] = verts.Count; verts.Add(v2); }
-                idx.Add(remap[li0]); idx.Add(remap[li1]); idx.Add(remap[li2]);
+                if (remap[li0] < 0)
+                {
+                    remap[li0] = verts.Count;
+                    verts.Add(v0);
+                }
+
+                if (remap[li1] < 0)
+                {
+                    remap[li1] = verts.Count;
+                    verts.Add(v1);
+                }
+
+                if (remap[li2] < 0)
+                {
+                    remap[li2] = verts.Count;
+                    verts.Add(v2);
+                }
+
+                idx.Add(remap[li0]);
+                idx.Add(remap[li1]);
+                idx.Add(remap[li2]);
                 triLayers.Add(layer);
             }
         }
@@ -476,41 +498,42 @@ namespace ValheimVillages.Villager.AI.Navigation
             // are typically small (door blockers, piece colliders) so a
             // single-point center test is sufficient — partial-overlap boxes
             // would have been rejected by CollectSources' bounds anyway.
-            Vector3 worldCenter = t.MultiplyPoint3x4(Vector3.zero);
+            var worldCenter = t.MultiplyPoint3x4(Vector3.zero);
             if (worldCenter.x < minX || worldCenter.x > maxX ||
                 worldCenter.z < minZ || worldCenter.z > maxZ) return;
 
-            Vector3 h = size * 0.5f;
-            int b = verts.Count;
+            var h = size * 0.5f;
+            var b = verts.Count;
             verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x, -h.y, -h.z))); // 0
-            verts.Add(t.MultiplyPoint3x4(new Vector3( h.x, -h.y, -h.z))); // 1
-            verts.Add(t.MultiplyPoint3x4(new Vector3( h.x, -h.y,  h.z))); // 2
-            verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x, -h.y,  h.z))); // 3
-            verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x,  h.y, -h.z))); // 4
-            verts.Add(t.MultiplyPoint3x4(new Vector3( h.x,  h.y, -h.z))); // 5
-            verts.Add(t.MultiplyPoint3x4(new Vector3( h.x,  h.y,  h.z))); // 6
-            verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x,  h.y,  h.z))); // 7
+            verts.Add(t.MultiplyPoint3x4(new Vector3(h.x, -h.y, -h.z))); // 1
+            verts.Add(t.MultiplyPoint3x4(new Vector3(h.x, -h.y, h.z))); // 2
+            verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x, -h.y, h.z))); // 3
+            verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x, h.y, -h.z))); // 4
+            verts.Add(t.MultiplyPoint3x4(new Vector3(h.x, h.y, -h.z))); // 5
+            verts.Add(t.MultiplyPoint3x4(new Vector3(h.x, h.y, h.z))); // 6
+            verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x, h.y, h.z))); // 7
 
             // 6 faces × 2 triangles, counter-clockwise from outside.
-            int[] boxTris = {
-                0,1,2, 0,2,3,  // -Y bottom
-                4,6,5, 4,7,6,  // +Y top
-                0,5,1, 0,4,5,  // -Z back
-                2,7,3, 2,6,7,  // +Z front
-                0,3,7, 0,7,4,  // -X left
-                1,5,2, 5,6,2,  // +X right
+            int[] boxTris =
+            {
+                0, 1, 2, 0, 2, 3, // -Y bottom
+                4, 6, 5, 4, 7, 6, // +Y top
+                0, 5, 1, 0, 4, 5, // -Z back
+                2, 7, 3, 2, 6, 7, // +Z front
+                0, 3, 7, 0, 7, 4, // -X left
+                1, 5, 2, 5, 6, 2, // +X right
             };
-            for (int i = 0; i < boxTris.Length; i++)
+            for (var i = 0; i < boxTris.Length; i++)
                 idx.Add(b + boxTris[i]);
             // 12 triangles (6 faces × 2), all sharing this box's source layer.
-            for (int i = 0; i < 12; i++)
+            for (var i = 0; i < 12; i++)
                 triLayers.Add(layer);
         }
 
         /// <summary>
-        /// Remove the active bake's NavMesh data. Invoked automatically on
-        /// hot reload via <see cref="RegisterCleanupAttribute"/>; safe to call
-        /// when no bake is active.
+        ///     Remove the active bake's NavMesh data. Invoked automatically on
+        ///     hot reload via <see cref="RegisterCleanupAttribute" />; safe to call
+        ///     when no bake is active.
         /// </summary>
         [RegisterCleanup]
         public static void Clear()
@@ -522,22 +545,60 @@ namespace ValheimVillages.Villager.AI.Navigation
             s_pieceSources.Clear();
             s_piecePhantomCount = 0;
         }
+
+        public struct BakeResult
+        {
+            public bool Success;
+            public int SourceCount;
+            public int DoorsBlocked;
+            public float DurationMs;
+            public string FailureReason;
+
+            // Per-kind sub-counts so the caller can log each bake separately
+            // while still seeing the rollup totals in SourceCount / DurationMs.
+            public int TerrainSourceCount;
+            public int PieceSourceCount;
+            public float TerrainDurationMs;
+            public float PieceDurationMs;
+        }
     }
 
     /// <summary>
-    /// Owns the active <see cref="NavMeshDataInstance"/> handles for the
-    /// villager bake on a <see cref="Object.DontDestroyOnLoad"/> GameObject
-    /// named <c>VV_NavMeshBakeHolder</c>. New assemblies find the existing
-    /// holder by name so they inherit and can clean up the prior assembly's
-    /// bake instances. <see cref="OnDestroy"/> is a safety net for full
-    /// teardown (game exit, scene unload).
+    ///     Owns the active <see cref="NavMeshDataInstance" /> handles for the
+    ///     villager bake on a <see cref="Object.DontDestroyOnLoad" /> GameObject
+    ///     named <c>VV_NavMeshBakeHolder</c>. New assemblies find the existing
+    ///     holder by name so they inherit and can clean up the prior assembly's
+    ///     bake instances. <see cref="OnDestroy" /> is a safety net for full
+    ///     teardown (game exit, scene unload).
     /// </summary>
     internal class NavMeshBakeHolder : MonoBehaviour
     {
-        private NavMeshDataInstance m_terrain;
         private NavMeshDataInstance m_piece;
+        private NavMeshDataInstance m_terrain;
 
         internal bool HasAny => m_terrain.valid || m_piece.valid;
+
+        private void OnDestroy()
+        {
+            var removed = 0;
+            if (m_terrain.valid)
+            {
+                m_terrain.Remove();
+                m_terrain = default;
+                removed++;
+            }
+
+            if (m_piece.valid)
+            {
+                m_piece.Remove();
+                m_piece = default;
+                removed++;
+            }
+
+            if (removed > 0)
+                Plugin.Log?.LogInfo(
+                    $"[NavMeshBakeHolder] OnDestroy: removed {removed} orphaned NavMesh data instances");
+        }
 
         internal void SetTerrain(NavMeshDataInstance instance)
         {
@@ -553,27 +614,26 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         internal void RemoveTerrain()
         {
-            if (m_terrain.valid) { m_terrain.Remove(); m_terrain = default; }
+            if (m_terrain.valid)
+            {
+                m_terrain.Remove();
+                m_terrain = default;
+            }
         }
 
         internal void RemovePiece()
         {
-            if (m_piece.valid) { m_piece.Remove(); m_piece = default; }
+            if (m_piece.valid)
+            {
+                m_piece.Remove();
+                m_piece = default;
+            }
         }
 
         internal void RemoveAll()
         {
             RemoveTerrain();
             RemovePiece();
-        }
-
-        private void OnDestroy()
-        {
-            int removed = 0;
-            if (m_terrain.valid) { m_terrain.Remove(); m_terrain = default; removed++; }
-            if (m_piece.valid) { m_piece.Remove(); m_piece = default; removed++; }
-            if (removed > 0)
-                Plugin.Log?.LogInfo($"[NavMeshBakeHolder] OnDestroy: removed {removed} orphaned NavMesh data instances");
         }
     }
 }

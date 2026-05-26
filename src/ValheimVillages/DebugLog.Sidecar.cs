@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using BepInEx;
 
 namespace ValheimVillages
 {
@@ -14,26 +15,33 @@ namespace ValheimVillages
             {
                 // BepInEx.Paths.ConfigPath is available — write under <config>/vv_dumps
                 string root;
-                try { root = BepInEx.Paths.ConfigPath; }
-                catch { root = "."; }
+                try
+                {
+                    root = Paths.ConfigPath;
+                }
+                catch
+                {
+                    root = ".";
+                }
+
                 return Path.Combine(root, "vv_dumps");
             }
         }
 
         /// <summary>
-        /// Logs a (potentially large) collection as a compact one-line summary
-        /// and writes the full content to a sidecar JSON file named with a short
-        /// content hash. Re-emits are deduplicated: identical content -> same file,
-        /// written only once.
+        ///     Logs a (potentially large) collection as a compact one-line summary
+        ///     and writes the full content to a sidecar JSON file named with a short
+        ///     content hash. Re-emits are deduplicated: identical content -> same file,
+        ///     written only once.
         /// </summary>
         public static void List(string component, string name, IEnumerable<object> items)
         {
             var arr = items?.Select(i => i?.ToString() ?? "null").ToArray()
                       ?? new string[0];
-            string joined = string.Join(",", arr);
-            string sha = ShortSha(joined);
-            string dir = SidecarDir;
-            string file = Path.Combine(dir, $"{name}_{sha}.json");
+            var joined = string.Join(",", arr);
+            var sha = ShortSha(joined);
+            var dir = SidecarDir;
+            var file = Path.Combine(dir, $"{name}_{sha}.json");
             try
             {
                 Directory.CreateDirectory(dir);
@@ -41,16 +49,20 @@ namespace ValheimVillages
                 {
                     var sb = new StringBuilder();
                     sb.Append('[');
-                    for (int i = 0; i < arr.Length; i++)
+                    for (var i = 0; i < arr.Length; i++)
                     {
                         if (i > 0) sb.Append(',');
                         sb.Append('"').Append(JsonEscape(arr[i])).Append('"');
                     }
+
                     sb.Append(']');
                     File.WriteAllText(file, sb.ToString());
                 }
             }
-            catch { /* sidecar write failure must not break logging */ }
+            catch
+            {
+                /* sidecar write failure must not break logging */
+            }
 
             // Use Event so the summary line is structured + timestamped.
             Event(component, name,
@@ -63,15 +75,17 @@ namespace ValheimVillages
         {
             using (var h = SHA1.Create())
             {
-                byte[] b = h.ComputeHash(Encoding.UTF8.GetBytes(s ?? ""));
+                var b = h.ComputeHash(Encoding.UTF8.GetBytes(s ?? ""));
                 var sb = new StringBuilder(8);
-                for (int i = 0; i < 4; i++) sb.AppendFormat("{0:x2}", b[i]);
+                for (var i = 0; i < 4; i++) sb.AppendFormat("{0:x2}", b[i]);
                 return sb.ToString();
             }
         }
 
         private static string JsonEscape(string s)
-            => (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"")
-                        .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+        {
+            return (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"")
+                .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+        }
     }
 }

@@ -1,11 +1,11 @@
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 using ValheimVillages.Attributes;
-using ValheimVillages.Testing;
 using ValheimVillages.Enums;
-using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Schemas;
-using ValheimVillages.TaskQueue;
+using ValheimVillages.TaskQueue.ActivityLog;
+using ValheimVillages.Testing;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
@@ -22,8 +22,8 @@ namespace ValheimVillages.TaskQueue.Handlers
 
         public TaskResult Handle(VillagerTask task, VillagerActivityLog activityLog)
         {
-            float scheduledAt = GetScheduledAt(task);
-            float elapsed = Time.time - scheduledAt;
+            var scheduledAt = GetScheduledAt(task);
+            var elapsed = Time.time - scheduledAt;
 
             // Run after a short deferral; do not wait for NavMesh (baking disabled for built-in MoveTo/FindPath experiments).
             if (elapsed < DeferralSeconds)
@@ -37,8 +37,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                     NotBefore = Time.time + DeferralSeconds,
                     Attributes = new Dictionary<string, string>
                     {
-                        { AttrScheduledAt, scheduledAt.ToString("R") }
-                    }
+                        { AttrScheduledAt, scheduledAt.ToString("R") },
+                    },
                 });
                 return TaskResult.Ok();
             }
@@ -52,9 +52,9 @@ namespace ValheimVillages.TaskQueue.Handlers
         private static float GetScheduledAt(VillagerTask task)
         {
             if (task.Attributes != null &&
-                task.Attributes.TryGetValue(AttrScheduledAt, out string s) &&
-                float.TryParse(s, System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out float v))
+                task.Attributes.TryGetValue(AttrScheduledAt, out var s) &&
+                float.TryParse(s, NumberStyles.Float,
+                    CultureInfo.InvariantCulture, out var v))
                 return v;
 
             return task.CreatedAt;

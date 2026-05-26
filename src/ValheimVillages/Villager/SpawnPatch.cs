@@ -3,19 +3,19 @@ using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 using UnityEngine;
-using ValheimVillages.Schemas;
 using ValheimVillages.UI.Interaction;
-using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Registry;
 using ValheimVillages.Villager.Station;
+using Object = UnityEngine.Object;
+using Random = UnityEngine.Random;
 
 namespace ValheimVillages.Villager
 {
     /// <summary>
-    /// Single spawn path: handles using pawn items to spawn villagers at unclaimed beds.
-    /// Supports vv_pawn (random type), vv_farmer_pawn, vv_guard_pawn, vv_mountaineer_pawn, etc.
-    /// Adds Villager component and registers with Villager.AI.VillagerAIManager.
+    ///     Single spawn path: handles using pawn items to spawn villagers at unclaimed beds.
+    ///     Supports vv_pawn (random type), vv_farmer_pawn, vv_guard_pawn, vv_mountaineer_pawn, etc.
+    ///     Adds Villager component and registers with Villager.AI.VillagerAIManager.
     /// </summary>
     [HarmonyPatch(typeof(Humanoid), nameof(Humanoid.UseItem))]
     public static class VillagerPawnPatch
@@ -27,8 +27,8 @@ namespace ValheimVillages.Villager
         private static Dictionary<string, string> s_pawnItemToType;
 
         /// <summary>
-        /// Map of pawn item names to villager type, built from VillagerRegistry.
-        /// "vv_pawn" maps to null (random type).
+        ///     Map of pawn item names to villager type, built from VillagerRegistry.
+        ///     "vv_pawn" maps to null (random type).
         /// </summary>
         private static Dictionary<string, string> PawnItemToType
         {
@@ -41,8 +41,9 @@ namespace ValheimVillages.Villager
                 return s_pawnItemToType;
             }
         }
+
         /// <summary>
-        /// Logs all prefabs containing "dvergr" (case insensitive) for debugging.
+        ///     Logs all prefabs containing "dvergr" (case insensitive) for debugging.
         /// </summary>
         public static void LogAvailableDvergrPrefabs()
         {
@@ -59,10 +60,7 @@ namespace ValheimVillages.Villager
                 .ToList();
 
             Plugin.Log?.LogInfo($"Found {dvergrPrefabs.Count} Dvergr prefabs:");
-            foreach (var name in dvergrPrefabs)
-            {
-                Plugin.Log?.LogInfo($"  - {name}");
-            }
+            foreach (var name in dvergrPrefabs) Plugin.Log?.LogInfo($"  - {name}");
         }
 
         [HarmonyPrefix]
@@ -73,10 +71,10 @@ namespace ValheimVillages.Villager
                 return true;
 
             // Only intercept our pawn items (by name or custom data)
-            string itemName = item?.m_dropPrefab?.name;
+            var itemName = item?.m_dropPrefab?.name;
             if (itemName == null)
                 return true;
-            bool hasCustomType = item.m_customData != null && item.m_customData.ContainsKey(VillagerTypeKey);
+            var hasCustomType = item.m_customData != null && item.m_customData.ContainsKey(VillagerTypeKey);
             if (!hasCustomType && !PawnItemToType.ContainsKey(itemName))
                 return true;
 
@@ -91,7 +89,7 @@ namespace ValheimVillages.Villager
                 return true;
 
             // Check if the bed is unclaimed (owner stored in ZDO)
-            var bedZdoId = bed.GetComponent<ZNetView>()?.GetZDO()?.GetLong("owner", 0L) ?? 0L;
+            var bedZdoId = bed.GetComponent<ZNetView>()?.GetZDO()?.GetLong("owner") ?? 0L;
             if (bedZdoId != 0L)
             {
                 player.Message(MessageHud.MessageType.Center, "This bed is already claimed");
@@ -111,13 +109,18 @@ namespace ValheimVillages.Villager
             if (item.m_customData != null && item.m_customData.ContainsKey(VillagerTypeKey))
             {
                 villagerType = item.m_customData[VillagerTypeKey];
-                villagerPrefab = item.m_customData != null && item.m_customData.TryGetValue(VillagerPrefabKey, out var p) ? p : DefaultPrefab;
+                villagerPrefab =
+                    item.m_customData != null && item.m_customData.TryGetValue(VillagerPrefabKey, out var p)
+                        ? p
+                        : DefaultPrefab;
             }
             else
             {
                 PawnItemToType.TryGetValue(item?.m_dropPrefab?.name ?? "", out var mappedType);
                 if (mappedType != null)
+                {
                     villagerType = mappedType;
+                }
                 else
                 {
                     var types = VillagerRegistry.Definitions.Keys.ToList();
@@ -126,8 +129,10 @@ namespace ValheimVillages.Villager
                         Plugin.Log?.LogError("No villager types in registry");
                         return false;
                     }
-                    villagerType = types[UnityEngine.Random.Range(0, types.Count)];
+
+                    villagerType = types[Random.Range(0, types.Count)];
                 }
+
                 var def = VillagerRegistry.Get(villagerType);
                 villagerPrefab = !string.IsNullOrEmpty(def?.preferredPrefab) ? def.preferredPrefab : DefaultPrefab;
             }
@@ -152,7 +157,7 @@ namespace ValheimVillages.Villager
             var spawnRot = bed.transform.rotation;
 
             // Instantiate the NPC
-            var npcObject = UnityEngine.Object.Instantiate(prefab, spawnPos, spawnRot);
+            var npcObject = Object.Instantiate(prefab, spawnPos, spawnRot);
             if (npcObject == null)
             {
                 Plugin.Log?.LogError("Failed to instantiate NPC");
@@ -180,11 +185,12 @@ namespace ValheimVillages.Villager
             if (npcZnetView == null || npcZnetView.GetZDO() == null)
             {
                 Plugin.Log?.LogError("Spawned NPC has no ZNetView/ZDO");
-                UnityEngine.Object.Destroy(npcObject);
+                Object.Destroy(npcObject);
                 return false;
             }
+
             var npcZdoId = npcZnetView.GetZDO().m_uid;
-            string uniqueId = Guid.NewGuid().ToString();
+            var uniqueId = Guid.NewGuid().ToString();
             npcZnetView.GetZDO().Set("vv_villager_id", uniqueId);
             npcZnetView.GetZDO().Set("vv_villager_type", villagerType);
             npcZnetView.GetZDO().Set("vv_villager_name", villagerDef.displayName);
@@ -207,15 +213,15 @@ namespace ValheimVillages.Villager
             // VillagerInteract replace them entirely.
             var monsterAI = npcObject.GetComponent<MonsterAI>();
             if (monsterAI != null)
-                UnityEngine.Object.DestroyImmediate(monsterAI);
+                Object.DestroyImmediate(monsterAI);
 
             var npcTalk = npcObject.GetComponent<NpcTalk>();
             if (npcTalk != null)
-                UnityEngine.Object.DestroyImmediate(npcTalk);
+                Object.DestroyImmediate(npcTalk);
 
             var tameable = npcObject.GetComponent<Tameable>();
             if (tameable != null)
-                UnityEngine.Object.DestroyImmediate(tameable);
+                Object.DestroyImmediate(tameable);
 
             // Add Villager component (Awake adds VillagerAI and registers with VillagerAIManager)
             npcObject.AddComponent<Villager>();
@@ -239,17 +245,14 @@ namespace ValheimVillages.Villager
                 if (playerInventory != null && item != null)
                 {
                     if (playerInventory.RemoveOneItem(item))
-                    {
                         Plugin.Log?.LogInfo("Consumed vv_pawn item from inventory");
-                    }
                     else
-                    {
                         Plugin.Log?.LogWarning("Failed to remove vv_pawn item from inventory");
-                    }
                 }
                 else
                 {
-                    Plugin.Log?.LogWarning($"Cannot remove item: playerInventory={playerInventory != null}, item={item != null}");
+                    Plugin.Log?.LogWarning(
+                        $"Cannot remove item: playerInventory={playerInventory != null}, item={item != null}");
                 }
             }
             catch (Exception ex)
@@ -262,6 +265,5 @@ namespace ValheimVillages.Villager
 
             return true;
         }
-
     }
 }

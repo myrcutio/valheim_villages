@@ -9,10 +9,10 @@ using ValheimVillages.Villages;
 namespace ValheimVillages.Behaviors.Patrol
 {
     /// <summary>
-    /// Manages patrol route discovery.
-    /// Phase 1 (Scouting): Detect perimeter instantly via exterior-inward raycasts, then walk toward wall.
-    /// Phase 2 (CircuitTracing): Trace circle around bed creating waypoints, raycasting from exterior
-    /// inward at each angle so the first wall hit is always the outermost perimeter wall.
+    ///     Manages patrol route discovery.
+    ///     Phase 1 (Scouting): Detect perimeter instantly via exterior-inward raycasts, then walk toward wall.
+    ///     Phase 2 (CircuitTracing): Trace circle around bed creating waypoints, raycasting from exterior
+    ///     inward at each angle so the first wall hit is always the outermost perimeter wall.
     /// </summary>
     public class PatrolDiscovery
     {
@@ -29,13 +29,13 @@ namespace ValheimVillages.Behaviors.Patrol
 
         private readonly VillagerAI m_ai;
         private readonly Vector3 m_bedPosition;
-        private Vector3 m_scoutDirection;
-        private bool m_perimeterDetected;
-        private float m_patrolRadius;
-        private float m_currentAngle;
-        private float m_startAngle;
         private readonly List<Vector3> m_waypoints = new();
         private bool m_circuitStarted;
+        private float m_currentAngle;
+        private float m_patrolRadius;
+        private bool m_perimeterDetected;
+        private Vector3 m_scoutDirection;
+        private float m_startAngle;
 
         public PatrolDiscovery(VillagerAI ai, Vector3 bedPosition)
         {
@@ -50,8 +50,9 @@ namespace ValheimVillages.Behaviors.Patrol
 
         public void BeginScouting()
         {
-            float angle = Random.Range(0f, 360f);
-            m_scoutDirection = new Vector3(Mathf.Cos(angle * Mathf.Deg2Rad), 0f, Mathf.Sin(angle * Mathf.Deg2Rad)).normalized;
+            var angle = Random.Range(0f, 360f);
+            m_scoutDirection = new Vector3(Mathf.Cos(angle * Mathf.Deg2Rad), 0f, Mathf.Sin(angle * Mathf.Deg2Rad))
+                .normalized;
 
             // Instant perimeter detection: raycast from exterior inward
             if (RaycastPerimeterFromExterior(m_scoutDirection, PerimeterProbeDistance, out var hit))
@@ -64,7 +65,8 @@ namespace ValheimVillages.Behaviors.Patrol
             else
             {
                 m_patrolRadius = MaxScoutDistance;
-                Plugin.Log?.LogInfo($"[Patrol:{m_ai.NpcName}] No outer wall found, using max radius {m_patrolRadius:F1}m");
+                Plugin.Log?.LogInfo(
+                    $"[Patrol:{m_ai.NpcName}] No outer wall found, using max radius {m_patrolRadius:F1}m");
             }
 
             m_perimeterDetected = true;
@@ -74,8 +76,10 @@ namespace ValheimVillages.Behaviors.Patrol
             Plugin.Log?.LogInfo($"[Patrol:{m_ai.NpcName}] Scouting in direction {m_scoutDirection}");
         }
 
-        /// <summary>Returns true when scouting is complete. Perimeter is detected instantly
-        /// in BeginScouting, so this returns true on first call to transition to circuit tracing.</summary>
+        /// <summary>
+        ///     Returns true when scouting is complete. Perimeter is detected instantly
+        ///     in BeginScouting, so this returns true on first call to transition to circuit tracing.
+        /// </summary>
         public bool UpdateScouting()
         {
             return m_perimeterDetected;
@@ -116,7 +120,7 @@ namespace ValheimVillages.Behaviors.Patrol
 
             if (m_circuitStarted && m_waypoints.Count >= 3)
             {
-                float distToFirst = Vector2.Distance(
+                var distToFirst = Vector2.Distance(
                     new Vector2(m_ai.Position.x, m_ai.Position.z),
                     new Vector2(m_waypoints[0].x, m_waypoints[0].z));
 
@@ -134,8 +138,8 @@ namespace ValheimVillages.Behaviors.Patrol
         }
 
         /// <summary>
-        /// Skip to the next arc point without creating a waypoint.
-        /// Used for stall recovery when the patroller can't reach the current target.
+        ///     Skip to the next arc point without creating a waypoint.
+        ///     Used for stall recovery when the patroller can't reach the current target.
         /// </summary>
         public void SkipToNextArcPoint()
         {
@@ -154,14 +158,14 @@ namespace ValheimVillages.Behaviors.Patrol
             var currentPos = m_ai.Position;
 
             Vector3 candidate;
-            bool nearPerimeter = false;
+            var nearPerimeter = false;
 
             // Raycast from exterior inward to find the outermost wall at this angle
-            float probeDist = m_patrolRadius + ExteriorProbeOffset;
+            var probeDist = m_patrolRadius + ExteriorProbeOffset;
             if (RaycastPerimeterFromExterior(direction, probeDist, out var hit))
             {
                 // Place waypoint just inside the outer wall
-                var inward = (m_bedPosition - hit.point);
+                var inward = m_bedPosition - hit.point;
                 inward.y = 0f;
                 inward = inward.normalized;
                 candidate = hit.point + inward * WallInsetDistance;
@@ -180,10 +184,10 @@ namespace ValheimVillages.Behaviors.Patrol
 
         private void AdvanceToNextArcPoint()
         {
-            float angleStep = WaypointSpacing / Mathf.Max(m_patrolRadius, 1f);
-            float probeDist = m_patrolRadius + ExteriorProbeOffset;
+            var angleStep = WaypointSpacing / Mathf.Max(m_patrolRadius, 1f);
+            var probeDist = m_patrolRadius + ExteriorProbeOffset;
 
-            for (int i = 0; i < MaxAngleSkips; i++)
+            for (var i = 0; i < MaxAngleSkips; i++)
             {
                 m_currentAngle += angleStep;
                 var dir = new Vector3(Mathf.Cos(m_currentAngle), 0f, Mathf.Sin(m_currentAngle));
@@ -192,7 +196,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 Vector3 target;
                 if (RaycastPerimeterFromExterior(dir, probeDist, out var hit))
                 {
-                    var inward = (m_bedPosition - hit.point);
+                    var inward = m_bedPosition - hit.point;
                     inward.y = 0f;
                     inward = inward.normalized;
                     target = hit.point + inward * WallInsetDistance;
@@ -219,14 +223,14 @@ namespace ValheimVillages.Behaviors.Patrol
             Plugin.Log?.LogError(
                 $"[Patrol:{m_ai.NpcName}] AdvanceToNextArcPoint failed after {MaxAngleSkips} skips: " +
                 $"bed=({m_bedPosition.x:F2},{m_bedPosition.y:F2},{m_bedPosition.z:F2}) " +
-                $"angleRad={m_currentAngle:F4} angleDeg={(m_currentAngle * Mathf.Rad2Deg):F2} " +
+                $"angleRad={m_currentAngle:F4} angleDeg={m_currentAngle * Mathf.Rad2Deg:F2} " +
                 $"radius={m_patrolRadius:F2}. Dropping arc point, transitioning to Idle.");
             m_ai.SetState(BehaviorState.Idle);
         }
 
         /// <summary>
-        /// Raycast from a point far outside the village inward toward the bed center.
-        /// The nearest wall hit from the exterior is always the outermost perimeter wall.
+        ///     Raycast from a point far outside the village inward toward the bed center.
+        ///     The nearest wall hit from the exterior is always the outermost perimeter wall.
         /// </summary>
         private bool RaycastPerimeterFromExterior(Vector3 direction, float probeDistance, out RaycastHit wallHit)
         {
@@ -234,14 +238,14 @@ namespace ValheimVillages.Behaviors.Patrol
             var origin = m_bedPosition + direction * probeDistance;
 
             // Get terrain height at the exterior probe point, 1m above ground
-            float height = m_bedPosition.y;
+            var height = m_bedPosition.y;
             if (ZoneSystem.instance != null &&
-                ZoneSystem.instance.GetSolidHeight(origin, out float h, 1000))
+                ZoneSystem.instance.GetSolidHeight(origin, out var h))
                 height = h;
             origin.y = height + 1f;
 
             // Raycast horizontally inward toward the bed center
-            var inward = (m_bedPosition - origin);
+            var inward = m_bedPosition - origin;
             inward.y = 0f;
             inward = inward.normalized;
 
@@ -249,9 +253,9 @@ namespace ValheimVillages.Behaviors.Patrol
         }
 
         /// <summary>
-        /// Snap a candidate position to the NavMesh. When near the village perimeter (wall-adjacent),
-        /// probes from above to prefer elevated surfaces like wall tops. Otherwise probes at
-        /// candidate height to stay at ground level.
+        ///     Snap a candidate position to the NavMesh. When near the village perimeter (wall-adjacent),
+        ///     probes from above to prefer elevated surfaces like wall tops. Otherwise probes at
+        ///     candidate height to stay at ground level.
         /// </summary>
         private static bool SnapToNavMesh(Vector3 candidate, bool preferElevated, out Vector3 snapped)
         {
@@ -260,18 +264,19 @@ namespace ValheimVillages.Behaviors.Patrol
             filter.agentTypeID = VillagerAgentType.ResolveValheimHumanoidAgentTypeID();
             filter.areaMask = NavMesh.AllAreas;
 
-            float probeY = preferElevated ? candidate.y + NavMeshProbeHeight : candidate.y;
+            var probeY = preferElevated ? candidate.y + NavMeshProbeHeight : candidate.y;
             var probe = new Vector3(candidate.x, probeY, candidate.z);
-            if (NavMesh.SamplePosition(probe, out NavMeshHit hit, NavMeshProbeRadius, filter))
+            if (NavMesh.SamplePosition(probe, out var hit, NavMeshProbeRadius, filter))
             {
                 snapped = hit.position;
                 return true;
             }
+
             return false;
         }
 
         /// <summary>
-        /// Check if a target position is reachable from the patroller via a complete NavMesh path.
+        ///     Check if a target position is reachable from the patroller via a complete NavMesh path.
         /// </summary>
         private bool IsReachableFromPatroller(Vector3 target)
         {
@@ -279,8 +284,8 @@ namespace ValheimVillages.Behaviors.Patrol
             filter.agentTypeID = VillagerAgentType.ResolveValheimHumanoidAgentTypeID();
             filter.areaMask = NavMesh.AllAreas;
 
-            if (!NavMesh.SamplePosition(m_ai.Position, out NavMeshHit srcHit, 5f, filter)) return false;
-            if (!NavMesh.SamplePosition(target, out NavMeshHit dstHit, 5f, filter)) return false;
+            if (!NavMesh.SamplePosition(m_ai.Position, out var srcHit, 5f, filter)) return false;
+            if (!NavMesh.SamplePosition(target, out var dstHit, 5f, filter)) return false;
 
             var path = new NavMeshPath();
             NavMesh.CalculatePath(srcHit.position, dstHit.position, filter, path);

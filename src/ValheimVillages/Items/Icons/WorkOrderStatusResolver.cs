@@ -1,30 +1,30 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Settings;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Work;
-using ValheimVillages.Settings;
 
 namespace ValheimVillages.Items.Icons
 {
     /// <summary>
-    /// Determines the visual status of a work order item by checking
-    /// container output quantities, active villager work, and recipe availability.
-    /// Accepts a pre-scanned container list to avoid redundant physics queries
-    /// when resolving many work orders at the same position.
+    ///     Determines the visual status of a work order item by checking
+    ///     container output quantities, active villager work, and recipe availability.
+    ///     Accepts a pre-scanned container list to avoid redundant physics queries
+    ///     when resolving many work orders at the same position.
     /// </summary>
     public static class WorkOrderStatusResolver
     {
         /// <summary>
-        /// Resolve the status of a work order item.
+        ///     Resolve the status of a work order item.
         /// </summary>
         /// <param name="item">The work order item with custom data.</param>
         /// <param name="containerPos">
-        /// Position used for container scanning if <paramref name="containers"/>
-        /// is null. Pass null when in player inventory away from village.
+        ///     Position used for container scanning if <paramref name="containers" />
+        ///     is null. Pass null when in player inventory away from village.
         /// </param>
         /// <param name="containers">
-        /// Pre-scanned nearby containers. When provided, skips the physics
-        /// query (avoids O(n) scans for n work orders at the same spot).
+        ///     Pre-scanned nearby containers. When provided, skips the physics
+        ///     query (avoids O(n) scans for n work orders at the same spot).
         /// </param>
         public static WorkOrderStatus Resolve(
             ItemDrop.ItemData item,
@@ -41,7 +41,7 @@ namespace ValheimVillages.Items.Icons
                 || string.IsNullOrEmpty(station))
                 return WorkOrderStatus.Pending;
 
-            int max = 10;
+            var max = 10;
             if (item.m_customData.TryGetValue("wo_max", out var maxStr))
                 int.TryParse(maxStr, out max);
 
@@ -51,14 +51,12 @@ namespace ValheimVillages.Items.Icons
 
             // Lazily scan containers if not pre-supplied
             if (containers == null && containerPos.HasValue)
-            {
                 containers = ContainerScanner.FindNearbyContainers(
-                    containerPos.Value, ValheimVillages.Settings.WorkSettings.ChestScanRadius);
-            }
+                    containerPos.Value, WorkSettings.ChestScanRadius);
 
             if (containers != null && containers.Count > 0)
             {
-                int existing = ContainerScanner.CountAcrossContainers(
+                var existing = ContainerScanner.CountAcrossContainers(
                     containers, itemPrefab);
                 if (existing >= max)
                     return WorkOrderStatus.Completed;
@@ -86,6 +84,7 @@ namespace ValheimVillages.Items.Icons
                 if (cb.CurrentItemPrefab == itemPrefab)
                     return true;
             }
+
             return false;
         }
 

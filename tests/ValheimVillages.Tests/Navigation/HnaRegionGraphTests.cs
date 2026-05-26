@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Villager.AI.Navigation;
 using Xunit;
@@ -6,7 +5,7 @@ using Xunit;
 namespace ValheimVillages.Tests.Navigation;
 
 /// <summary>
-/// Tests for RegionGraph instance methods: PointToRegionId, GetBoundaryCells, GetLinksFromRegion.
+///     Tests for RegionGraph instance methods: PointToRegionId, GetBoundaryCells, GetLinksFromRegion.
 /// </summary>
 public class RegionGraphTests
 {
@@ -31,7 +30,7 @@ public class RegionGraphTests
         var graph = BuildGraph(0f, 0f, regions);
 
         // Cell center is at (0.5*3, 0.5*3) = (1.5, 1.5), height bucket 5 = y in [10, 12)
-        string result = graph.PointToRegionId(new Vector3(1.5f, 10.5f, 1.5f));
+        var result = graph.PointToRegionId(new Vector3(1.5f, 10.5f, 1.5f));
         Assert.Equal("0_0_h5", result);
     }
 
@@ -41,7 +40,7 @@ public class RegionGraphTests
         var regions = new HashSet<string> { "0_0_h0" };
         var graph = BuildGraph(0f, 0f, regions);
 
-        string result = graph.PointToRegionId(new Vector3(100f, 0f, 100f));
+        var result = graph.PointToRegionId(new Vector3(100f, 0f, 100f));
         Assert.Null(result);
     }
 
@@ -53,7 +52,7 @@ public class RegionGraphTests
         var regions = new HashSet<string> { "0_0_h0" };
         var graph = BuildGraph(0f, 0f, regions);
 
-        string result = graph.PointToRegionId(new Vector3(1.5f, 8f, 1.5f));
+        var result = graph.PointToRegionId(new Vector3(1.5f, 8f, 1.5f));
         Assert.Null(result);
     }
 
@@ -64,7 +63,7 @@ public class RegionGraphTests
         var regions = new HashSet<string> { "0_0_h5" };
         var graph = BuildGraph(0f, 0f, regions);
 
-        string result = graph.PointToRegionId(new Vector3(1.5f, 11.9f, 1.5f));
+        var result = graph.PointToRegionId(new Vector3(1.5f, 11.9f, 1.5f));
         Assert.Equal("0_0_h5", result);
     }
 
@@ -76,7 +75,7 @@ public class RegionGraphTests
         var graph = BuildGraph(0f, 0f, regions);
 
         // y=9.5 → bucket 4, search checks bucket 4 (exact), then 5 (d=+1) → match
-        string result = graph.PointToRegionId(new Vector3(1.5f, 9.5f, 1.5f));
+        var result = graph.PointToRegionId(new Vector3(1.5f, 9.5f, 1.5f));
         Assert.Equal("0_0_h5", result);
     }
 
@@ -100,7 +99,7 @@ public class RegionGraphTests
         var regions = new HashSet<string> { "0_0_h0", "1_0_h0", "2_0_h0" };
         var heights = new Dictionary<string, float>
         {
-            { "0_0_h0", 0f }, { "1_0_h0", 0f }, { "2_0_h0", 0f }
+            { "0_0_h0", 0f }, { "1_0_h0", 0f }, { "2_0_h0", 0f },
         };
         var graph = BuildGraph(0f, 0f, regions, cellHeights: heights);
 
@@ -120,13 +119,14 @@ public class RegionGraphTests
         // 3x3 block: the center cell (1,1) has no exterior neighbors
         var regions = new HashSet<string>();
         var heights = new Dictionary<string, float>();
-        for (int x = 0; x < 3; x++)
-        for (int z = 0; z < 3; z++)
+        for (var x = 0; x < 3; x++)
+        for (var z = 0; z < 3; z++)
         {
             string id = RegionGraph.CellKey(x, z, 0);
             regions.Add(id);
             heights[id] = 0f;
         }
+
         var graph = BuildGraph(0f, 0f, regions, cellHeights: heights);
 
         var boundary = graph.GetBoundaryCells();
@@ -162,8 +162,8 @@ public class RegionGraphTests
                 ToRegionId = "1_0_h0",
                 LinkType = HnaLinkType.Door,
                 PositionStart = new Vector3(1, 0, 0),
-                PositionEnd = new Vector3(2, 0, 0)
-            }
+                PositionEnd = new Vector3(2, 0, 0),
+            },
         };
         var graph = BuildGraph(0f, 0f, regions, links);
 

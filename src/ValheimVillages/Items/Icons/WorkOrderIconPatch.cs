@@ -1,18 +1,16 @@
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
-using UnityEngine;
-using ValheimVillages.Items.Icons;
-using ValheimVillages.Villager.AI.Work;
 using ValheimVillages.Settings;
+using ValheimVillages.Villager.AI.Work;
 
 namespace ValheimVillages.Items.Icons
 {
     /// <summary>
-    /// Re-applies production item overlays and status badges on work order
-    /// icons when the inventory or container UI is opened. Handles game load
-    /// and scene transitions where composited textures are lost but
-    /// m_customData persists.
+    ///     Re-applies production item overlays and status badges on work order
+    ///     icons when the inventory or container UI is opened. Handles game load
+    ///     and scene transitions where composited textures are lost but
+    ///     m_customData persists.
     /// </summary>
     [HarmonyPatch]
     public static class WorkOrderIconPatch
@@ -62,11 +60,9 @@ namespace ValheimVillages.Items.Icons
         private static Container GetCurrentContainer(InventoryGui gui)
         {
             if (_containerField == null)
-            {
                 _containerField = typeof(InventoryGui).GetField(
                     "m_currentContainer",
                     BindingFlags.NonPublic | BindingFlags.Instance);
-            }
             return _containerField?.GetValue(gui) as Container;
         }
     }

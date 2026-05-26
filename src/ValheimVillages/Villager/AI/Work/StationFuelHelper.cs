@@ -4,8 +4,8 @@ using UnityEngine;
 namespace ValheimVillages.Villager.AI.Work
 {
     /// <summary>
-    /// Fuel requirement for a cooking station: either fire underneath (Fireplace)
-    /// or internal fuel (CookingStation.m_useFuel).
+    ///     Fuel requirement for a cooking station: either fire underneath (Fireplace)
+    ///     or internal fuel (CookingStation.m_useFuel).
     /// </summary>
     public struct FuelNeed
     {
@@ -18,29 +18,29 @@ namespace ValheimVillages.Villager.AI.Work
     }
 
     /// <summary>
-    /// Helpers for diagnosing and resolving fuel requirements on cooking stations.
+    ///     Helpers for diagnosing and resolving fuel requirements on cooking stations.
     /// </summary>
     public static class StationFuelHelper
     {
         private const float FireplaceSearchRadius = 3f;
 
         /// <summary>
-        /// Determines whether the station needs fueling (fire underneath, internal fuel, or both).
-        /// Returns true when at least one fuel need was identified.
+        ///     Determines whether the station needs fueling (fire underneath, internal fuel, or both).
+        ///     Returns true when at least one fuel need was identified.
         /// </summary>
         /// <summary>
-        /// Determines whether the station needs fueling (fire underneath, internal fuel, or both).
-        /// Server ready check is: (m_requireFire AND IsFireLit) OR (m_useFuel AND GetFuel > 0).
-        /// Either condition alone makes the station ready, so we try fire first and fall back to
-        /// internal fuel if the fireplace can't be found.
+        ///     Determines whether the station needs fueling (fire underneath, internal fuel, or both).
+        ///     Server ready check is: (m_requireFire AND IsFireLit) OR (m_useFuel AND GetFuel > 0).
+        ///     Either condition alone makes the station ready, so we try fire first and fall back to
+        ///     internal fuel if the fireplace can't be found.
         /// </summary>
         public static bool DiagnoseFuelNeed(CookingStation station, out FuelNeed need)
         {
             need = default;
             if (station == null) return false;
 
-            bool needsFire = station.m_requireFire && !StationFinder.IsCookingStationFireLit(station);
-            bool needsInternalFuel = station.m_useFuel && StationFinder.GetCookingStationFuel(station) <= 0;
+            var needsFire = station.m_requireFire && !StationFinder.IsCookingStationFireLit(station);
+            var needsInternalFuel = station.m_useFuel && StationFinder.GetCookingStationFuel(station) <= 0;
 
             if (!needsFire && !needsInternalFuel) return false;
 
@@ -68,8 +68,8 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Finds the Fireplace near a CookingStation that can accept fuel.
-        /// Searches around m_fireCheckPoints first, then around the station transform.
+        ///     Finds the Fireplace near a CookingStation that can accept fuel.
+        ///     Searches around m_fireCheckPoints first, then around the station transform.
         /// </summary>
         public static bool TryFindFireplaceNear(CookingStation station, out Fireplace fireplace)
         {
@@ -78,13 +78,10 @@ namespace ValheimVillages.Villager.AI.Work
 
             var searchPoints = new List<Vector3>();
             if (station.m_fireCheckPoints != null)
-            {
                 foreach (var pt in station.m_fireCheckPoints)
-                {
                     if (pt != null)
                         searchPoints.Add(pt.position);
-                }
-            }
+
             if (searchPoints.Count == 0)
                 searchPoints.Add(station.transform.position);
 
@@ -104,7 +101,7 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        /// Searches containers for at least 1 unit of the required fuel item.
+        ///     Searches containers for at least 1 unit of the required fuel item.
         /// </summary>
         public static bool FindFuelInContainers(
             List<Container> containers, string fuelPrefabName, out Container fuelContainer)

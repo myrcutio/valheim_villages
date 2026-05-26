@@ -2,37 +2,36 @@ using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Schemas;
-using ValheimVillages.Villager.AI;
+using ValheimVillages.UI.Interaction;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Registry;
 using ValheimVillages.Villager.Station;
-using ValheimVillages.UI.Interaction;
 
 namespace ValheimVillages.Villager
 {
     /// <summary>
-    /// Restores villager state after hot reload or zone load.
-    /// Strips native Dvergr components (MonsterAI, NpcTalk, Tameable)
-    /// and ensures all mod components are present.
+    ///     Restores villager state after hot reload or zone load.
+    ///     Strips native Dvergr components (MonsterAI, NpcTalk, Tameable)
+    ///     and ensures all mod components are present.
     /// </summary>
     public static class VillagerRestoration
     {
         private static readonly HashSet<string> s_restoredIds = new();
 
         /// <summary>
-        /// Restore villager state from ZDO using VillagerRegistry for definition lookup.
-        /// Strips native AI/talk/tame components and ensures all mod components are present.
+        ///     Restore villager state from ZDO using VillagerRegistry for definition lookup.
+        ///     Strips native AI/talk/tame components and ensures all mod components are present.
         /// </summary>
         public static bool Restore(GameObject go, ZDO zdo)
         {
             if (go == null || zdo == null) return false;
 
-            string uniqueId = zdo.GetString("vv_villager_id", "");
+            var uniqueId = zdo.GetString("vv_villager_id");
             if (string.IsNullOrEmpty(uniqueId)) return false;
 
             if (s_restoredIds.Contains(uniqueId)) return false;
 
-            string typeStr = zdo.GetString("vv_villager_type", "");
+            var typeStr = zdo.GetString("vv_villager_type");
             if (string.IsNullOrEmpty(typeStr))
             {
                 Plugin.Log?.LogWarning($"[VillagerRestoration] NPC {uniqueId} has no vv_villager_type, skipping");
@@ -66,8 +65,8 @@ namespace ValheimVillages.Villager
         }
 
         /// <summary>
-        /// Remove native Dvergr prefab components that conflict with our AI/talk/interaction.
-        /// Safe to call even if they've already been destroyed (e.g. after initial spawn).
+        ///     Remove native Dvergr prefab components that conflict with our AI/talk/interaction.
+        ///     Safe to call even if they've already been destroyed (e.g. after initial spawn).
         /// </summary>
         private static void StripNativeComponents(GameObject go)
         {
@@ -96,8 +95,8 @@ namespace ValheimVillages.Villager
         }
 
         /// <summary>
-        /// Ensure all mod components are present on the NPC GameObject.
-        /// Idempotent -- skips components that already exist.
+        ///     Ensure all mod components are present on the NPC GameObject.
+        ///     Idempotent -- skips components that already exist.
         /// </summary>
         private static void RestoreComponents(GameObject go, string uniqueId, string typeStr)
         {

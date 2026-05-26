@@ -1,13 +1,12 @@
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
-using ValheimVillages.Items.WorkOrders;
 using ValheimVillages.UI.Core;
 
 namespace ValheimVillages.UI.ContextMenus
 {
     /// <summary>
-    /// Holds references to the interactive UI elements in the work order panel.
+    ///     Holds references to the interactive UI elements in the work order panel.
     /// </summary>
     public struct WorkOrderMenuElements
     {
@@ -22,14 +21,16 @@ namespace ValheimVillages.UI.ContextMenus
     }
 
     /// <summary>
-    /// Builds the Unity UI panel hierarchy for the work order settings menu.
-    /// Uses VillagerUIFactory for Valheim-native styling.
+    ///     Builds the Unity UI panel hierarchy for the work order settings menu.
+    ///     Uses VillagerUIFactory for Valheim-native styling.
     /// </summary>
     public static class WorkOrderMenuBuilder
     {
         private const int MinQuota = 1;
+
         /// <summary>Slider cap (~2-3 full stacks). Input field is uncapped.</summary>
         private const int SliderMax = 100;
+
         private const float PanelWidth = 360f;
         private const float PanelHeight = 330f;
 
@@ -77,11 +78,11 @@ namespace ValheimVillages.UI.ContextMenus
             elements.RangeLabel = VillagerUIFactory.CreateLabel(
                 content, "Production Range: 1 - 10");
 
-            VillagerUIFactory.CreateSpacer(content, 8f);
+            VillagerUIFactory.CreateSpacer(content);
 
             // Save / Cancel buttons
             var btnRow = VillagerUIFactory.CreateHorizontalGroup(
-                content, 10f, 36f);
+                content, 10f);
             VillagerUIFactory.CreateButton(btnRow.transform, "Save", onSave);
             VillagerUIFactory.CreateButton(
                 btnRow.transform, "Cancel", onCancel);

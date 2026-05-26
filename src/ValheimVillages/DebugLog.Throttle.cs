@@ -1,38 +1,29 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 
 namespace ValheimVillages
 {
     internal static partial class DebugLog
     {
-        private sealed class ThrottleState
-        {
-            public int Suppressed;
-            public TimeSpan LastEmitted;
-            public bool EverEmitted;
-        }
-
-        private static readonly Dictionary<string, ThrottleState> _throttle =
-            new Dictionary<string, ThrottleState>();
+        private static readonly Dictionary<string, ThrottleState> _throttle = new();
 
         private static readonly TimeSpan DefaultThrottleWindow = TimeSpan.FromSeconds(10);
 
         /// <summary>
-        /// Like Event() but deduplicates by `key`. First call within a window
-        /// emits immediately; subsequent calls with the same key are suppressed.
-        /// The next emit after the window includes `suppressed=N` so no signal
-        /// is lost — only the volume is.
+        ///     Like Event() but deduplicates by `key`. First call within a window
+        ///     emits immediately; subsequent calls with the same key are suppressed.
+        ///     The next emit after the window includes `suppressed=N` so no signal
+        ///     is lost — only the volume is.
         /// </summary>
         public static void Throttled(string key, string component, string eventName,
-                                     params (string key, object val)[] kv)
+            params (string key, object val)[] kv)
         {
             ThrottledWindow(key, DefaultThrottleWindow, component, eventName, kv);
         }
 
         public static void ThrottledWindow(string key, TimeSpan window,
-                                           string component, string eventName,
-                                           params (string key, object val)[] kv)
+            string component, string eventName,
+            params (string key, object val)[] kv)
         {
             if (string.IsNullOrEmpty(key))
             {
@@ -52,9 +43,9 @@ namespace ValheimVillages
 
             lock (state)
             {
-                TimeSpan now = Elapsed();
-                bool firstEver = !state.EverEmitted;
-                bool windowElapsed = (now - state.LastEmitted) >= window;
+                var now = Elapsed();
+                var firstEver = !state.EverEmitted;
+                var windowElapsed = now - state.LastEmitted >= window;
 
                 if (firstEver || windowElapsed)
                 {
@@ -70,6 +61,7 @@ namespace ValheimVillages
                     {
                         Event(component, eventName, kv);
                     }
+
                     state.LastEmitted = now;
                     state.EverEmitted = true;
                     state.Suppressed = 0;
@@ -79,6 +71,13 @@ namespace ValheimVillages
                     state.Suppressed++;
                 }
             }
+        }
+
+        private sealed class ThrottleState
+        {
+            public bool EverEmitted;
+            public TimeSpan LastEmitted;
+            public int Suppressed;
         }
     }
 }

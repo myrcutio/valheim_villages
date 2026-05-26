@@ -1,23 +1,24 @@
 using UnityEngine;
 using ValheimVillages.Enums;
 using ValheimVillages.Schemas;
+using ValheimVillages.Settings;
 
 namespace ValheimVillages.Villager.AI
 {
     /// <summary>
-    /// Shared environment utilities for villager behaviors.
-    /// Context building and shelter detection used by multiple modules.
+    ///     Shared environment utilities for villager behaviors.
+    ///     Context building and shelter detection used by multiple modules.
     /// </summary>
     public static class VillagerBehaviorLogic
     {
         /// <summary>
-        /// Build current context from environment.
+        ///     Build current context from environment.
         /// </summary>
         public static BehaviorContext GetCurrentContext(VillagerAI ai)
         {
             var pos = ai.Position;
-            float dayFraction = EnvMan.instance != null ? EnvMan.instance.GetDayFraction() : 0.5f;
-            bool isRaining = EnvMan.instance != null && (EnvMan.IsWet() || EnvMan.instance.IsEnvironment("Rain"));
+            var dayFraction = EnvMan.instance != null ? EnvMan.instance.GetDayFraction() : 0.5f;
+            var isRaining = EnvMan.instance != null && (EnvMan.IsWet() || EnvMan.instance.IsEnvironment("Rain"));
 
             return new BehaviorContext
             {
@@ -25,24 +26,24 @@ namespace ValheimVillages.Villager.AI
                 TimeOfDay = GetTimeOfDay(dayFraction),
                 IsRaining = isRaining,
                 InShelter = CheckShelter(pos),
-                CurrentComfort = 0f
+                CurrentComfort = 0f,
             };
         }
 
         private static TimeOfDay GetTimeOfDay(float dayFraction)
         {
             // Sleep disabled for debugging — always return Day during night hours
-            if (dayFraction >= ValheimVillages.Settings.VillagerSettings.NightStart || dayFraction < ValheimVillages.Settings.VillagerSettings.MorningStart)
+            if (dayFraction >= VillagerSettings.NightStart || dayFraction < VillagerSettings.MorningStart)
                 return TimeOfDay.Evening; // Treat night as evening so NPCs stay awake
-            if (dayFraction < ValheimVillages.Settings.VillagerSettings.DayStart)
+            if (dayFraction < VillagerSettings.DayStart)
                 return TimeOfDay.Morning;
-            if (dayFraction < ValheimVillages.Settings.VillagerSettings.EveningStart)
+            if (dayFraction < VillagerSettings.EveningStart)
                 return TimeOfDay.Day;
             return TimeOfDay.Evening;
         }
 
         /// <summary>
-        /// Check if there is shelter overhead at the given position.
+        ///     Check if there is shelter overhead at the given position.
         /// </summary>
         public static bool CheckShelter(Vector3 position)
         {
@@ -51,6 +52,7 @@ namespace ValheimVillages.Villager.AI
                 if (hit.collider?.GetComponentInParent<Piece>() != null) return true;
                 if (hit.collider != null && hit.collider.gameObject.isStatic) return true;
             }
+
             return false;
         }
     }

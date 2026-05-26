@@ -1,13 +1,12 @@
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
-using ValheimVillages.Items;
 
 namespace ValheimVillages.Items.Fragments
 {
     /// <summary>
-    /// Injects ransom note fragments into chest loot tables.
-    /// Fragments match the biome where the chest is located.
+    ///     Injects ransom note fragments into chest loot tables.
+    ///     Fragments match the biome where the chest is located.
     /// </summary>
     [HarmonyPatch(typeof(Container), "Awake")]
     public static class FragmentLootPatch
@@ -17,8 +16,8 @@ namespace ValheimVillages.Items.Fragments
         private static Dictionary<Heightmap.Biome, string> s_biomeFragmentMap;
 
         /// <summary>
-        /// Maps Heightmap.Biome values to fragment item names,
-        /// derived from ItemFactory.FragmentBiomes.
+        ///     Maps Heightmap.Biome values to fragment item names,
+        ///     derived from ItemFactory.FragmentBiomes.
         /// </summary>
         private static Dictionary<Heightmap.Biome, string> BiomeFragmentMap
         {
@@ -33,7 +32,7 @@ namespace ValheimVillages.Items.Fragments
         }
 
         /// <summary>
-        /// Patch Container.Awake to inject biome-appropriate fragment into chest drop tables.
+        ///     Patch Container.Awake to inject biome-appropriate fragment into chest drop tables.
         /// </summary>
         [HarmonyPostfix]
         public static void Postfix(Container __instance)
@@ -55,10 +54,8 @@ namespace ValheimVillages.Items.Fragments
 
             // Check if fragment is already in the drop table
             foreach (var drop in __instance.m_defaultItems.m_drops)
-            {
                 if (drop.m_item != null && drop.m_item.name == fragmentName)
                     return;
-            }
 
             // Add fragment to the drop table with low weight
             __instance.m_defaultItems.m_drops.Add(new DropTable.DropData
@@ -67,7 +64,7 @@ namespace ValheimVillages.Items.Fragments
                 m_stackMin = 1,
                 m_stackMax = 1,
                 m_weight = FragmentDropWeight,
-                m_dontScale = true
+                m_dontScale = true,
             });
         }
 

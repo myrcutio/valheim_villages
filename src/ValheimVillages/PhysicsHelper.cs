@@ -4,13 +4,13 @@ using UnityEngine;
 namespace ValheimVillages
 {
     /// <summary>
-    /// Shared physics queries: OverlapSphere + GetComponentInParent with consistent null handling.
+    ///     Shared physics queries: OverlapSphere + GetComponentInParent with consistent null handling.
     /// </summary>
     public static class PhysicsHelper
     {
         /// <summary>
-        /// Return the first component of type T found in radius (via OverlapSphere + GetComponentInParent on each collider).
-        /// Returns null if none found.
+        ///     Return the first component of type T found in radius (via OverlapSphere + GetComponentInParent on each collider).
+        ///     Returns null if none found.
         /// </summary>
         public static T GetFirstInRadius<T>(Vector3 center, float radius) where T : Component
         {
@@ -21,12 +21,14 @@ namespace ValheimVillages
                 var c = col.gameObject.GetComponentInParent<T>();
                 if (c != null) return c;
             }
+
             return null;
         }
 
         /// <summary>
-        /// Return all components of type T in radius. Same object may appear multiple times if multiple colliders reference it.
-        /// Caller should dedupe if needed (e.g. by reference).
+        ///     Return all components of type T in radius. Same object may appear multiple times if multiple colliders reference
+        ///     it.
+        ///     Caller should dedupe if needed (e.g. by reference).
         /// </summary>
         public static List<T> GetAllInRadius<T>(Vector3 center, float radius) where T : Component
         {
@@ -38,6 +40,7 @@ namespace ValheimVillages
                 var c = col.gameObject.GetComponentInParent<T>();
                 if (c != null) list.Add(c);
             }
+
             return list;
         }
     }

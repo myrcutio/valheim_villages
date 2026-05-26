@@ -11,8 +11,8 @@ using ValheimVillages.Attributes;
 namespace ValheimVillages.Testing
 {
     /// <summary>
-    /// In-game integration test runner. Discovers [ModTest] methods,
-    /// executes them, and writes JSON results to vv_test_results.json.
+    ///     In-game integration test runner. Discovers [ModTest] methods,
+    ///     executes them, and writes JSON results to vv_test_results.json.
     /// </summary>
     public static class ModTestRunner
     {
@@ -23,7 +23,7 @@ namespace ValheimVillages.Testing
             Paths.ConfigPath, "vv_test_results.json");
 
         /// <summary>
-        /// Discover and run all [ModTest] methods. Writes JSON results.
+        ///     Discover and run all [ModTest] methods. Writes JSON results.
         /// </summary>
         public static void RunAll()
         {
@@ -39,7 +39,7 @@ namespace ValheimVillages.Testing
             foreach (var method in methods)
             {
                 var attr = method.GetCustomAttribute<ModTestAttribute>();
-                string testName = attr?.Name ?? $"{method.DeclaringType?.Name}.{method.Name}";
+                var testName = attr?.Name ?? $"{method.DeclaringType?.Name}.{method.Name}";
 
                 try
                 {
@@ -64,7 +64,7 @@ namespace ValheimVillages.Testing
                 }
             }
 
-            string result = failed == 0 && errored == 0 ? "PASS" : "FAIL";
+            var result = failed == 0 && errored == 0 ? "PASS" : "FAIL";
 
             Plugin.Log?.LogInfo(
                 $"[ModTestRunner] Results: {passed} passed, {failed} failed, " +
@@ -75,31 +75,29 @@ namespace ValheimVillages.Testing
         }
 
         /// <summary>
-        /// Discover all [ModTest] methods sorted by Order, then alphabetically.
+        ///     Discover all [ModTest] methods sorted by Order, then alphabetically.
         /// </summary>
         private static List<MethodInfo> DiscoverTests(Assembly assembly)
         {
             var methods = new List<(MethodInfo method, int order, string name)>();
 
             foreach (var type in assembly.GetTypes())
+            foreach (var method in type.GetMethods(
+                         BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
             {
-                foreach (var method in type.GetMethods(
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+                var attr = method.GetCustomAttribute<ModTestAttribute>();
+                if (attr == null) continue;
+
+                if (method.GetParameters().Length > 0)
                 {
-                    var attr = method.GetCustomAttribute<ModTestAttribute>();
-                    if (attr == null) continue;
-
-                    if (method.GetParameters().Length > 0)
-                    {
-                        Plugin.Log?.LogWarning(
-                            $"[ModTestRunner] Skipping {type.Name}.{method.Name}: " +
-                            "must be parameterless static");
-                        continue;
-                    }
-
-                    string name = attr.Name ?? $"{type.Name}.{method.Name}";
-                    methods.Add((method, attr.Order, name));
+                    Plugin.Log?.LogWarning(
+                        $"[ModTestRunner] Skipping {type.Name}.{method.Name}: " +
+                        "must be parameterless static");
+                    continue;
                 }
+
+                var name = attr.Name ?? $"{type.Name}.{method.Name}";
+                methods.Add((method, attr.Order, name));
             }
 
             return methods
@@ -110,7 +108,7 @@ namespace ValheimVillages.Testing
         }
 
         /// <summary>
-        /// Build a TestResultEntry from an exception.
+        ///     Build a TestResultEntry from an exception.
         /// </summary>
         private static TestResultEntry BuildResult(
             MethodInfo method, Exception ex, string testName, string state)
@@ -120,7 +118,7 @@ namespace ValheimVillages.Testing
                 Test = testName,
                 State = state,
                 Message = ex.Message,
-                StackTrace = ex.StackTrace ?? ""
+                StackTrace = ex.StackTrace ?? "",
             };
 
             // Extract source location from stack trace
@@ -138,23 +136,19 @@ namespace ValheimVillages.Testing
 
             // Capture assertions if available
             if (ex is ModAssertException mae)
-            {
                 foreach (var a in mae.Assertions)
-                {
                     entry.Assertions.Add(new AssertionOutput
                     {
                         Message = a.Message,
                         Expected = a.Expected ?? "",
-                        Actual = a.Actual ?? ""
+                        Actual = a.Actual ?? "",
                     });
-                }
-            }
 
             return entry;
         }
 
         /// <summary>
-        /// Write test results to JSON using StringBuilder (no library dependency).
+        ///     Write test results to JSON using StringBuilder (no library dependency).
         /// </summary>
         private static void WriteJsonResults(
             string result, int passed, int failed, int errored, int skipped,
@@ -163,29 +157,29 @@ namespace ValheimVillages.Testing
         {
             var sb = new StringBuilder();
             sb.AppendLine("{");
-            sb.AppendLine($"  \"v\": 1,");
+            sb.AppendLine("  \"v\": 1,");
             sb.AppendLine($"  \"ts\": \"{DateTime.UtcNow:O}\",");
             sb.AppendLine($"  \"result\": \"{result}\",");
-            sb.AppendLine($"  \"summary\": {{");
+            sb.AppendLine("  \"summary\": {");
             sb.AppendLine($"    \"total\": {totalTests},");
             sb.AppendLine($"    \"passed\": {passed},");
             sb.AppendLine($"    \"failed\": {failed},");
             sb.AppendLine($"    \"errors\": {errored},");
             sb.AppendLine($"    \"skipped\": {skipped}");
-            sb.AppendLine($"  }},");
+            sb.AppendLine("  },");
 
             // Failures
-            sb.AppendLine($"  \"failures\": [");
+            sb.AppendLine("  \"failures\": [");
             WriteEntries(sb, failures);
-            sb.AppendLine($"  ],");
+            sb.AppendLine("  ],");
 
             // Errors
-            sb.AppendLine($"  \"errors\": [");
+            sb.AppendLine("  \"errors\": [");
             WriteEntries(sb, errors);
-            sb.AppendLine($"  ],");
+            sb.AppendLine("  ],");
 
             // Skipped (always empty for now)
-            sb.AppendLine($"  \"skipped\": []");
+            sb.AppendLine("  \"skipped\": []");
             sb.AppendLine("}");
 
             try
@@ -201,22 +195,22 @@ namespace ValheimVillages.Testing
 
         private static void WriteEntries(StringBuilder sb, List<TestResultEntry> entries)
         {
-            for (int i = 0; i < entries.Count; i++)
+            for (var i = 0; i < entries.Count; i++)
             {
                 var e = entries[i];
                 sb.AppendLine("    {");
                 sb.AppendLine($"      \"test\": {JsonEscape(e.Test)},");
                 sb.AppendLine($"      \"state\": {JsonEscape(e.State)},");
-                sb.AppendLine($"      \"location\": {{");
+                sb.AppendLine("      \"location\": {");
                 sb.AppendLine($"        \"file\": {JsonEscape(e.File ?? "")},");
                 sb.AppendLine($"        \"line\": {e.Line},");
                 sb.AppendLine($"        \"class\": {JsonEscape(e.ClassName ?? "")}");
-                sb.AppendLine($"      }},");
+                sb.AppendLine("      },");
                 sb.AppendLine($"      \"message\": {JsonEscape(e.Message ?? "")},");
 
                 // Assertions
-                sb.AppendLine($"      \"assertions\": [");
-                for (int j = 0; j < e.Assertions.Count; j++)
+                sb.AppendLine("      \"assertions\": [");
+                for (var j = 0; j < e.Assertions.Count; j++)
                 {
                     var a = e.Assertions[j];
                     sb.Append("        { ");
@@ -227,7 +221,8 @@ namespace ValheimVillages.Testing
                     if (j < e.Assertions.Count - 1) sb.Append(",");
                     sb.AppendLine();
                 }
-                sb.AppendLine($"      ],");
+
+                sb.AppendLine("      ],");
 
                 sb.AppendLine($"      \"stackTrace\": {JsonEscape(e.StackTrace ?? "")}");
                 sb.Append("    }");
@@ -256,21 +251,21 @@ namespace ValheimVillages.Testing
 
         private class TestResultEntry
         {
-            public string Test = "";
-            public string State = "";
+            public readonly List<AssertionOutput> Assertions = new();
+            public string ClassName = "";
             public string File;
             public int Line;
-            public string ClassName = "";
             public string Message = "";
-            public List<AssertionOutput> Assertions = new List<AssertionOutput>();
             public string StackTrace = "";
+            public string State = "";
+            public string Test = "";
         }
 
         private class AssertionOutput
         {
-            public string Message = "";
-            public string Expected = "";
             public string Actual = "";
+            public string Expected = "";
+            public string Message = "";
         }
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using BepInEx;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Villages;
@@ -8,9 +9,9 @@ using ValheimVillages.Villages;
 namespace ValheimVillages.Villager.AI.Navigation
 {
     /// <summary>
-    /// Dumps spatial data (beds, height grid, doors, building pieces) to a JSON file
-    /// so the HNA partition algorithm can be tested offline with unit tests.
-    /// Run via console command: vv_hna_dump
+    ///     Dumps spatial data (beds, height grid, doors, building pieces) to a JSON file
+    ///     so the HNA partition algorithm can be tested offline with unit tests.
+    ///     Run via console command: vv_hna_dump
     /// </summary>
     public static class SpatialDump
     {
@@ -18,31 +19,40 @@ namespace ValheimVillages.Villager.AI.Navigation
         private const float ScanRadius = 50f;
         private const float RaycastHeight = 3f;
         private const float RaycastMaxDown = 8f;
+
+        private const float HeightStep = 3f;
+        private const float HeightMarginBelow = 5f;
+        private const float HeightMarginAbove = 10f;
         private static readonly int GroundMask = LayerMask.GetMask("Default", "static_solid", "terrain", "piece");
 
-        [DevCommand("Dump spatial data (beds, height grid, doors, pieces) to JSON for offline testing", Name = "vv_hna_dump")]
+        [DevCommand("Dump spatial data (beds, height grid, doors, pieces) to JSON for offline testing",
+            Name = "vv_hna_dump")]
         public static void Dump()
         {
-            var beds = ValheimVillages.Villager.AI.VillagerAIManager.GetAllBedPositions();
+            var beds = VillagerAIManager.GetAllBedPositions();
             if (beds == null || beds.Count == 0)
             {
                 Console.instance?.Print("No villager beds found.");
                 return;
             }
 
-            bool hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(
-                out float gMinX, out float gMinZ, out float gMaxX, out float gMaxZ);
+            var hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(
+                out var gMinX, out var gMinZ, out var gMaxX, out var gMaxZ);
 
             float minX, minZ, maxX, maxZ;
             if (hasPatrolBounds)
             {
-                minX = gMinX; minZ = gMinZ; maxX = gMaxX; maxZ = gMaxZ;
+                minX = gMinX;
+                minZ = gMinZ;
+                maxX = gMaxX;
+                maxZ = gMaxZ;
             }
             else
             {
                 minX = maxX = beds[0].x;
                 minZ = maxZ = beds[0].z;
             }
+
             foreach (var bed in beds)
             {
                 if (bed.x - ScanRadius < minX) minX = bed.x - ScanRadius;
@@ -51,21 +61,22 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (bed.z + ScanRadius > maxZ) maxZ = bed.z + ScanRadius;
             }
 
-            float originX = minX;
-            float originZ = minZ;
-            int cellCountX = Mathf.Max(1, Mathf.CeilToInt((maxX - minX) / CellSize));
-            int cellCountZ = Mathf.Max(1, Mathf.CeilToInt((maxZ - minZ) / CellSize));
+            var originX = minX;
+            var originZ = minZ;
+            var cellCountX = Mathf.Max(1, Mathf.CeilToInt((maxX - minX) / CellSize));
+            var cellCountZ = Mathf.Max(1, Mathf.CeilToInt((maxZ - minZ) / CellSize));
 
             var sb = new StringBuilder();
             sb.Append("{\n");
 
             sb.Append("  \"beds\": [\n");
-            for (int i = 0; i < beds.Count; i++)
+            for (var i = 0; i < beds.Count; i++)
             {
                 var b = beds[i];
                 sb.Append($"    [{b.x:F2}, {b.y:F2}, {b.z:F2}]");
                 sb.Append(i < beds.Count - 1 ? ",\n" : "\n");
             }
+
             sb.Append("  ],\n");
 
             if (hasPatrolBounds)
@@ -78,47 +89,48 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.Append($"  \"gridSize\": [{cellCountX}, {cellCountZ}],\n");
 
             sb.Append("  \"heightGrid\": [\n");
-            int mask = GroundMask != 0 ? GroundMask : ~0;
-            float[] refHeights = GatherReferenceHeights(beds);
+            var mask = GroundMask != 0 ? GroundMask : ~0;
+            var refHeights = GatherReferenceHeights(beds);
 
-            for (int iz = 0; iz < cellCountZ; iz++)
+            for (var iz = 0; iz < cellCountZ; iz++)
+            for (var ix = 0; ix < cellCountX; ix++)
             {
-                for (int ix = 0; ix < cellCountX; ix++)
+                var wx = originX + (ix + 0.5f) * CellSize;
+                var wz = originZ + (iz + 0.5f) * CellSize;
+
+                sb.Append("    { ");
+                sb.Append($"\"ix\": {ix}, \"iz\": {iz}, ");
+                sb.Append($"\"wx\": {wx:F2}, \"wz\": {wz:F2}, ");
+                sb.Append("\"hits\": [");
+
+                var seenHitY = new HashSet<int>();
+                var firstHit = true;
+                foreach (var refY in refHeights)
                 {
-                    float wx = originX + (ix + 0.5f) * CellSize;
-                    float wz = originZ + (iz + 0.5f) * CellSize;
-
-                    sb.Append("    { ");
-                    sb.Append($"\"ix\": {ix}, \"iz\": {iz}, ");
-                    sb.Append($"\"wx\": {wx:F2}, \"wz\": {wz:F2}, ");
-                    sb.Append("\"hits\": [");
-
-                    var seenHitY = new HashSet<int>();
-                    bool firstHit = true;
-                    foreach (float refY in refHeights)
+                    var rayOrigin = new Vector3(wx, refY + RaycastHeight, wz);
+                    if (Physics.Raycast(rayOrigin, Vector3.down, out var hit, RaycastMaxDown, mask,
+                            QueryTriggerInteraction.Ignore))
                     {
-                        var rayOrigin = new Vector3(wx, refY + RaycastHeight, wz);
-                        if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, RaycastMaxDown, mask, QueryTriggerInteraction.Ignore))
-                        {
-                            int bucket = Mathf.RoundToInt(hit.point.y * 4);
-                            if (!seenHitY.Add(bucket)) continue;
-                            if (!firstHit) sb.Append(", ");
-                            string layerName = LayerMask.LayerToName(hit.collider.gameObject.layer);
-                            sb.Append($"{{\"refY\": {refY:F2}, \"hitY\": {hit.point.y:F2}, \"layer\": \"{layerName}\", \"layerIdx\": {hit.collider.gameObject.layer}}}");
-                            firstHit = false;
-                        }
+                        var bucket = Mathf.RoundToInt(hit.point.y * 4);
+                        if (!seenHitY.Add(bucket)) continue;
+                        if (!firstHit) sb.Append(", ");
+                        var layerName = LayerMask.LayerToName(hit.collider.gameObject.layer);
+                        sb.Append(
+                            $"{{\"refY\": {refY:F2}, \"hitY\": {hit.point.y:F2}, \"layer\": \"{layerName}\", \"layerIdx\": {hit.collider.gameObject.layer}}}");
+                        firstHit = false;
                     }
-
-                    sb.Append("] }");
-                    bool last = (iz == cellCountZ - 1 && ix == cellCountX - 1);
-                    sb.Append(last ? "\n" : ",\n");
                 }
+
+                sb.Append("] }");
+                var last = iz == cellCountZ - 1 && ix == cellCountX - 1;
+                sb.Append(last ? "\n" : ",\n");
             }
+
             sb.Append("  ],\n");
 
             sb.Append("  \"doors\": [\n");
             var doors = Object.FindObjectsByType<Door>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            int doorIdx = 0;
+            var doorIdx = 0;
             foreach (var door in doors)
             {
                 if (door == null) continue;
@@ -126,58 +138,60 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (pos.x < minX - 10 || pos.x > maxX + 10 || pos.z < minZ - 10 || pos.z > maxZ + 10)
                     continue;
                 var fwd = door.transform.forward;
-                bool hasPiece = door.GetComponentInParent<Piece>() != null;
+                var hasPiece = door.GetComponentInParent<Piece>() != null;
                 if (doorIdx > 0) sb.Append(",\n");
-                sb.Append($"    {{\"pos\": [{pos.x:F2}, {pos.y:F2}, {pos.z:F2}], \"forward\": [{fwd.x:F3}, {fwd.y:F3}, {fwd.z:F3}], \"hasPiece\": {(hasPiece ? "true" : "false")}}}");
+                sb.Append(
+                    $"    {{\"pos\": [{pos.x:F2}, {pos.y:F2}, {pos.z:F2}], \"forward\": [{fwd.x:F3}, {fwd.y:F3}, {fwd.z:F3}], \"hasPiece\": {(hasPiece ? "true" : "false")}}}");
                 doorIdx++;
             }
+
             sb.Append("\n  ],\n");
 
             sb.Append("  \"buildingPieces\": [\n");
             var pieces = Object.FindObjectsByType<Piece>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            int pieceIdx = 0;
+            var pieceIdx = 0;
             foreach (var piece in pieces)
             {
                 if (piece == null) continue;
                 var pos = piece.transform.position;
                 if (pos.x < minX - 5 || pos.x > maxX + 5 || pos.z < minZ - 5 || pos.z > maxZ + 5)
                     continue;
-                string pieceName = piece.m_name ?? piece.gameObject.name;
+                var pieceName = piece.m_name ?? piece.gameObject.name;
                 var ext = piece.GetComponent<Collider>()?.bounds.extents ?? Vector3.zero;
                 var fwd = piece.transform.forward;
-                int layer = piece.gameObject.layer;
+                var layer = piece.gameObject.layer;
                 if (pieceIdx > 0) sb.Append(",\n");
-                sb.Append($"    {{\"name\": \"{EscapeJson(pieceName)}\", \"pos\": [{pos.x:F2}, {pos.y:F2}, {pos.z:F2}], " +
+                sb.Append(
+                    $"    {{\"name\": \"{EscapeJson(pieceName)}\", \"pos\": [{pos.x:F2}, {pos.y:F2}, {pos.z:F2}], " +
                     $"\"fwd\": [{fwd.x:F3}, {fwd.y:F3}, {fwd.z:F3}], \"layer\": {layer}, " +
                     $"\"extents\": [{ext.x:F2}, {ext.y:F2}, {ext.z:F2}]}}");
                 pieceIdx++;
             }
+
             sb.Append("\n  ]\n");
 
             sb.Append("}\n");
 
-            string path = Path.Combine(
+            var path = Path.Combine(
                 "/home/benny/Projects/valheim_villages",
                 ".cursor", "hna_spatial_dump.json");
             File.WriteAllText(path, sb.ToString());
-            Console.instance?.Print($"HNA spatial dump written to {path} ({beds.Count} beds, {cellCountX}x{cellCountZ} grid, {doorIdx} doors, {pieceIdx} pieces)");
+            Console.instance?.Print(
+                $"HNA spatial dump written to {path} ({beds.Count} beds, {cellCountX}x{cellCountZ} grid, {doorIdx} doors, {pieceIdx} pieces)");
             Plugin.Log?.LogInfo($"[Region] Spatial dump: {path}");
         }
-
-        private const float HeightStep = 3f;
-        private const float HeightMarginBelow = 5f;
-        private const float HeightMarginAbove = 10f;
 
         private static float[] GatherReferenceHeights(List<Vector3> beds)
         {
             var heights = new HashSet<int>();
             foreach (var b in beds)
             {
-                int lo = Mathf.FloorToInt((b.y - HeightMarginBelow) / HeightStep) * (int)HeightStep;
-                int hi = Mathf.CeilToInt((b.y + HeightMarginAbove) / HeightStep) * (int)HeightStep;
-                for (int h = lo; h <= hi; h += (int)HeightStep)
+                var lo = Mathf.FloorToInt((b.y - HeightMarginBelow) / HeightStep) * (int)HeightStep;
+                var hi = Mathf.CeilToInt((b.y + HeightMarginAbove) / HeightStep) * (int)HeightStep;
+                for (var h = lo; h <= hi; h += (int)HeightStep)
                     heights.Add(h);
             }
+
             var result = new List<int>(heights);
             result.Sort();
             return result.ConvertAll(h => (float)h).ToArray();
@@ -191,8 +205,8 @@ namespace ValheimVillages.Villager.AI.Navigation
     }
 
     /// <summary>
-    /// MonoBehaviour that records player positions at a regular interval.
-    /// Attach to any active GameObject; controlled via static Start/Stop methods.
+    ///     MonoBehaviour that records player positions at a regular interval.
+    ///     Attach to any active GameObject; controlled via static Start/Stop methods.
     /// </summary>
     public class HnaPathRecorder : MonoBehaviour
     {
@@ -200,37 +214,9 @@ namespace ValheimVillages.Villager.AI.Navigation
         private const float MinMoveDist = 0.5f;
 
         private static HnaPathRecorder s_instance;
-        private static readonly List<Vector3> s_positions = new List<Vector3>();
-        private float _timer;
+        private static readonly List<Vector3> s_positions = new();
         private Vector3 _lastPos;
-
-        [DevCommand("Start recording player path for walkable ground truth", Name = "vv_hna_record_start")]
-        public static void StartRecording()
-        {
-            if (s_instance != null)
-            {
-                Console.instance?.Print("Already recording. Use vv_hna_record_stop to stop.");
-                return;
-            }
-            s_positions.Clear();
-            var go = new GameObject("HnaPathRecorder");
-            DontDestroyOnLoad(go);
-            s_instance = go.AddComponent<HnaPathRecorder>();
-            Console.instance?.Print("Recording player path. Walk around all walkable areas, then run: vv_hna_record_stop");
-        }
-
-        [DevCommand("Stop recording and save path to vv_dumps/hna_walkable_path.json", Name = "vv_hna_record_stop")]
-        public static void StopRecording()
-        {
-            if (s_instance == null)
-            {
-                Console.instance?.Print("Not recording. Use vv_hna_record_start first.");
-                return;
-            }
-            Destroy(s_instance.gameObject);
-            s_instance = null;
-            SavePath();
-        }
+        private float _timer;
 
         private void Update()
         {
@@ -247,6 +233,37 @@ namespace ValheimVillages.Villager.AI.Navigation
             _lastPos = pos;
         }
 
+        [DevCommand("Start recording player path for walkable ground truth", Name = "vv_hna_record_start")]
+        public static void StartRecording()
+        {
+            if (s_instance != null)
+            {
+                Console.instance?.Print("Already recording. Use vv_hna_record_stop to stop.");
+                return;
+            }
+
+            s_positions.Clear();
+            var go = new GameObject("HnaPathRecorder");
+            DontDestroyOnLoad(go);
+            s_instance = go.AddComponent<HnaPathRecorder>();
+            Console.instance?.Print(
+                "Recording player path. Walk around all walkable areas, then run: vv_hna_record_stop");
+        }
+
+        [DevCommand("Stop recording and save path to vv_dumps/hna_walkable_path.json", Name = "vv_hna_record_stop")]
+        public static void StopRecording()
+        {
+            if (s_instance == null)
+            {
+                Console.instance?.Print("Not recording. Use vv_hna_record_start first.");
+                return;
+            }
+
+            Destroy(s_instance.gameObject);
+            s_instance = null;
+            SavePath();
+        }
+
         private static void SavePath()
         {
             if (s_positions.Count == 0)
@@ -259,17 +276,18 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.Append("{\n");
             sb.Append($"  \"count\": {s_positions.Count},\n");
             sb.Append("  \"positions\": [\n");
-            for (int i = 0; i < s_positions.Count; i++)
+            for (var i = 0; i < s_positions.Count; i++)
             {
                 var p = s_positions[i];
                 sb.Append($"    [{p.x:F2}, {p.y:F2}, {p.z:F2}]");
                 sb.Append(i < s_positions.Count - 1 ? ",\n" : "\n");
             }
+
             sb.Append("  ]\n");
             sb.Append("}\n");
 
-            string path = Path.Combine(
-                BepInEx.Paths.ConfigPath, "vv_dumps", "hna_walkable_path.json");
+            var path = Path.Combine(
+                Paths.ConfigPath, "vv_dumps", "hna_walkable_path.json");
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             File.WriteAllText(path, sb.ToString());
             Console.instance?.Print($"Saved {s_positions.Count} positions to {path}");

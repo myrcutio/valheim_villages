@@ -1,30 +1,31 @@
 using System.Collections.Generic;
 using HarmonyLib;
+using UnityEngine;
 using ValheimVillages.Attributes;
 
 namespace ValheimVillages.Villager.AI
 {
     /// <summary>
-    /// Static registry for VillagerAI instances, keyed by unique ID.
-    /// Inspired by MobAILib's MobManager pattern.
+    ///     Static registry for VillagerAI instances, keyed by unique ID.
+    ///     Inspired by MobAILib's MobManager pattern.
     /// </summary>
     public static class VillagerAIManager
     {
         /// <summary>
-        /// All active villager AI instances, keyed by their unique ID.
+        ///     All active villager AI instances, keyed by their unique ID.
         /// </summary>
         public static readonly Dictionary<string, VillagerAI> ActiveVillagers = new();
 
         /// <summary>
-        /// Pending registrations (legacy): uniqueId -> bed position for villagers registered
-        /// before their AI component exists. The primary path registers via RegisterActive
-        /// from VillagerAI.Awake (component lifecycle).
+        ///     Pending registrations (legacy): uniqueId -> bed position for villagers registered
+        ///     before their AI component exists. The primary path registers via RegisterActive
+        ///     from VillagerAI.Awake (component lifecycle).
         /// </summary>
-        private static readonly Dictionary<string, UnityEngine.Vector3> s_pendingRegistrations = new();
+        private static readonly Dictionary<string, Vector3> s_pendingRegistrations = new();
 
         /// <summary>
-        /// Register an active VillagerAI instance. Called from VillagerAI.Awake when the
-        /// Villager component adds VillagerAI (component lifecycle; no MonsterAI).
+        ///     Register an active VillagerAI instance. Called from VillagerAI.Awake when the
+        ///     Villager component adds VillagerAI (component lifecycle; no MonsterAI).
         /// </summary>
         public static void RegisterActive(VillagerAI ai)
         {
@@ -34,10 +35,10 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        /// Legacy: Register a villager by ID and bed position (e.g. before AI component exists).
-        /// The primary path uses Villager + VillagerAI components and RegisterActive from Awake.
+        ///     Legacy: Register a villager by ID and bed position (e.g. before AI component exists).
+        ///     The primary path uses Villager + VillagerAI components and RegisterActive from Awake.
         /// </summary>
-        public static void Register(string uniqueId, UnityEngine.Vector3 bedPosition)
+        public static void Register(string uniqueId, Vector3 bedPosition)
         {
             if (string.IsNullOrEmpty(uniqueId)) return;
 
@@ -46,7 +47,7 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        /// Unregister a villager.
+        ///     Unregister a villager.
         /// </summary>
         public static void Unregister(string uniqueId)
         {
@@ -55,7 +56,7 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        /// Unregister and destroy reference when a villager is destroyed.
+        ///     Unregister and destroy reference when a villager is destroyed.
         /// </summary>
         public static void Unregister(VillagerAI ai)
         {
@@ -64,7 +65,7 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        /// Check if a unique ID is registered (either pending or active).
+        ///     Check if a unique ID is registered (either pending or active).
         /// </summary>
         public static bool IsRegistered(string uniqueId)
         {
@@ -73,22 +74,21 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        /// Get unique bed positions for every villager in the world. Reads
-        /// authoritatively from <c>ZDOMan.m_objectsByID</c>: each ZDO with the
-        /// <c>vv_villager_type</c> tag carries a persistent <c>vv_bed_position</c>.
-        /// Survives villager GameObject unload (out-of-range, teleported) and
-        /// hot reloads (the in-memory <see cref="ActiveVillagers"/> dict is
-        /// cleared on reload).
-        ///
-        /// Returns an empty list if <c>ZDOMan</c> isn't yet alive — callers
-        /// should treat that as "world not ready" and either retry or abort.
-        /// No fallback to in-memory state: that path was masking missing-bed
-        /// bugs (e.g. villagers unloaded across reload) by silently using a
-        /// stale subset.
+        ///     Get unique bed positions for every villager in the world. Reads
+        ///     authoritatively from <c>ZDOMan.m_objectsByID</c>: each ZDO with the
+        ///     <c>vv_villager_type</c> tag carries a persistent <c>vv_bed_position</c>.
+        ///     Survives villager GameObject unload (out-of-range, teleported) and
+        ///     hot reloads (the in-memory <see cref="ActiveVillagers" /> dict is
+        ///     cleared on reload).
+        ///     Returns an empty list if <c>ZDOMan</c> isn't yet alive — callers
+        ///     should treat that as "world not ready" and either retry or abort.
+        ///     No fallback to in-memory state: that path was masking missing-bed
+        ///     bugs (e.g. villagers unloaded across reload) by silently using a
+        ///     stale subset.
         /// </summary>
-        public static List<UnityEngine.Vector3> GetAllBedPositions()
+        public static List<Vector3> GetAllBedPositions()
         {
-            var list = new List<UnityEngine.Vector3>();
+            var list = new List<Vector3>();
             var zdoMan = ZDOMan.instance;
             if (zdoMan == null) return list;
             var objectsByID = Traverse.Create(zdoMan)
@@ -97,23 +97,26 @@ namespace ValheimVillages.Villager.AI
             foreach (var zdo in objectsByID.Values)
             {
                 if (zdo == null) continue;
-                string vtype = zdo.GetString("vv_villager_type", "");
+                var vtype = zdo.GetString("vv_villager_type");
                 if (string.IsNullOrEmpty(vtype)) continue;
-                var pos = zdo.GetVec3("vv_bed_position", UnityEngine.Vector3.zero);
-                if (pos == UnityEngine.Vector3.zero) continue;
-                bool duplicate = false;
+                var pos = zdo.GetVec3("vv_bed_position", Vector3.zero);
+                if (pos == Vector3.zero) continue;
+                var duplicate = false;
                 foreach (var existing in list)
-                {
                     if ((existing - pos).sqrMagnitude < 1f)
-                    { duplicate = true; break; }
-                }
+                    {
+                        duplicate = true;
+                        break;
+                    }
+
                 if (!duplicate) list.Add(pos);
             }
+
             return list;
         }
 
         /// <summary>
-        /// Clear all registrations (e.g. on world unload).
+        ///     Clear all registrations (e.g. on world unload).
         /// </summary>
         [RegisterCleanup]
         public static void Clear()

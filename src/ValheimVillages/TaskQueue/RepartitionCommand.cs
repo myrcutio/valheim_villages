@@ -6,10 +6,10 @@ using ValheimVillages.Schemas;
 namespace ValheimVillages.TaskQueue
 {
     /// <summary>
-    /// Dev command to force an immediate hna_partition rebuild. Useful for
-    /// verifying partition-time behavior (e.g., polygon clip activation,
-    /// door blocker counts) without waiting for the patrol behavior to
-    /// request one.
+    ///     Dev command to force an immediate hna_partition rebuild. Useful for
+    ///     verifying partition-time behavior (e.g., polygon clip activation,
+    ///     door blocker counts) without waiting for the patrol behavior to
+    ///     request one.
     /// </summary>
     internal static class RepartitionCommand
     {
@@ -25,7 +25,7 @@ namespace ValheimVillages.TaskQueue
                 Attributes = new Dictionary<string, string>(),
             };
             GlobalTaskQueue.Enqueue(task);
-            string msg = "[vv_repartition] Enqueued hna_partition (high priority, no anchor)";
+            var msg = "[vv_repartition] Enqueued hna_partition (high priority, no anchor)";
             Console.instance?.Print(msg);
             Plugin.Log?.LogInfo(msg);
         }

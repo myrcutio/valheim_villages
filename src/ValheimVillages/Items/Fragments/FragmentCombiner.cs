@@ -1,19 +1,21 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 namespace ValheimVillages.Items.Fragments
 {
     /// <summary>
-    /// Handles combining 3 same-biome ransom note fragments into a rescue quest map marker.
+    ///     Handles combining 3 same-biome ransom note fragments into a rescue quest map marker.
     /// </summary>
     public static class FragmentCombiner
     {
         private const int RequiredFragments = 3;
 
         /// <summary>
-        /// Maps biome identifiers to the NPC type that can be rescued there.
+        ///     Maps biome identifiers to the NPC type that can be rescued there.
         /// </summary>
         private static readonly Dictionary<string, string> BiomeNpcMap = new()
         {
@@ -23,38 +25,68 @@ namespace ValheimVillages.Items.Fragments
             { "Mountain", "Mountaineer" },
             { "Plains", "Farmer" },
             { "Mistlands", "Scout" },
-            { "Ashlands", "Guard" }
+            { "Ashlands", "Guard" },
         };
 
         /// <summary>
-        /// Maps biome identifiers to dungeon/location prefab names that can host rescue quests.
-        /// These are locations that are guaranteed to spawn in the correct biome and have
-        /// appropriate enemy difficulty. Preferred locations are listed first.
+        ///     Maps biome identifiers to dungeon/location prefab names that can host rescue quests.
+        ///     These are locations that are guaranteed to spawn in the correct biome and have
+        ///     appropriate enemy difficulty. Preferred locations are listed first.
         /// </summary>
         private static readonly Dictionary<string, string[]> BiomeLocationMap = new()
         {
             { "Meadows", new[] { "Dolmen01", "Dolmen02", "Dolmen03", "WoodVillage1" } },
-            { "BlackForest", new[] { "TrollCave", "TrollCave02", "Crypt2", "Crypt3", "Crypt4",
-                                     "Hildir_crypt" } },
-            { "Swamp", new[] { "SunkenCrypt1", "SunkenCrypt2", "SunkenCrypt3", "SunkenCrypt4",
-                               "SwampRuin1", "SwampRuin2" } },
-            { "Mountain", new[] { "MountainCave01", "MountainCave02", "Hildir_cave",
-                                  "AbandonedLogCabin02", "AbandonedLogCabin03",
-                                  "AbandonedLogCabin04" } },
-            { "Plains", new[] { "GoblinCamp1", "GoblinCamp2", "StoneTower1", "StoneTower2",
-                                "StoneTower3", "StoneTower4", "Hildir_plainsfortress" } },
-            { "Mistlands", new[] { "Mistlands_GuardTower1_new", "Mistlands_GuardTower2_new",
-                                   "Mistlands_GuardTower3_new", "Mistlands_Excavation1",
-                                   "Mistlands_Excavation2", "Mistlands_Excavation3" } },
-            { "Ashlands", new[] { "CharredFortress", "FortressRuins", "CharredRuins1",
-                                  "CharredTowerRuins1", "CharredTowerRuins2",
-                                  "CharredTowerRuins3" } }
+            {
+                "BlackForest", new[]
+                {
+                    "TrollCave", "TrollCave02", "Crypt2", "Crypt3", "Crypt4",
+                    "Hildir_crypt",
+                }
+            },
+            {
+                "Swamp", new[]
+                {
+                    "SunkenCrypt1", "SunkenCrypt2", "SunkenCrypt3", "SunkenCrypt4",
+                    "SwampRuin1", "SwampRuin2",
+                }
+            },
+            {
+                "Mountain", new[]
+                {
+                    "MountainCave01", "MountainCave02", "Hildir_cave",
+                    "AbandonedLogCabin02", "AbandonedLogCabin03",
+                    "AbandonedLogCabin04",
+                }
+            },
+            {
+                "Plains", new[]
+                {
+                    "GoblinCamp1", "GoblinCamp2", "StoneTower1", "StoneTower2",
+                    "StoneTower3", "StoneTower4", "Hildir_plainsfortress",
+                }
+            },
+            {
+                "Mistlands", new[]
+                {
+                    "Mistlands_GuardTower1_new", "Mistlands_GuardTower2_new",
+                    "Mistlands_GuardTower3_new", "Mistlands_Excavation1",
+                    "Mistlands_Excavation2", "Mistlands_Excavation3",
+                }
+            },
+            {
+                "Ashlands", new[]
+                {
+                    "CharredFortress", "FortressRuins", "CharredRuins1",
+                    "CharredTowerRuins1", "CharredTowerRuins2",
+                    "CharredTowerRuins3",
+                }
+            },
         };
 
         /// <summary>
-        /// Attempts to combine 3 fragments of the given biome from the player's inventory.
-        /// Counts stack sizes so a single stack of 3 is sufficient.
-        /// On success, consumes the fragments and places a rescue quest marker on the map.
+        ///     Attempts to combine 3 fragments of the given biome from the player's inventory.
+        ///     Counts stack sizes so a single stack of 3 is sufficient.
+        ///     On success, consumes the fragments and places a rescue quest marker on the map.
         /// </summary>
         /// <returns>True if fragments were combined, false if not enough fragments.</returns>
         public static bool TryCombine(Player player, string biome)
@@ -68,13 +100,13 @@ namespace ValheimVillages.Items.Fragments
 
             // Find all fragment stacks matching this biome and count total quantity
             var matchingItems = FindFragmentsByBiome(inventory, biome);
-            int totalCount = 0;
+            var totalCount = 0;
             foreach (var item in matchingItems)
                 totalCount += item.m_stack;
 
             if (totalCount < RequiredFragments)
             {
-                int needed = RequiredFragments - totalCount;
+                var needed = RequiredFragments - totalCount;
                 player.Message(MessageHud.MessageType.Center,
                     $"Need {needed} more {biome} fragments ({totalCount}/{RequiredFragments})");
                 return false;
@@ -99,20 +131,20 @@ namespace ValheimVillages.Items.Fragments
                     $"Cannot combine {biome} fragments: no valid {biome} location found " +
                     $"in loaded world (player at {player.transform.position}, " +
                     $"villagerType={villagerType}, fragmentsHeld={totalCount}). " +
-                    $"Fragments NOT consumed.");
+                    "Fragments NOT consumed.");
                 player.Message(MessageHud.MessageType.Center,
                     $"Cannot locate {biome} in the surrounding world. Try again from a different area.");
                 return false;
             }
 
             // Consume 3 fragments across stacks now that we know the quest can be placed.
-            int toRemove = RequiredFragments;
+            var toRemove = RequiredFragments;
             foreach (var item in matchingItems)
             {
                 if (toRemove <= 0) break;
 
-                int removeFromStack = Mathf.Min(toRemove, item.m_stack);
-                for (int i = 0; i < removeFromStack; i++)
+                var removeFromStack = Mathf.Min(toRemove, item.m_stack);
+                for (var i = 0; i < removeFromStack; i++)
                     inventory.RemoveOneItem(item);
                 toRemove -= removeFromStack;
             }
@@ -127,7 +159,7 @@ namespace ValheimVillages.Items.Fragments
         }
 
         /// <summary>
-        /// Gets the biome string from a fragment item definition name.
+        ///     Gets the biome string from a fragment item definition name.
         /// </summary>
         public static string GetBiomeFromItem(string itemName)
         {
@@ -157,10 +189,10 @@ namespace ValheimVillages.Items.Fragments
         }
 
         /// <summary>
-        /// Finds an existing dungeon/location in the target biome from ZoneSystem's
-        /// placed location instances. This guarantees the quest spawns at a real location
-        /// that is in the correct biome with appropriate enemies.
-        /// Picks a random matching location, preferring ones closer to the player.
+        ///     Finds an existing dungeon/location in the target biome from ZoneSystem's
+        ///     placed location instances. This guarantees the quest spawns at a real location
+        ///     that is in the correct biome with appropriate enemies.
+        ///     Picks a random matching location, preferring ones closer to the player.
         /// </summary>
         private static Vector3? FindPositionInBiome(string biomeName, Vector3 playerPos)
         {
@@ -183,7 +215,7 @@ namespace ValheimVillages.Items.Fragments
                 if (locInstance.m_location == null)
                     continue;
 
-                string locName = locInstance.m_location.m_prefabName;
+                var locName = locInstance.m_location.m_prefabName;
                 if (string.IsNullOrEmpty(locName))
                     continue;
 
@@ -204,8 +236,8 @@ namespace ValheimVillages.Items.Fragments
             candidates.Sort((a, b) =>
                 Vector3.Distance(playerPos, a).CompareTo(Vector3.Distance(playerPos, b)));
 
-            int poolSize = Mathf.Max(1, candidates.Count / 4);
-            int chosenIndex = Random.Range(0, poolSize);
+            var poolSize = Mathf.Max(1, candidates.Count / 4);
+            var chosenIndex = Random.Range(0, poolSize);
             var chosen = candidates[chosenIndex];
 
             Plugin.Log?.LogInfo(
@@ -225,7 +257,7 @@ namespace ValheimVillages.Items.Fragments
                 return;
             }
 
-            string pinName = $"Rescue: Captive {villagerType} ({biome})";
+            var pinName = $"Rescue: Captive {villagerType} ({biome})";
 
             try
             {
@@ -259,28 +291,27 @@ namespace ValheimVillages.Items.Fragments
                     args[0] = position;
                     args[1] = Minimap.PinType.Icon3;
                     args[2] = pinName;
-                    args[3] = true;  // save
+                    args[3] = true; // save
                     args[4] = false; // isChecked
                     // Fill optional params with their defaults
-                    for (int i = 5; i < parms.Length; i++)
-                    {
+                    for (var i = 5; i < parms.Length; i++)
                         if (parms[i].HasDefaultValue)
                             args[i] = parms[i].DefaultValue;
                         else if (parms[i].ParameterType.IsValueType)
-                            args[i] = System.Activator.CreateInstance(parms[i].ParameterType);
+                            args[i] = Activator.CreateInstance(parms[i].ParameterType);
                         else
                             args[i] = null;
-                    }
 
                     addPinMethod.Invoke(minimap, args);
                     Plugin.Log?.LogInfo($"Added quest marker at {position}: {pinName}");
                 }
                 else
                 {
-                    Plugin.Log?.LogWarning($"Could not find Minimap.AddPin method (found {addPinMethods.Length} overloads)");
+                    Plugin.Log?.LogWarning(
+                        $"Could not find Minimap.AddPin method (found {addPinMethods.Length} overloads)");
                 }
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 Plugin.Log?.LogError($"Failed to add quest marker: {ex.Message}");
             }

@@ -4,9 +4,9 @@ using UnityEngine;
 namespace ValheimVillages.Items.VirtualRecipes
 {
     /// <summary>
-    /// Station template management for virtual recipes.
-    /// Creates and caches dummy CraftingStation GameObjects used to associate
-    /// virtual recipes with villager stations.
+    ///     Station template management for virtual recipes.
+    ///     Creates and caches dummy CraftingStation GameObjects used to associate
+    ///     virtual recipes with villager stations.
     /// </summary>
     internal static class VirtualRecipeParser
     {

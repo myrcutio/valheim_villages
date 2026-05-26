@@ -4,8 +4,14 @@
   "displayName": "Tavern Keeper",
   "description": "Manages tavern operations, cooking, brewing, and hospitality services",
   "workbenches": [
-    { "name": "piece_cauldron", "minLevel": 1 },
-    { "name": "piece_artisanstation", "minLevel": 1 }
+    {
+      "name": "piece_cauldron",
+      "minLevel": 1
+    },
+    {
+      "name": "piece_artisanstation",
+      "minLevel": 1
+    }
   ],
   "requiredBiomes": [],
   "preferredBiomes": [],
@@ -15,9 +21,24 @@
   "scalingType": "VillagerDependent",
   "dependentOnNpcType": "Farmer",
   "tieredBenefits": [
-    { "minLevel": 1, "maxLevel": 1, "description": "Can cook basic food items (follows cauldron level requirements)", "effectMultiplier": 1.0 },
-    { "minLevel": 2, "maxLevel": 2, "description": "Can brew mead in addition to cooking", "effectMultiplier": 1.5 },
-    { "minLevel": 3, "maxLevel": 99, "description": "Provides additional comfort bonus when monitoring feasts", "effectMultiplier": 2.0 }
+    {
+      "minLevel": 1,
+      "maxLevel": 1,
+      "description": "Can cook basic food items (follows cauldron level requirements)",
+      "effectMultiplier": 1.0
+    },
+    {
+      "minLevel": 2,
+      "maxLevel": 2,
+      "description": "Can brew mead in addition to cooking",
+      "effectMultiplier": 1.5
+    },
+    {
+      "minLevel": 3,
+      "maxLevel": 99,
+      "description": "Provides additional comfort bonus when monitoring feasts",
+      "effectMultiplier": 2.0
+    }
   ],
   "productions": [],
   "providesLevelTo": [],
@@ -25,16 +46,55 @@
   "interdependenceDescription": "",
   "stationName": "$vv_tavernkeeper",
   "stationIcon": "Tankard",
-  "workStations": ["$vv_tavernkeeper"],
-  "stationRecipes": [
-    { "output": "CookedMeat", "outputAmount": 1, "input": "RawMeat", "inputAmount": 1, "minStationLevel": 1 },
-    { "output": "NeckTailGrilled", "outputAmount": 1, "input": "NeckTail", "inputAmount": 1, "minStationLevel": 1 },
-    { "output": "CookedDeerMeat", "outputAmount": 1, "input": "DeerMeat", "inputAmount": 1, "minStationLevel": 1 },
-    { "output": "CookedLoxMeat", "outputAmount": 1, "input": "LoxMeat", "inputAmount": 1, "minStationLevel": 2 },
-    { "output": "BarleyFlour", "outputAmount": 1, "input": "Barley", "inputAmount": 1, "minStationLevel": 2 }
+  "workStations": [
+    "$vv_tavernkeeper"
   ],
-  "behaviors": ["craft", "tidy"],
-  "tags": ["tab:info", "tab:debug", "tab:workorder"],
+  "stationRecipes": [
+    {
+      "output": "CookedMeat",
+      "outputAmount": 1,
+      "input": "RawMeat",
+      "inputAmount": 1,
+      "minStationLevel": 1
+    },
+    {
+      "output": "NeckTailGrilled",
+      "outputAmount": 1,
+      "input": "NeckTail",
+      "inputAmount": 1,
+      "minStationLevel": 1
+    },
+    {
+      "output": "CookedDeerMeat",
+      "outputAmount": 1,
+      "input": "DeerMeat",
+      "inputAmount": 1,
+      "minStationLevel": 1
+    },
+    {
+      "output": "CookedLoxMeat",
+      "outputAmount": 1,
+      "input": "LoxMeat",
+      "inputAmount": 1,
+      "minStationLevel": 2
+    },
+    {
+      "output": "BarleyFlour",
+      "outputAmount": 1,
+      "input": "Barley",
+      "inputAmount": 1,
+      "minStationLevel": 2
+    }
+  ],
+  "behaviors": [
+    "craft",
+    "tidy"
+  ],
+  "tags": [
+    "tab:info",
+    "tab:debug",
+    "tab:workorder"
+  ],
   "randomTalk": [
     "Rule one of tavern keeping: the customer is always right. Rule two: the customer is frequently drunk and therefore not to be trusted. These rules coexist.",
     "I've been told my mead could strip paint. I've also been told it could raise the dead. Both reviews were positive.",

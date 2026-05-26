@@ -1,9 +1,9 @@
 namespace ValheimVillages.UI.Core
 {
     /// <summary>
-    /// Interface for a tab in the villager interaction UI.
-    /// Core version with Unity-free members only.
-    /// Unity-dependent methods are defined in the mod assembly.
+    ///     Interface for a tab in the villager interaction UI.
+    ///     Core version with Unity-free members only.
+    ///     Unity-dependent methods are defined in the mod assembly.
     /// </summary>
     public interface IVillagerTab
     {

@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using BepInEx;
-using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villages;
@@ -12,23 +12,23 @@ using ValheimVillages.Villages;
 namespace ValheimVillages.Testing
 {
     /// <summary>
-    /// Captures a snapshot of the current game state for regression testing.
-    /// Includes villager positions, behavior states, and village area data.
+    ///     Captures a snapshot of the current game state for regression testing.
+    ///     Includes villager positions, behavior states, and village area data.
     /// </summary>
     public class SceneSnapshot
     {
         public string Timestamp;
-        public List<VillagerSnapshot> Villagers = new List<VillagerSnapshot>();
-        public List<VillageAreaSnapshot> VillageAreas = new List<VillageAreaSnapshot>();
+        public List<VillageAreaSnapshot> VillageAreas = new();
+        public List<VillagerSnapshot> Villagers = new();
 
         /// <summary>
-        /// Capture current game state as a snapshot.
+        ///     Capture current game state as a snapshot.
         /// </summary>
         public static SceneSnapshot Capture()
         {
             var snapshot = new SceneSnapshot
             {
-                Timestamp = DateTime.UtcNow.ToString("O")
+                Timestamp = DateTime.UtcNow.ToString("O"),
             };
 
             // Capture villager data from Villager.AI manager
@@ -42,8 +42,8 @@ namespace ValheimVillages.Testing
                     UniqueId = ai.UniqueId ?? "unknown",
                     NpcType = ai.VillagerType ?? "unknown",
                     BehaviorState = ai.CurrentState.ToString(),
-                    Position = new float[] { pos.x, pos.y, pos.z },
-                    KnownLocationCount = 0
+                    Position = new[] { pos.x, pos.y, pos.z },
+                    KnownLocationCount = 0,
                 });
             }
 
@@ -77,7 +77,7 @@ namespace ValheimVillages.Testing
         }
 
         /// <summary>
-        /// Compare current state against a saved snapshot and report diffs.
+        ///     Compare current state against a saved snapshot and report diffs.
         /// </summary>
         public static string CompareWithCurrent(SceneSnapshot saved)
         {
@@ -96,8 +96,8 @@ namespace ValheimVillages.Testing
             var allTypes = savedTypes.Keys.Union(currentTypes.Keys).OrderBy(t => t);
             foreach (var type in allTypes)
             {
-                int s = savedTypes.TryGetValue(type, out var sv) ? sv : 0;
-                int c = currentTypes.TryGetValue(type, out var cv) ? cv : 0;
+                var s = savedTypes.TryGetValue(type, out var sv) ? sv : 0;
+                var c = currentTypes.TryGetValue(type, out var cv) ? cv : 0;
                 if (s != c)
                     sb.AppendLine($"  DIFF {type}: saved={s}, current={c}");
             }
@@ -114,7 +114,7 @@ namespace ValheimVillages.Testing
             sb.AppendLine($"  \"timestamp\": \"{Timestamp}\",");
 
             sb.AppendLine("  \"villagers\": [");
-            for (int i = 0; i < Villagers.Count; i++)
+            for (var i = 0; i < Villagers.Count; i++)
             {
                 var v = Villagers[i];
                 sb.AppendLine("    {");
@@ -127,10 +127,11 @@ namespace ValheimVillages.Testing
                 if (i < Villagers.Count - 1) sb.Append(",");
                 sb.AppendLine();
             }
+
             sb.AppendLine("  ],");
 
             sb.AppendLine("  \"villageAreas\": [");
-            for (int i = 0; i < VillageAreas.Count; i++)
+            for (var i = 0; i < VillageAreas.Count; i++)
             {
                 var a = VillageAreas[i];
                 sb.AppendLine("    {");
@@ -141,6 +142,7 @@ namespace ValheimVillages.Testing
                 if (i < VillageAreas.Count - 1) sb.Append(",");
                 sb.AppendLine();
             }
+
             sb.AppendLine("  ]");
 
             sb.AppendLine("}");
@@ -150,13 +152,16 @@ namespace ValheimVillages.Testing
         private static SceneSnapshot FromJson(string json)
         {
             var snapshot = new SceneSnapshot();
-            var tsMatch = System.Text.RegularExpressions.Regex.Match(
+            var tsMatch = Regex.Match(
                 json, "\"timestamp\":\\s*\"([^\"]+)\"");
             if (tsMatch.Success) snapshot.Timestamp = tsMatch.Groups[1].Value;
             return snapshot;
         }
 
-        private static string Esc(string s) => s?.Replace("\"", "\\\"") ?? "";
+        private static string Esc(string s)
+        {
+            return s?.Replace("\"", "\\\"") ?? "";
+        }
 
         #endregion
 
@@ -191,11 +196,11 @@ namespace ValheimVillages.Testing
     /// <summary>Villager state at a point in time.</summary>
     public class VillagerSnapshot
     {
-        public string UniqueId;
-        public string NpcType;
         public string BehaviorState;
-        public float[] Position = new float[3];
         public int KnownLocationCount;
+        public string NpcType;
+        public float[] Position = new float[3];
+        public string UniqueId;
     }
 
     /// <summary>Village area state at a point in time.</summary>

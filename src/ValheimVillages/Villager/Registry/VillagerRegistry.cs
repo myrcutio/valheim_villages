@@ -8,14 +8,14 @@ using ValheimVillages.Schemas;
 namespace ValheimVillages.Villager.Registry
 {
     /// <summary>
-    /// Registry of villager type definitions loaded from embedded JSON files.
+    ///     Registry of villager type definitions loaded from embedded JSON files.
     /// </summary>
     public static class VillagerRegistry
     {
         private static Dictionary<string, VillagerDef> _definitions;
 
         /// <summary>
-        /// Get all villager type definitions.
+        ///     Get all villager type definitions.
         /// </summary>
         public static IReadOnlyDictionary<string, VillagerDef> Definitions
         {
@@ -27,14 +27,14 @@ namespace ValheimVillages.Villager.Registry
         }
 
         /// <summary>
-        /// Get a specific villager type definition.
+        ///     Get a specific villager type definition.
         /// </summary>
         public static VillagerDef Get(string villagerType)
         {
             EnsureInitialized();
             return _definitions.TryGetValue(villagerType, out var def) ? def : null;
         }
-        
+
         private static void EnsureInitialized()
         {
             if (_definitions != null) return;

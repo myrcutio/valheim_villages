@@ -4,7 +4,10 @@
   "displayName": "Blacksmith",
   "description": "Skilled in metalworking, forging, and weapon/armor repair",
   "workbenches": [
-    { "name": "Forge", "minLevel": 1 }
+    {
+      "name": "Forge",
+      "minLevel": 1
+    }
   ],
   "requiredBiomes": [],
   "preferredBiomes": [],
@@ -15,16 +18,33 @@
   "dependentOnNpcType": "",
   "tieredBenefits": [],
   "productions": [
-    { "requiredLevel": 1, "outputItem": "Bronze", "description": "Produces bronze (requires Miner with copper + tin)" }
+    {
+      "requiredLevel": 1,
+      "outputItem": "Bronze",
+      "description": "Produces bronze (requires Miner with copper + tin)"
+    }
   ],
-  "providesLevelTo": ["Miner"],
-  "receivesLevelFrom": ["Miner", "Carpenter"],
+  "providesLevelTo": [
+    "Miner"
+  ],
+  "receivesLevelFrom": [
+    "Miner",
+    "Carpenter"
+  ],
   "interdependenceDescription": "Adds level to Miner for tin; requires Miner for ore; Carpenter improves tools",
   "stationName": "",
   "stationIcon": "Hammer",
-  "workStations": ["$piece_forge"],
-  "behaviors": ["craft"],
-  "tags": ["tab:info", "tab:debug", "tab:workorder"],
+  "workStations": [
+    "$piece_forge"
+  ],
+  "behaviors": [
+    "craft"
+  ],
+  "tags": [
+    "tab:info",
+    "tab:debug",
+    "tab:workorder"
+  ],
   "randomTalk": [
     "The secret to good metalwork is hitting it until it's the right shape. Same applies to most problems, really.",
     "I don't make mistakes. I make unexpectedly artistic letter openers.",

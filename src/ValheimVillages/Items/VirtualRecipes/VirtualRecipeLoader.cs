@@ -8,9 +8,9 @@ using ValheimVillages.Villager.Registry;
 namespace ValheimVillages.Items.VirtualRecipes
 {
     /// <summary>
-    /// Registers virtual recipe definitions as real Recipe objects in ObjectDB.
-    /// Reads station recipes and discovery tags from VillagerRegistry definitions
-    /// instead of separate JSON files.
+    ///     Registers virtual recipe definitions as real Recipe objects in ObjectDB.
+    ///     Reads station recipes and discovery tags from VillagerRegistry definitions
+    ///     instead of separate JSON files.
     /// </summary>
     public static class VirtualRecipeLoader
     {
@@ -23,9 +23,9 @@ namespace ValheimVillages.Items.VirtualRecipes
         }
 
         /// <summary>
-        /// Register all virtual recipes with ObjectDB.
-        /// Iterates VillagerRegistry definitions for station recipes and
-        /// uses recipe:cultivator / recipe:cooking tags for discovery.
+        ///     Register all virtual recipes with ObjectDB.
+        ///     Iterates VillagerRegistry definitions for station recipes and
+        ///     uses recipe:cultivator / recipe:cooking tags for discovery.
         /// </summary>
         public static void RegisterAll(ObjectDB objectDB)
         {
@@ -43,7 +43,7 @@ namespace ValheimVillages.Items.VirtualRecipes
 
             RemoveOurRecipesFrom(objectDB);
 
-            int count = 0;
+            var count = 0;
 
             foreach (var kv in VillagerRegistry.Definitions)
             {
@@ -74,8 +74,8 @@ namespace ValheimVillages.Items.VirtualRecipes
         }
 
         /// <summary>
-        /// When ZNetScene becomes available, add cooking-discovered recipes
-        /// for any station with the recipe:cooking tag.
+        ///     When ZNetScene becomes available, add cooking-discovered recipes
+        ///     for any station with the recipe:cooking tag.
         /// </summary>
         public static void RegisterCookingRecipesIfNeeded(ObjectDB objectDB)
         {
@@ -94,7 +94,7 @@ namespace ValheimVillages.Items.VirtualRecipes
                 var cookingEntries = CookingRecipeDiscovery.GetCookingRecipes(existingOutputs);
                 if (cookingEntries.Count == 0) continue;
 
-                int added = RegisterDiscoveredEntries(objectDB, station, cookingEntries, existingOutputs);
+                var added = RegisterDiscoveredEntries(objectDB, station, cookingEntries, existingOutputs);
                 if (added > 0)
                     Plugin.Log?.LogInfo(
                         $"VirtualRecipeLoader: Registered {added} cooking-discovered recipes for {def.stationName} (ZNetScene ready)");
@@ -102,22 +102,22 @@ namespace ValheimVillages.Items.VirtualRecipes
         }
 
         /// <summary>
-        /// Re-runs cultivator and cooking discovery and adds any new recipes.
-        /// Returns the number of new recipes added.
+        ///     Re-runs cultivator and cooking discovery and adds any new recipes.
+        ///     Returns the number of new recipes added.
         /// </summary>
         public static int RecheckDiscoveredRecipes(ObjectDB objectDB)
         {
             if (objectDB?.m_recipes == null) return 0;
 
-            int totalAdded = 0;
+            var totalAdded = 0;
 
             foreach (var kv in VillagerRegistry.Definitions)
             {
                 var def = kv.Value;
                 if (string.IsNullOrEmpty(def?.stationName)) continue;
 
-                bool hasCultivator = def.tags != null && TagParser.HasTag(def.tags, "recipe", "cultivator");
-                bool hasCooking = def.tags != null && TagParser.HasTag(def.tags, "recipe", "cooking");
+                var hasCultivator = def.tags != null && TagParser.HasTag(def.tags, "recipe", "cultivator");
+                var hasCooking = def.tags != null && TagParser.HasTag(def.tags, "recipe", "cooking");
                 if (!hasCultivator && !hasCooking) continue;
 
                 var station = VirtualRecipeParser.GetOrCreateStationTemplate(def.stationName);
@@ -140,12 +140,13 @@ namespace ValheimVillages.Items.VirtualRecipes
             }
 
             if (totalAdded > 0)
-                Plugin.Log?.LogInfo($"VirtualRecipeLoader: Recheck added {totalAdded} discovered recipes (post-world load)");
+                Plugin.Log?.LogInfo(
+                    $"VirtualRecipeLoader: Recheck added {totalAdded} discovered recipes (post-world load)");
             return totalAdded;
         }
 
         /// <summary>
-        /// Get the template CraftingStation for a virtual station name.
+        ///     Get the template CraftingStation for a virtual station name.
         /// </summary>
         public static CraftingStation GetStationTemplate(string stationName)
         {
@@ -153,7 +154,7 @@ namespace ValheimVillages.Items.VirtualRecipes
         }
 
         /// <summary>
-        /// Get the physical station type override for a recipe, or null if none.
+        ///     Get the physical station type override for a recipe, or null if none.
         /// </summary>
         public static string GetPhysicalStation(string recipeName)
         {
@@ -166,7 +167,7 @@ namespace ValheimVillages.Items.VirtualRecipes
             List<StationRecipe> recipes, HashSet<string> existingOutputs)
         {
             if (recipes == null || recipes.Count == 0) return 0;
-            int count = 0;
+            var count = 0;
             foreach (var sr in recipes)
             {
                 if (IsExcludedFromCraftMenu(sr.output)) continue;
@@ -177,9 +178,10 @@ namespace ValheimVillages.Items.VirtualRecipes
                 {
                     output = sr.output,
                     outputAmount = sr.outputAmount,
-                    inputs = string.IsNullOrEmpty(sr.input) ? null
+                    inputs = string.IsNullOrEmpty(sr.input)
+                        ? null
                         : new[] { new VirtualRecipeInput { item = sr.input, amount = sr.inputAmount } },
-                    minStationLevel = sr.minStationLevel
+                    minStationLevel = sr.minStationLevel,
                 };
 
                 var recipe = CreateRecipe(objectDB, station, entry);
@@ -190,6 +192,7 @@ namespace ValheimVillages.Items.VirtualRecipes
                     count++;
                 }
             }
+
             return count;
         }
 
@@ -197,7 +200,7 @@ namespace ValheimVillages.Items.VirtualRecipes
             ObjectDB objectDB, CraftingStation station,
             List<VirtualRecipeEntry> entries, HashSet<string> existingOutputs)
         {
-            int count = 0;
+            var count = 0;
             foreach (var entry in entries)
             {
                 if (IsExcludedFromCraftMenu(entry.output)) continue;
@@ -212,6 +215,7 @@ namespace ValheimVillages.Items.VirtualRecipes
                     count++;
                 }
             }
+
             return count;
         }
 
@@ -225,6 +229,7 @@ namespace ValheimVillages.Items.VirtualRecipes
                     continue;
                 existingOutputs.Add(r.m_item.gameObject.name);
             }
+
             return existingOutputs;
         }
 
@@ -233,25 +238,24 @@ namespace ValheimVillages.Items.VirtualRecipes
             if (def?.cultivatorExclusions == null || def.cultivatorExclusions.Count == 0)
                 return Array.Empty<string>();
             var lower = new string[def.cultivatorExclusions.Count];
-            for (int i = 0; i < def.cultivatorExclusions.Count; i++)
+            for (var i = 0; i < def.cultivatorExclusions.Count; i++)
             {
                 var s = def.cultivatorExclusions[i];
                 lower[i] = string.IsNullOrEmpty(s) ? "" : s.Trim().ToLowerInvariant();
             }
+
             return lower;
         }
 
         private static void ReAddExisting(ObjectDB objectDB)
         {
-            int added = 0;
+            var added = 0;
             foreach (var recipe in _registeredRecipes)
-            {
                 if (!objectDB.m_recipes.Contains(recipe))
                 {
                     objectDB.m_recipes.Add(recipe);
                     added++;
                 }
-            }
 
             if (added > 0)
                 Plugin.Log?.LogInfo(
@@ -260,7 +264,7 @@ namespace ValheimVillages.Items.VirtualRecipes
 
         private static void RemoveOurRecipesFrom(ObjectDB objectDB)
         {
-            int removed = objectDB.m_recipes.RemoveAll(r =>
+            var removed = objectDB.m_recipes.RemoveAll(r =>
                 r != null && !string.IsNullOrEmpty(r.name) && r.name.StartsWith("VV_Recipe_"));
             if (removed > 0)
                 Plugin.Log?.LogInfo(
@@ -294,7 +298,6 @@ namespace ValheimVillages.Items.VirtualRecipes
 
             var resources = new List<Piece.Requirement>();
             if (entry.inputs != null)
-            {
                 foreach (var input in entry.inputs)
                 {
                     var inputPrefab = ObjectDB.instance.GetItemPrefab(input.item);
@@ -318,10 +321,9 @@ namespace ValheimVillages.Items.VirtualRecipes
                         m_resItem = inputItemDrop,
                         m_amount = input.amount,
                         m_amountPerLevel = 0,
-                        m_recover = false
+                        m_recover = false,
                     });
                 }
-            }
 
             var recipeName = $"VV_Recipe_{station.m_name}_{entry.output}";
             var recipe = ScriptableObject.CreateInstance<Recipe>();

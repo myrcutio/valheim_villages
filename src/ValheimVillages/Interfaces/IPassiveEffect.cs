@@ -3,9 +3,9 @@ using UnityEngine;
 namespace ValheimVillages.Interfaces
 {
     /// <summary>
-    /// Interface for passive village effects that operate continuously
-    /// within village boundaries. Implementations are registered via
-    /// [RegisterPassive] and discovered by AttributeScanner.
+    ///     Interface for passive village effects that operate continuously
+    ///     within village boundaries. Implementations are registered via
+    ///     [RegisterPassive] and discovered by AttributeScanner.
     /// </summary>
     public interface IPassiveEffect
     {

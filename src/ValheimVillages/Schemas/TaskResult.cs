@@ -3,25 +3,25 @@ using System.Collections.Generic;
 namespace ValheimVillages.Schemas
 {
     /// <summary>
-    /// Result returned by an ITaskHandler after processing a task.
+    ///     Result returned by an ITaskHandler after processing a task.
     /// </summary>
     public class TaskResult
     {
-        /// <summary>Whether the task completed successfully.</summary>
-        public bool Success;
+        /// <summary>Handler-specific output data, keyed by name.</summary>
+        public Dictionary<string, string> Data;
 
         /// <summary>Error message when Success is false; null otherwise.</summary>
         public string Error;
 
-        /// <summary>Handler-specific output data, keyed by name.</summary>
-        public Dictionary<string, string> Data;
-
         /// <summary>
-        /// Optional typed payload for passing complex objects (e.g. WorkOrderContext)
-        /// to callbacks without serializing to strings. Only valid during the
-        /// synchronous callback invocation.
+        ///     Optional typed payload for passing complex objects (e.g. WorkOrderContext)
+        ///     to callbacks without serializing to strings. Only valid during the
+        ///     synchronous callback invocation.
         /// </summary>
         public object Payload;
+
+        /// <summary>Whether the task completed successfully.</summary>
+        public bool Success;
 
         /// <summary>Create a successful result with optional data.</summary>
         public static TaskResult Ok(Dictionary<string, string> data = null, object payload = null)

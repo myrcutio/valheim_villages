@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Algorithms;
 using Xunit;
@@ -8,7 +6,7 @@ using Barrier = ValheimVillages.Algorithms.Barrier;
 namespace ValheimVillages.Tests.Algorithms;
 
 /// <summary>
-/// Tests for the FloodFill BFS algorithm: barrier handling, region isolation.
+///     Tests for the FloodFill BFS algorithm: barrier handling, region isolation.
 /// </summary>
 public class FloodFillTests
 {
@@ -27,8 +25,8 @@ public class FloodFillTests
 
         var result = FloodFill.Run(
             beds, barriers, heightLookup,
-            originX: -30f, originZ: -30f,
-            cellSize: 1f, cellCountX: 60, cellCountZ: 60);
+            -30f, -30f,
+            1f, 60, 60);
 
         Assert.True(result.Count > 0, "Should flood at least some cells");
         // With 25m radius on flat terrain, expect a large region
@@ -68,11 +66,11 @@ public class FloodFillTests
             0, 0, 1f, 60, 60);
 
         // All cells should be within FloodFillRadius (25m) of the bed
-        float r2 = FloodFill.FloodFillRadius * FloodFill.FloodFillRadius;
+        var r2 = FloodFill.FloodFillRadius * FloodFill.FloodFillRadius;
         foreach (var cell in result)
         {
             float dx = cell.Wx - 15f, dz = cell.Wz - 15f;
-            float dist2 = dx * dx + dz * dz;
+            var dist2 = dx * dx + dz * dz;
             Assert.True(dist2 <= r2 * 1.5f, // allow some cell-size margin
                 $"Cell ({cell.Wx:F1},{cell.Wz:F1}) is too far from bed: {Math.Sqrt(dist2):F1}m > {FloodFill.FloodFillRadius}m");
         }
@@ -104,13 +102,13 @@ public class FloodFillTests
     {
         var barriers = new List<Barrier>
         {
-            new Barrier
+            new()
             {
                 Px = 5, Pz = 5, Py = 0,
                 Fx = 1, Fz = 0,
                 HalfWidth2 = 4f,
-                YTolerance = 0
-            }
+                YTolerance = 0,
+            },
         };
 
         // Line crossing the barrier
@@ -124,13 +122,13 @@ public class FloodFillTests
     {
         var barriers = new List<Barrier>
         {
-            new Barrier
+            new()
             {
                 Px = 5, Pz = 5, Py = 0,
                 Fx = 1, Fz = 0,
                 HalfWidth2 = 4f,
-                YTolerance = 3f // only blocks within 3m of Y=0
-            }
+                YTolerance = 3f, // only blocks within 3m of Y=0
+            },
         };
 
         // Same floor: should block

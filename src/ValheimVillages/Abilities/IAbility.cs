@@ -3,8 +3,8 @@ using ValheimVillages.Interfaces;
 namespace ValheimVillages.Abilities
 {
     /// <summary>
-    /// Extension of the Core IAbility interface adding Player-dependent methods.
-    /// Ability implementations should implement this interface.
+    ///     Extension of the Core IAbility interface adding Player-dependent methods.
+    ///     Ability implementations should implement this interface.
     /// </summary>
     public interface IPlayerAbility : IAbility
     {

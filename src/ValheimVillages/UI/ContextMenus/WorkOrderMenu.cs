@@ -1,47 +1,48 @@
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 using UnityEngine.UI;
 using ValheimVillages.Attributes;
-using ValheimVillages.Items.WorkOrders;
 using ValheimVillages.UI.Core;
 
 namespace ValheimVillages.UI.ContextMenus
 {
     /// <summary>
-    /// Unity UI menu for configuring work order production quotas (min, max).
-    /// Opens when a player right-clicks a work order item.
-    /// Styled to match Valheim's native UI aesthetic via VillagerUIFactory.
+    ///     Unity UI menu for configuring work order production quotas (min, max).
+    ///     Opens when a player right-clicks a work order item.
+    ///     Styled to match Valheim's native UI aesthetic via VillagerUIFactory.
     /// </summary>
     [RegisterModObject("WorkOrderMenu")]
     public class WorkOrderMenu : MonoBehaviour
     {
-        private static WorkOrderMenu s_instance;
+        private const int MinQuota = 1;
 
-        private bool m_visible;
+        /// <summary>Hard ceiling for typed input. Slider has its own lower cap.</summary>
+        private const int MaxQuota = 9999;
+
+        private static WorkOrderMenu s_instance;
         private ItemDrop.ItemData m_currentItem;
-        private GameObject m_panelRoot;
+        private string m_itemDisplay = "";
+        private GameObject m_itemLabel;
+        private InputField m_maxInput;
+        private Slider m_maxSlider;
+        private int m_maximum = 10;
+        private InputField m_minInput;
 
         // UI element references (populated by WorkOrderMenuBuilder)
         private Slider m_minSlider;
-        private InputField m_minInput;
-        private Slider m_maxSlider;
-        private InputField m_maxInput;
-        private GameObject m_stationLabel;
-        private GameObject m_itemLabel;
-        private GameObject m_rangeLabel;
 
         // Backing data
         private int m_minimum = 1;
-        private int m_maximum = 10;
+        private GameObject m_panelRoot;
+        private GameObject m_rangeLabel;
         private string m_stationDisplay = "";
-        private string m_itemDisplay = "";
+        private GameObject m_stationLabel;
 
         // Prevents circular updates between slider <-> input field
         private bool m_updatingUI;
 
-        private const int MinQuota = 1;
-        /// <summary>Hard ceiling for typed input. Slider has its own lower cap.</summary>
-        private const int MaxQuota = 9999;
+        private bool m_visible;
 
         /// <summary>Whether the menu is currently visible.</summary>
         public static bool IsVisible =>
@@ -113,12 +114,10 @@ namespace ValheimVillages.UI.ContextMenus
         private static void CleanupStaleInstances()
         {
 #pragma warning disable CS0618
-            var existing = Object.FindObjectsOfType<WorkOrderMenu>();
+            var existing = FindObjectsOfType<WorkOrderMenu>();
             foreach (var menu in existing)
-            {
                 if (menu != s_instance)
                     Destroy(menu.gameObject);
-            }
 #pragma warning restore CS0618
         }
 
@@ -132,9 +131,13 @@ namespace ValheimVillages.UI.ContextMenus
             m_stationDisplay = FormatStationName(stationRaw);
 
             m_minimum = int.TryParse(
-                GetData(item, "wo_min", "1"), out var min) ? min : 1;
+                GetData(item, "wo_min", "1"), out var min)
+                ? min
+                : 1;
             m_maximum = int.TryParse(
-                GetData(item, "wo_max", "10"), out var max) ? max : 10;
+                GetData(item, "wo_max", "10"), out var max)
+                ? max
+                : 10;
 
             var rawItemName = GetData(item, "wo_item_name", "");
             m_itemDisplay = string.IsNullOrEmpty(rawItemName)
@@ -177,7 +180,7 @@ namespace ValheimVillages.UI.ContextMenus
                 .Replace("$piece_", "")
                 .Replace("$vv_", "")
                 .Replace("_", " ");
-            return System.Globalization.CultureInfo.CurrentCulture
+            return CultureInfo.CurrentCulture
                 .TextInfo.ToTitleCase(clean);
         }
 
@@ -227,8 +230,8 @@ namespace ValheimVillages.UI.ContextMenus
         }
 
         /// <summary>
-        /// Sets text on a label created by VillagerUIFactory.CreateLabel.
-        /// Uses TMPro reflection, then falls back to legacy Text.
+        ///     Sets text on a label created by VillagerUIFactory.CreateLabel.
+        ///     Uses TMPro reflection, then falls back to legacy Text.
         /// </summary>
         private static void SetLabel(GameObject go, string text)
         {

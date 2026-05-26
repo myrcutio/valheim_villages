@@ -1,10 +1,14 @@
 # ValheimVillages.Tests
 
-Keywords: test, unit test, xUnit, dotnet test, FloodFillTests, PathScoringTests, BoundaryPipelineTests, TabContractTests, AbilityContractTests, BehaviorContractTests, NpcDefinitionTests, TagParserTests, TaskQueueTests, contract test, algorithm test, definition test, integration test, regression test, NpcTypeDefinition, TagParser, net10.0
+Keywords: test, unit test, xUnit, dotnet test, FloodFillTests, PathScoringTests, BoundaryPipelineTests,
+TabContractTests, AbilityContractTests, BehaviorContractTests, NpcDefinitionTests, TagParserTests, TaskQueueTests,
+contract test, algorithm test, definition test, integration test, regression test, NpcTypeDefinition, TagParser, net10.0
 
 ## Purpose
 
-Unit tests for ValheimVillages. Runs via `dotnet test` without launching the game. Covers algorithms, registration contracts, NPC definitions, and task queue data types. Contract tests use safe reflection to skip types with unresolvable Unity dependencies.
+Unit tests for ValheimVillages. Runs via `dotnet test` without launching the game. Covers algorithms, registration
+contracts, NPC definitions, and task queue data types. Contract tests use safe reflection to skip types with
+unresolvable Unity dependencies.
 
 ## Directory Structure
 
@@ -27,12 +31,12 @@ ValheimVillages.Tests/
 
 ## Test Categories
 
-| Category | What it verifies |
-|----------|-----------------|
-| **Algorithms** | FloodFill BFS, PathScoring metrics, BoundaryPipeline geometry transforms |
-| **Contracts** | All `[Register*]` attributed types implement their required interface |
-| **Definitions** | NPC JSON definitions parse correctly; TagParser handles all formats |
-| **TaskQueue** | Task data types serialize/compare correctly; priority ordering |
+| Category        | What it verifies                                                         |
+|-----------------|--------------------------------------------------------------------------|
+| **Algorithms**  | FloodFill BFS, PathScoring metrics, BoundaryPipeline geometry transforms |
+| **Contracts**   | All `[Register*]` attributed types implement their required interface    |
+| **Definitions** | NPC JSON definitions parse correctly; TagParser handles all formats      |
+| **TaskQueue**   | Task data types serialize/compare correctly; priority ordering           |
 
 ## Running Tests
 
@@ -40,10 +44,13 @@ ValheimVillages.Tests/
 dotnet test tests/ValheimVillages.Tests/
 ```
 
-References the main `ValheimVillages` project. Contract tests use `AssemblyHelper` to safely reflect over types that may depend on unavailable Unity assemblies.
+References the main `ValheimVillages` project. Contract tests use `AssemblyHelper` to safely reflect over types that may
+depend on unavailable Unity assemblies.
 
 ## Integration
 
 - **ValheimVillages** -- the only project reference; tests algorithms, schemas, and registration attributes.
-- Contract tests scan the assembly for `[Register*]` attributes to verify interface compliance, skipping types whose metadata can't be loaded outside the game runtime.
-- Adding a new `[RegisterTab]`, `[RegisterAbility]`, or `[RegisterBehavior]` type will be caught by contract tests if it fails to implement the required interface.
+- Contract tests scan the assembly for `[Register*]` attributes to verify interface compliance, skipping types whose
+  metadata can't be loaded outside the game runtime.
+- Adding a new `[RegisterTab]`, `[RegisterAbility]`, or `[RegisterBehavior]` type will be caught by contract tests if it
+  fails to implement the required interface.

@@ -1,8 +1,8 @@
 namespace ValheimVillages.Behaviors
 {
     /// <summary>
-    /// Extension of the Core IBehavior interface adding ZDO persistence methods.
-    /// Behavior implementations should implement this interface to support save/load.
+    ///     Extension of the Core IBehavior interface adding ZDO persistence methods.
+    ///     Behavior implementations should implement this interface to support save/load.
     /// </summary>
     public interface IBehaviorPersistence
     {

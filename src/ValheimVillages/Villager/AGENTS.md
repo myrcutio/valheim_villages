@@ -1,10 +1,13 @@
 # Villager
 
-Keywords: Villager, VillagerAI, VillagerAIManager, VillagerRestoration, VillagerStation, VillagerDef, VillagerRegistry, SpawnPatch, VillagerPawnPatch, POI discovery, VillagerPOIDiscovery, DoorHandler, hot reload, restoration, memory, behavior logic
+Keywords: Villager, VillagerAI, VillagerAIManager, VillagerRestoration, VillagerStation, VillagerDef, VillagerRegistry,
+SpawnPatch, VillagerPawnPatch, POI discovery, VillagerPOIDiscovery, DoorHandler, hot reload, restoration, memory,
+behavior logic
 
 ## Purpose
 
-Villager lifecycle, AI, and restoration. Owns the single spawn path (SpawnPatch), restoration after hot reload (VillagerRestoration), POI discovery (VillagerPOIDiscovery), look behavior, and Villager.Station.VillagerStation.
+Villager lifecycle, AI, and restoration. Owns the single spawn path (SpawnPatch), restoration after hot reload
+(VillagerRestoration), POI discovery (VillagerPOIDiscovery), look behavior, and Villager.Station.VillagerStation.
 
 ## Directory Structure
 
@@ -37,7 +40,9 @@ Villager/
 ## Integration
 
 - **TaskQueue/** -- POIDiscoveryHandler uses VillagerPOIDiscovery and VillagerAIManager.
-- **Behaviors/** -- BehaviorFactory.CreateBehaviors(VillagerAI, tags); VillagerAI runs behaviors each tick.
-- **UI/** -- VillagerBehaviorBridge uses VillagerAIManager.ActiveVillagers; `tab:workorder` tag drives Orders tab visibility via VillagerStation.HasCraftingRecipes.
+- **Behaviors/** -- BehaviorFactory.CreateBehaviors (VillagerAI, tags); VillagerAI runs behaviors each tick.
+- **UI/** -- VillagerBehaviorBridge uses VillagerAIManager.ActiveVillagers; `tab:workorder` tag drives Orders tab
+  visibility via VillagerStation.HasCraftingRecipes.
 - **Patches/** -- ItemPatch (ZNetSceneAwake) calls VillagerPawnPatch.LogAvailableDvergrPrefabs.
-- **Items/** -- Pawns (generated from VillagerRegistry) spawn villagers via SpawnPatch; work orders drive Behaviors crafting/farming.
+- **Items/** -- Pawns (generated from VillagerRegistry) spawn villagers via SpawnPatch; work orders drive Behaviors
+  crafting/farming.

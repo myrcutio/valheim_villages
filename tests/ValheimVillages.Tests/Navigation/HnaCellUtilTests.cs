@@ -4,7 +4,7 @@ using Xunit;
 namespace ValheimVillages.Tests.Navigation;
 
 /// <summary>
-/// Tests for RegionGraph cell ID utilities: HeightBucket, TryParseCellId, CellKey.
+///     Tests for RegionGraph cell ID utilities: HeightBucket, TryParseCellId, CellKey.
 /// </summary>
 public class HnaCellUtilTests
 {
@@ -25,7 +25,7 @@ public class HnaCellUtilTests
     [Fact]
     public void HeightBucket_UsesConfiguredBucketSize()
     {
-        float bucketSize = RegionGraph.HeightBucketSize;
+        var bucketSize = RegionGraph.HeightBucketSize;
         Assert.Equal(2f, bucketSize);
         Assert.Equal(1, RegionGraph.HeightBucket(bucketSize));
     }

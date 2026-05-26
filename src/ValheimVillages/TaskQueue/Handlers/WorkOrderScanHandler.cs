@@ -1,24 +1,22 @@
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using UnityEngine;
-using ValheimVillages.Schemas;
-using ValheimVillages.Items.VirtualRecipes;
 using ValheimVillages.Attributes;
+using ValheimVillages.Items.VirtualRecipes;
+using ValheimVillages.Schemas;
+using ValheimVillages.Settings;
+using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Work;
-using ValheimVillages.Settings;
-using ValheimVillages.TaskQueue;
-using ValheimVillages.TaskQueue.ActivityLog;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
     /// <summary>
-    /// Handles "work_order_scan" tasks. Extracts the heavy scanning logic from
-    /// CraftingBehavior.TryScanForWork: finds containers, matches work orders,
-    /// checks quantities/ingredients/stations, and returns the fully resolved
-    /// context via callback.
-    /// Priority: Medium (2).
+    ///     Handles "work_order_scan" tasks. Extracts the heavy scanning logic from
+    ///     CraftingBehavior.TryScanForWork: finds containers, matches work orders,
+    ///     checks quantities/ingredients/stations, and returns the fully resolved
+    ///     context via callback.
+    ///     Priority: Medium (2).
     /// </summary>
     [RegisterTaskHandler]
     public class WorkOrderScanHandler : ITaskHandlerWithLog
@@ -29,50 +27,37 @@ namespace ValheimVillages.TaskQueue.Handlers
         {
             // Parse attributes
             if (!task.Attributes.TryGetValue("villager_id", out var villagerId))
-            {
                 return TaskResult.Fail("Missing villager_id");
-            }
 
             if (!task.Attributes.TryGetValue("villager_type", out var villagerType) ||
                 string.IsNullOrEmpty(villagerType))
-            {
                 return TaskResult.Fail("Missing villager_type");
-            }
 
             if (!TaskAttributeParser.TryParsePosition(task.Attributes, "bed", out var bedPos))
-            {
                 return TaskResult.Fail("Missing or invalid bed position");
-            }
 
             // Look up the VillagerAI to access memory
             if (!VillagerAIManager.ActiveVillagers.TryGetValue(villagerId, out var ai))
-            {
                 return TaskResult.Fail($"Villager {villagerId} not found in active villagers");
-            }
 
             // Find containers
             var containers = ContainerScanner.FindNearbyContainers(
                 bedPos, WorkSettings.ChestScanRadius);
 
-            if (containers.Count == 0)
-            {
-                return TaskResult.Fail("No containers found near bed");
-            }
+            if (containers.Count == 0) return TaskResult.Fail("No containers found near bed");
 
             // Find all matching work orders and try each until one can be fulfilled
             var allMatches = ContainerScanner.FindAllWorkOrders(containers, villagerType);
-            
+
             if (allMatches == null || allMatches.Count == 0)
-            {
                 // No work orders to do: ACK so the queue continues (no retry/dead-letter).
                 return TaskResult.Ok();
-            }
 
             string lastFailReason = null;
             foreach (var match in allMatches)
             {
                 // Check existing output quantity
-                int existingCount = ContainerScanner.CountAcrossContainers(
+                var existingCount = ContainerScanner.CountAcrossContainers(
                     containers, match.ItemPrefabName);
 
                 if (existingCount >= match.MaxQuantity)
@@ -90,9 +75,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
 
                 // Check output capacity
-                int outputAmount = recipe.m_amount > 0 ? recipe.m_amount : 1;
+                var outputAmount = recipe.m_amount > 0 ? recipe.m_amount : 1;
                 if (!ContainerScanner.CanAcceptItem(
-                    match.SourceContainer, match.ItemPrefabName, outputAmount))
+                        match.SourceContainer, match.ItemPrefabName, outputAmount))
                 {
                     lastFailReason = "Output chest full";
                     continue;
@@ -126,14 +111,14 @@ namespace ValheimVillages.TaskQueue.Handlers
                         $"matched farming work order for {match.ItemPrefabName}");
 
                     return TaskResult.Ok(
-                        data: new Dictionary<string, string>
+                        new Dictionary<string, string>
                         {
                             { "item_prefab", match.ItemPrefabName },
                             { "station_name", match.StationName },
                             { "existing_count", existingCount.ToString() },
-                            { "is_farming", "true" }
+                            { "is_farming", "true" },
                         },
-                        payload: farmContext);
+                        farmContext);
                 }
 
                 CookingStation cookingStationRef = null;
@@ -142,13 +127,13 @@ namespace ValheimVillages.TaskQueue.Handlers
                 if (physicalStation == "cookingstation")
                 {
                     if (StationFinder.TryFindStationAtKnownLocations<CookingStation>(
-                        ai, s => StationFinder.IsCookingStationReady(s), out var pos, out var station))
+                            ai, s => StationFinder.IsCookingStationReady(s), out var pos, out var station))
                     {
                         stationPos = pos;
                         cookingStationRef = station;
                     }
-                    else if (StationFinder.TryFindStationAtKnownLocations<CookingStation>(
-                        ai, null, out pos, out station))
+                    else if (StationFinder.TryFindStationAtKnownLocations(
+                                 ai, null, out pos, out station))
                     {
                         if (StationFuelHelper.DiagnoseFuelNeed(station, out var need)
                             && StationFuelHelper.FindFuelInContainers(containers, need.FuelItemPrefab, out var fc))
@@ -159,7 +144,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                             fuelContainer = fc;
                             Plugin.Log?.LogInfo(
                                 $"[WorkOrderScan] Station needs fuel ({need.FuelItemPrefab}), " +
-                                $"found in container. Will fuel before cooking.");
+                                "found in container. Will fuel before cooking.");
                         }
                         else
                         {
@@ -167,12 +152,16 @@ namespace ValheimVillages.TaskQueue.Handlers
                         }
                     }
                     else
+                    {
                         stationPos = null;
+                    }
+
                     stationDesc = "CookingStation";
                 }
                 else
                 {
-                    if (StationFinder.TryFindStationAtKnownLocations<CraftingStation>(ai, cs => cs.m_name == match.StationName, out var pos, out _))
+                    if (StationFinder.TryFindStationAtKnownLocations<CraftingStation>(ai,
+                            cs => cs.m_name == match.StationName, out var pos, out _))
                         stationPos = pos;
                     else
                         stationPos = null;
@@ -187,7 +176,8 @@ namespace ValheimVillages.TaskQueue.Handlers
 
                 // For cooking station, remember input item name so we can poll the right slot
                 string cookingInputName = null;
-                if (cookingStationRef != null && recipe.m_resources != null && recipe.m_resources.Length > 0 && recipe.m_resources[0].m_resItem != null)
+                if (cookingStationRef != null && recipe.m_resources != null && recipe.m_resources.Length > 0 &&
+                    recipe.m_resources[0].m_resItem != null)
                     cookingInputName = recipe.m_resources[0].m_resItem.gameObject.name;
 
                 // Build the full context for the callback
@@ -203,7 +193,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                     CraftedCount = existingCount,
                     CurrentIngredientIndex = 0,
                     FuelRequirement = fuelRequirement,
-                    FuelContainer = fuelContainer
+                    FuelContainer = fuelContainer,
                 };
 
                 // Log the successful scan to the activity log
@@ -218,13 +208,13 @@ namespace ValheimVillages.TaskQueue.Handlers
 
                 // Return result with context as payload for the callback
                 return TaskResult.Ok(
-                    data: new Dictionary<string, string>
+                    new Dictionary<string, string>
                     {
                         { "item_prefab", match.ItemPrefabName },
                         { "station_name", match.StationName },
-                        { "existing_count", existingCount.ToString() }
+                        { "existing_count", existingCount.ToString() },
                     },
-                    payload: context);
+                    context);
             }
 
             // No work order could be fulfilled right now (station not discovered,

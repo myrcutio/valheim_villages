@@ -7,8 +7,8 @@ namespace ValheimVillages.Villager
     public class Dialog
     {
         /// <summary>
-        /// Configure VillagerTalk dialog lines from the villager definition.
-        /// Only replaces lists that have entries in the JSON.
+        ///     Configure VillagerTalk dialog lines from the villager definition.
+        ///     Only replaces lists that have entries in the JSON.
         /// </summary>
         public static void ConfigureDialog(GameObject npcObject, VillagerDef villagerDef)
         {

@@ -5,8 +5,8 @@ using ValheimVillages.Attributes;
 namespace ValheimVillages.Patches
 {
     /// <summary>
-    /// Detects structural changes (piece placement/removal) and sets a dirty
-    /// flag so the HNA region graph can be rebuilt after a debounce period.
+    ///     Detects structural changes (piece placement/removal) and sets a dirty
+    ///     flag so the HNA region graph can be rebuilt after a debounce period.
     /// </summary>
     [HarmonyPatch]
     public static class PieceChangePatch
@@ -32,10 +32,16 @@ namespace ValheimVillages.Patches
 
         [HarmonyPostfix]
         [HarmonyPatch(typeof(Piece), "SetCreator")]
-        private static void OnPiecePlaced() => MarkDirty();
+        private static void OnPiecePlaced()
+        {
+            MarkDirty();
+        }
 
         [HarmonyPrefix]
         [HarmonyPatch(typeof(WearNTear), "Remove")]
-        private static void OnPieceRemoved() => MarkDirty();
+        private static void OnPieceRemoved()
+        {
+            MarkDirty();
+        }
     }
 }

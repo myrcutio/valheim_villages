@@ -1,10 +1,14 @@
 # Behaviors
 
-Keywords: behavior, patrol, alarm, craft, farming, explore, tidy, IBehavior, BehaviorFactory, RegisterBehavior, PatrolStateMachine, PerimeterPatrolBehavior, BreachAlarmBehavior, TidyBehavior, breach detection, patrol discovery, waypoint, circuit tracing, scouting, region boundary, patrol geometry, patrol persistence, stall detection, behavior priority, WantsControl, CookingStation
+Keywords: behavior, patrol, alarm, craft, farming, explore, tidy, IBehavior, BehaviorFactory, RegisterBehavior,
+PatrolStateMachine, PerimeterPatrolBehavior, BreachAlarmBehavior, TidyBehavior, breach detection, patrol discovery,
+waypoint, circuit tracing, scouting, region boundary, patrol geometry, patrol persistence, stall detection, behavior
+priority, WantsControl, CookingStation
 
 ## Purpose
 
-Composable NPC behaviors driven by tags in NPC JSON definitions. Each behavior has a tag, priority, and lifecycle hooks (WantsControl, Update, OnArrival). The highest-priority behavior that wants control runs each tick.
+Composable NPC behaviors driven by tags in NPC JSON definitions. Each behavior has a tag, priority, and lifecycle hooks
+(WantsControl, Update, OnArrival). The highest-priority behavior that wants control runs each tick.
 
 ## Directory Structure
 
@@ -34,23 +38,23 @@ Behaviors/
 
 ## Key Types
 
-| Type | Role |
-|------|------|
-| `BehaviorFactory` | Maps tag strings to `IBehavior` creator functions; returns sorted list by priority |
-| `PatrolStateMachine` | Patrol state machine with scouting, circuit tracing, patrolling, and alarm states |
-| `PerimeterPatrolBehavior` | Registered adapter that wraps `PatrolStateMachine`; exposes patrol state to UI |
-| `TidyBehavior` | Mid-priority (60) behavior that removes done/burnt items from cooking station spits |
-| `BreachAlarmBehavior` | High-priority (100) behavior that activates on wall breaches |
-| `PatrolPersistence` | Persists patrol state (waypoints, breach, region data) to ZDO |
-| `PatrolDiscovery` | Discovers patrol routes by scouting walls and tracing circuits |
+| Type                      | Role                                                                                |
+|---------------------------|-------------------------------------------------------------------------------------|
+| `BehaviorFactory`         | Maps tag strings to `IBehavior` creator functions; returns sorted list by priority  |
+| `PatrolStateMachine`      | Patrol state machine with scouting, circuit tracing, patrolling, and alarm states   |
+| `PerimeterPatrolBehavior` | Registered adapter that wraps `PatrolStateMachine`; exposes patrol state to UI      |
+| `TidyBehavior`            | Mid-priority (60) behavior that removes done/burnt items from cooking station spits |
+| `BreachAlarmBehavior`     | High-priority (100) behavior that activates on wall breaches                        |
+| `PatrolPersistence`       | Persists patrol state (waypoints, breach, region data) to ZDO                       |
+| `PatrolDiscovery`         | Discovers patrol routes by scouting walls and tracing circuits                      |
 
 ## Entry Points and Registration
 
 - `[RegisterBehavior("tag")]` attributes discovered by `AttributeScanner.RegisterBehaviors()`.
 - `BehaviorFactory.CreateBehaviors(ai, behaviorTags)` called by `VillagerAI` during initialization.
 - Behavior keys are merged from two sources in each NPC JSON definition:
-  - Legacy `"behaviors"` array (e.g. `["craft"]`)
-  - `"behavior:*"` entries in the `"tags"` array (e.g. `"behavior:farming"`)
+    - Legacy `"behaviors"` array (e.g. `["craft"]`)
+    - `"behavior:*"` entries in the `"tags"` array (e.g. `"behavior:farming"`)
 - Behaviors sorted by `Priority`; highest-priority behavior where `WantsControl()` returns true gets `Update()`.
 
 ## Integration

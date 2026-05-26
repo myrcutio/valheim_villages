@@ -3,10 +3,10 @@ using UnityEngine;
 namespace ValheimVillages.IntegrationTests
 {
     /// <summary>
-    /// Recorded walkable positions from the test village. Every position
-    /// must fall within CellSize (3m) of an HNA region center for the
-    /// graph to fully cover the navigable area.
-    /// Source: <BepInEx>/config/vv_dumps/hna_walkable_path.json (389 positions)
+    ///     Recorded walkable positions from the test village. Every position
+    ///     must fall within CellSize (3m) of an HNA region center for the
+    ///     graph to fully cover the navigable area.
+    ///     Source: <BepInEx>/config/vv_dumps/hna_walkable_path.json (389 positions)
     /// </summary>
     public static partial class RegionWalkableCoverageTests
     {

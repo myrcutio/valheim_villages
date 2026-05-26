@@ -4,10 +4,10 @@ using ValheimVillages.Attributes;
 namespace ValheimVillages.Villager.AI.Navigation
 {
     /// <summary>
-    /// Cleanup command for legacy torch-based debug markers. Torch visualization
-    /// has been replaced by the GL-based <see cref="Pathfinding.PathDebugRenderer"/>;
-    /// this class only retains the cleanup command so persisted torch ZDOs from
-    /// old sessions can still be removed.
+    ///     Cleanup command for legacy torch-based debug markers. Torch visualization
+    ///     has been replaced by the GL-based <see cref="Pathfinding.PathDebugRenderer" />;
+    ///     this class only retains the cleanup command so persisted torch ZDOs from
+    ///     old sessions can still be removed.
     /// </summary>
     public static class RegionDebugVisualization
     {
@@ -15,8 +15,8 @@ namespace ValheimVillages.Villager.AI.Navigation
         private const string RegionTorchPrefabName = "piece_groundtorch_wood";
 
         /// <summary>
-        /// Emergency cleanup: find and destroy ALL persisted torch markers from
-        /// old sessions that used torch-based visualization.
+        ///     Emergency cleanup: find and destroy ALL persisted torch markers from
+        ///     old sessions that used torch-based visualization.
         /// </summary>
         [DevCommand("Remove ALL persisted torch markers from the world", Name = "vv_hna_cleanup")]
         public static void CleanupPersistedMarkers()
@@ -27,12 +27,12 @@ namespace ValheimVillages.Villager.AI.Navigation
                 return;
             }
 
-            string linkClone = LinkTorchPrefabName + "(Clone)";
-            string regionClone = RegionTorchPrefabName + "(Clone)";
+            var linkClone = LinkTorchPrefabName + "(Clone)";
+            var regionClone = RegionTorchPrefabName + "(Clone)";
             var allZnvs = Object.FindObjectsByType<ZNetView>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
 
-            int destroyed = 0;
+            var destroyed = 0;
             foreach (var znv in allZnvs)
             {
                 if (znv == null || znv.gameObject == null) continue;
@@ -51,6 +51,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 {
                     Object.Destroy(znv.gameObject);
                 }
+
                 destroyed++;
             }
 

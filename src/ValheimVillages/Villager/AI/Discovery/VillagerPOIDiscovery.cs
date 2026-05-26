@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages;
 using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Schemas;
@@ -9,13 +8,15 @@ using ValheimVillages.Settings;
 namespace ValheimVillages.Villager.AI
 {
     /// <summary>
-    /// POI discovery and validation logic for villager AI.
-    /// Scans nearby objects to discover beds, fires, chairs, tables, farms, and animals.
+    ///     POI discovery and validation logic for villager AI.
+    ///     Scans nearby objects to discover beds, fires, chairs, tables, farms, and animals.
     /// </summary>
     public static class VillagerPOIDiscovery
     {
+        private const float LOSDiscoveryRadius = 50f;
+
         /// <summary>
-        /// Discover points of interest near the given transform (Villager.AI path).
+        ///     Discover points of interest near the given transform (Villager.AI path).
         /// </summary>
         public static void DiscoverNearbyPOIs(Transform transform, IVillagerMemory memory)
         {
@@ -25,11 +26,11 @@ namespace ValheimVillages.Villager.AI
             if (Vector3.Distance(pos, memory.BedPosition) > VillagerSettings.MaxWanderRange)
                 return;
 
-            bool currentShelter = VillagerBehaviorLogic.CheckShelter(pos);
+            var currentShelter = VillagerBehaviorLogic.CheckShelter(pos);
             if (currentShelter)
                 memory.DiscoverLocation(pos, LocationType.Shelter, 0f, true);
 
-            float comfort = CalculateCurrentComfort(transform, pos);
+            var comfort = CalculateCurrentComfort(transform, pos);
             memory.UpdateBestComfort(comfort, pos);
 
             var colliders = Physics.OverlapSphere(pos, VillagerSettings.DiscoveryRadius);
@@ -38,7 +39,6 @@ namespace ValheimVillages.Villager.AI
                 if (collider == null || collider.gameObject == null) continue;
                 TryDiscoverPOI(collider.gameObject, memory);
             }
-
         }
 
         private static void TryDiscoverPOI(GameObject obj, IVillagerMemory memory)
@@ -67,20 +67,20 @@ namespace ValheimVillages.Villager.AI
                 }
             }
 
-            bool hasShelter = VillagerBehaviorLogic.CheckShelter(pos);
+            var hasShelter = VillagerBehaviorLogic.CheckShelter(pos);
 
-            float comfort = locType.Value switch
+            var comfort = locType.Value switch
             {
                 LocationType.Fire => hasShelter ? 2f : 0.5f,
                 LocationType.Animals => 1.5f,
-                _ => 1f
+                _ => 1f,
             };
 
             memory.DiscoverLocation(pos, locType.Value, comfort, hasShelter);
         }
 
         /// <summary>
-        /// Extended-range discovery using line-of-sight (Villager.AI path).
+        ///     Extended-range discovery using line-of-sight (Villager.AI path).
         /// </summary>
         public static void DiscoverVisiblePOIs(Transform transform, IVillagerMemory memory)
         {
@@ -105,13 +105,11 @@ namespace ValheimVillages.Villager.AI
 
                 var direction = targetPos - eyePos;
                 if (Physics.Raycast(eyePos, direction.normalized, out var hit, direction.magnitude))
-                {
                     if (Vector3.Distance(hit.point, targetPos) > 3f)
                         continue;
-                }
 
-                bool hasShelter = VillagerBehaviorLogic.CheckShelter(targetPos);
-                float comfort = locType.Value == LocationType.Fire && hasShelter ? 2f : 1f;
+                var hasShelter = VillagerBehaviorLogic.CheckShelter(targetPos);
+                var comfort = locType.Value == LocationType.Fire && hasShelter ? 2f : 1f;
                 memory.DiscoverLocation(targetPos, locType.Value, comfort, hasShelter);
 
                 Plugin.Log?.LogInfo($"[LOS] Spotted {locType.Value} at {targetPos} ({direction.magnitude:F0}m away)");
@@ -122,8 +120,8 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        /// Classify a GameObject as a location type, or null if unrecognized.
-        /// Single source of truth for both discovery and validation (IsLocationStillValid).
+        ///     Classify a GameObject as a location type, or null if unrecognized.
+        ///     Single source of truth for both discovery and validation (IsLocationStillValid).
         /// </summary>
         private static LocationType? ClassifyObject(GameObject obj)
         {
@@ -133,9 +131,10 @@ namespace ValheimVillages.Villager.AI
             if (obj.GetComponentInParent<CraftingStation>() != null) return LocationType.CraftStation;
             if (obj.GetComponentInParent<CookingStation>() != null) return LocationType.CraftStation;
 
-            string name = obj.name.ToLower();
+            var name = obj.name.ToLower();
             if (name.Contains("table") || name.Contains("bench")) return LocationType.Table;
-            if (name.Contains("cultivat") || name.Contains("sapling") || name.Contains("plant_")) return LocationType.Farm;
+            if (name.Contains("cultivat") || name.Contains("sapling") || name.Contains("plant_"))
+                return LocationType.Farm;
 
             var character = obj.GetComponent<Character>();
             if (character != null && character.IsTamed()) return LocationType.Animals;
@@ -143,20 +142,16 @@ namespace ValheimVillages.Villager.AI
             return null;
         }
 
-        private const float LOSDiscoveryRadius = 50f;
-
         /// <summary>
-        /// Validate that known locations still have their expected objects (any IVillagerMemory).
+        ///     Validate that known locations still have their expected objects (any IVillagerMemory).
         /// </summary>
         public static void ValidateKnownLocations(IVillagerMemory memory)
         {
             var locationsToRemove = new List<KnownLocation>();
 
             foreach (var location in memory.GetValidatableLocations())
-            {
                 if (!IsLocationStillValid(location))
                     locationsToRemove.Add(location);
-            }
 
             foreach (var location in locationsToRemove)
                 memory.RemoveLocation(location);
@@ -174,12 +169,13 @@ namespace ValheimVillages.Villager.AI
                 if (ClassifyObject(collider.gameObject) == location.Type)
                     return true;
             }
+
             return false;
         }
 
         private static float CalculateCurrentComfort(Transform transform, Vector3 position)
         {
-            float comfort = 0f;
+            var comfort = 0f;
 
             if (VillagerBehaviorLogic.CheckShelter(position))
                 comfort += 1f;

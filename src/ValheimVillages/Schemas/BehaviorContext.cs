@@ -4,7 +4,7 @@ using ValheimVillages.Enums;
 namespace ValheimVillages.Schemas
 {
     /// <summary>
-    /// Current environmental context for behavior decisions.
+    ///     Current environmental context for behavior decisions.
     /// </summary>
     public struct BehaviorContext
     {

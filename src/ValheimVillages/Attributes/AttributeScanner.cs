@@ -2,19 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using ValheimVillages.Abilities;
-using ValheimVillages.Behaviors;
 using ValheimVillages.Interfaces;
 using ValheimVillages.TaskQueue;
 using ValheimVillages.UI.Core;
+using ValheimVillages.UI.Tabs;
 using ValheimVillages.Villager.AI;
 
 namespace ValheimVillages.Attributes
 {
     /// <summary>
-    /// Scans the mod assembly for registration attributes and wires up
-    /// console commands, task handlers, cleanup hooks, abilities, passives,
-    /// UI tabs, list panels, context menus, and behaviors matching annotations.
+    ///     Scans the mod assembly for registration attributes and wires up
+    ///     console commands, task handlers, cleanup hooks, abilities, passives,
+    ///     UI tabs, list panels, context menus, and behaviors matching annotations.
     /// </summary>
     public static class AttributeScanner
     {
@@ -28,8 +27,8 @@ namespace ValheimVillages.Attributes
         private static readonly List<(string Name, string Description)> s_devCommands = new();
 
         /// <summary>
-        /// Master entry point. Scans the assembly for all registration attributes
-        /// and wires up the discovered types/methods.
+        ///     Master entry point. Scans the assembly for all registration attributes
+        ///     and wires up the discovered types/methods.
         /// </summary>
         public static void ScanAndRegister(Assembly assembly)
         {
@@ -53,7 +52,7 @@ namespace ValheimVillages.Attributes
             CollectModObjectNames(assembly);
 
             Plugin.Log?.LogInfo(
-                $"[AttributeScanner] Registered: " +
+                "[AttributeScanner] Registered: " +
                 $"{s_abilities.Count} abilities, {s_passives.Count} passives, " +
                 $"{s_tabs.Count} tabs, {s_panels.Count} panels, " +
                 $"{s_contextMenus.Count} context menus, " +
@@ -61,94 +60,28 @@ namespace ValheimVillages.Attributes
                 $"{s_modObjectNames.Count} mod objects");
         }
 
-        #region DevCommands
-
-        private static void RegisterDevCommands(Assembly assembly)
-        {
-            int count = 0;
-            foreach (var type in assembly.GetTypes())
-            {
-                foreach (var method in type.GetMethods(
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    var attr = method.GetCustomAttribute<DevCommandAttribute>();
-                    if (attr == null) continue;
-
-                    string name = attr.Name ?? DeriveCommandName(type, method);
-                    var parameters = method.GetParameters();
-
-                    Terminal.ConsoleEventFailable handler;
-                    if (parameters.Length == 0)
-                    {
-                        var m = method;
-                        handler = _ => { m.Invoke(null, null); return null; };
-                    }
-                    else if (parameters.Length == 1 &&
-                             parameters[0].ParameterType == typeof(Terminal.ConsoleEventArgs))
-                    {
-                        var m = method;
-                        handler = args => { m.Invoke(null, new object[] { args }); return null; };
-                    }
-                    else
-                    {
-                        Plugin.Log?.LogWarning(
-                            $"[AttributeScanner] Skipping [DevCommand] on {type.Name}.{method.Name}: " +
-                            "unsupported parameter signature");
-                        continue;
-                    }
-
-                    new Terminal.ConsoleCommand(name, attr.Description, handler);
-                    s_devCommands.Add((name, attr.Description));
-                    count++;
-                }
-            }
-            Plugin.Log?.LogDebug($"[AttributeScanner] Registered {count} dev commands");
-        }
-
-        private static string DeriveCommandName(Type type, MethodInfo method)
-        {
-            return $"{type.Name}_{method.Name}".ToLowerInvariant();
-        }
-
-        /// <summary>
-        /// Returns (name, description) for every [DevCommand] registered in the
-        /// most recent <see cref="ScanAndRegister"/> pass. Used by the `vv` help
-        /// console command to enumerate available mod commands without reflection
-        /// at print time.
-        /// </summary>
-        public static IReadOnlyList<(string Name, string Description)> GetRegisteredDevCommands()
-            => s_devCommands;
-
-        #endregion
-
         #region ObjectDB
 
         /// <summary>
-        /// Invoke all [RegisterObjectDB] methods. Called from ObjectDB.Awake patch
-        /// and during hot-reload.
+        ///     Invoke all [RegisterObjectDB] methods. Called from ObjectDB.Awake patch
+        ///     and during hot-reload.
         /// </summary>
         public static void InvokeObjectDBRegistrations(Assembly assembly, ObjectDB db)
         {
             foreach (var type in assembly.GetTypes())
+            foreach (var method in type.GetMethods(
+                         BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
             {
-                foreach (var method in type.GetMethods(
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    var attr = method.GetCustomAttribute<RegisterObjectDBAttribute>();
-                    if (attr == null) continue;
+                var attr = method.GetCustomAttribute<RegisterObjectDBAttribute>();
+                if (attr == null) continue;
 
-                    var parameters = method.GetParameters();
-                    if (parameters.Length == 1 && parameters[0].ParameterType == typeof(ObjectDB))
-                    {
-                        method.Invoke(null, new object[] { db });
-                    }
-                    else
-                    {
-                        Plugin.Log?.LogWarning(
-                            $"[AttributeScanner] Skipping [RegisterObjectDB] on " +
-                            $"{type.Name}.{method.Name}: expected (ObjectDB) parameter");
-                    }
-                }
+                var parameters = method.GetParameters();
+                if (parameters.Length == 1 && parameters[0].ParameterType == typeof(ObjectDB))
+                    method.Invoke(null, new object[] { db });
+                else
+                    Plugin.Log?.LogWarning(
+                        "[AttributeScanner] Skipping [RegisterObjectDB] on " +
+                        $"{type.Name}.{method.Name}: expected (ObjectDB) parameter");
             }
         }
 
@@ -158,7 +91,7 @@ namespace ValheimVillages.Attributes
 
         private static void RegisterTaskHandlers(Assembly assembly)
         {
-            int count = 0;
+            var count = 0;
             foreach (var type in assembly.GetTypes())
             {
                 var attr = type.GetCustomAttribute<RegisterTaskHandlerAttribute>();
@@ -176,6 +109,7 @@ namespace ValheimVillages.Attributes
                 TaskHandlerRegistry.Register(handler);
                 count++;
             }
+
             Plugin.Log?.LogDebug($"[AttributeScanner] Registered {count} task handlers");
         }
 
@@ -184,33 +118,101 @@ namespace ValheimVillages.Attributes
         #region Cleanup
 
         /// <summary>
-        /// Invoke all [RegisterCleanup] methods. Called during hot-reload cleanup.
+        ///     Invoke all [RegisterCleanup] methods. Called during hot-reload cleanup.
         /// </summary>
         public static void InvokeAllCleanup(Assembly assembly)
         {
-            int count = 0;
+            var count = 0;
             foreach (var type in assembly.GetTypes())
+            foreach (var method in type.GetMethods(
+                         BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
             {
-                foreach (var method in type.GetMethods(
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    var attr = method.GetCustomAttribute<RegisterCleanupAttribute>();
-                    if (attr == null) continue;
+                var attr = method.GetCustomAttribute<RegisterCleanupAttribute>();
+                if (attr == null) continue;
 
-                    if (method.GetParameters().Length == 0)
-                    {
-                        method.Invoke(null, null);
-                        count++;
-                    }
-                    else
-                    {
-                        Plugin.Log?.LogWarning(
-                            $"[AttributeScanner] Skipping [RegisterCleanup] on " +
-                            $"{type.Name}.{method.Name}: must be parameterless");
-                    }
+                if (method.GetParameters().Length == 0)
+                {
+                    method.Invoke(null, null);
+                    count++;
+                }
+                else
+                {
+                    Plugin.Log?.LogWarning(
+                        "[AttributeScanner] Skipping [RegisterCleanup] on " +
+                        $"{type.Name}.{method.Name}: must be parameterless");
                 }
             }
+
             Plugin.Log?.LogDebug($"[AttributeScanner] Invoked {count} cleanup methods");
+        }
+
+        #endregion
+
+        #region DevCommands
+
+        private static void RegisterDevCommands(Assembly assembly)
+        {
+            var count = 0;
+            foreach (var type in assembly.GetTypes())
+            foreach (var method in type.GetMethods(
+                         BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                var attr = method.GetCustomAttribute<DevCommandAttribute>();
+                if (attr == null) continue;
+
+                var name = attr.Name ?? DeriveCommandName(type, method);
+                var parameters = method.GetParameters();
+
+                Terminal.ConsoleEventFailable handler;
+                if (parameters.Length == 0)
+                {
+                    var m = method;
+                    handler = _ =>
+                    {
+                        m.Invoke(null, null);
+                        return null;
+                    };
+                }
+                else if (parameters.Length == 1 &&
+                         parameters[0].ParameterType == typeof(Terminal.ConsoleEventArgs))
+                {
+                    var m = method;
+                    handler = args =>
+                    {
+                        m.Invoke(null, new object[] { args });
+                        return null;
+                    };
+                }
+                else
+                {
+                    Plugin.Log?.LogWarning(
+                        $"[AttributeScanner] Skipping [DevCommand] on {type.Name}.{method.Name}: " +
+                        "unsupported parameter signature");
+                    continue;
+                }
+
+                new Terminal.ConsoleCommand(name, attr.Description, handler);
+                s_devCommands.Add((name, attr.Description));
+                count++;
+            }
+
+            Plugin.Log?.LogDebug($"[AttributeScanner] Registered {count} dev commands");
+        }
+
+        private static string DeriveCommandName(Type type, MethodInfo method)
+        {
+            return $"{type.Name}_{method.Name}".ToLowerInvariant();
+        }
+
+        /// <summary>
+        ///     Returns (name, description) for every [DevCommand] registered in the
+        ///     most recent <see cref="ScanAndRegister" /> pass. Used by the `vv` help
+        ///     console command to enumerate available mod commands without reflection
+        ///     at print time.
+        /// </summary>
+        public static IReadOnlyList<(string Name, string Description)> GetRegisteredDevCommands()
+        {
+            return s_devCommands;
         }
 
         #endregion
@@ -267,7 +269,10 @@ namespace ValheimVillages.Attributes
         }
 
         /// <summary>Get all registered abilities.</summary>
-        public static IReadOnlyDictionary<string, IAbility> GetAllAbilities() => s_abilities;
+        public static IReadOnlyDictionary<string, IAbility> GetAllAbilities()
+        {
+            return s_abilities;
+        }
 
         #endregion
 
@@ -301,7 +306,10 @@ namespace ValheimVillages.Attributes
         }
 
         /// <summary>Get all registered passive effects.</summary>
-        public static IReadOnlyDictionary<string, IPassiveEffect> GetAllPassives() => s_passives;
+        public static IReadOnlyDictionary<string, IPassiveEffect> GetAllPassives()
+        {
+            return s_passives;
+        }
 
         #endregion
 
@@ -335,7 +343,10 @@ namespace ValheimVillages.Attributes
         }
 
         /// <summary>Get all registered tabs (sorted by Order).</summary>
-        public static IReadOnlyList<IVillagerTab> GetRegisteredTabs() => s_tabs;
+        public static IReadOnlyList<IVillagerTab> GetRegisteredTabs()
+        {
+            return s_tabs;
+        }
 
         #endregion
 
@@ -361,9 +372,9 @@ namespace ValheimVillages.Attributes
 
                 // Wire panel into its parent tab's static registration
                 if (panel.ParentTab == "info")
-                    UI.Tabs.InfoTab.RegisterPanel(panel);
+                    InfoTab.RegisterPanel(panel);
                 else if (panel.ParentTab == "debug")
-                    UI.Tabs.DebugTab.RegisterPanel(panel);
+                    DebugTab.RegisterPanel(panel);
             }
         }
 
@@ -398,7 +409,10 @@ namespace ValheimVillages.Attributes
         }
 
         /// <summary>Get all registered context menus.</summary>
-        public static IReadOnlyList<IContextMenu> GetContextMenus() => s_contextMenus;
+        public static IReadOnlyList<IContextMenu> GetContextMenus()
+        {
+            return s_contextMenus;
+        }
 
         #endregion
 
@@ -426,8 +440,8 @@ namespace ValheimVillages.Attributes
         }
 
         /// <summary>
-        /// Create an IBehavior instance by tag, using the registered constructor.
-        /// Returns null if the tag is not registered.
+        ///     Create an IBehavior instance by tag, using the registered constructor.
+        ///     Returns null if the tag is not registered.
         /// </summary>
         public static IBehavior CreateBehavior(string tag, VillagerAI owner)
         {
@@ -437,7 +451,10 @@ namespace ValheimVillages.Attributes
         }
 
         /// <summary>Check if a behavior tag is registered.</summary>
-        public static bool HasBehavior(string tag) => s_behaviorCreators.ContainsKey(tag);
+        public static bool HasBehavior(string tag)
+        {
+            return s_behaviorCreators.ContainsKey(tag);
+        }
 
         #endregion
     }

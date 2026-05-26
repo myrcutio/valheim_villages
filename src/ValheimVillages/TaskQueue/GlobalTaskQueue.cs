@@ -10,20 +10,19 @@ using ValheimVillages.TaskQueue.ActivityLog;
 namespace ValheimVillages.TaskQueue
 {
     /// <summary>
-    /// Global singleton task queue with tiered priority levels.
-    /// Each priority tier has its own FIFO queue. The priority value (1-3)
-    /// determines how many messages that tier can pop per tick.
-    /// When higher tiers are empty, unused capacity backfills to lower tiers.
+    ///     Global singleton task queue with tiered priority levels.
+    ///     Each priority tier has its own FIFO queue. The priority value (1-3)
+    ///     determines how many messages that tier can pop per tick.
+    ///     When higher tiers are empty, unused capacity backfills to lower tiers.
     /// </summary>
     public static class GlobalTaskQueue
     {
-
         // One FIFO queue per priority tier
         private static readonly Dictionary<TaskPriority, Queue<VillagerTask>> s_queues = new()
         {
             { TaskPriority.High, new Queue<VillagerTask>() },
             { TaskPriority.Medium, new Queue<VillagerTask>() },
-            { TaskPriority.Low, new Queue<VillagerTask>() }
+            { TaskPriority.Low, new Queue<VillagerTask>() },
         };
 
         // Priority tiers in descending order for iteration
@@ -40,8 +39,14 @@ namespace ValheimVillages.TaskQueue
         public static IReadOnlyList<VillagerTask> DeadLetters => s_deadLetters;
 
         /// <summary>
-        /// Enqueue a task into the appropriate priority tier.
-        /// Silently drops duplicates (same Name + SourceId already pending).
+        ///     Get the total number of pending tasks across all tiers.
+        /// </summary>
+        public static int PendingCount =>
+            s_queues.Values.Sum(q => q.Count);
+
+        /// <summary>
+        ///     Enqueue a task into the appropriate priority tier.
+        ///     Silently drops duplicates (same Name + SourceId already pending).
         /// </summary>
         public static bool Enqueue(VillagerTask task)
         {
@@ -69,32 +74,32 @@ namespace ValheimVillages.TaskQueue
         }
 
         /// <summary>
-        /// Process a batch of tasks. Called once per frame from Plugin.Update().
-        /// First pass: each tier gets its guaranteed allocation (priority value).
-        /// Second pass: backfill lower tiers if total processed is under the
-        /// minimum throughput floor (highest priority value = 3).
+        ///     Process a batch of tasks. Called once per frame from Plugin.Update().
+        ///     First pass: each tier gets its guaranteed allocation (priority value).
+        ///     Second pass: backfill lower tiers if total processed is under the
+        ///     minimum throughput floor (highest priority value = 3).
         /// </summary>
         public static void ProcessBatch()
         {
-            int totalProcessed = 0;
-            int minThroughput = (int)s_tiersDescending[0]; // 3
+            var totalProcessed = 0;
+            var minThroughput = (int)s_tiersDescending[0]; // 3
 
             // First pass: guaranteed allocation per tier
             foreach (var tier in s_tiersDescending)
             {
-                int allocation = (int)tier;
-                int processed = DrainQueue(tier, allocation);
+                var allocation = (int)tier;
+                var processed = DrainQueue(tier, allocation);
                 totalProcessed += processed;
             }
 
             // Second pass: backfill if under minimum throughput
             if (totalProcessed < minThroughput)
             {
-                int remaining = minThroughput - totalProcessed;
+                var remaining = minThroughput - totalProcessed;
                 foreach (var tier in s_tiersDescending)
                 {
                     if (remaining <= 0) break;
-                    int processed = DrainQueue(tier, remaining);
+                    var processed = DrainQueue(tier, remaining);
                     totalProcessed += processed;
                     remaining -= processed;
                 }
@@ -102,15 +107,15 @@ namespace ValheimVillages.TaskQueue
         }
 
         /// <summary>
-        /// Drain up to maxCount tasks from the specified tier's queue.
-        /// Returns the number of tasks successfully processed (not timed out).
+        ///     Drain up to maxCount tasks from the specified tier's queue.
+        ///     Returns the number of tasks successfully processed (not timed out).
         /// </summary>
         private static int DrainQueue(TaskPriority tier, int maxCount)
         {
             var queue = s_queues[tier];
-            int processed = 0;
-            int inspected = 0;
-            int initialCount = queue.Count;
+            var processed = 0;
+            var inspected = 0;
+            var initialCount = queue.Count;
 
             while (processed < maxCount && queue.Count > 0 && inspected < initialCount)
             {
@@ -174,7 +179,7 @@ namespace ValheimVillages.TaskQueue
         }
 
         /// <summary>
-        /// Handle a failed task: retry or dead-letter.
+        ///     Handle a failed task: retry or dead-letter.
         /// </summary>
         private static void HandleFailure(VillagerTask task, string error)
         {
@@ -200,7 +205,7 @@ namespace ValheimVillages.TaskQueue
         }
 
         /// <summary>
-        /// Add a task to the dead letter queue, evicting oldest if at capacity.
+        ///     Add a task to the dead letter queue, evicting oldest if at capacity.
         /// </summary>
         private static void AddToDeadLetters(VillagerTask task)
         {
@@ -211,7 +216,7 @@ namespace ValheimVillages.TaskQueue
         }
 
         /// <summary>
-        /// Remove a task's dedup key from the pending set.
+        ///     Remove a task's dedup key from the pending set.
         /// </summary>
         private static void RemovePendingKey(VillagerTask task)
         {
@@ -219,19 +224,15 @@ namespace ValheimVillages.TaskQueue
         }
 
         /// <summary>
-        /// Get the total number of pending tasks across all tiers.
+        ///     Get the pending count for a specific priority tier.
         /// </summary>
-        public static int PendingCount =>
-            s_queues.Values.Sum(q => q.Count);
+        public static int PendingCount_ForTier(TaskPriority tier)
+        {
+            return s_queues.TryGetValue(tier, out var q) ? q.Count : 0;
+        }
 
         /// <summary>
-        /// Get the pending count for a specific priority tier.
-        /// </summary>
-        public static int PendingCount_ForTier(TaskPriority tier) =>
-            s_queues.TryGetValue(tier, out var q) ? q.Count : 0;
-
-        /// <summary>
-        /// Clear all queues, pending keys, and dead letters (e.g. on world unload).
+        ///     Clear all queues, pending keys, and dead letters (e.g. on world unload).
         /// </summary>
         [RegisterCleanup]
         public static void Clear()

@@ -5,16 +5,16 @@ using UnityEngine.UI;
 namespace ValheimVillages.UI.Core
 {
     /// <summary>
-    /// Extension of VillagerUIFactory with interactive control builders
-    /// (slider, input field, popup panel).
+    ///     Extension of VillagerUIFactory with interactive control builders
+    ///     (slider, input field, popup panel).
     /// </summary>
     public static partial class VillagerUIFactory
     {
         private static readonly Color ValheimOrange = new(1f, 0.631f, 0.235f, 1f);
 
         /// <summary>
-        /// Create a centered popup panel with a dark Valheim-style background,
-        /// title, and vertical content area. Returns the root GO and content transform.
+        ///     Create a centered popup panel with a dark Valheim-style background,
+        ///     title, and vertical content area. Returns the root GO and content transform.
         /// </summary>
         public static (GameObject root, Transform content) CreatePopupPanel(
             string title, float width, float height)
@@ -72,7 +72,7 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>
-        /// Create a horizontal slider styled to match Valheim's aesthetic.
+        ///     Create a horizontal slider styled to match Valheim's aesthetic.
         /// </summary>
         public static Slider CreateSlider(
             Transform parent, float min, float max,
@@ -156,7 +156,7 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>
-        /// Create a numeric input field using Unity's legacy InputField.
+        ///     Create a numeric input field using Unity's legacy InputField.
         /// </summary>
         public static InputField CreateInputField(
             Transform parent, string initialText,

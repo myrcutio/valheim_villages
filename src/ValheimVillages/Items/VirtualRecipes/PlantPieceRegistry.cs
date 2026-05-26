@@ -5,17 +5,17 @@ using ValheimVillages.Attributes;
 namespace ValheimVillages.Items.VirtualRecipes
 {
     /// <summary>
-    /// Maps output item prefab names (e.g., "Carrot") to their cultivator piece
-    /// GameObjects (e.g., the "sapling_carrot" piece). Built during cultivator
-    /// recipe discovery so farming NPCs can look up which piece to instantiate.
+    ///     Maps output item prefab names (e.g., "Carrot") to their cultivator piece
+    ///     GameObjects (e.g., the "sapling_carrot" piece). Built during cultivator
+    ///     recipe discovery so farming NPCs can look up which piece to instantiate.
     /// </summary>
     public static class PlantPieceRegistry
     {
         private static readonly Dictionary<string, GameObject> _outputToPiece = new();
 
         /// <summary>
-        /// Register a mapping from output item prefab name to cultivator piece prefab.
-        /// Called during CultivatorRecipeDiscovery.
+        ///     Register a mapping from output item prefab name to cultivator piece prefab.
+        ///     Called during CultivatorRecipeDiscovery.
         /// </summary>
         public static void Register(string outputItemName, GameObject piecePrefab)
         {
@@ -26,7 +26,7 @@ namespace ValheimVillages.Items.VirtualRecipes
         }
 
         /// <summary>
-        /// Get the cultivator piece prefab for the given output item, or null if not found.
+        ///     Get the cultivator piece prefab for the given output item, or null if not found.
         /// </summary>
         public static GameObject GetPiecePrefab(string outputItemName)
         {
@@ -35,7 +35,7 @@ namespace ValheimVillages.Items.VirtualRecipes
         }
 
         /// <summary>
-        /// Returns true if the given output item has a registered plant piece.
+        ///     Returns true if the given output item has a registered plant piece.
         /// </summary>
         public static bool IsFarmingOutput(string outputItemName)
         {
@@ -43,7 +43,7 @@ namespace ValheimVillages.Items.VirtualRecipes
         }
 
         /// <summary>
-        /// Clear all registrations (for hot reload).
+        ///     Clear all registrations (for hot reload).
         /// </summary>
         [RegisterCleanup]
         public static void Clear()

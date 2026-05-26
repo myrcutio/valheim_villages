@@ -4,25 +4,24 @@ using ValheimVillages.Villager;
 namespace ValheimVillages.Patches
 {
     /// <summary>
-    /// When Valheim loads a zone and spawns a Dvergr from ZDO, the raw prefab
-    /// gets MonsterAI/NpcTalk/Tameable but none of our mod components. This
-    /// postfix detects villager ZDOs and calls VillagerRestoration.Restore to
-    /// re-add Villager, VillagerAI, VillagerTalk, etc.
-    ///
-    /// Safe alongside ZNetViewAwakeProtectionPatch (prefix): that prefix only
-    /// blocks template prefabs (vv_* without "(Clone)"). When the prefix returns
-    /// false, GetZDO() is null here, so we skip harmlessly.
+    ///     When Valheim loads a zone and spawns a Dvergr from ZDO, the raw prefab
+    ///     gets MonsterAI/NpcTalk/Tameable but none of our mod components. This
+    ///     postfix detects villager ZDOs and calls VillagerRestoration.Restore to
+    ///     re-add Villager, VillagerAI, VillagerTalk, etc.
+    ///     Safe alongside ZNetViewAwakeProtectionPatch (prefix): that prefix only
+    ///     blocks template prefabs (vv_* without "(Clone)"). When the prefix returns
+    ///     false, GetZDO() is null here, so we skip harmlessly.
     /// </summary>
     [HarmonyPatch(typeof(ZNetView), "Awake")]
     public static class ZoneLoadRestorationPatch
     {
         [HarmonyPostfix]
-        static void Postfix(ZNetView __instance)
+        private static void Postfix(ZNetView __instance)
         {
             var zdo = __instance.GetZDO();
             if (zdo == null) return;
 
-            string vid = zdo.GetString("vv_villager_id", "");
+            var vid = zdo.GetString("vv_villager_id");
             if (string.IsNullOrEmpty(vid)) return;
 
             if (__instance.GetComponent<Villager.Villager>() != null) return;

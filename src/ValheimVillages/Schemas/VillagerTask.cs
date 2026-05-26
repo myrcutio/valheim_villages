@@ -5,50 +5,50 @@ using ValheimVillages.Enums;
 namespace ValheimVillages.Schemas
 {
     /// <summary>
-    /// A single task message to be processed by the global task queue.
+    ///     A single task message to be processed by the global task queue.
     /// </summary>
     public class VillagerTask
     {
+        /// <summary>Handler-specific parameters, keyed by name.</summary>
+        public Dictionary<string, string> Attributes;
+
+        /// <summary>
+        ///     Invoked synchronously on the main thread when the task completes.
+        ///     Handlers can safely mutate Unity state inside the callback.
+        /// </summary>
+        public Action<TaskResult> Callback;
+
+        /// <summary>Time.time when the task was enqueued.</summary>
+        public float CreatedAt;
+
         /// <summary>Handler name, e.g. "container_scan", "breach_check".</summary>
         public string Name;
 
         /// <summary>
-        /// Reference to the object that triggered this task.
-        /// Typically a villager GUID, or a composite key like "guard_id:waypoint_idx".
+        ///     Earliest Time.time at which this task may be processed.
+        ///     Zero (default) means no deferral. DrainQueue re-enqueues
+        ///     tasks whose NotBefore has not yet elapsed.
         /// </summary>
-        public string SourceId;
+        public float NotBefore;
 
         /// <summary>Which priority tier this task belongs to.</summary>
         public TaskPriority Priority;
-
-        /// <summary>Maximum seconds before the task expires without processing.</summary>
-        public float TimeoutSeconds;
-
-        /// <summary>Time.time when the task was enqueued.</summary>
-        public float CreatedAt;
 
         /// <summary>Number of times this task has been retried after failure.</summary>
         public int RetryCount;
 
         /// <summary>
-        /// Earliest Time.time at which this task may be processed.
-        /// Zero (default) means no deferral. DrainQueue re-enqueues
-        /// tasks whose NotBefore has not yet elapsed.
+        ///     Reference to the object that triggered this task.
+        ///     Typically a villager GUID, or a composite key like "guard_id:waypoint_idx".
         /// </summary>
-        public float NotBefore;
+        public string SourceId;
 
-        /// <summary>Handler-specific parameters, keyed by name.</summary>
-        public Dictionary<string, string> Attributes;
-
-        /// <summary>
-        /// Invoked synchronously on the main thread when the task completes.
-        /// Handlers can safely mutate Unity state inside the callback.
-        /// </summary>
-        public Action<TaskResult> Callback;
+        /// <summary>Maximum seconds before the task expires without processing.</summary>
+        public float TimeoutSeconds;
     }
 
     /// <summary>
-    /// Tuning constants for the task queue system.
+    ///     Tuning constants for the task queue system.
     /// </summary>
     public static class TaskSettings
     {

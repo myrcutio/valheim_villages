@@ -1,9 +1,9 @@
 namespace ValheimVillages.Interfaces
 {
     /// <summary>
-    /// Interface for tag-driven list panels that provide items for a parent tab.
-    /// Core version with Unity-free members only.
-    /// Unity-dependent methods are defined in the mod assembly.
+    ///     Interface for tag-driven list panels that provide items for a parent tab.
+    ///     Core version with Unity-free members only.
+    ///     Unity-dependent methods are defined in the mod assembly.
     /// </summary>
     public interface IListPanel
     {

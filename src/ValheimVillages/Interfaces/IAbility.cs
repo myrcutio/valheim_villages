@@ -1,10 +1,10 @@
 namespace ValheimVillages.Interfaces
 {
     /// <summary>
-    /// Interface for teachable abilities that an NPC can teach a player.
-    /// Core version with Unity-free members only.
-    /// Player-dependent methods (HasLearned, Learn, Activate) are defined
-    /// in the mod assembly via IPlayerAbility.
+    ///     Interface for teachable abilities that an NPC can teach a player.
+    ///     Core version with Unity-free members only.
+    ///     Player-dependent methods (HasLearned, Learn, Activate) are defined
+    ///     in the mod assembly via IPlayerAbility.
     /// </summary>
     public interface IAbility
     {

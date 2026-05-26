@@ -1,18 +1,18 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace ValheimVillages.Items.Icons
 {
     /// <summary>
-    /// Composites a production item's icon onto a work order's parchment icon
-    /// so players can tell at a glance which item the work order produces.
-    /// The item is drawn large and centered on the parchment. A status badge
-    /// (completed, in-progress, unworkable) is drawn in the top-right corner.
-    ///
-    /// Uses a two-tier cache to avoid recompositing on every UI open:
-    ///   Tier 1 (base): parchment + item overlay — expensive, cached permanently.
-    ///   Tier 2 (final): base + status badge — cheap to stamp, keyed by status.
+    ///     Composites a production item's icon onto a work order's parchment icon
+    ///     so players can tell at a glance which item the work order produces.
+    ///     The item is drawn large and centered on the parchment. A status badge
+    ///     (completed, in-progress, unworkable) is drawn in the top-right corner.
+    ///     Uses a two-tier cache to avoid recompositing on every UI open:
+    ///     Tier 1 (base): parchment + item overlay — expensive, cached permanently.
+    ///     Tier 2 (final): base + status badge — cheap to stamp, keyed by status.
     /// </summary>
     public static class WorkOrderIconCompositor
     {
@@ -23,21 +23,21 @@ namespace ValheimVillages.Items.Icons
         private const int OverlayY = 11;
 
         /// <summary>
-        /// Tier 1: base composite pixels (parchment + item, no status).
-        /// Key: "{workOrderPrefab}_{itemPrefab}"
-        /// Value: RGBA32 pixel array + dimensions. Never cleared during play.
+        ///     Tier 1: base composite pixels (parchment + item, no status).
+        ///     Key: "{workOrderPrefab}_{itemPrefab}"
+        ///     Value: RGBA32 pixel array + dimensions. Never cleared during play.
         /// </summary>
         private static readonly Dictionary<string, CachedBase> _baseCache = new();
 
         /// <summary>
-        /// Tier 2: final sprites with status badge stamped on.
-        /// Key: "{workOrderPrefab}_{itemPrefab}_{status}"
-        /// All status variants coexist; no need to clear on status change.
+        ///     Tier 2: final sprites with status badge stamped on.
+        ///     Key: "{workOrderPrefab}_{itemPrefab}_{status}"
+        ///     All status variants coexist; no need to clear on status change.
         /// </summary>
         private static readonly Dictionary<string, Sprite> _spriteCache = new();
 
         /// <summary>
-        /// Clear both cache tiers (hot reload / world unload).
+        ///     Clear both cache tiers (hot reload / world unload).
         /// </summary>
         public static void ClearCache()
         {
@@ -46,9 +46,9 @@ namespace ValheimVillages.Items.Icons
         }
 
         /// <summary>
-        /// If the item is a configured work order (has wo_item custom data),
-        /// overlay the production item's icon onto the parchment, then draw
-        /// the status badge. Deep-copies SharedData so only this instance changes.
+        ///     If the item is a configured work order (has wo_item custom data),
+        ///     overlay the production item's icon onto the parchment, then draw
+        ///     the status badge. Deep-copies SharedData so only this instance changes.
         /// </summary>
         public static void ApplyOverlay(
             ItemDrop.ItemData itemData,
@@ -63,8 +63,8 @@ namespace ValheimVillages.Items.Icons
             var baseIcons = itemData.m_shared.m_icons;
             if (baseIcons == null || baseIcons.Length == 0) return;
 
-            string woPrefab = itemData.m_dropPrefab?.name ?? "wo";
-            string spriteKey = $"{woPrefab}_{itemPrefab}_{status}";
+            var woPrefab = itemData.m_dropPrefab?.name ?? "wo";
+            var spriteKey = $"{woPrefab}_{itemPrefab}_{status}";
 
             // Fast path: final sprite already cached for this exact status
             if (_spriteCache.TryGetValue(spriteKey, out var cached))
@@ -75,7 +75,7 @@ namespace ValheimVillages.Items.Icons
             }
 
             // Ensure the base composite (parchment + item) is cached
-            string baseKey = $"{woPrefab}_{itemPrefab}";
+            var baseKey = $"{woPrefab}_{itemPrefab}";
             if (!_baseCache.TryGetValue(baseKey, out var baseCached))
             {
                 baseCached = BuildBaseComposite(baseIcons[0], itemPrefab);
@@ -93,8 +93,8 @@ namespace ValheimVillages.Items.Icons
         }
 
         /// <summary>
-        /// Scan an inventory and apply overlays to every work order,
-        /// resolving status from a pre-scanned list of nearby containers.
+        ///     Scan an inventory and apply overlays to every work order,
+        ///     resolving status from a pre-scanned list of nearby containers.
         /// </summary>
         public static void EnsureOverlays(
             Inventory inventory,
@@ -125,7 +125,7 @@ namespace ValheimVillages.Items.Icons
             try
             {
                 var baseTex = MakeReadable(parchment.texture);
-                var itemTex = MakeReadable(itemIcon: prodSprite);
+                var itemTex = MakeReadable(prodSprite);
 
                 BlitScaled(baseTex, itemTex, prodSprite.rect,
                     OverlayX, OverlayY, OverlaySize);
@@ -135,11 +135,11 @@ namespace ValheimVillages.Items.Icons
                 {
                     Pixels = pixels,
                     Width = baseTex.width,
-                    Height = baseTex.height
+                    Height = baseTex.height,
                 };
 
-                UnityEngine.Object.Destroy(baseTex);
-                UnityEngine.Object.Destroy(itemTex);
+                Object.Destroy(baseTex);
+                Object.Destroy(itemTex);
                 return result;
             }
             catch (Exception ex)
@@ -184,6 +184,17 @@ namespace ValheimVillages.Items.Icons
 
         #endregion
 
+        /// <summary>
+        ///     Cached base composite: raw RGBA32 pixels from the parchment + item
+        ///     overlay, before any status badge is applied.
+        /// </summary>
+        private class CachedBase
+        {
+            public int Height;
+            public Color32[] Pixels;
+            public int Width;
+        }
+
         #region Helpers
 
         private static void EnsureOwnSharedData(ItemDrop.ItemData item)
@@ -194,11 +205,9 @@ namespace ValheimVillages.Items.Icons
             var prefabDrop = prefab.GetComponent<ItemDrop>();
             if (prefabDrop != null &&
                 ReferenceEquals(item.m_shared, prefabDrop.m_itemData.m_shared))
-            {
                 item.m_shared = JsonUtility.FromJson<
                     ItemDrop.ItemData.SharedData>(
                     JsonUtility.ToJson(item.m_shared));
-            }
         }
 
         private static Sprite GetItemSprite(string prefabName)
@@ -207,51 +216,49 @@ namespace ValheimVillages.Items.Icons
             if (prefab == null) return null;
             var drop = prefab.GetComponent<ItemDrop>();
             var icons = drop?.m_itemData?.m_shared?.m_icons;
-            return (icons != null && icons.Length > 0) ? icons[0] : null;
+            return icons != null && icons.Length > 0 ? icons[0] : null;
         }
 
         /// <summary>
-        /// Blit a sprite region onto a destination texture with alpha blending.
-        /// Only draws on pixels where the destination already has alpha.
+        ///     Blit a sprite region onto a destination texture with alpha blending.
+        ///     Only draws on pixels where the destination already has alpha.
         /// </summary>
         private static void BlitScaled(
             Texture2D dst, Texture2D src, Rect srcRect,
             int dstX, int dstY, int dstSize)
         {
-            for (int dy = 0; dy < dstSize; dy++)
+            for (var dy = 0; dy < dstSize; dy++)
+            for (var dx = 0; dx < dstSize; dx++)
             {
-                for (int dx = 0; dx < dstSize; dx++)
-                {
-                    int srcPx = (int)srcRect.x +
-                        (int)(dx * srcRect.width / dstSize);
-                    int srcPy = (int)srcRect.y +
-                        (int)(dy * srcRect.height / dstSize);
-                    srcPx = Mathf.Clamp(srcPx, 0, src.width - 1);
-                    srcPy = Mathf.Clamp(srcPy, 0, src.height - 1);
+                var srcPx = (int)srcRect.x +
+                            (int)(dx * srcRect.width / dstSize);
+                var srcPy = (int)srcRect.y +
+                            (int)(dy * srcRect.height / dstSize);
+                srcPx = Mathf.Clamp(srcPx, 0, src.width - 1);
+                srcPy = Mathf.Clamp(srcPy, 0, src.height - 1);
 
-                    var ic = src.GetPixel(srcPx, srcPy);
-                    if (ic.a < 0.1f) continue;
+                var ic = src.GetPixel(srcPx, srcPy);
+                if (ic.a < 0.1f) continue;
 
-                    int px = dstX + dx;
-                    int py = dstY + dy;
-                    if (px >= dst.width || py >= dst.height) continue;
+                var px = dstX + dx;
+                var py = dstY + dy;
+                if (px >= dst.width || py >= dst.height) continue;
 
-                    var bc = dst.GetPixel(px, py);
-                    if (bc.a < 0.1f) continue;
+                var bc = dst.GetPixel(px, py);
+                if (bc.a < 0.1f) continue;
 
-                    float a = ic.a;
-                    dst.SetPixel(px, py, new Color(
-                        bc.r * (1 - a) + ic.r * a,
-                        bc.g * (1 - a) + ic.g * a,
-                        bc.b * (1 - a) + ic.b * a,
-                        Mathf.Max(bc.a, ic.a)));
-                }
+                var a = ic.a;
+                dst.SetPixel(px, py, new Color(
+                    bc.r * (1 - a) + ic.r * a,
+                    bc.g * (1 - a) + ic.g * a,
+                    bc.b * (1 - a) + ic.b * a,
+                    Mathf.Max(bc.a, ic.a)));
             }
         }
 
         /// <summary>
-        /// GPU-copy a texture to a new readable Texture2D (works even if
-        /// the source is compressed / non-readable).
+        ///     GPU-copy a texture to a new readable Texture2D (works even if
+        ///     the source is compressed / non-readable).
         /// </summary>
         private static Texture2D MakeReadable(Texture source)
         {
@@ -279,16 +286,5 @@ namespace ValheimVillages.Items.Icons
         }
 
         #endregion
-
-        /// <summary>
-        /// Cached base composite: raw RGBA32 pixels from the parchment + item
-        /// overlay, before any status badge is applied.
-        /// </summary>
-        private class CachedBase
-        {
-            public Color32[] Pixels;
-            public int Width;
-            public int Height;
-        }
     }
 }

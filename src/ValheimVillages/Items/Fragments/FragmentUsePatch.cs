@@ -1,12 +1,11 @@
 using HarmonyLib;
-using ValheimVillages.Items;
 
 namespace ValheimVillages.Items.Fragments
 {
     /// <summary>
-    /// Intercepts item use for ransom note fragments.
-    /// When a player uses a fragment, attempts to combine 3 same-biome fragments
-    /// into a rescue quest marker on the map.
+    ///     Intercepts item use for ransom note fragments.
+    ///     When a player uses a fragment, attempts to combine 3 same-biome fragments
+    ///     into a rescue quest marker on the map.
     /// </summary>
     [HarmonyPatch(typeof(Humanoid), nameof(Humanoid.UseItem))]
     public static class FragmentUsePatch
@@ -18,7 +17,7 @@ namespace ValheimVillages.Items.Fragments
             if (__instance is not Player player)
                 return true;
 
-            string itemName = item?.m_dropPrefab?.name;
+            var itemName = item?.m_dropPrefab?.name;
             if (string.IsNullOrEmpty(itemName))
                 return true;
 
@@ -28,7 +27,7 @@ namespace ValheimVillages.Items.Fragments
                 return true;
 
             // Attempt to combine fragments of this biome
-            string biome = def.biome;
+            var biome = def.biome;
             if (string.IsNullOrEmpty(biome))
                 return true;
 

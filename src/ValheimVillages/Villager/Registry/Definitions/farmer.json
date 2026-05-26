@@ -4,39 +4,98 @@
   "displayName": "Farmer",
   "description": "Knowledgeable about agriculture, food production, crop management, and beekeeping",
   "workbenches": [
-    { "name": "Workbench", "minLevel": 1 }
+    {
+      "name": "Workbench",
+      "minLevel": 1
+    }
   ],
   "requiredBiomes": [],
-  "preferredBiomes": ["Meadows", "Plains"],
+  "preferredBiomes": [
+    "Meadows",
+    "Plains"
+  ],
   "requiresCoastal": false,
   "minComfortLevel": 2,
   "materialRequirements": "Wood for farm structures, cultivatable land nearby",
   "scalingType": "VillagerVariety",
   "skinColor": "1.15,1.85,1.55",
-  "equipment": ["cultivator"],
+  "equipment": [
+    "cultivator"
+  ],
   "stationName": "$vv_farmer",
   "stationIcon": "Cultivator",
-  "workStations": ["$piece_workbench", "$piece_cauldron", "$vv_farmer"],
+  "workStations": [
+    "$piece_workbench",
+    "$piece_cauldron",
+    "$vv_farmer"
+  ],
   "stationRecipes": [
-    { "output": "BarleyFlour", "outputAmount": 1, "input": "Barley", "inputAmount": 1, "minStationLevel": 2 }
+    {
+      "output": "BarleyFlour",
+      "outputAmount": 1,
+      "input": "Barley",
+      "inputAmount": 1,
+      "minStationLevel": 2
+    }
   ],
   "cultivatorExclusions": [
-    "cultivate", "grass", "flint", "stone", "wood",
-    "yggdrasil", "yggdrasil_wood", "pine", "birch", "oak",
-    "fir_cone", "fircone", "pine_cone", "beechseed", "beech_seed",
-    "ancient_seed", "firtree_sapling", "pinetree_sapling", "beech_sapling",
-    "birch_sapling", "oak_sapling", "ygga", "vineash", "vinegreen"
+    "cultivate",
+    "grass",
+    "flint",
+    "stone",
+    "wood",
+    "yggdrasil",
+    "yggdrasil_wood",
+    "pine",
+    "birch",
+    "oak",
+    "fir_cone",
+    "fircone",
+    "pine_cone",
+    "beechseed",
+    "beech_seed",
+    "ancient_seed",
+    "firtree_sapling",
+    "pinetree_sapling",
+    "beech_sapling",
+    "birch_sapling",
+    "oak_sapling",
+    "ygga",
+    "vineash",
+    "vinegreen"
   ],
-  "behaviors": ["craft", "tidy"],
-  "tags": ["behavior:farming", "tab:info", "tab:debug", "tab:workorder", "recipe:cultivator", "recipe:cooking"],
+  "behaviors": [
+    "craft",
+    "tidy"
+  ],
+  "tags": [
+    "behavior:farming",
+    "tab:info",
+    "tab:debug",
+    "tab:workorder",
+    "recipe:cultivator",
+    "recipe:cooking"
+  ],
   "dependentOnNpcType": "",
   "tieredBenefits": [],
   "productions": [
-    { "requiredLevel": 1, "outputItem": "Carrot", "description": "Grows food items" },
-    { "requiredLevel": 2, "outputItem": "Honey", "description": "Produces honey through beekeeping (requires beehives)" }
+    {
+      "requiredLevel": 1,
+      "outputItem": "Carrot",
+      "description": "Grows food items"
+    },
+    {
+      "requiredLevel": 2,
+      "outputItem": "Honey",
+      "description": "Produces honey through beekeeping (requires beehives)"
+    }
   ],
-  "providesLevelTo": ["Miner"],
-  "receivesLevelFrom": ["Carpenter"],
+  "providesLevelTo": [
+    "Miner"
+  ],
+  "receivesLevelFrom": [
+    "Carpenter"
+  ],
   "interdependenceDescription": "Food enables mining operations; Carpenter tools improve farming",
   "randomTalk": [
     "The thing about carrots is, they're underground. You never know how they're doing. It's a relationship built entirely on trust.",

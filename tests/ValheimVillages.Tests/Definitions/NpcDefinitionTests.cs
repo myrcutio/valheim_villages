@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using ValheimVillages.Schemas;
 using ValheimVillages.Tags;
 using Xunit;
@@ -6,7 +5,7 @@ using Xunit;
 namespace ValheimVillages.Tests.Definitions;
 
 /// <summary>
-/// Validate villager definition data integrity and tag references.
+///     Validate villager definition data integrity and tag references.
 /// </summary>
 public class NpcDefinitionTests
 {
@@ -48,8 +47,8 @@ public class NpcDefinitionTests
                 "behavior:patrol",
                 "behavior:craft",
                 "listpanel:guardstatus",
-                "tab:workorder"
-            }
+                "tab:workorder",
+            },
         };
 
         var behaviors = TagParser.GetValues(def.tags, "behavior");

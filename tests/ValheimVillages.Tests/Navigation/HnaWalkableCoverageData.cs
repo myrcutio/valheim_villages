@@ -3,10 +3,10 @@ using UnityEngine;
 namespace ValheimVillages.Tests.Navigation;
 
 /// <summary>
-/// Recorded walkable positions from the test village. Captured by walking through
-/// all reachable areas and logging player positions. Every position in this list
-/// must fall within a valid HNA region for full village coverage.
-/// Source: .cursor/hna_walkable_path.json (389 positions)
+///     Recorded walkable positions from the test village. Captured by walking through
+///     all reachable areas and logging player positions. Every position in this list
+///     must fall within a valid HNA region for full village coverage.
+///     Source: .cursor/hna_walkable_path.json (389 positions)
 /// </summary>
 public partial class HnaWalkableCoverageTests
 {

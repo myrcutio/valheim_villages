@@ -3,9 +3,9 @@ using UnityEngine;
 namespace ValheimVillages.Abilities
 {
     /// <summary>
-    /// Status effect for the Mountaineer's "Mountain Stride" ability.
-    /// While active, the player is immune to sliding on steep surfaces.
-    /// Duration: 5 minutes. Cooldown: 20 minutes.
+    ///     Status effect for the Mountaineer's "Mountain Stride" ability.
+    ///     While active, the player is immune to sliding on steep surfaces.
+    ///     Duration: 5 minutes. Cooldown: 20 minutes.
     /// </summary>
     public class SE_MountainStride : StatusEffect
     {
@@ -34,12 +34,12 @@ namespace ValheimVillages.Abilities
         }
 
         /// <summary>
-        /// Create a simple mountain-themed icon sprite for the buff HUD.
+        ///     Create a simple mountain-themed icon sprite for the buff HUD.
         /// </summary>
         private static Sprite CreateBuffIcon()
         {
             // TODO: this is gross and bad, and the AI should feel bad.
-            int size = 32;
+            var size = 32;
             var tex = new Texture2D(size, size);
             var pixels = new Color[size * size];
 
@@ -48,27 +48,22 @@ namespace ValheimVillages.Abilities
             var snow = new Color(0.95f, 0.95f, 1f, 1f);
 
             // Fill background
-            for (int i = 0; i < pixels.Length; i++)
+            for (var i = 0; i < pixels.Length; i++)
                 pixels[i] = bg;
 
             // Draw a simple mountain triangle
-            for (int y = 0; y < size; y++)
+            for (var y = 0; y < size; y++)
+            for (var x = 0; x < size; x++)
             {
-                for (int x = 0; x < size; x++)
-                {
-                    int centerX = size / 2;
-                    int baseY = 6;
-                    int peakY = 26;
-                    float progress = (float)(y - baseY) / (peakY - baseY);
+                var centerX = size / 2;
+                var baseY = 6;
+                var peakY = 26;
+                var progress = (float)(y - baseY) / (peakY - baseY);
 
-                    if (y >= baseY && y <= peakY)
-                    {
-                        float halfWidth = (1f - progress) * (size / 2f - 2);
-                        if (Mathf.Abs(x - centerX) <= halfWidth)
-                        {
-                            pixels[y * size + x] = y > peakY - 6 ? snow : mountain;
-                        }
-                    }
+                if (y >= baseY && y <= peakY)
+                {
+                    var halfWidth = (1f - progress) * (size / 2f - 2);
+                    if (Mathf.Abs(x - centerX) <= halfWidth) pixels[y * size + x] = y > peakY - 6 ? snow : mountain;
                 }
             }
 

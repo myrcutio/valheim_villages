@@ -1,14 +1,12 @@
-using System;
-using System.Linq;
 using System.Reflection;
-using ValheimVillages.Interfaces;
 using ValheimVillages.Attributes;
+using ValheimVillages.Interfaces;
 using Xunit;
 
 namespace ValheimVillages.Tests.Contracts;
 
 /// <summary>
-/// Verify that every class annotated with [RegisterBehavior] implements IBehavior.
+///     Verify that every class annotated with [RegisterBehavior] implements IBehavior.
 /// </summary>
 public class BehaviorContractTests
 {

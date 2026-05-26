@@ -1,7 +1,7 @@
 namespace ValheimVillages.Behaviors.Farming
 {
     /// <summary>
-    /// Configuration settings for NPC farming behavior.
+    ///     Configuration settings for NPC farming behavior.
     /// </summary>
     public static class FarmSettings
     {
@@ -13,13 +13,13 @@ namespace ValheimVillages.Behaviors.Farming
         public const float HarvestScanRadius = 20f;
 
         /// <summary>
-        /// Maximum number of seeds to plant per farming session.
-        /// Prevents NPC from planting endlessly if seeds are abundant.
+        ///     Maximum number of seeds to plant per farming session.
+        ///     Prevents NPC from planting endlessly if seeds are abundant.
         /// </summary>
         public const int MaxPlantsPerSession = 10;
 
         /// <summary>
-        /// Maximum harvested items the NPC carries per trip before walking back to the container.
+        ///     Maximum harvested items the NPC carries per trip before walking back to the container.
         /// </summary>
         public const int MaxHarvestCarryPerTrip = 2;
 

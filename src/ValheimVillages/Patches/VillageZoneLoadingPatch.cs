@@ -6,9 +6,9 @@ using ValheimVillages.Villager.AI;
 namespace ValheimVillages.Patches
 {
     /// <summary>
-    /// Keeps village zones loaded on the server even when no player is nearby.
-    /// Injects village bed positions as phantom reference points for zone
-    /// creation and object spawning.
+    ///     Keeps village zones loaded on the server even when no player is nearby.
+    ///     Injects village bed positions as phantom reference points for zone
+    ///     creation and object spawning.
     /// </summary>
     public static class VillageZoneLoadingPatch
     {
@@ -16,8 +16,8 @@ namespace ValheimVillages.Patches
         private const float ZoneSize = 64f;
 
         /// <summary>
-        /// Deduplicate bed positions into one per zone grid cell so multiple
-        /// villagers in the same village produce only one phantom zone center.
+        ///     Deduplicate bed positions into one per zone grid cell so multiple
+        ///     villagers in the same village produce only one phantom zone center.
         /// </summary>
         private static List<Vector3> GetPhantomPositions()
         {
@@ -44,12 +44,12 @@ namespace ValheimVillages.Patches
         }
 
         /// <summary>
-        /// After vanilla creates zones for player peers, also create zones
-        /// around village bed positions so terrain and vegetation load.
+        ///     After vanilla creates zones for player peers, also create zones
+        ///     around village bed positions so terrain and vegetation load.
         /// </summary>
         [HarmonyPatch(typeof(ZoneSystem), "CreateLocalZones")]
         [HarmonyPatch(new[] { typeof(Vector3) })]
-        static class ZoneSystemCreateZonesPatch
+        private static class ZoneSystemCreateZonesPatch
         {
             // We can't postfix on Update easily (CreateLocalZones is called
             // from a loop over peers). Instead, piggyback on each
@@ -59,10 +59,10 @@ namespace ValheimVillages.Patches
         }
 
         [HarmonyPatch(typeof(ZoneSystem), "Update")]
-        static class ZoneSystemUpdatePatch
+        private static class ZoneSystemUpdatePatch
         {
             [HarmonyPostfix]
-            static void Postfix(ZoneSystem __instance)
+            private static void Postfix(ZoneSystem __instance)
             {
                 if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
 
@@ -76,16 +76,16 @@ namespace ValheimVillages.Patches
         }
 
         /// <summary>
-        /// Prefix-replace CreateDestroyObjects on the server so village zone
-        /// ZDOs are included in the active set. Without this, vanilla's
-        /// RemoveObjects would destroy village zone GameObjects every frame.
-        /// On clients, vanilla runs unmodified.
+        ///     Prefix-replace CreateDestroyObjects on the server so village zone
+        ///     ZDOs are included in the active set. Without this, vanilla's
+        ///     RemoveObjects would destroy village zone GameObjects every frame.
+        ///     On clients, vanilla runs unmodified.
         /// </summary>
         [HarmonyPatch(typeof(ZNetScene), "CreateDestroyObjects")]
-        static class ZNetSceneCreateDestroyPatch
+        private static class ZNetSceneCreateDestroyPatch
         {
             [HarmonyPrefix]
-            static bool Prefix(ZNetScene __instance)
+            private static bool Prefix(ZNetScene __instance)
             {
                 if (ZNet.instance == null || !ZNet.instance.IsServer())
                     return true;
@@ -103,8 +103,8 @@ namespace ValheimVillages.Patches
 
                 var refPos = ZNet.instance.GetReferencePosition();
                 var zone = ZoneSystem.GetZone(refPos);
-                int activeArea = ZoneSystem.instance.m_activeArea;
-                int activeDistant = ZoneSystem.instance.m_activeDistantArea;
+                var activeArea = ZoneSystem.instance.m_activeArea;
+                var activeDistant = ZoneSystem.instance.m_activeDistantArea;
 
                 ZDOMan.instance.FindSectorObjects(zone, activeArea, activeDistant, nearObjects, distantObjects);
 
@@ -113,7 +113,7 @@ namespace ValheimVillages.Patches
                     var phantomZone = ZoneSystem.GetZone(pos);
                     if (phantomZone.x == zone.x && phantomZone.y == zone.y)
                         continue;
-                    ZDOMan.instance.FindSectorObjects(phantomZone, activeArea, 0, nearObjects, null);
+                    ZDOMan.instance.FindSectorObjects(phantomZone, activeArea, 0, nearObjects);
                 }
 
                 tr.Method("CreateObjects", nearObjects, distantObjects).GetValue();

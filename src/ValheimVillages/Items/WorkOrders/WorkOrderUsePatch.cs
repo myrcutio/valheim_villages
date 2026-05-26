@@ -1,13 +1,12 @@
 using HarmonyLib;
-using ValheimVillages.Items;
 using ValheimVillages.UI.ContextMenus;
 
 namespace ValheimVillages.Items.WorkOrders
 {
     /// <summary>
-    /// Intercepts item use for work order items.
-    /// When a player uses (right-clicks) a work order, opens the WorkOrderMenu
-    /// to configure production quota settings.
+    ///     Intercepts item use for work order items.
+    ///     When a player uses (right-clicks) a work order, opens the WorkOrderMenu
+    ///     to configure production quota settings.
     /// </summary>
     [HarmonyPatch(typeof(Humanoid), nameof(Humanoid.UseItem))]
     public static class WorkOrderUsePatch
@@ -19,7 +18,7 @@ namespace ValheimVillages.Items.WorkOrders
             if (__instance is not Player player)
                 return true;
 
-            string itemName = item?.m_dropPrefab?.name;
+            var itemName = item?.m_dropPrefab?.name;
             if (string.IsNullOrEmpty(itemName))
                 return true;
 
@@ -35,8 +34,8 @@ namespace ValheimVillages.Items.WorkOrders
     }
 
     /// <summary>
-    /// Integrates WorkOrderMenu visibility with Valheim's UI systems
-    /// so the camera and input don't conflict when the menu is open.
+    ///     Integrates WorkOrderMenu visibility with Valheim's UI systems
+    ///     so the camera and input don't conflict when the menu is open.
     /// </summary>
     [HarmonyPatch(typeof(TextInput), "IsVisible")]
     public static class WorkOrderTextInputPatch
@@ -50,7 +49,7 @@ namespace ValheimVillages.Items.WorkOrders
     }
 
     /// <summary>
-    /// Integrates WorkOrderMenu visibility with Valheim's menu system.
+    ///     Integrates WorkOrderMenu visibility with Valheim's menu system.
     /// </summary>
     [HarmonyPatch(typeof(Menu), "IsVisible")]
     public static class WorkOrderMenuVisiblePatch

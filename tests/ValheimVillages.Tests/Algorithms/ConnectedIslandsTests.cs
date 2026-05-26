@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using ValheimVillages.Algorithms;
 using Xunit;
 
@@ -13,8 +10,8 @@ public class ConnectedIslandsTests
     {
         var islands = ConnectedIslands.FindIslands(
             1,
-            isConnected: (a, b) => false,
-            shouldTest: (a, b) => true);
+            (a, b) => false,
+            (a, b) => true);
 
         Assert.Single(islands);
         Assert.Equal(new[] { 0 }, islands[0]);
@@ -25,8 +22,8 @@ public class ConnectedIslandsTests
     {
         var islands = ConnectedIslands.FindIslands(
             5,
-            isConnected: (a, b) => true,
-            shouldTest: (a, b) => true);
+            (a, b) => true,
+            (a, b) => true);
 
         Assert.Single(islands);
         Assert.Equal(5, islands[0].Count);
@@ -37,8 +34,8 @@ public class ConnectedIslandsTests
     {
         var islands = ConnectedIslands.FindIslands(
             4,
-            isConnected: (a, b) => false,
-            shouldTest: (a, b) => true);
+            (a, b) => false,
+            (a, b) => true);
 
         Assert.Equal(4, islands.Count);
         foreach (var island in islands)
@@ -51,12 +48,12 @@ public class ConnectedIslandsTests
         // 0-1-2 connected, 3-4 connected, no cross-cluster links
         var islands = ConnectedIslands.FindIslands(
             5,
-            isConnected: (a, b) =>
+            (a, b) =>
             {
                 int lo = Math.Min(a, b), hi = Math.Max(a, b);
                 return (lo < 3 && hi < 3) || (lo >= 3 && hi >= 3);
             },
-            shouldTest: (a, b) => true);
+            (a, b) => true);
 
         Assert.Equal(2, islands.Count);
 
@@ -72,8 +69,8 @@ public class ConnectedIslandsTests
         // All connected via chain even though 0-3 is never tested directly
         var islands = ConnectedIslands.FindIslands(
             4,
-            isConnected: (a, b) => Math.Abs(a - b) == 1,
-            shouldTest: (a, b) => Math.Abs(a - b) <= 1);
+            (a, b) => Math.Abs(a - b) == 1,
+            (a, b) => Math.Abs(a - b) <= 1);
 
         Assert.Single(islands);
         Assert.Equal(4, islands[0].Count);
@@ -82,11 +79,15 @@ public class ConnectedIslandsTests
     [Fact]
     public void ShouldTestFilter_LimitsPairsChecked()
     {
-        int callCount = 0;
+        var callCount = 0;
         var islands = ConnectedIslands.FindIslands(
             4,
-            isConnected: (a, b) => { callCount++; return true; },
-            shouldTest: (a, b) => Math.Abs(a - b) == 1);
+            (a, b) =>
+            {
+                callCount++;
+                return true;
+            },
+            (a, b) => Math.Abs(a - b) == 1);
 
         // Only adjacent pairs tested: (0,1), (1,2), (2,3) = 3 calls
         // But union-find skips already-merged pairs, so at most 3
@@ -99,8 +100,8 @@ public class ConnectedIslandsTests
     {
         var islands = ConnectedIslands.FindIslands(
             0,
-            isConnected: (a, b) => true,
-            shouldTest: (a, b) => true);
+            (a, b) => true,
+            (a, b) => true);
 
         Assert.Empty(islands);
     }
@@ -111,8 +112,8 @@ public class ConnectedIslandsTests
         // 0-1 connected, 2-3 connected, 4-5 connected
         var islands = ConnectedIslands.FindIslands(
             6,
-            isConnected: (a, b) => (a / 2) == (b / 2),
-            shouldTest: (a, b) => true);
+            (a, b) => a / 2 == b / 2,
+            (a, b) => true);
 
         Assert.Equal(3, islands.Count);
         foreach (var island in islands)

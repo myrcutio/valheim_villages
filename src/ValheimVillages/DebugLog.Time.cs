@@ -14,21 +14,24 @@ namespace ValheimVillages
         private static readonly Stopwatch _sessionClock = Stopwatch.StartNew();
 
         /// <summary>
-        /// Session-relative elapsed time. Used internally by Throttled() to
-        /// schedule re-emits; exposed in case other code wants the same clock.
+        ///     Session-relative elapsed time. Used internally by Throttled() to
+        ///     schedule re-emits; exposed in case other code wants the same clock.
         /// </summary>
-        public static TimeSpan Elapsed() => _sessionClock.Elapsed;
+        public static TimeSpan Elapsed()
+        {
+            return _sessionClock.Elapsed;
+        }
 
         /// <summary>
-        /// Formatted timestamp token: "t=+12.34s". Append to structured event
-        /// lines so a reader can see elapsed time at a glance without parsing
-        /// wall-clock dates out of mixed BepInEx output.
+        ///     Formatted timestamp token: "t=+12.34s". Append to structured event
+        ///     lines so a reader can see elapsed time at a glance without parsing
+        ///     wall-clock dates out of mixed BepInEx output.
         /// </summary>
         public static string T()
         {
             return "t=+"
-                + _sessionClock.Elapsed.TotalSeconds.ToString("0.00", CultureInfo.InvariantCulture)
-                + "s";
+                   + _sessionClock.Elapsed.TotalSeconds.ToString("0.00", CultureInfo.InvariantCulture)
+                   + "s";
         }
     }
 }
