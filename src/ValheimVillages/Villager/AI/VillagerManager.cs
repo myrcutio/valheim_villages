@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using HarmonyLib;
 using ValheimVillages.Attributes;
 
 namespace ValheimVillages.Villager.AI
@@ -72,28 +73,41 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        /// Get unique bed positions from all active villagers.
-        /// Reads the authoritative <see cref="Villager.BedPosition"/> from each
-        /// villager's component and deduplicates positions within 1m of each other.
+        /// Get unique bed positions for every villager in the world. Reads
+        /// authoritatively from <c>ZDOMan.m_objectsByID</c>: each ZDO with the
+        /// <c>vv_villager_type</c> tag carries a persistent <c>vv_bed_position</c>.
+        /// Survives villager GameObject unload (out-of-range, teleported) and
+        /// hot reloads (the in-memory <see cref="ActiveVillagers"/> dict is
+        /// cleared on reload).
+        ///
+        /// Returns an empty list if <c>ZDOMan</c> isn't yet alive — callers
+        /// should treat that as "world not ready" and either retry or abort.
+        /// No fallback to in-memory state: that path was masking missing-bed
+        /// bugs (e.g. villagers unloaded across reload) by silently using a
+        /// stale subset.
         /// </summary>
         public static List<UnityEngine.Vector3> GetAllBedPositions()
         {
             var list = new List<UnityEngine.Vector3>();
-            foreach (var ai in ActiveVillagers.Values)
+            var zdoMan = ZDOMan.instance;
+            if (zdoMan == null) return list;
+            var objectsByID = Traverse.Create(zdoMan)
+                .Field<Dictionary<ZDOID, ZDO>>("m_objectsByID").Value;
+            if (objectsByID == null) return list;
+            foreach (var zdo in objectsByID.Values)
             {
-                var villager = ai?.Villager;
-                if (villager == null) continue;
-                var pos = villager.BedPosition;
+                if (zdo == null) continue;
+                string vtype = zdo.GetString("vv_villager_type", "");
+                if (string.IsNullOrEmpty(vtype)) continue;
+                var pos = zdo.GetVec3("vv_bed_position", UnityEngine.Vector3.zero);
                 if (pos == UnityEngine.Vector3.zero) continue;
-
                 bool duplicate = false;
                 foreach (var existing in list)
                 {
                     if ((existing - pos).sqrMagnitude < 1f)
                     { duplicate = true; break; }
                 }
-                if (!duplicate)
-                    list.Add(pos);
+                if (!duplicate) list.Add(pos);
             }
             return list;
         }

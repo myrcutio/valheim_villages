@@ -190,13 +190,24 @@ namespace ValheimVillages.Villager.AI.Navigation
             float maxNeighborDist2 = MaxNeighborDist * MaxNeighborDist;
             var cachedFilter = filter;
 
+            if (!VillagerAgentType.TryGetSlope(out float maxSlope) ||
+                !VillagerAgentType.TryGetClimb(out float maxClimb))
+            {
+                Plugin.Log?.LogError(
+                    "[NavMeshLink] BridgeDisconnectedIslands: cannot evaluate path walkability " +
+                    "because VillagerAgentType slope/climb are not yet available " +
+                    "(Pathfinding.instance not alive or agent slot 31 not registered). " +
+                    "Skipping island bridging this cycle.");
+                return 0;
+            }
+
             var islands = ConnectedIslands.FindIslands(
                 allHits.Count,
                 isConnected: (a, b) =>
                 {
                     var path = new NavMeshPath();
                     NavMesh.CalculatePath(allHits[a], allHits[b], cachedFilter, path);
-                    return IsPathPhysicallyWalkable(path);
+                    return IsPathPhysicallyWalkableCore(path, maxSlope, maxClimb);
                 },
                 shouldTest: (a, b) =>
                 {
@@ -241,7 +252,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
                 var testPath = new NavMeshPath();
                 NavMesh.CalculatePath(bestA, bestB, filter, testPath);
-                if (IsPathPhysicallyWalkable(testPath))
+                if (IsPathPhysicallyWalkableCore(testPath, maxSlope, maxClimb))
                     continue;
 
                 Plugin.Log?.LogInfo(
@@ -303,7 +314,16 @@ namespace ValheimVillages.Villager.AI.Navigation
 
                 var path = new NavMeshPath();
                 NavMesh.CalculatePath(hitA.position, hitB.position, filter, path);
-                if (IsPathPhysicallyWalkable(path)) continue;
+                if (!TryIsPathPhysicallyWalkable(path, out bool walkable))
+                {
+                    Plugin.Log?.LogError(
+                        "[NavMeshLink] Skipping door at " + pos + ": cannot evaluate path walkability " +
+                        "because VillagerAgentType slope/climb are not yet available " +
+                        "(Pathfinding.instance not alive or agent slot 31 not registered). " +
+                        "Caller should defer door-link placement until registration completes.");
+                    continue;
+                }
+                if (walkable) continue;
 
                 if (TryAddLink(hitA.position, hitB.position, agentTypeID))
                 {
@@ -318,12 +338,33 @@ namespace ValheimVillages.Villager.AI.Navigation
             return placed;
         }
 
-        private static bool IsPathPhysicallyWalkable(NavMeshPath path)
+        /// <summary>
+        /// Tries to determine whether a NavMesh path is physically walkable for the villager
+        /// agent by checking per-segment slope/climb against the live agent settings.
+        /// Returns false when slope/climb cannot be read (villager agent slot not registered
+        /// yet); the caller must not substitute a default in that case.
+        /// </summary>
+        private static bool TryIsPathPhysicallyWalkable(NavMeshPath path, out bool walkable)
+        {
+            walkable = false;
+            if (!VillagerAgentType.TryGetSlope(out float maxSlope) ||
+                !VillagerAgentType.TryGetClimb(out float maxClimb))
+            {
+                return false;
+            }
+            walkable = IsPathPhysicallyWalkableCore(path, maxSlope, maxClimb);
+            return true;
+        }
+
+        /// <summary>
+        /// Pure walkability math with caller-supplied slope/climb. Callers must obtain those
+        /// from <see cref="VillagerAgentType.TryGetSlope"/>/<see cref="VillagerAgentType.TryGetClimb"/>
+        /// — there are no synthesised defaults inside this helper, by design.
+        /// </summary>
+        private static bool IsPathPhysicallyWalkableCore(NavMeshPath path, float maxSlope, float maxClimb)
         {
             if (path.status != NavMeshPathStatus.PathComplete) return false;
             if (path.corners == null || path.corners.Length < 2) return true;
-            float maxSlope = VillagerAgentType.Slope;
-            float maxClimb = VillagerAgentType.Climb;
             for (int k = 1; k < path.corners.Length; k++)
             {
                 float dy = Mathf.Abs(path.corners[k].y - path.corners[k - 1].y);
@@ -335,8 +376,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     float slope = Mathf.Atan2(dy, horiz) * Mathf.Rad2Deg;
                     if (slope > maxSlope) return false;
                 }
-                else if (dy > maxClimb)
-                    return false;
+                else if (dy > maxClimb) return false;
             }
             return true;
         }
@@ -436,6 +476,15 @@ namespace ValheimVillages.Villager.AI.Navigation
             int agentTypeID = VillagerAgentType.UnityAgentTypeID;
             if (agentTypeID == 0) return;
 
+            if (!VillagerAgentType.TryGetSlope(out float maxSlope) ||
+                !VillagerAgentType.TryGetClimb(out float maxClimb))
+            {
+                Plugin.Log?.LogError(
+                    "[NavMeshLink] ComputeLinkCandidates: IsRegistered=true but slope/climb " +
+                    "could not be resolved. Aborting candidate computation this cycle.");
+                return;
+            }
+
             var filter = new NavMeshQueryFilter
             {
                 agentTypeID = agentTypeID,
@@ -486,7 +535,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (sampledA && sampledB)
                 {
                     NavMesh.CalculatePath(hitA.position, hitB.position, filter, path);
-                    if (IsPathPhysicallyWalkable(path))
+                    if (IsPathPhysicallyWalkableCore(path, maxSlope, maxClimb))
                     {
                         candidate.Status = HnaCandidateStatus.AlreadyConnected;
                         s_hnaCandidates.Add(candidate);

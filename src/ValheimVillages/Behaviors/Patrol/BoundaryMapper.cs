@@ -141,24 +141,40 @@ namespace ValheimVillages.Behaviors.Patrol
 
                 if (prevOk || nextOk) continue;
 
-                // Both directions fail — try re-snapping at the average Y of neighbors
-                float neighborY = (waypoints[prev].y + waypoints[next].y) * 0.5f;
-                var resnap = new Vector3(waypoints[i].x, neighborY, waypoints[i].z);
-                if (NavMesh.SamplePosition(resnap, out NavMeshHit hit, BoundaryGeometry.NavMeshProbeRadius, filter))
-                {
-                    bool prevOk2 = BoundaryGeometry.IsNavMeshPathClear(waypoints[prev], hit.position, filter);
-                    bool nextOk2 = BoundaryGeometry.IsNavMeshPathClear(hit.position, waypoints[next], filter);
-                    if (prevOk2 || nextOk2)
-                    {
-                        waypoints[i] = hit.position;
-                        continue;
-                    }
-                }
+                // Both directions fail. We do NOT silently re-snap at neighbor-average Y —
+                // that would mask a real disagreement between the HNA region graph Y
+                // (which placed this waypoint) and what NavMesh considers walkable.
+                // Surface the disagreement loudly and drop the waypoint when the
+                // ring can stay connected via a direct prev→next path.
+                float navY = float.NaN;
+                if (NavMesh.SamplePosition(waypoints[i], out NavMeshHit navHit,
+                        BoundaryGeometry.NavMeshProbeRadius, filter))
+                    navY = navHit.position.y;
+                float bakeY = RegionGraph.GetSolidHeightAt(waypoints[i].x, waypoints[i].z, out float by)
+                    ? by : float.NaN;
 
                 if (BoundaryGeometry.IsNavMeshPathClear(waypoints[prev], waypoints[next], filter))
                 {
+                    Plugin.Log?.LogError(
+                        $"[BoundaryMapper] Unpathable waypoint at " +
+                        $"({waypoints[i].x:F2}, {waypoints[i].y:F2}, {waypoints[i].z:F2}): " +
+                        $"both prev→curr and curr→next NavMesh paths blocked. " +
+                        $"NavMesh Y={navY:F2}, bake Y={bakeY:F2}, " +
+                        $"prev Y={waypoints[prev].y:F2}, next Y={waypoints[next].y:F2}. " +
+                        $"Dropping waypoint (no silent neighbor-average re-snap).");
                     waypoints.RemoveAt(i);
                     dropped++;
+                }
+                else
+                {
+                    Plugin.Log?.LogError(
+                        $"[BoundaryMapper] Isolated waypoint at " +
+                        $"({waypoints[i].x:F2}, {waypoints[i].y:F2}, {waypoints[i].z:F2}): " +
+                        $"both prev→curr and curr→next NavMesh paths blocked AND " +
+                        $"prev→next direct bridge also blocked. " +
+                        $"NavMesh Y={navY:F2}, bake Y={bakeY:F2}, " +
+                        $"prev Y={waypoints[prev].y:F2}, next Y={waypoints[next].y:F2}. " +
+                        $"Keeping waypoint to preserve ring connectivity; patrol may snag here.");
                 }
             }
 

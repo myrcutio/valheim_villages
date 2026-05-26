@@ -23,23 +23,30 @@ namespace ValheimVillages.Villager.AI.Navigation
     /// <c>WallBlocks</c> primitive, refuses to expand into <c>outsideCells</c>.
     /// Output: <c>bedReachableCells</c> (terrain XZ keys reachable from at
     /// least one bed). Catches internal cliffs, pits, locked-off rooms.</item>
-    /// <item><b>Pass 3</b> (piece): keep iff the piece cell's XZ is NOT in
-    /// <c>outsideCells</c>. No piece adjacency, no overlap chasing — purely
-    /// XZ-strict. Trades off rampart pieces sitting on top of walls that
-    /// straddle the inside/outside boundary (those half-keep). Overhangs and
-    /// piece-to-piece reachability deferred to a follow-up.</item>
+    /// <item><b>Pass 3</b> (piece): bed-reachable flood on the piece layer.
+    /// Seeds are piece lookup keys within <c>MaxSeedStep</c> Y of a
+    /// <c>bedReachableCells</c> terrain cell (i.e. "a villager could step
+    /// from terrain onto this piece"). BFS expands via 4-connected horizontal
+    /// neighbour XZs across all height buckets present at the neighbour
+    /// (stair pieces naturally bridge floors at different Ys), gated by
+    /// <c>|Δy| ≤ MaxClimb</c> on region-centroid Y. Step-height naturally
+    /// severs rooftops from floors in the same XZ column and severs floors
+    /// from wall-top pieces. Output: <c>pieceReachableKeys</c>. Fallback if
+    /// zero seeds: today's XZ-outside rule (keep piece iff its XZ is not in
+    /// <c>outsideCells</c>) with a warning log.</item>
     /// </list>
     /// Cell-level apply (per kind):
     /// <list type="bullet">
     /// <item>Terrain <c>LookupGrid</c> entries / tris dropped iff XZ NOT in
     /// <c>bedReachableCells</c>.</item>
-    /// <item>Piece <c>LookupGrid</c> entries / tris dropped iff XZ in
-    /// <c>outsideCells</c>.</item>
+    /// <item>Piece <c>LookupGrid</c> entries / tris dropped iff lookup key NOT
+    /// in <c>pieceReachableKeys</c>.</item>
     /// <item><c>static_solid</c> tris dropped iff centroid XZ in
     /// <c>outsideCells</c> (unchanged from prior PR).</item>
     /// </list>
     /// Region-level cascade: a region is dropped wholesale iff every one of
-    /// its XZ cells failed the per-kind keep rule above.
+    /// its cells failed the per-kind keep rule above (terrain by XZ,
+    /// piece by lookup key).
     /// </summary>
     internal static class RubberBandPrune
     {
@@ -51,8 +58,12 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int Pass2Seeds;
             /// <summary>Terrain XZ cells reached by Pass 2's bed flood (or the fallback set).</summary>
             public int BedReachableTerrainCells;
-            /// <summary>Piece XZ cells dropped by Pass 3 (cells inside <c>outsideCells</c>).</summary>
-            public int Pass3PieceCellsDropped;
+            /// <summary>Piece lookup keys seeded for Pass 3 (piece cells within step-height of a bed-reachable terrain cell).</summary>
+            public int Pass3Seeds;
+            /// <summary>Piece lookup keys reached by Pass 3's piece flood (or the fallback set).</summary>
+            public int BedReachablePieceKeys;
+            /// <summary>Piece lookup keys dropped by Pass 3 (not reached by the piece flood).</summary>
+            public int Pass3PieceKeysDropped;
             public int RegionsDropped;
             public int PerimeterSeeds;
             public int LookupCellsDropped;
@@ -60,8 +71,28 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int StaticSolidTrianglesDropped;
         }
 
-        private const float CapsuleRadius = 0.35f;
-        private const float CastHeightOffset = 1f;
+        // Waist-height probe band, relative to a cell's ground Y.
+        //
+        // The probe is a thin Y-slab at walker waist height that fully
+        // spans the cell pair in the step direction. Tuned to:
+        //   - CATCH walls (extend from ground to 2m+, body crosses waist)
+        //   - MISS beds (top at ~0.6m, below WaistMin)
+        //   - MISS overhead arches / vaults / ceilings (start at ~2m,
+        //     above WaistMax)
+        //
+        // WaistMin 0.7m: above typical bed top (~0.6m) and above the
+        // villager's max climb (~0.3m). Things shorter than this the
+        // walker can step over, so they shouldn't block.
+        // WaistMax 1.3m: walker chest height. Above this we'd start
+        // catching low arches / overhanging eaves.
+        //
+        // WallBlocks calls this twice — once at each cell's ground Y —
+        // so a wall on a plateau (uphill step) is caught by the higher
+        // probe while a wall on the low side is caught by the lower one.
+        // The OLD single-height probe at min+1m missed plateau walls
+        // (probe sat below them); max+1m missed low-side walls.
+        private const float WaistMin = 0.7f;
+        private const float WaistMax = 1.3f;
 
         // --- Diagnostic snapshot (for vv_probe) ---
         // Populated at end of every Apply(). Cleared on hot reload via
@@ -135,14 +166,18 @@ namespace ValheimVillages.Villager.AI.Navigation
             //   kind. Pass 1 / Pass 2 use the terrain map for cast-height
             //   anchoring; the piece map is informational only (joined into
             //   the diagnostic snapshot at the bottom).
-            // ridToXz: combined region → XZ cells (the region cascade still
-            //   operates on the combined set).
+            // ridToXz: combined region → XZ cells (terrain region cascade
+            //   still operates on this).
+            // ridToPieceKeys: per-piece-region → lookup keys. Piece region
+            //   cascade uses this so we can ask "any of my keys reachable?"
+            //   at lookup-key granularity (XZ would lose Y-bucket info).
             // xzToLookupKeys{Terrain,Piece}: per-kind reverse index used by
             //   the cell-level apply below to drop entries without rescanning
             //   the full lookupGrid.
             var xzMaxYTerrain = new Dictionary<long, float>();
             var xzMaxYPiece = new Dictionary<long, float>();
             var ridToXz = new Dictionary<string, List<long>>();
+            var ridToPieceKeys = new Dictionary<string, HashSet<long>>();
             var xzToLookupKeysTerrain = new Dictionary<long, List<long>>();
             var xzToLookupKeysPiece = new Dictionary<long, List<long>>();
             foreach (var kv in lookupGrid)
@@ -183,6 +218,15 @@ namespace ValheimVillages.Villager.AI.Navigation
                     xzToLookupKeys[xz] = keyList;
                 }
                 keyList.Add(kv.Key);
+                if (isPiece)
+                {
+                    if (!ridToPieceKeys.TryGetValue(kv.Value, out var ridKeys))
+                    {
+                        ridKeys = new HashSet<long>();
+                        ridToPieceKeys[kv.Value] = ridKeys;
+                    }
+                    ridKeys.Add(kv.Key);
+                }
             }
 
             // --- Pass 1: outside-in terrain flood ---
@@ -231,76 +275,50 @@ namespace ValheimVillages.Villager.AI.Navigation
             foreach (var kv in xzMaxYTerrain)
                 if (outsideCells.Contains(kv.Key)) stats.OutsideTerrainCells++;
 
-            // --- Pass 2: inside-out terrain flood from beds ---
-            // For each bed, find the terrain cell at its XZ column (a bed at
-            // (x, y, z) seeds the terrain cell at (Floor(x/cell), Floor(z/cell))
-            // regardless of the bed's y — terrain is single-surface in Valheim
-            // so vertical infinity collapses to one cell). Skip beds whose XZ
-            // has no terrain (bed on a piece floor with no terrain below) or
-            // whose seed cell is in outsideCells (bed outside the perimeter —
-            // pathological). BFS expands via 4-connected terrain cells, same
-            // WallBlocks primitive as Pass 1, refusing to enter outsideCells.
-            // Fallback if no bed seeded: all non-outside terrain cells (matches
-            // prior no-seeds branch — keeps the partition usable when beds
-            // don't resolve to terrain).
+            // --- Pass 2: inside-out flood from beds ---
+            // Walks any non-outside cell in the bake bounds (NOT only cells in
+            // xzMaxYTerrain). The prior xzMaxYTerrain.ContainsKey gate made the
+            // flood depend on the terrain bake's region coverage: in villages
+            // heavily covered by piece floors / foundations / paving the
+            // terrain under those pieces gets rejBlocked'd by RegionBuilder,
+            // so xzMaxYTerrain has no entry there, and Pass 2 couldn't bridge
+            // across them — fragmented inside-village walkable area into tiny
+            // islands. A villager can legitimately walk on any non-outside
+            // cell that isn't wall-blocked from its neighbour, regardless of
+            // whether the terrain region centroid landed on this XZ.
+            //
+            // Bed seeding: bed's exact XZ cell, period. No 30m direct-scan
+            // fallback (that was masking the real seeding semantics: a bed
+            // outside the perimeter, or out of bake bounds, is a real bug
+            // worth surfacing, not silently snapping to a nearby cell).
+            //
+            // Cell Y comes from ZoneSystem.GetGroundHeight (per-cell heightmap),
+            // not xzMaxYTerrain (region-centroid Y can drift up to ~0.75m).
             var bedReachableCells = new HashSet<long>();
             int pass2Seeds = 0;
-            if (beds != null && beds.Count > 0)
+            if (beds != null && beds.Count > 0 && ZoneSystem.instance != null)
             {
                 var bedQueue = new Queue<long>();
-                // Bed→terrain seeding: a bed inside a building sits over floor
-                // pieces that shadow terrain in the combined LookupGrid at the
-                // bed's exact XZ cell, so an exact-XZ rule misses every bed
-                // deeper into a building than its outer wall thickness. The
-                // user's "vertical infinity" intent maps to "find the closest
-                // terrain cell to the bed's XZ column" — implemented as a
-                // direct scan over xzMaxYTerrain, picking the closest
-                // non-outside cell within MaxBedSeedDist. 30m is generous
-                // enough to span any typical building / multi-room hall while
-                // still being village-local.
-                const float MaxBedSeedDist = 30f;
-                const float MaxBedSeedDistSq = MaxBedSeedDist * MaxBedSeedDist;
                 foreach (var bed in beds)
                 {
                     int bgx = Mathf.FloorToInt(bed.x / cell);
                     int bgz = Mathf.FloorToInt(bed.z / cell);
-                    long exactKey = XzKey(bgx, bgz);
-                    bool exactHasTerrain = xzMaxYTerrain.ContainsKey(exactKey);
-                    bool exactOutside = outsideCells.Contains(exactKey);
-                    long bedKey;
-                    if (exactHasTerrain && !exactOutside)
+                    if (bgx < gxMin || bgx > gxMax || bgz < gzMin || bgz > gzMax)
                     {
-                        bedKey = exactKey;
+                        Plugin.Log?.LogWarning(
+                            $"[RubberBand] Pass 2 bed skipped: bed=({bed.x:F1},{bed.z:F1}) " +
+                            $"cell=({bgx},{bgz}) out_of_bake_bounds " +
+                            $"[{gxMin}..{gxMax}, {gzMin}..{gzMax}]");
+                        continue;
                     }
-                    else
+                    long bedKey = XzKey(bgx, bgz);
+                    if (outsideCells.Contains(bedKey))
                     {
-                        // Closest non-outside terrain cell in xzMaxYTerrain
-                        // within MaxBedSeedDist of the bed's XZ. Iterate the
-                        // map directly — cheap (few hundred entries) and
-                        // guaranteed to find any reachable cell regardless of
-                        // how far the bed is from terrain.
-                        long best = 0;
-                        float bestDistSq = float.MaxValue;
-                        foreach (var kv in xzMaxYTerrain)
-                        {
-                            if (outsideCells.Contains(kv.Key)) continue;
-                            UnpackXz(kv.Key, out int kgx, out int kgz);
-                            float cx = kgx * cell + cell * 0.5f;
-                            float cz = kgz * cell + cell * 0.5f;
-                            float ddx = cx - bed.x, ddz = cz - bed.z;
-                            float dSq = ddx * ddx + ddz * ddz;
-                            if (dSq > MaxBedSeedDistSq) continue;
-                            if (dSq < bestDistSq) { bestDistSq = dSq; best = kv.Key; }
-                        }
-                        if (bestDistSq == float.MaxValue)
-                        {
-                            Plugin.Log?.LogInfo(
-                                $"[RubberBand] Pass 2 bed skipped: bed=({bed.x:F1},{bed.z:F1}) " +
-                                $"cell=({bgx},{bgz}) exact_terrain={exactHasTerrain} " +
-                                $"exact_outside={exactOutside} no_seed_within_{MaxBedSeedDist:F0}m");
-                            continue;
-                        }
-                        bedKey = best;
+                        Plugin.Log?.LogWarning(
+                            $"[RubberBand] Pass 2 bed skipped: bed=({bed.x:F1},{bed.z:F1}) " +
+                            $"cell=({bgx},{bgz}) lies in outsideCells " +
+                            "(perimeter flood reached the bed's cell — bed outside walls?)");
+                        continue;
                     }
                     if (bedReachableCells.Add(bedKey))
                     {
@@ -308,11 +326,14 @@ namespace ValheimVillages.Villager.AI.Navigation
                         pass2Seeds++;
                     }
                 }
+                float halfCell = cell * 0.5f;
                 while (bedQueue.Count > 0)
                 {
                     long curKey = bedQueue.Dequeue();
                     UnpackXz(curKey, out int gx, out int gz);
-                    float curY = GetCellY(gx, gz, xzMaxYTerrain, cell);
+                    float curWx = gx * cell + halfCell;
+                    float curWz = gz * cell + halfCell;
+                    float curY = ZoneSystem.instance.GetGroundHeight(new Vector3(curWx, 0f, curWz));
                     for (int d = 0; d < 4; d++)
                     {
                         int ngx = gx + dx[d], ngz = gz + dz[d];
@@ -320,9 +341,10 @@ namespace ValheimVillages.Villager.AI.Navigation
                         long nKey = XzKey(ngx, ngz);
                         if (bedReachableCells.Contains(nKey)) continue;
                         if (outsideCells.Contains(nKey)) continue;
-                        if (!xzMaxYTerrain.ContainsKey(nKey)) continue;
 
-                        float nY = GetCellY(ngx, ngz, xzMaxYTerrain, cell);
+                        float nwx = ngx * cell + halfCell;
+                        float nwz = ngz * cell + halfCell;
+                        float nY = ZoneSystem.instance.GetGroundHeight(new Vector3(nwx, 0f, nwz));
                         if (WallBlocks(gx, gz, ngx, ngz, curY, nY, cell, pieceMask)) continue;
 
                         bedReachableCells.Add(nKey);
@@ -331,16 +353,110 @@ namespace ValheimVillages.Villager.AI.Navigation
                 }
             }
             stats.Pass2Seeds = pass2Seeds;
-            if (pass2Seeds == 0)
-            {
-                Plugin.Log?.LogWarning(
-                    "[RubberBand] Pass 2 had no bed seeds (no beds in scene, or all " +
-                    "beds resolved to non-terrain / outside-perimeter cells). Falling " +
-                    "back to 'all non-outside terrain' as bed-reachable.");
-                foreach (var kv in xzMaxYTerrain)
-                    if (!outsideCells.Contains(kv.Key)) bedReachableCells.Add(kv.Key);
-            }
             stats.BedReachableTerrainCells = bedReachableCells.Count;
+
+            // --- Pass 3: bed-reachable piece flood (bridges through terrain) ---
+            // Unified BFS over (XZ, Y) nodes. Seeded from every bed-reachable
+            // terrain cell at its true ground height (ZoneSystem heightmap, not
+            // region-centroid Y — region centroids drift up to ~0.75m and that
+            // matters at the MaxClimb threshold). At each visit, the flood
+            // tries stepping to:
+            //   (a) the neighbour XZ's terrain — but ONLY if that XZ is itself
+            //       bed-reachable. Terrain visits are pure CONNECTIVITY BRIDGES
+            //       (let the flood span two piece islands separated by a strip
+            //       of open ground). They never add anything to
+            //       pieceReachableKeys — terrain decisions are Pass 2's alone.
+            //   (b) any piece at the neighbour XZ (regardless of hb). Piece
+            //       visits are gated by |c.y - curY| ≤ MaxClimb on region-
+            //       centroid Y and are added to pieceReachableKeys.
+            // Y-aware via centroid gating naturally severs roof apexes from
+            // floors in the same XZ column (no 4-neighbour stair piece linking
+            // them), and severs floor → wall-top (Δy typically 2m+).
+            //
+            // MaxClimb 1.0m: tight enough to drop the rampart → roof-base
+            // bridge (typically ≥2m), still allows 1m-per-cell stair pieces.
+            // Bump to 1.25–1.5m if stair connectivity breaks empirically.
+            const float MaxClimb = 1.0f;
+            var pieceReachableKeys = new HashSet<long>();
+            int pass3Seeds = 0;
+            if (xzToLookupKeysPiece.Count > 0 && bedReachableCells.Count > 0
+                && ZoneSystem.instance != null)
+            {
+                float half = cell * 0.5f;
+                var visitedTerrainXz = new HashSet<long>();
+                // Queue entries are tagged isTerrain so dedup is kind-aware:
+                //   - Terrain visits (seed + bridge) dedup by XZ via
+                //     visitedTerrainXz on dequeue. Each bed-reachable XZ is
+                //     processed once at ground altitude.
+                //   - Piece visits (piece-step) skip the XZ gate so a column
+                //     with stacked pieces can be re-entered at multiple
+                //     altitudes; pieceReachableKeys dedups per lookup key.
+                var pieceQueue = new Queue<(long xz, float y, bool isTerrain)>();
+                foreach (long xz in bedReachableCells)
+                {
+                    UnpackXz(xz, out int gx, out int gz);
+                    float wx = gx * cell + half;
+                    float wz = gz * cell + half;
+                    float ty = ZoneSystem.instance.GetGroundHeight(new Vector3(wx, 0f, wz));
+                    // Do NOT pre-mark visitedTerrainXz here. Marking on
+                    // seed-enqueue was the dead-code bug — it pre-flagged
+                    // every bed-reachable XZ so the bridge step (a) below
+                    // could never fire from a piece visit. Dedup at dequeue
+                    // instead. (bedReachableCells is a HashSet so seeds are
+                    // already unique; the queue is safe.)
+                    pieceQueue.Enqueue((xz, ty, true));
+                }
+                while (pieceQueue.Count > 0)
+                {
+                    var (curXz, curY, isTerrain) = pieceQueue.Dequeue();
+                    // Terrain-altitude dedup: each bed-reachable XZ runs its
+                    // 4-neighbour scan at most once at ground height. Piece
+                    // visits bypass this gate — pieceReachableKeys already
+                    // prevents redundant per-piece work.
+                    if (isTerrain && !visitedTerrainXz.Add(curXz)) continue;
+                    UnpackXz(curXz, out int gx, out int gz);
+                    for (int d = 0; d < 4; d++)
+                    {
+                        int ngx = gx + dx[d], ngz = gz + dz[d];
+                        long nXz = XzKey(ngx, ngz);
+                        // (a) Terrain bridge: enqueue as a terrain visit at the
+                        //     neighbour's ground height if it's bed-reachable and
+                        //     the climb from curY fits within MaxClimb. Fires
+                        //     from both terrain visits AND piece visits — the
+                        //     latter is "step off this piece onto the adjacent
+                        //     ground". The pre-check against visitedTerrainXz is
+                        //     an optimization; the authoritative dedup is the
+                        //     dequeue gate above.
+                        if (bedReachableCells.Contains(nXz) && !visitedTerrainXz.Contains(nXz))
+                        {
+                            float nwx = ngx * cell + half;
+                            float nwz = ngz * cell + half;
+                            float tnY = ZoneSystem.instance.GetGroundHeight(new Vector3(nwx, 0f, nwz));
+                            if (Mathf.Abs(tnY - curY) <= MaxClimb)
+                            {
+                                pieceQueue.Enqueue((nXz, tnY, true));
+                            }
+                        }
+                        // (b) Piece step: walk every piece at neighbour XZ within
+                        //     climb of curY. Dedup via pieceReachableKeys.
+                        if (xzToLookupKeysPiece.TryGetValue(nXz, out var nPieceKeys))
+                        {
+                            foreach (long pKey in nPieceKeys)
+                            {
+                                if (pieceReachableKeys.Contains(pKey)) continue;
+                                if (!lookupGrid.TryGetValue(pKey, out string rid)) continue;
+                                if (!centroids.TryGetValue(rid, out Vector3 c)) continue;
+                                if (Mathf.Abs(c.y - curY) > MaxClimb) continue;
+                                pieceReachableKeys.Add(pKey);
+                                pieceQueue.Enqueue((nXz, c.y, false));
+                                pass3Seeds++;
+                            }
+                        }
+                    }
+                }
+            }
+            stats.Pass3Seeds = pass3Seeds;
+            stats.BedReachablePieceKeys = pieceReachableKeys.Count;
 
             // --- Cell-level apply ---
             // Static_solid sweep runs first so its tris are counted under
@@ -374,23 +490,25 @@ namespace ValheimVillages.Villager.AI.Navigation
                 }
             }
 
-            // Piece LookupGrid (Pass 3): drop entry iff its XZ is in outsideCells.
+            // Piece LookupGrid (Pass 3): drop entry iff its lookup key is not
+            // in pieceReachableKeys (bed-reachable piece flood result).
             int pieceLookupDropped = 0;
-            int pass3PieceCellsDropped = 0;
+            int pass3PieceKeysDropped = 0;
             foreach (var kv in xzToLookupKeysPiece)
             {
-                if (!outsideCells.Contains(kv.Key)) continue;
-                pass3PieceCellsDropped++;
                 foreach (long lookupKey in kv.Value)
                 {
+                    if (pieceReachableKeys.Contains(lookupKey)) continue;
+                    pass3PieceKeysDropped++;
                     if (lookupGrid.Remove(lookupKey)) pieceLookupDropped++;
                 }
             }
             stats.LookupCellsDropped = terrainLookupDropped + pieceLookupDropped;
-            stats.Pass3PieceCellsDropped = pass3PieceCellsDropped;
+            stats.Pass3PieceKeysDropped = pass3PieceKeysDropped;
 
             // Triangle sweep: terrain tris drop iff centroid XZ NOT in
-            // bedReachable; piece tris drop iff centroid XZ in outsideCells.
+            // bedReachable; piece tris drop iff their lookup key (gx, gz,
+            // hb derived from centroid Y) is NOT in pieceReachableKeys.
             // Triangle kind comes from kindMap[t.RegionId]; missing kind
             // defaults to Terrain (safe — terrain rule is stricter).
             if (triangles != null && triangles.Count > 0)
@@ -402,36 +520,53 @@ namespace ValheimVillages.Villager.AI.Navigation
                     float cz = (t.V0.z + t.V1.z + t.V2.z) / 3f;
                     int tgx = Mathf.FloorToInt(cx / cell);
                     int tgz = Mathf.FloorToInt(cz / cell);
-                    long xz = XzKey(tgx, tgz);
                     SurfaceKind k = (kindMap != null && !string.IsNullOrEmpty(t.RegionId)
                                      && kindMap.TryGetValue(t.RegionId, out var sk))
                         ? sk : SurfaceKind.Terrain;
-                    return k == SurfaceKind.Piece
-                        ? outsideCells.Contains(xz)
-                        : !bedReachableCells.Contains(xz);
+                    if (k == SurfaceKind.Piece)
+                    {
+                        float cy = (t.V0.y + t.V1.y + t.V2.y) / 3f;
+                        int hb = RegionGraph.HeightBucket(cy);
+                        long pKey = RegionGraph.PackLookup(tgx, tgz, hb);
+                        return !pieceReachableKeys.Contains(pKey);
+                    }
+                    return !bedReachableCells.Contains(XzKey(tgx, tgz));
                 });
                 stats.TrianglesDropped = beforeCount - triangles.Count;
             }
 
             // --- Region-level cascade ---
-            // A region is dropped wholesale iff none of its XZ cells survived
-            // the per-kind keep rule. Terrain regions need ≥1 cell in
-            // bedReachableCells; piece regions need ≥1 cell not in
-            // outsideCells. A region with no recorded XZ cells (centroid
-            // lookup failed during flatten) is dropped as a no-op safety.
+            // A region is dropped wholesale iff none of its cells survived
+            // the per-kind keep rule:
+            //   terrain region: ≥1 XZ cell in bedReachableCells (uses ridToXz)
+            //   piece region:   ≥1 lookup key in pieceReachableKeys (uses
+            //                   ridToPieceKeys, which preserves hb info that
+            //                   ridToXz collapses away)
+            // A region with no recorded cells (centroid lookup failed during
+            // flatten) is dropped as a no-op safety.
             foreach (string rid in regionIds)
             {
                 bool anyKept = false;
                 SurfaceKind kind = (kindMap != null && kindMap.TryGetValue(rid, out var k))
                     ? k : SurfaceKind.Terrain;
-                if (ridToXz.TryGetValue(rid, out var cells))
+                if (kind == SurfaceKind.Piece)
                 {
-                    foreach (long xz in cells)
+                    if (ridToPieceKeys.TryGetValue(rid, out var pieceKeys))
                     {
-                        bool keptCell = kind == SurfaceKind.Piece
-                            ? !outsideCells.Contains(xz)
-                            : bedReachableCells.Contains(xz);
-                        if (keptCell) { anyKept = true; break; }
+                        foreach (long pKey in pieceKeys)
+                        {
+                            if (pieceReachableKeys.Contains(pKey)) { anyKept = true; break; }
+                        }
+                    }
+                }
+                else
+                {
+                    if (ridToXz.TryGetValue(rid, out var cells))
+                    {
+                        foreach (long xz in cells)
+                        {
+                            if (bedReachableCells.Contains(xz)) { anyKept = true; break; }
+                        }
                     }
                 }
                 if (!anyKept) dropped.Add(rid);
@@ -511,45 +646,106 @@ namespace ValheimVillages.Villager.AI.Navigation
         private static bool WallBlocks(int gxA, int gzA, int gxB, int gzB,
             float yA, float yB, float cell, int mask)
         {
-            // Cast at min(yA, yB) + 1m so the capsule sits INSIDE the wall
-            // column when stepping between cells of different elevation
-            // (e.g. ground → wall-top). The max-Y form let the flood walk
-            // over walls because the cast was anchored above the wall.
-            float castY = Mathf.Min(yA, yB) + CastHeightOffset;
-            float half = cell * 0.5f;
-            var a = new Vector3(gxA * cell + half, castY, gzA * cell + half);
-            var b = new Vector3(gxB * cell + half, castY, gzB * cell + half);
-            return Physics.CheckCapsule(a, b, CapsuleRadius, mask,
-                QueryTriggerInteraction.Ignore);
+            // Probe at walker waist of EACH cell. Two probes handle
+            // elevation steps: a wall on the higher cell's plateau sits
+            // at plateauY+0.7..1.3 in world coords — a single probe at
+            // min(yA,yB)+waist would sit below it. Probing at both cells'
+            // waists catches walls at either elevation end. Short-circuits
+            // on first hit.
+            return ProbeAtWaist(gxA, gzA, gxB, gzB, yA, cell, mask)
+                || (yA != yB && ProbeAtWaist(gxA, gzA, gxB, gzB, yB, cell, mask));
+        }
+
+        private static bool ProbeAtWaist(int gxA, int gzA, int gxB, int gzB,
+            float floorY, float cell, int mask)
+        {
+            ComputeWaistProbeBox(gxA, gzA, gxB, gzB, floorY, cell,
+                out Vector3 center, out Vector3 halfExtents);
+            return Physics.CheckBox(center, halfExtents, Quaternion.identity,
+                mask, QueryTriggerInteraction.Ignore);
         }
 
         /// <summary>
         /// Diagnostic mirror of <see cref="WallBlocks"/> that also returns
-        /// the names of every collider the capsule hit (semicolon-joined,
-        /// truncated). Uses <c>OverlapCapsule</c> so we can name the
-        /// blockers — slightly slower than CheckCapsule, only called by
-        /// vv_probe.
+        /// the names of every collider the probe box hit (semicolon-joined,
+        /// truncated to 8 across both waist probes). Uses <c>OverlapBox</c>
+        /// so we can enumerate the blockers — slightly slower than CheckBox,
+        /// only called by <c>vv_probe</c>.
         /// </summary>
         internal static bool Diagnose(int gxA, int gzA, int gxB, int gzB,
             float yA, float yB, float cell, int mask, out string hitNames)
         {
-            float castY = Mathf.Min(yA, yB) + CastHeightOffset;
-            float half = cell * 0.5f;
-            var a = new Vector3(gxA * cell + half, castY, gzA * cell + half);
-            var b = new Vector3(gxB * cell + half, castY, gzB * cell + half);
-            var hits = Physics.OverlapCapsule(a, b, CapsuleRadius, mask,
-                QueryTriggerInteraction.Ignore);
-            if (hits == null || hits.Length == 0)
+            ComputeWaistProbeBox(gxA, gzA, gxB, gzB, yA, cell,
+                out Vector3 centerA, out Vector3 halfExtentsA);
+            var hitsA = Physics.OverlapBox(centerA, halfExtentsA, Quaternion.identity,
+                mask, QueryTriggerInteraction.Ignore);
+            Collider[] hitsB = null;
+            if (yA != yB)
+            {
+                ComputeWaistProbeBox(gxA, gzA, gxB, gzB, yB, cell,
+                    out Vector3 centerB, out Vector3 halfExtentsB);
+                hitsB = Physics.OverlapBox(centerB, halfExtentsB, Quaternion.identity,
+                    mask, QueryTriggerInteraction.Ignore);
+            }
+            int total = (hitsA?.Length ?? 0) + (hitsB?.Length ?? 0);
+            if (total == 0)
             {
                 hitNames = "";
                 return false;
             }
-            var names = new List<string>(hits.Length);
-            for (int i = 0; i < hits.Length && i < 4; i++)
-                names.Add(hits[i] != null ? hits[i].name : "<null>");
+            var names = new List<string>(Mathf.Min(total, 8));
+            void AddNames(Collider[] arr, int max)
+            {
+                if (arr == null) return;
+                int limit = Mathf.Min(arr.Length, max);
+                for (int i = 0; i < limit; i++)
+                    names.Add(arr[i] != null ? arr[i].name : "<null>");
+            }
+            AddNames(hitsA, 4);
+            AddNames(hitsB, 4);
             hitNames = string.Join(";", names);
-            if (hits.Length > 4) hitNames += $";+{hits.Length - 4}";
+            if (total > names.Count) hitNames += $";+{total - names.Count}";
             return true;
+        }
+
+        // Build the waist-height probe box for a 4-neighbour step between
+        // cells A and B, anchored at the given cell's ground Y. The box:
+        //   - Spans the full cell pair in the step direction (catches walls
+        //     anywhere along the segment in any orientation — including
+        //     off-axis like hex / diagonal wall pieces).
+        //   - Spans the full cell width perpendicular to the step (catches
+        //     walls overlapping the shared edge anywhere across its 1m).
+        //   - Y range floorY+WaistMin to floorY+WaistMax: thin horizontal
+        //     slice at walker waist height, above beds and below arches.
+        // Diagonal steps aren't used by the 4-neighbour BFS; non-cardinal
+        // input is logged as a contract violation.
+        private static void ComputeWaistProbeBox(int gxA, int gzA, int gxB, int gzB,
+            float floorY, float cell,
+            out Vector3 center, out Vector3 halfExtents)
+        {
+            float half = cell * 0.5f;
+            float lowY = floorY + WaistMin;
+            float highY = floorY + WaistMax;
+            float centerY = (lowY + highY) * 0.5f;
+            float halfY = (highY - lowY) * 0.5f;
+
+            float midX = (gxA + gxB) * 0.5f * cell + half;
+            float midZ = (gzA + gzB) * 0.5f * cell + half;
+            center = new Vector3(midX, centerY, midZ);
+
+            int dgx = gxB - gxA;
+            int dgz = gzB - gzA;
+            if ((dgx != 0 && dgz == 0) || (dgz != 0 && dgx == 0))
+            {
+                halfExtents = new Vector3(half, halfY, half);
+            }
+            else
+            {
+                Plugin.Log?.LogError(
+                    $"[RubberBand] ComputeWaistProbeBox called with non-cardinal step " +
+                    $"({gxA},{gzA})->({gxB},{gzB}); 4-neighbour BFS contract violated.");
+                halfExtents = new Vector3(half, halfY, half);
+            }
         }
 
         // --- Encoding helpers ---

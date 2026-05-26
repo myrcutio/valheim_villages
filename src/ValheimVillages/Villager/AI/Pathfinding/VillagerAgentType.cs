@@ -42,27 +42,56 @@ namespace ValheimVillages.Villager.AI.Pathfinding
 
         /// <summary>
         /// Maximum walkable slope in degrees, read live from the registered
-        /// agent settings (or Humanoid as fallback before registration).
+        /// agent settings. Returns false if the villager agent slot has not
+        /// been registered yet (Pathfinding singleton not alive) — callers
+        /// MUST handle the false case rather than substituting a default.
         /// </summary>
-        public static float Slope => GetEffectiveSettings().agentSlope;
+        public static bool TryGetSlope(out float slope)
+        {
+            if (!TryGetEffectiveSettings(out var settings))
+            {
+                slope = 0f;
+                return false;
+            }
+            slope = settings.agentSlope;
+            return true;
+        }
 
         /// <summary>
         /// Maximum climbable step height in meters, read live from the
-        /// registered agent settings (or Humanoid as fallback).
+        /// registered agent settings. Returns false if the villager agent slot
+        /// has not been registered yet — callers MUST handle the false case
+        /// rather than substituting a default.
         /// </summary>
-        public static float Climb => GetEffectiveSettings().agentClimb;
+        public static bool TryGetClimb(out float climb)
+        {
+            if (!TryGetEffectiveSettings(out var settings))
+            {
+                climb = 0f;
+                return false;
+            }
+            climb = settings.agentClimb;
+            return true;
+        }
 
-        private static NavMeshBuildSettings GetEffectiveSettings()
+        /// <summary>
+        /// Returns the live NavMesh build settings for the villager agent slot,
+        /// or false if the slot has not been registered yet. No fallback values
+        /// are ever synthesised — this is the contract that lets pathfinding
+        /// consumers fail loudly during the registration race window instead
+        /// of silently using Unity defaults that don't match the villager
+        /// agent's actual slope/climb (27°/0.3m cloned from Humanoid).
+        /// </summary>
+        public static bool TryGetEffectiveSettings(out NavMeshBuildSettings settings)
         {
             int id = s_registered ? s_unityAgentTypeID : ResolveValheimHumanoidAgentTypeID();
             if (id == 0)
             {
-                // Pathfinding singleton not yet available — Unity defaults are safe
-                // because the actual queries that consume these values don't run
-                // until well after Pathfinding initialization.
-                return new NavMeshBuildSettings { agentSlope = 45f, agentClimb = 0.4f };
+                settings = default;
+                return false;
             }
-            return NavMesh.GetSettingsByID(id);
+            settings = NavMesh.GetSettingsByID(id);
+            return true;
         }
 
         /// <summary>

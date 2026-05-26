@@ -83,26 +83,55 @@ namespace ValheimVillages.Behaviors.Patrol
         }
 
         /// <summary>
-        /// Re-sample Y via BFS cell height (accurate per-floor) with
-        /// GetSolidHeightAt fallback, then validate on NavMesh.
+        /// Re-sample Y via BFS cell height (HNA region graph is the ground truth),
+        /// then validate against NavMesh. Fail-fast on any disagreement: if BFS
+        /// fails, NavMesh fails, or the two disagree by more than
+        /// <see cref="YDisagreementTolerance"/>, log a LogError naming the
+        /// position with both Y sources and drop the waypoint. No silent
+        /// fallback to GetSolidHeightAt — a bake/graph mismatch is a real bug
+        /// that needs to surface, not be papered over.
         /// </summary>
+        const float YDisagreementTolerance = 0.5f;
+
         static bool TryResamplePosition(
             float worldX, float worldZ, NavMeshQueryFilter filter,
             RegionGraph graph, out Vector3 result)
         {
             result = default;
 
-            float probeY;
-            if (!TryGetBfsCellHeight(worldX, worldZ, graph, out probeY))
+            if (!TryGetBfsCellHeight(worldX, worldZ, graph, out float bfsY))
             {
-                if (!RegionGraph.GetSolidHeightAt(worldX, worldZ, out probeY))
-                    return false;
+                float bakeYDiag = RegionGraph.GetSolidHeightAt(worldX, worldZ, out float by) ? by : float.NaN;
+                Plugin.Log?.LogError(
+                    $"[WaypointRelaxation] BFS cell height lookup failed at " +
+                    $"({worldX:F2}, {worldZ:F2}); bake Y={bakeYDiag:F2}. " +
+                    $"Dropping waypoint (no silent fallback to bake height).");
+                return false;
             }
 
-            var candidate = new Vector3(worldX, probeY, worldZ);
+            var candidate = new Vector3(worldX, bfsY, worldZ);
             if (!NavMesh.SamplePosition(candidate, out NavMeshHit hit,
                     BoundaryGeometry.NavMeshProbeRadius, filter))
+            {
+                float bakeYDiag = RegionGraph.GetSolidHeightAt(worldX, worldZ, out float by) ? by : float.NaN;
+                Plugin.Log?.LogError(
+                    $"[WaypointRelaxation] NavMesh.SamplePosition failed at " +
+                    $"({worldX:F2}, {bfsY:F2}, {worldZ:F2}); BFS Y={bfsY:F2}, bake Y={bakeYDiag:F2}. " +
+                    $"Dropping waypoint.");
                 return false;
+            }
+
+            float deltaY = Mathf.Abs(hit.position.y - bfsY);
+            if (deltaY > YDisagreementTolerance)
+            {
+                float bakeYDiag = RegionGraph.GetSolidHeightAt(worldX, worldZ, out float by) ? by : float.NaN;
+                Plugin.Log?.LogError(
+                    $"[WaypointRelaxation] BFS/NavMesh Y disagreement at " +
+                    $"({worldX:F2}, {worldZ:F2}): BFS Y={bfsY:F2}, NavMesh Y={hit.position.y:F2}, " +
+                    $"bake Y={bakeYDiag:F2}, |Δ|={deltaY:F2} > {YDisagreementTolerance:F2}m. " +
+                    $"Dropping waypoint (HNA region graph is ground truth; no silent substitution).");
+                return false;
+            }
 
             result = hit.position;
             return true;

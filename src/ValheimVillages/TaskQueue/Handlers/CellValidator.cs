@@ -32,17 +32,46 @@ namespace ValheimVillages.TaskQueue.Handlers
 
         /// <summary>
         /// Case 2: Rejects transitions steeper than <see cref="MaxSlopeDeg"/> in either direction.
-        /// Near-zero horizontal distance falls back to a step-height check against
-        /// <see cref="VillagerAgentType.Climb"/>.
+        /// Near-zero horizontal distance falls back to a step-height check against the live
+        /// villager agent climb. Returns <c>true</c> (cell rejected) if the agent climb is
+        /// not available (slot not registered yet) — no synthesised default. The caller may
+        /// also branch on the explicit value via <see cref="TryIsTooSteep"/>.
         /// </summary>
         internal static bool IsTooSteep(float fromX, float fromY, float fromZ,
                                          float toX, float toY, float toZ)
         {
+            if (TryIsTooSteep(fromX, fromY, fromZ, toX, toY, toZ, out bool tooSteep))
+                return tooSteep;
+
+            Plugin.Log?.LogError(
+                "[CellValidator] IsTooSteep: villager agent climb unavailable " +
+                "(Pathfinding.instance not alive or agent slot 31 not registered); " +
+                "rejecting cell transition fail-closed. Caller should defer cell validation.");
+            return true;
+        }
+
+        /// <summary>
+        /// Try-pattern variant: returns false if slope/climb cannot be evaluated because the
+        /// villager agent slot is not yet registered. Callers that can defer work (flood-fill
+        /// drivers, tests) should branch on this rather than the eager <see cref="IsTooSteep"/>.
+        /// </summary>
+        internal static bool TryIsTooSteep(float fromX, float fromY, float fromZ,
+                                            float toX, float toY, float toZ,
+                                            out bool tooSteep)
+        {
+            tooSteep = false;
             float dy = Mathf.Abs(toY - fromY);
             float dx = toX - fromX, dz = toZ - fromZ;
             float horiz = Mathf.Sqrt(dx * dx + dz * dz);
-            if (horiz < 0.01f) return dy > VillagerAgentType.Climb;
-            return Mathf.Atan2(dy, horiz) * Mathf.Rad2Deg > MaxSlopeDeg;
+            if (horiz < 0.01f)
+            {
+                if (!VillagerAgentType.TryGetClimb(out float maxClimb))
+                    return false;
+                tooSteep = dy > maxClimb;
+                return true;
+            }
+            tooSteep = Mathf.Atan2(dy, horiz) * Mathf.Rad2Deg > MaxSlopeDeg;
+            return true;
         }
 
         /// <summary>

@@ -210,15 +210,18 @@ namespace ValheimVillages.Behaviors.Patrol
                 }
             }
 
-            // Fallback: use last geometric position with ground-level Y
-            var fallbackDir = new Vector3(Mathf.Cos(m_currentAngle), 0f, Mathf.Sin(m_currentAngle));
-            var fallback = m_bedPosition + fallbackDir * m_patrolRadius;
-            if (ZoneSystem.instance != null &&
-                ZoneSystem.instance.GetSolidHeight(fallback, out float height, 1000))
-                fallback.y = height;
-
-            m_ai.SetState(BehaviorState.CircuitTracing,
-                new VillagerWaypoint(fallback, VillagerWaypoint.DefaultStrategyId));
+            // Fail-fast: no NavMesh-confirmed arc point in the next MaxAngleSkips angles.
+            // Previous behavior synthesized m_bedPosition + dir * m_patrolRadius and ground-snapped
+            // via GetSolidHeight, sending the villager toward a position with no NavMesh coverage
+            // or walkability guarantee. That silently produced hangs and erratic pathing.
+            // Surface the failure and abandon the circuit instead — the state machine will
+            // route the villager back through Idle on the next tick.
+            Plugin.Log?.LogError(
+                $"[Patrol:{m_ai.NpcName}] AdvanceToNextArcPoint failed after {MaxAngleSkips} skips: " +
+                $"bed=({m_bedPosition.x:F2},{m_bedPosition.y:F2},{m_bedPosition.z:F2}) " +
+                $"angleRad={m_currentAngle:F4} angleDeg={(m_currentAngle * Mathf.Rad2Deg):F2} " +
+                $"radius={m_patrolRadius:F2}. Dropping arc point, transitioning to Idle.");
+            m_ai.SetState(BehaviorState.Idle);
         }
 
         /// <summary>

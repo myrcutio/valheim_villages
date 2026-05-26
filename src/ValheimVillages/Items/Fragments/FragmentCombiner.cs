@@ -80,7 +80,32 @@ namespace ValheimVillages.Items.Fragments
                 return false;
             }
 
-            // Consume 3 fragments across stacks
+            // Determine NPC type for this biome
+            if (!BiomeNpcMap.TryGetValue(biome, out var villagerType))
+            {
+                Plugin.Log?.LogWarning($"No NPC type mapped for biome: {biome}");
+                villagerType = "Farmer";
+            }
+
+            // Find a location in the target biome BEFORE consuming fragments.
+            // If no valid location exists in the loaded world, fail fast and leave
+            // the fragments in the player's inventory so they can retry elsewhere.
+            // The pawn is NOT spawned now — it will be spawned by RescueQuestTracker
+            // when the player arrives at the quest location (zone must be loaded).
+            var questPos = FindPositionInBiome(biome, player.transform.position);
+            if (!questPos.HasValue)
+            {
+                Plugin.Log?.LogError(
+                    $"Cannot combine {biome} fragments: no valid {biome} location found " +
+                    $"in loaded world (player at {player.transform.position}, " +
+                    $"villagerType={villagerType}, fragmentsHeld={totalCount}). " +
+                    $"Fragments NOT consumed.");
+                player.Message(MessageHud.MessageType.Center,
+                    $"Cannot locate {biome} in the surrounding world. Try again from a different area.");
+                return false;
+            }
+
+            // Consume 3 fragments across stacks now that we know the quest can be placed.
             int toRemove = RequiredFragments;
             foreach (var item in matchingItems)
             {
@@ -92,34 +117,10 @@ namespace ValheimVillages.Items.Fragments
                 toRemove -= removeFromStack;
             }
 
-            // Determine NPC type for this biome
-            if (!BiomeNpcMap.TryGetValue(biome, out var villagerType))
-            {
-                Plugin.Log?.LogWarning($"No NPC type mapped for biome: {biome}");
-                villagerType = "Farmer";
-            }
-
-            // Find a location in the target biome and place a map marker.
-            // The pawn is NOT spawned now — it will be spawned by RescueQuestTracker
-            // when the player arrives at the quest location (zone must be loaded).
-            var questPos = FindPositionInBiome(biome, player.transform.position);
-            if (questPos.HasValue)
-            {
-                AddQuestMarker(questPos.Value, villagerType, biome);
-                RescueQuestTracker.AddQuest(questPos.Value, villagerType, biome);
-                player.Message(MessageHud.MessageType.Center,
-                    $"Rescue quest revealed! A captive {villagerType} awaits in the {biome}.");
-            }
-            else
-            {
-                // Fallback: place marker at a random offset from player
-                var fallbackPos = player.transform.position + Random.insideUnitSphere * 500f;
-                fallbackPos.y = 0f;
-                AddQuestMarker(fallbackPos, villagerType, biome);
-                RescueQuestTracker.AddQuest(fallbackPos, villagerType, biome);
-                player.Message(MessageHud.MessageType.Center,
-                    $"Rescue quest revealed! A captive {villagerType} may be found in the {biome}.");
-            }
+            AddQuestMarker(questPos.Value, villagerType, biome);
+            RescueQuestTracker.AddQuest(questPos.Value, villagerType, biome);
+            player.Message(MessageHud.MessageType.Center,
+                $"Rescue quest revealed! A captive {villagerType} awaits in the {biome}.");
 
             Plugin.Log?.LogInfo($"Combined {RequiredFragments} {biome} fragments -> rescue quest for {villagerType}");
             return true;

@@ -85,19 +85,21 @@ namespace ValheimVillages.TaskQueue.Handlers
             // over this village's bounds. Without this, RegionBuilder's
             // NavMesh queries against slot 31 return no triangles because
             // Valheim only bakes the Humanoid agent (slot 1).
-            float bakeMinY = float.MaxValue, bakeMaxY = float.MinValue;
-            if (beds != null && beds.Count > 0)
+            if (beds == null || beds.Count == 0)
             {
-                foreach (var bed in beds)
+                Plugin.Log?.LogError(
+                    $"[Region] Partition aborted: no villager beds for village '{villageKey}'. " +
+                    "Cannot determine bake elevation without beds — refusing to bake at sea-level fallback.");
+                return TaskResult.Ok(new Dictionary<string, string>
                 {
-                    if (bed.y < bakeMinY) bakeMinY = bed.y;
-                    if (bed.y > bakeMaxY) bakeMaxY = bed.y;
-                }
+                    { "regions", "0" }, { "links", "0" }, { "reason", "no_beds_for_bake_y" }
+                });
             }
-            else
+            float bakeMinY = float.MaxValue, bakeMaxY = float.MinValue;
+            foreach (var bed in beds)
             {
-                // Fall back to a sensible vertical range around sea level.
-                bakeMinY = 0f; bakeMaxY = 0f;
+                if (bed.y < bakeMinY) bakeMinY = bed.y;
+                if (bed.y > bakeMaxY) bakeMaxY = bed.y;
             }
             const float bakeYPadding = 30f;
             var bakeBounds = new Bounds();
@@ -183,7 +185,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("outside_terrain_cells", rbStats.OutsideTerrainCells),
                 ("pass2_seeds", rbStats.Pass2Seeds),
                 ("bed_reachable_terrain_cells", rbStats.BedReachableTerrainCells),
-                ("pass3_piece_cells_dropped", rbStats.Pass3PieceCellsDropped),
+                ("pass3_seeds", rbStats.Pass3Seeds),
+                ("bed_reachable_piece_keys", rbStats.BedReachablePieceKeys),
+                ("pass3_piece_keys_dropped", rbStats.Pass3PieceKeysDropped),
                 ("lookup_cells_dropped", rbStats.LookupCellsDropped),
                 ("triangles_dropped", rbStats.TrianglesDropped),
                 ("static_solid_dropped", rbStats.StaticSolidTrianglesDropped),
@@ -542,32 +546,14 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
             }
 
-            // Fallback: largest terrain region by triangle count from Triangles list.
             if (seeds.Count == 0)
             {
-                var triCounts = new Dictionary<string, int>();
-                if (terrainResult.Triangles != null)
-                    foreach (var ct in terrainResult.Triangles)
-                    {
-                        if (string.IsNullOrEmpty(ct.RegionId)) continue;
-                        triCounts[ct.RegionId] = triCounts.TryGetValue(ct.RegionId, out int c0) ? c0 + 1 : 1;
-                    }
-                string largest = null;
-                int largestCount = 0;
-                foreach (var kv in triCounts)
-                    if (kv.Value > largestCount) { largestCount = kv.Value; largest = kv.Key; }
-                if (largest != null)
-                {
-                    seeds.Add(largest);
-                    Plugin.Log?.LogInfo(
-                        $"[Region] CrossKind BFS: no bed mapped to terrain region; " +
-                        $"falling back to largest terrain region {largest} ({largestCount} tris)");
-                }
-            }
-
-            if (seeds.Count == 0)
-            {
-                Plugin.Log?.LogWarning("[Region] CrossKind adjacency: no seeds found (vv_bfs_trace will be empty)");
+                int bedCount = beds?.Count ?? 0;
+                int regionCount = terrainResult.RegionIds?.Count ?? 0;
+                Plugin.Log?.LogError(
+                    $"[Region] CrossKind adjacency aborted: no bed mapped to any terrain region " +
+                    $"(beds={bedCount}, terrain_regions={regionCount}). " +
+                    "Refusing to seed BFS from a synthetic largest-region fallback; vv_bfs_trace will report no data.");
                 return;
             }
 
