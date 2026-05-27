@@ -75,6 +75,24 @@ namespace ValheimVillages.Schemas
         /// <summary>The recipe to craft.</summary>
         public Recipe Recipe;
 
+        /// <summary>Input item prefab name for smelting (e.g. CopperOre); used to identify the active conversion.</summary>
+        public string SmelterInputItemName;
+
+        /// <summary>True when we collected the smelted output into the chest (skip deposit step on arrival).</summary>
+        public bool SmelterItemAlreadyInChest;
+
+        /// <summary>Snapshot of Smelter.GetProcessedQueueSize() when the villager arrived; used to detect new output.</summary>
+        public int SmelterProcessedAtStart;
+
+        /// <summary>
+        ///     When using a physical Smelter-family prefab (smelter, blastfurnace, charcoal_kiln, eitrrefinery,
+        ///     piece_spinningwheel, windmill), the station instance so the NPC can add ore and poll for output.
+        /// </summary>
+        public Smelter SmelterRef;
+
+        /// <summary>True after we've requested removal of the processed item; prevents re-entry from re-polling.</summary>
+        public bool SmelterRemovalRequested;
+
         /// <summary>The container where the work order was found.</summary>
         public Container SourceContainer;
 

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using UnityEngine;
@@ -55,6 +56,54 @@ namespace ValheimVillages.TaskQueue.ActivityLog
 
             Plugin.Log?.LogDebug(
                 $"[ActivityLog:{villagerId}] {taskName}/{action}: {description}");
+        }
+
+        /// <summary>
+        ///     Record a "blocked" entry for a villager, deduped by
+        ///     (villagerId, taskName, itemPrefab, stationName, reason). Existing matching
+        ///     entries are removed before the new one is appended so the Info-tab
+        ///     "Work Issues" view doesn't grow unbounded as scans repeat.
+        /// </summary>
+        public void RecordBlocked(string villagerId, string taskName, string itemPrefab, string stationName, string reason, Vector3? workOrderPosition)
+        {
+            if (string.IsNullOrEmpty(villagerId)) return;
+
+            if (!m_logs.TryGetValue(villagerId, out var entries))
+            {
+                entries = new List<ActivityLogEntry>();
+                m_logs[villagerId] = entries;
+            }
+
+            entries.RemoveAll(e =>
+                e.VillagerId == villagerId &&
+                e.TaskName == taskName &&
+                e.Action == "blocked" &&
+                e.ItemPrefab == itemPrefab &&
+                e.StationName == stationName &&
+                e.Reason == reason);
+
+            if (entries.Count >= TaskSettings.MaxActivityLogEntriesPerVillager)
+                TrimOldest(entries);
+
+            var description = $"{itemPrefab} [{stationName}] — {reason}";
+            entries.Add(new ActivityLogEntry
+            {
+                Timestamp = Time.time,
+                VillagerId = villagerId,
+                TaskName = taskName,
+                Action = "blocked",
+                Description = description,
+                ItemPrefab = itemPrefab,
+                StationName = stationName,
+                Reason = reason,
+                WorkOrderPosX = workOrderPosition?.x,
+                WorkOrderPosY = workOrderPosition?.y,
+                WorkOrderPosZ = workOrderPosition?.z,
+                Committed = false,
+            });
+
+            Plugin.Log?.LogDebug(
+                $"[ActivityLog:{villagerId}] {taskName}/blocked: {description}");
         }
 
         /// <summary>
@@ -134,6 +183,18 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                 sb.Append(e.Action ?? "");
                 sb.Append(FieldSeparator);
                 sb.Append(e.Description ?? "");
+                sb.Append(FieldSeparator);
+                sb.Append(e.ItemPrefab ?? "");
+                sb.Append(FieldSeparator);
+                sb.Append(e.StationName ?? "");
+                sb.Append(FieldSeparator);
+                sb.Append(e.Reason ?? "");
+                sb.Append(FieldSeparator);
+                sb.Append(e.WorkOrderPosX.HasValue ? e.WorkOrderPosX.Value.ToString(CultureInfo.InvariantCulture) : "");
+                sb.Append(FieldSeparator);
+                sb.Append(e.WorkOrderPosY.HasValue ? e.WorkOrderPosY.Value.ToString(CultureInfo.InvariantCulture) : "");
+                sb.Append(FieldSeparator);
+                sb.Append(e.WorkOrderPosZ.HasValue ? e.WorkOrderPosZ.Value.ToString(CultureInfo.InvariantCulture) : "");
             }
 
             zdo.Set(ZdoKey, sb.ToString());
@@ -165,6 +226,14 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                 if (!float.TryParse(fields[0], out var timestamp))
                     continue;
 
+                float? posX = null, posY = null, posZ = null;
+                if (fields.Length >= 10)
+                {
+                    if (float.TryParse(fields[7], NumberStyles.Float, CultureInfo.InvariantCulture, out var x)) posX = x;
+                    if (float.TryParse(fields[8], NumberStyles.Float, CultureInfo.InvariantCulture, out var y)) posY = y;
+                    if (float.TryParse(fields[9], NumberStyles.Float, CultureInfo.InvariantCulture, out var z)) posZ = z;
+                }
+
                 entries.Add(new ActivityLogEntry
                 {
                     Timestamp = timestamp,
@@ -172,6 +241,12 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                     TaskName = fields[1],
                     Action = fields[2],
                     Description = fields[3],
+                    ItemPrefab = fields.Length >= 7 ? fields[4] : null,
+                    StationName = fields.Length >= 7 ? fields[5] : null,
+                    Reason = fields.Length >= 7 ? fields[6] : null,
+                    WorkOrderPosX = posX,
+                    WorkOrderPosY = posY,
+                    WorkOrderPosZ = posZ,
                     Committed = false,
                 });
             }

@@ -116,6 +116,26 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
+        ///     Clear cached BaseAI paths on every active villager. Call after
+        ///     a partition / NavMesh rebake so stale waypoints (now off-mesh
+        ///     or routed through cleared NavMeshLinks) don't keep a villager
+        ///     locked into a doomed path. Each villager re-pathfinds against
+        ///     the fresh NavMesh on their next tick. Returns count for log.
+        /// </summary>
+        public static int InvalidatePathsAfterRebake()
+        {
+            var count = 0;
+            foreach (var ai in ActiveVillagers.Values)
+            {
+                if (ai == null) continue;
+                ai.ClearCachedPath();
+                count++;
+            }
+
+            return count;
+        }
+
+        /// <summary>
         ///     Clear all registrations (e.g. on world unload).
         /// </summary>
         [RegisterCleanup]

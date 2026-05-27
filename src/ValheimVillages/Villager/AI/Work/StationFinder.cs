@@ -21,6 +21,9 @@ namespace ValheimVillages.Villager.AI.Work
         private static readonly MethodInfo s_getFuel = typeof(CookingStation)
             .GetMethod("GetFuel", BindingFlags.NonPublic | BindingFlags.Instance);
 
+        private static readonly MethodInfo s_smelterGetFuel = typeof(Smelter)
+            .GetMethod("GetFuel", BindingFlags.NonPublic | BindingFlags.Instance);
+
         /// <summary>
         ///     Raw call to CookingStation.IsFireLit() via reflection.
         ///     Returns false if reflection fails or fire is not lit.
@@ -65,6 +68,52 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
+        ///     Returns the Smelter component on the ZNetScene prefab with the given name, or null if the prefab
+        ///     doesn't exist or doesn't carry a Smelter (e.g. it's a CraftingStation prefab like piece_forge).
+        /// </summary>
+        public static Smelter GetSmelterPrefab(string prefabName)
+        {
+            if (string.IsNullOrEmpty(prefabName)) return null;
+            var zns = ZNetScene.instance;
+            if (zns?.m_prefabs == null) return null;
+            for (var i = 0; i < zns.m_prefabs.Count; i++)
+            {
+                var go = zns.m_prefabs[i];
+                if (go == null || go.name != prefabName) continue;
+                return go.GetComponent<Smelter>();
+            }
+            return null;
+        }
+
+        /// <summary>
+        ///     Smelter is ready when it has no fuel requirement (m_fuelItem null) OR currently has fuel.
+        ///     Mirrors the cooking-station ready check at the smelter level.
+        /// </summary>
+        public static bool IsSmelterReady(Smelter station)
+        {
+            if (station == null) return false;
+            if (station.m_fuelItem == null) return true;
+            return GetSmelterFuel(station) > 0f;
+        }
+
+        /// <summary>
+        ///     Returns the current fuel level of a Smelter via reflection (GetFuel is private).
+        ///     Returns 0 on failure.
+        /// </summary>
+        public static float GetSmelterFuel(Smelter station)
+        {
+            if (station == null || s_smelterGetFuel == null) return 0f;
+            try
+            {
+                return (float)s_smelterGetFuel.Invoke(station, null);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        /// <summary>
         ///     Returns the current fuel level of a CookingStation via reflection (GetFuel is private).
         ///     Returns 0 on failure.
         /// </summary>
@@ -103,6 +152,7 @@ namespace ValheimVillages.Villager.AI.Work
         ///     Find the first station of type T at the NPC's known CraftStation locations,
         ///     ordered by distance from bed. Returns position and component when filter passes.
         /// </summary>
+        [Obsolete("Use VillageStationRegistry.TryFindStation; per-villager LOS discovery no longer classifies stations.")]
         public static bool TryFindStationAtKnownLocations<T>(
             IVillagerStationLookup ai,
             Func<T, bool> filter,
@@ -115,6 +165,10 @@ namespace ValheimVillages.Villager.AI.Work
             if (ai?.KnownLocations == null) return false;
 
             var bedPos = ai.BedPosition;
+            // Smelter-family prefabs aren't registered with a Smelter-specific LocationType today;
+            // VillagerPOIDiscovery.ClassifyObject tags them as CraftStation when a nearby
+            // CraftingStation/CookingStation is present, so the existing filter is the closest match
+            // for "stations the villager works at." Revisit if smelters get their own LocationType.
             var craftStations = ai.KnownLocations
                 .Where(l => l.Type == LocationType.CraftStation || l.Type == LocationType.CookingStation)
                 .OrderBy(l => Vector3.Distance(bedPos, l.Position))

@@ -140,6 +140,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 s_registry[villageKey] = graph;
             }
 
+            graph.RegisteredVillageKey = villageKey;
             return graph;
         }
 
@@ -273,6 +274,12 @@ namespace ValheimVillages.Villager.AI.Navigation
         public bool IsAvailable => m_initialized && m_regionIds.Count > 0;
         public int RegionCount => m_regionIds.Count;
         public int LinkCount => m_links.Count;
+
+        /// <summary>
+        ///     The key this graph is registered under in <see cref="s_registry" />.
+        ///     Set by <see cref="GetOrCreate" />.
+        /// </summary>
+        public string RegisteredVillageKey { get; private set; }
 
         #endregion
 

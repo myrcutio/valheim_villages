@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Attributes;
 using ValheimVillages.Schemas;
 using ValheimVillages.Tags;
 using ValheimVillages.Villager.Registry;
@@ -16,6 +17,21 @@ namespace ValheimVillages.Items.VirtualRecipes
     {
         private static readonly List<Recipe> _registeredRecipes = new();
         private static readonly Dictionary<string, string> _physicalStationMap = new();
+
+        /// <summary>
+        ///     Clear cached recipe state on world unload / hot reload so the
+        ///     next <see cref="RegisterAll" /> performs a full re-discovery
+        ///     instead of short-circuiting via <see cref="ReAddExisting" />.
+        ///     Without this, duplicates accumulated across reloads stick
+        ///     around until Valheim restarts entirely — the loader thinks
+        ///     it already has the recipes and re-adds them as-is.
+        /// </summary>
+        [RegisterCleanup]
+        public static void Clear()
+        {
+            _registeredRecipes.Clear();
+            _physicalStationMap.Clear();
+        }
 
         private static bool IsExcludedFromCraftMenu(string output)
         {
@@ -67,6 +83,12 @@ namespace ValheimVillages.Items.VirtualRecipes
                     var cookingEntries = CookingRecipeDiscovery.GetCookingRecipes(existingOutputs);
                     count += RegisterDiscoveredEntries(objectDB, station, cookingEntries, existingOutputs);
                 }
+
+                if (def.tags != null && TagParser.HasTag(def.tags, "recipe", "smelter"))
+                {
+                    var smelterEntries = SmelterRecipeDiscovery.GetSmelterRecipes(existingOutputs);
+                    count += RegisterDiscoveredEntries(objectDB, station, smelterEntries, existingOutputs);
+                }
             }
 
             Plugin.Log?.LogInfo(
@@ -74,8 +96,11 @@ namespace ValheimVillages.Items.VirtualRecipes
         }
 
         /// <summary>
-        ///     When ZNetScene becomes available, add cooking-discovered recipes
-        ///     for any station with the recipe:cooking tag.
+        ///     When ZNetScene becomes available, add cooking- AND smelter-
+        ///     discovered recipes for any station with the matching
+        ///     recipe:cooking or recipe:smelter tag. Both discovery sources
+        ///     need ZNetScene populated with the relevant prefabs before
+        ///     they can enumerate conversions.
         /// </summary>
         public static void RegisterCookingRecipesIfNeeded(ObjectDB objectDB)
         {
@@ -85,19 +110,36 @@ namespace ValheimVillages.Items.VirtualRecipes
             {
                 var def = kv.Value;
                 if (string.IsNullOrEmpty(def?.stationName)) continue;
-                if (def.tags == null || !TagParser.HasTag(def.tags, "recipe", "cooking")) continue;
+                if (def.tags == null) continue;
 
                 var station = VirtualRecipeParser.GetOrCreateStationTemplate(def.stationName);
                 if (station == null) continue;
 
-                var existingOutputs = CollectExistingOutputs(def.stationName);
-                var cookingEntries = CookingRecipeDiscovery.GetCookingRecipes(existingOutputs);
-                if (cookingEntries.Count == 0) continue;
+                if (TagParser.HasTag(def.tags, "recipe", "cooking"))
+                {
+                    var existingOutputs = CollectExistingOutputs(def.stationName);
+                    var cookingEntries = CookingRecipeDiscovery.GetCookingRecipes(existingOutputs);
+                    if (cookingEntries.Count > 0)
+                    {
+                        var added = RegisterDiscoveredEntries(objectDB, station, cookingEntries, existingOutputs);
+                        if (added > 0)
+                            Plugin.Log?.LogInfo(
+                                $"VirtualRecipeLoader: Registered {added} cooking-discovered recipes for {def.stationName} (ZNetScene ready)");
+                    }
+                }
 
-                var added = RegisterDiscoveredEntries(objectDB, station, cookingEntries, existingOutputs);
-                if (added > 0)
-                    Plugin.Log?.LogInfo(
-                        $"VirtualRecipeLoader: Registered {added} cooking-discovered recipes for {def.stationName} (ZNetScene ready)");
+                if (TagParser.HasTag(def.tags, "recipe", "smelter"))
+                {
+                    var existingOutputs = CollectExistingOutputs(def.stationName);
+                    var smelterEntries = SmelterRecipeDiscovery.GetSmelterRecipes(existingOutputs);
+                    if (smelterEntries.Count > 0)
+                    {
+                        var added = RegisterDiscoveredEntries(objectDB, station, smelterEntries, existingOutputs);
+                        if (added > 0)
+                            Plugin.Log?.LogInfo(
+                                $"VirtualRecipeLoader: Registered {added} smelter-discovered recipes for {def.stationName} (ZNetScene ready)");
+                    }
+                }
             }
         }
 
@@ -118,7 +160,8 @@ namespace ValheimVillages.Items.VirtualRecipes
 
                 var hasCultivator = def.tags != null && TagParser.HasTag(def.tags, "recipe", "cultivator");
                 var hasCooking = def.tags != null && TagParser.HasTag(def.tags, "recipe", "cooking");
-                if (!hasCultivator && !hasCooking) continue;
+                var hasSmelter = def.tags != null && TagParser.HasTag(def.tags, "recipe", "smelter");
+                if (!hasCultivator && !hasCooking && !hasSmelter) continue;
 
                 var station = VirtualRecipeParser.GetOrCreateStationTemplate(def.stationName);
                 if (station == null) continue;
@@ -136,6 +179,12 @@ namespace ValheimVillages.Items.VirtualRecipes
                 {
                     var cookingEntries = CookingRecipeDiscovery.GetCookingRecipes(existingOutputs);
                     totalAdded += RegisterDiscoveredEntries(objectDB, station, cookingEntries, existingOutputs);
+                }
+
+                if (hasSmelter)
+                {
+                    var smelterEntries = SmelterRecipeDiscovery.GetSmelterRecipes(existingOutputs);
+                    totalAdded += RegisterDiscoveredEntries(objectDB, station, smelterEntries, existingOutputs);
                 }
             }
 

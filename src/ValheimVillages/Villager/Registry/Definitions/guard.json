@@ -69,8 +69,7 @@
     "passive:spawnblock",
     "tab:info",
     "tab:debug",
-    "listpanel:patrolstatus",
-    "listpanel:villagemap"
+    "listpanel:patrolstatus"
   ],
   "randomTalk": [
     "All quiet on the wall... mostly.",

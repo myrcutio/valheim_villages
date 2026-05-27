@@ -132,7 +132,6 @@ namespace ValheimVillages.UI.Tabs
 
             AddStateInfo(villager);
             AddRecentTasks(villager);
-            AddProblems(villager);
             AddNavigationCommands(villager);
         }
 
@@ -180,25 +179,6 @@ namespace ValheimVillages.UI.Tabs
             m_commands.Add(new DebugCommand
             {
                 CommandName = "Recent tasks",
-                Description = description,
-                ActionText = null,
-                OnAction = null,
-            });
-        }
-
-        private void AddProblems(VillagerBehaviorBridge villager)
-        {
-            var entries = VillagerActivityLog.Instance.GetEntries(villager.UniqueId);
-            var problems = entries.Where(e => e.Action == "abandon").ToList();
-            var lastProblems = problems.Count <= 10 ? problems : problems.Skip(problems.Count - 10).ToList();
-            var lines = lastProblems.Count == 0
-                ? new List<string> { "No problems (no abandoned tasks)." }
-                : lastProblems.Select(e => $"{e.TaskName}: {e.Description}").ToList();
-            var description = string.Join("\n", lines);
-
-            m_commands.Add(new DebugCommand
-            {
-                CommandName = $"Work Issues ({problems.Count})",
                 Description = description,
                 ActionText = null,
                 OnAction = null,

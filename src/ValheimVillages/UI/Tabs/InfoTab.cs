@@ -1,83 +1,59 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using UnityEngine;
 using ValheimVillages.Attributes;
-using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
-using ValheimVillages.Schemas;
+using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
+using ValheimVillages.UI.Panels;
 
 namespace ValheimVillages.UI.Tabs
 {
     /// <summary>
-    ///     Tab showing villager information.  Provides favourite places as
-    ///     list items (left pane) and place details + "Mark" action (right pane).
+    ///     Tab listing tasks for the villager — currently blocked work orders that need
+    ///     player attention. Each blocked entry shows the item being crafted and the
+    ///     reason it can't be fulfilled.
     /// </summary>
     [RegisterTab("info", Order = 0)]
     public class InfoTab : IVillagerTabUI
     {
-        private List<KnownLocation> m_topLocations = new();
-        public string TabName => "Info";
+        private const string AttentionPrefix = "⚠ ";
+
+        private List<ActivityLogEntry> m_issues = new();
+        private int m_issueCount;
+        public string TabName => "Tasks";
 
         public void OnSelected(VillagerBehaviorBridge villager)
         {
-            RefreshLocations(villager);
+            RefreshIssues(villager);
         }
 
         public void OnDeselected()
         {
-            m_topLocations.Clear();
+            m_issues.Clear();
+            m_issueCount = 0;
         }
 
         public void OnUpdate(VillagerBehaviorBridge villager)
         {
-            RefreshLocations(villager);
+            RefreshIssues(villager);
         }
-
-        #region Place Data
-
-        private TabDetailDataUI GetPlaceDetail(
-            int index, VillagerBehaviorBridge villager)
-        {
-            var loc = m_topLocations[index];
-            var dist = villager != null
-                ? Vector3.Distance(
-                    villager.transform.position, loc.Position)
-                : 0f;
-
-            var shelter = loc.HasShelter ? " (sheltered)" : "";
-            var desc = $"{GetLocationDescription(loc)}{shelter}\n" +
-                       $"Distance: {dist:F0}m\n" +
-                       $"Comfort: {loc.ComfortValue:F0}";
-
-            var captured = loc;
-            return new TabDetailDataUI
-            {
-                Title = GetShortName(loc),
-                Description = desc,
-                ActionText = "Mark on Map",
-                OnAction = () => AddMapPin(captured, villager),
-            };
-        }
-
-        #endregion
 
         #region IVillagerTab — List + Detail
 
         public List<TabListItemUI> GetListItems(VillagerBehaviorBridge villager)
         {
             var items = new List<TabListItemUI>();
-            foreach (var loc in m_topLocations)
+
+            m_issueCount = m_issues.Count;
+            foreach (var issue in m_issues)
                 items.Add(new TabListItemUI
                 {
-                    TabName = $"{GetLocationIcon(loc.Type)} {GetShortName(loc)}",
-                    Icon = null, // could map to real sprites later
+                    TabName = AttentionPrefix + (issue.ItemPrefab ?? "(blocked)"),
+                    Icon = ResolveItemIcon(issue.ItemPrefab),
                 });
 
-            // Add ability entries below the places
             AddAbilityItems(items, villager);
             return items;
         }
@@ -85,12 +61,29 @@ namespace ValheimVillages.UI.Tabs
         public TabDetailDataUI GetDetail(
             int index, VillagerBehaviorBridge villager)
         {
-            // Place items
-            if (index >= 0 && index < m_topLocations.Count)
-                return GetPlaceDetail(index, villager);
+            if (index >= 0 && index < m_issueCount)
+            {
+                var issue = m_issues[index];
 
-            // Ability items (after places)
-            var abilityIdx = index - m_topLocations.Count;
+                var pins = new List<(Vector3 position, Color color)>();
+                if (issue.WorkOrderPosX.HasValue && issue.WorkOrderPosY.HasValue && issue.WorkOrderPosZ.HasValue)
+                {
+                    var chestPos = new Vector3(issue.WorkOrderPosX.Value, issue.WorkOrderPosY.Value, issue.WorkOrderPosZ.Value);
+                    pins.Add((chestPos, new Color(1f, 0.5f, 0.1f, 1f)));
+                }
+
+                var mapTexture = VillageMapPanel.RenderForTask(villager, pins);
+
+                return new TabDetailDataUI
+                {
+                    Title = issue.ItemPrefab ?? "Blocked",
+                    Icon = ResolveItemIcon(issue.ItemPrefab),
+                    Description = $"Station: {issue.StationName ?? "?"}\n{issue.Reason ?? issue.Description ?? ""}",
+                    MapTexture = mapTexture,
+                };
+            }
+
+            var abilityIdx = index - m_issueCount;
             return GetAbilityDetail(abilityIdx, villager);
         }
 
@@ -128,7 +121,7 @@ namespace ValheimVillages.UI.Tabs
         private TabDetailDataUI GetAbilityDetail(
             int abilityIdx, VillagerBehaviorBridge villager)
         {
-            var globalIdx = m_topLocations.Count + abilityIdx;
+            var globalIdx = m_issueCount + abilityIdx;
             foreach (var (panel, startIdx, count) in m_panelRanges)
                 if (globalIdx >= startIdx && globalIdx < startIdx + count)
                     return panel is IListPanelUI panelUI ? panelUI.GetDetail(globalIdx - startIdx, villager) : null;
@@ -139,113 +132,24 @@ namespace ValheimVillages.UI.Tabs
 
         #region Helpers
 
-        private void RefreshLocations(VillagerBehaviorBridge villager)
+        private void RefreshIssues(VillagerBehaviorBridge villager)
         {
-            m_topLocations.Clear();
-            if (villager?.Memory == null) return;
-            m_topLocations = villager.Memory.KnownLocations
-                .Select(l => new { Loc = l, Score = ScoreLocation(l) })
-                .OrderByDescending(x => x.Score)
-                .Take(5)
-                .Select(x => x.Loc)
+            m_issues.Clear();
+            if (villager == null || string.IsNullOrEmpty(villager.UniqueId)) return;
+            m_issues = VillagerActivityLog.Instance
+                .GetEntries(villager.UniqueId)
+                .Where(e => e.Action == "blocked")
                 .ToList();
         }
 
-        private static float ScoreLocation(KnownLocation loc)
+        private static Sprite ResolveItemIcon(string itemPrefab)
         {
-            var s = loc.Type switch
-            {
-                LocationType.Bed => 100f, LocationType.Fire => 50f,
-                LocationType.Farm => 30f, LocationType.Animals => 30f,
-                LocationType.Shelter => 10f,
-                _ => 0f,
-            };
-            if (loc.HasShelter) s += 15f;
-            s += loc.ComfortValue * 10f;
-            return s;
-        }
-
-        private static string GetShortName(KnownLocation loc)
-        {
-            return loc.Type switch
-            {
-                LocationType.Bed => "Cozy Bed",
-                LocationType.Fire => loc.HasShelter ? "Warm Hearth" : "Campfire",
-                LocationType.Table => "Gathering Table",
-                LocationType.Shelter => "Dry Spot",
-                LocationType.Farm => "Open Fields",
-                LocationType.Animals => "Friendly Creatures",
-                _ => "Interesting Spot",
-            };
-        }
-
-        private static string GetLocationIcon(LocationType t)
-        {
-            return t switch
-            {
-                LocationType.Bed => "[Bed]",
-                LocationType.Fire => "[Fire]",
-                LocationType.Table => "[Table]",
-                LocationType.Shelter => "[Roof]",
-                LocationType.Farm => "[Field]",
-                LocationType.Animals => "[Beasts]",
-                _ => "[?]",
-            };
-        }
-
-        private static string GetLocationDescription(KnownLocation loc)
-        {
-            return loc.Type switch
-            {
-                LocationType.Bed => "A cozy bed",
-                LocationType.Fire =>
-                    loc.HasShelter ? "A warm hearth" : "A campfire",
-                LocationType.Table => "A gathering table",
-                LocationType.Shelter => "A dry spot",
-                LocationType.Farm => "Open fields",
-                LocationType.Animals => "Friendly creatures",
-                _ => "An interesting spot",
-            };
-        }
-
-        private static void AddMapPin(
-            KnownLocation loc, VillagerBehaviorBridge villager)
-        {
-            var minimap = Minimap.instance;
-            if (minimap == null)
-            {
-                Player.m_localPlayer?.Message(
-                    MessageHud.MessageType.TopLeft, "Map not available");
-                return;
-            }
-
-            var desc = GetLocationDescription(loc);
-            var name = villager?.GetComponent<Humanoid>()?.m_name
-                       ?? "Villager";
-            try
-            {
-                var method = typeof(Minimap).GetMethod("AddPin",
-                    BindingFlags.Public |
-                    BindingFlags.Instance,
-                    null,
-                    new[]
-                    {
-                        typeof(Vector3), typeof(Minimap.PinType),
-                        typeof(string), typeof(bool), typeof(bool),
-                    },
-                    null);
-                method?.Invoke(minimap, new object[]
-                {
-                    loc.Position, Minimap.PinType.Icon3,
-                    $"{name}: {desc}", true, false,
-                });
-                Player.m_localPlayer?.Message(
-                    MessageHud.MessageType.TopLeft, $"Marked: {desc}");
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log?.LogError($"Failed to add map pin: {ex.Message}");
-            }
+            if (string.IsNullOrEmpty(itemPrefab) || ObjectDB.instance == null) return null;
+            var prefab = ObjectDB.instance.GetItemPrefab(itemPrefab);
+            if (prefab == null) return null;
+            var drop = prefab.GetComponent<ItemDrop>();
+            var icons = drop?.m_itemData?.m_shared?.m_icons;
+            return icons != null && icons.Length > 0 ? icons[0] : null;
         }
 
         #endregion

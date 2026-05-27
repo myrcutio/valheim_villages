@@ -4,9 +4,9 @@ using UnityEngine;
 namespace ValheimVillages.Villages
 {
     /// <summary>
-    ///     Represents a protected village area defined by a polygon of patrol waypoints.
-    ///     Provides point-in-polygon and boundary proximity tests for spawn protection
-    ///     and enemy avoidance.
+    ///     Represents a village's enclosed polygon, derived from the HNA region graph's
+    ///     boundary cells. Provides point-in-polygon and boundary proximity tests for
+    ///     spawn protection and enemy avoidance.
     /// </summary>
     public class VillageArea
     {
@@ -15,10 +15,9 @@ namespace ValheimVillages.Villages
 
         private readonly List<Vector3> m_waypoints;
 
-        public VillageArea(string patrollerId, Vector3 bedPosition, List<Vector3> waypoints)
+        public VillageArea(string villageKey, List<Vector3> waypoints)
         {
-            PatrollerId = patrollerId;
-            BedPosition = bedPosition;
+            VillageKey = villageKey;
             m_waypoints = new List<Vector3>(waypoints);
 
             // Pre-compute 2D polygon for efficient checks
@@ -26,9 +25,7 @@ namespace ValheimVillages.Villages
             foreach (var wp in waypoints) m_polygon2D.Add(new Vector2(wp.x, wp.z));
         }
 
-        public string PatrollerId { get; }
-
-        public Vector3 BedPosition { get; }
+        public string VillageKey { get; }
 
         public IReadOnlyList<Vector3> Waypoints => m_waypoints;
 

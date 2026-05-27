@@ -55,8 +55,7 @@
   "tags": [
     "tab:info",
     "tab:debug",
-    "listpanel:patrolstatus",
-    "listpanel:villagemap"
+    "listpanel:patrolstatus"
   ],
   "randomTalk": [
     "Running away gets a bad reputation. I prefer to think of it as scouting in the opposite direction.",

@@ -292,6 +292,48 @@ namespace ValheimVillages.TaskQueue.Handlers
             // stale positions — masking the new graph's connectivity.
             NavMeshLinkPlacer.RemoveAllLinks();
 
+            // Replace slot-31 NavMesh with one built from the HNA-filtered
+            // triangle set. The first bake (BakeVillage) uses raw runtime
+            // colliders, which Unity's voxelizer handles inconsistently for
+            // non-convex MeshColliders (hollow columns, thin-walled decor):
+            // the voxelizer can leave walkable surface inside the volume
+            // even though the runtime capsule physics correctly hits the
+            // wall mesh. The HNA per-tri filter (RegionBuilder's
+            // CheckCapsule / CheckSphere clearance, see rej_blocked counter)
+            // already rejects those bad triangles — they're absent from
+            // RegionBuilder.CachedTriangles. Rebuilding the slot-31 NavMesh
+            // from CachedTriangles makes the NavMesh and the RegionGraph
+            // represent the same walkable set, so NavMesh.CalculatePath
+            // routes around column volumes instead of through them.
+            var hnaRebake = NavMeshBakeManager.RebakeFromHnaTriangles(
+                RegionBuilder.CachedTriangles, bakeBounds);
+            DebugLog.Event("NavMeshBake", "hna_rebake",
+                ("success", hnaRebake.Success),
+                ("triangles", hnaRebake.TriangleCount),
+                ("vertices", hnaRebake.VertexCount),
+                ("duration_ms", hnaRebake.DurationMs),
+                ("reason", hnaRebake.FailureReason ?? ""));
+            if (!hnaRebake.Success)
+                Plugin.Log?.LogWarning(
+                    $"[Region] HNA rebake failed ({hnaRebake.FailureReason}); slot-31 NavMesh " +
+                    "still reflects raw runtime colliders — columns and other non-convex " +
+                    "mesh geometry may not carve correctly.");
+
+            // Invalidate every active villager's cached BaseAI path.
+            // The rebake replaced slot-31 NavMesh data and the link
+            // sweep just cleared every NavMeshLink; any villager
+            // mid-walk is holding waypoints that may now sit on
+            // missing geometry or route through deleted links. The
+            // re-pathfind branch in VillagerAI only fires when the
+            // path is empty, so unreached-but-now-unreachable nodes
+            // would otherwise lock the villager into a doomed path
+            // indefinitely (step-jumping at thin air, no stuck-timer
+            // safety net because jumps register as movement).
+            var pathsInvalidated = VillagerAIManager.InvalidatePathsAfterRebake();
+            if (pathsInvalidated > 0)
+                Plugin.Log?.LogInfo(
+                    $"[Region] Invalidated cached paths for {pathsInvalidated} villager(s) after rebake");
+
             DebugLog.Capture("repartition");
 
             // TODO: re-enable door links once the region graph is validated
@@ -307,6 +349,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                 $"(terrain={terrainResult.RegionIds.Count}, piece={pieceResult.RegionIds.Count}), " +
                 $"{combinedLinks.Count} links " +
                 $"(bounds {minX:F0},{minZ:F0} to {maxX:F0},{maxZ:F0}, key={villageKey})");
+
+            VillageAreaManager.RefreshFromRegionGraph(graph);
 
             return TaskResult.Ok(new Dictionary<string, string>
             {

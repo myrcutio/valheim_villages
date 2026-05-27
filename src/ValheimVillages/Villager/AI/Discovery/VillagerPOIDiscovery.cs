@@ -128,8 +128,6 @@ namespace ValheimVillages.Villager.AI
             if (obj == null) return null;
             if (obj.GetComponent<Chair>() != null) return LocationType.Chair;
             if (obj.GetComponent<Fireplace>() != null) return LocationType.Fire;
-            if (obj.GetComponentInParent<CraftingStation>() != null) return LocationType.CraftStation;
-            if (obj.GetComponentInParent<CookingStation>() != null) return LocationType.CraftStation;
 
             var name = obj.name.ToLower();
             if (name.Contains("table") || name.Contains("bench")) return LocationType.Table;

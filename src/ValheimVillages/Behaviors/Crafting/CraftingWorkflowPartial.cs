@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 using ValheimVillages.Enums;
 using ValheimVillages.Schemas;
@@ -14,6 +15,22 @@ namespace ValheimVillages.Behaviors.Crafting
     /// </summary>
     public partial class CraftingBehavior
     {
+        private static readonly MethodInfo s_smelterGetProcessedQueueSize = typeof(Smelter)
+            .GetMethod("GetProcessedQueueSize", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        private static int GetSmelterProcessedQueueSize(Smelter smelter)
+        {
+            if (smelter == null || s_smelterGetProcessedQueueSize == null) return 0;
+            try
+            {
+                return (int)s_smelterGetProcessedQueueSize.Invoke(smelter, null);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
         private void AbandonWork(string reason)
         {
             m_context = null;
@@ -21,6 +38,14 @@ namespace ValheimVillages.Behaviors.Crafting
             if (m_ai != null)
                 m_ai.SetState(BehaviorState.Idle, (VillagerWaypoint)null);
         }
+
+        /// <summary>
+        ///     Public entry point for AbandonWork so external callers
+        ///     (e.g. IPathUnreachableHandler dispatch on the adapter) can
+        ///     abort the current work order without exposing the private
+        ///     implementation surface.
+        /// </summary>
+        public void AbandonWorkPublic(string reason) => AbandonWork(reason);
 
         private void BeginFueling()
         {
@@ -108,6 +133,21 @@ namespace ValheimVillages.Behaviors.Crafting
                     return;
                 }
             }
+            else if (fuel.SmelterRef != null)
+            {
+                var nview = fuel.SmelterRef.GetComponent<ZNetView>();
+                if (nview != null && nview.GetZDO() != null)
+                {
+                    nview.InvokeRPC("RPC_AddFuel");
+                    Plugin.Log?.LogInfo(
+                        $"[Work:{LogName}] Added fuel to Smelter ({fuel.SmelterRef.gameObject.name})");
+                }
+                else
+                {
+                    AbandonWork("smelter ZNetView invalid for fueling");
+                    return;
+                }
+            }
             else if (fuel.CookingStationRef != null)
             {
                 var nview = fuel.CookingStationRef.GetComponent<ZNetView>();
@@ -181,6 +221,77 @@ namespace ValheimVillages.Behaviors.Crafting
             return true;
         }
 
+        private bool TryPollSmelter()
+        {
+            var smelter = m_context?.SmelterRef;
+            if (smelter == null) return false;
+            if (m_context.SmelterRemovalRequested) return true;
+
+            if (!StationFinder.IsSmelterReady(smelter))
+            {
+                AbandonWork("smelter fuel ran out before output");
+                return true;
+            }
+
+            var processedNow = GetSmelterProcessedQueueSize(smelter);
+            if (processedNow <= m_context.SmelterProcessedAtStart) return true;
+
+            var nview = smelter.GetComponent<ZNetView>();
+            if (nview == null || nview.GetZDO() == null) return false;
+
+            m_context.SmelterRemovalRequested = true;
+            nview.InvokeRPC("RPC_EmptyProcessed");
+
+            TryPickupSmelterOutput(smelter);
+
+            m_context.CraftedCount++;
+            BeginReturningToChest();
+            return true;
+        }
+
+        private void TryPickupSmelterOutput(Smelter smelter)
+        {
+            var outputPos = smelter.m_outputPoint != null
+                ? smelter.m_outputPoint.position
+                : smelter.transform.position;
+            const float searchRadius = 3f;
+
+            var outputPrefab = m_context.WorkOrder?.ItemPrefabName;
+            if (string.IsNullOrEmpty(outputPrefab)) return;
+
+            var allDrops = PhysicsHelper.GetAllInRadius<ItemDrop>(outputPos, searchRadius);
+            ItemDrop closest = null;
+            var closestDist = float.MaxValue;
+            foreach (var drop in allDrops)
+            {
+                if (drop == null || drop.m_itemData == null) continue;
+                var dropPrefab = drop.m_itemData.m_dropPrefab?.name
+                                 ?? drop.gameObject.name.Replace("(Clone)", "").Trim();
+                if (dropPrefab != outputPrefab) continue;
+                var dist = Vector3.Distance(drop.transform.position, outputPos);
+                if (dist < closestDist)
+                {
+                    closest = drop;
+                    closestDist = dist;
+                }
+            }
+
+            if (closest != null)
+            {
+                var dropNview = closest.GetComponent<ZNetView>();
+                if (dropNview != null && dropNview.GetZDO() != null)
+                    ZNetScene.instance.Destroy(closest.gameObject);
+                else
+                    Object.Destroy(closest.gameObject);
+
+                if (m_context.SourceContainer != null)
+                {
+                    ContainerScanner.TryDepositItem(m_context.SourceContainer, outputPrefab, 1);
+                    m_context.SmelterItemAlreadyInChest = true;
+                }
+            }
+        }
+
         private void TryPickupDroppedItem(CookingStation station, string slotItemName)
         {
             var spawnPos = station.m_spawnPoint != null
@@ -232,6 +343,17 @@ namespace ValheimVillages.Behaviors.Crafting
                 {
                     ContainerScanner.TryDepositItem(m_context.SourceContainer, outputPrefab, 1);
                     m_context.CookingItemAlreadyInChest = true;
+                }
+            }
+            else if (m_context.SmelterRef != null)
+            {
+                // Smelter outputs are picked up in TryPollSmelter; this branch shouldn't normally trigger.
+                // If it does (e.g. fallback timer), deposit directly to the source chest.
+                var outputPrefab = m_context.WorkOrder?.ItemPrefabName;
+                if (!string.IsNullOrEmpty(outputPrefab) && m_context.SourceContainer != null)
+                {
+                    ContainerScanner.TryDepositItem(m_context.SourceContainer, outputPrefab, 1);
+                    m_context.SmelterItemAlreadyInChest = true;
                 }
             }
             else
@@ -299,6 +421,29 @@ namespace ValheimVillages.Behaviors.Crafting
             m_context.CraftStartTime = Time.time;
             SubState = WorkSubState.Crafting;
 
+            var smelter = m_context.SmelterRef;
+            if (smelter != null && !string.IsNullOrEmpty(m_context.SmelterInputItemName))
+            {
+                if (!StationFinder.IsSmelterReady(smelter))
+                {
+                    AbandonWork("smelter not ready (no fuel)");
+                    return;
+                }
+
+                var smelterNview = smelter.GetComponent<ZNetView>();
+                if (smelterNview == null || smelterNview.GetZDO() == null)
+                {
+                    AbandonWork("smelter ZNetView invalid");
+                    return;
+                }
+
+                m_context.SmelterProcessedAtStart = GetSmelterProcessedQueueSize(smelter);
+                smelterNview.InvokeRPC("RPC_AddOre", m_context.SmelterInputItemName);
+                Plugin.Log?.LogInfo(
+                    $"[Work:{LogName}] Added 1x {m_context.SmelterInputItemName} to Smelter ({smelter.gameObject.name})");
+                return;
+            }
+
             var station = m_context.CookingStationRef;
             if (station != null && !string.IsNullOrEmpty(m_context.CookingInputItemName))
             {
@@ -339,7 +484,7 @@ namespace ValheimVillages.Behaviors.Crafting
                 return;
             }
 
-            if (!m_context.CookingItemAlreadyInChest && m_context.SourceContainer != null)
+            if (!m_context.CookingItemAlreadyInChest && !m_context.SmelterItemAlreadyInChest && m_context.SourceContainer != null)
             {
                 var outputPrefab = m_context.WorkOrder?.ItemPrefabName;
                 if (!string.IsNullOrEmpty(outputPrefab))
@@ -347,7 +492,9 @@ namespace ValheimVillages.Behaviors.Crafting
             }
 
             m_context.CookingItemAlreadyInChest = false;
+            m_context.SmelterItemAlreadyInChest = false;
             m_context.CookingRemovalRequested = false;
+            m_context.SmelterRemovalRequested = false;
 
             var maxQuantity = m_context.WorkOrder?.MaxQuantity ?? 1;
             if (m_context.CraftedCount < maxQuantity)

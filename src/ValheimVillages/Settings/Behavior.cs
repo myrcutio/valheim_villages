@@ -22,10 +22,59 @@ namespace ValheimVillages.Settings
 
         /// <summary>How close to target before considering arrived (meters).</summary>
         /// <remarks>
-        ///     Set to 1m so NPCs get very close to their destination before stopping.
-        ///     Tests may use a slightly higher tolerance (2m) to account for pathfinding.
+        ///     Generous final-arrival radius used by VillagerAI's
+        ///     OnArrivedAtTarget gate and the explore adapter's
+        ///     "do I need to travel?" check. Sized for stations / chests
+        ///     where physical colliders (cooking station body, chest box)
+        ///     prevent the agent from getting closer than ~1.5-2m to the
+        ///     prefab's pivot. NOT used for intermediate path-node popping
+        ///     — that uses the much tighter <see cref="PathNodePopThreshold"/>
+        ///     so routing corners around obstacles don't get prematurely eaten.
         /// </remarks>
         public const float ArrivalThreshold = 2f;
+
+        /// <summary>
+        ///     Distance threshold for popping intermediate path nodes from
+        ///     <see cref="UnityEngine.AI.NavMeshPath.corners"/> as the agent
+        ///     advances along the path. Much tighter than
+        ///     <see cref="ArrivalThreshold"/> because routing corners
+        ///     placed by NavMesh.CalculatePath to navigate around obstacles
+        ///     (column corners, narrow doorways) sit close together — a 2m
+        ///     pop window eats them before the agent has actually maneuvered
+        ///     past them, leaving the agent stuck against the obstacle the
+        ///     corners were supposed to route around. 1.0m is the smallest
+        ///     window that still lets the agent register "arrived at node"
+        ///     when geometry pads the approach: agent radius (~0.5m) plus a
+        ///     typical piece collider radius (~0.4m for chests / beds / small
+        ///     columns) means the agent's CENTER physically can't get closer
+        ///     than ~0.9m to a node placed at the obstacle's position. A
+        ///     tighter threshold leaves the node unpoppable; 1.0m gives a
+        ///     small margin. Routing corners ≥1.4m apart (typical for
+        ///     CalculatePath turns around column-sized obstacles) still
+        ///     survive until the agent actually walks within range.
+        /// </summary>
+        public const float PathNodePopThreshold = 0.5f;
+
+        /// <summary>
+        ///     Additive buffer (meters) applied to the slot-31 agent radius
+        ///     when baking the villager NavMesh. The bake voxelizer carves
+        ///     walkable surface away from obstacles by the agent radius —
+        ///     adding a buffer pushes the NavMesh edge further from walls
+        ///     so path corners around columns / pillars / piece edges sit
+        ///     with extra clearance, giving the agent room to maneuver
+        ///     through turns without scraping the geometry.
+        ///
+        ///     Affects bake only: the slot-31 agent's REGISTERED radius is
+        ///     unchanged (still drives SamplePosition / NavMesh queries /
+        ///     CalculatePath cost). The character's actual capsule radius
+        ///     is independent and unaffected.
+        ///
+        ///     Tradeoff: large buffers can cause narrow passages to be
+        ///     carved out entirely (1m doorways at 0.5m base radius become
+        ///     unreachable past +0.0m buffer — but door NavMeshLinks bridge
+        ///     them, so this is fine in practice). Keep modest (≤0.2m).
+        /// </summary>
+        public const float NavMeshBakeRadiusBuffer = 0.12f;
 
         /// <summary>
         ///     Hard timeout: seconds since last successful waypoint arrival before
@@ -34,10 +83,68 @@ namespace ValheimVillages.Settings
         public const float PatrolHardStuckTimeoutSeconds = 60f;
 
         /// <summary>
+        ///     Seconds of zero physical movement (despite a non-empty path)
+        ///     before VillagerAI dumps diagnostics, clears the cached path,
+        ///     and lets the next tick re-evaluate via TryFindCompletePath
+        ///     (which will trigger the recovery flow if the target is truly
+        ///     unreachable). Larger than DoorSettings.MovementStallThreshold
+        ///     and StepJump's 1.5s so the door / step-jump heuristics get
+        ///     to run first.
+        /// </summary>
+        public const float PathStallEscapeSeconds = 5f;
+
+        /// <summary>
+        ///     Maximum recovery attempts when FindPath returns an incomplete
+        ///     path (target unreachable). After this many failures the AI
+        ///     fires <c>IPathUnreachableHandler.OnPathUnreachable</c> so the
+        ///     behavior can AbandonWork or pick a different target.
+        /// </summary>
+        public const int MaxRecoveryAttempts = 3;
+
+        /// <summary>
+        ///     Base seconds to wait after retreating to a known location before
+        ///     re-attempting the unreachable target. Exponential backoff per
+        ///     attempt: 5s, 10s, 20s, capped by <see cref="RecoveryBackoffMaxSeconds" />.
+        /// </summary>
+        public const float RecoveryBackoffBaseSeconds = 5f;
+
+        /// <summary>
+        ///     Upper bound on the recovery backoff to keep the retreat-retry
+        ///     loop from stretching unreasonably long under pathological
+        ///     attempt counts.
+        /// </summary>
+        public const float RecoveryBackoffMaxSeconds = 30f;
+
+        /// <summary>
         ///     Fraction of the character's normal m_jumpForce used for automatic step-up
         ///     jumps when stuck against raised geometry. 1.0 = full jump, 0.5 = half height.
         /// </summary>
         public const float StepJumpForceFraction = 0.6f;
+
+        /// <summary>
+        ///     Master switch for the automatic step-up jump when a villager
+        ///     stalls against raised geometry (path[0].y > transform.y).
+        ///     Disabled by default: the jump masks broken-path scenarios by
+        ///     refreshing m_lastRealMoveTime, which in turn prevents
+        ///     <see cref="PathStallEscapeSeconds"/> and other "no movement"
+        ///     timers from ever firing. With this off, a stuck villager
+        ///     stays visibly stuck and the diagnostic logs reflect reality.
+        /// </summary>
+        public const bool StepJumpEnabled = false;
+
+        /// <summary>
+        ///     Master switch for the path-stall recovery flow (retreat to a
+        ///     known POI with exponential backoff, eventually firing
+        ///     <see cref="ValheimVillages.Interfaces.IPathUnreachableHandler.OnPathUnreachable"/>).
+        ///     Disabled by default while investigating broken-path causes —
+        ///     the recovery shuffles villagers around the village in a way
+        ///     that hides the underlying NavMesh / pathing failure. With
+        ///     this off, a villager whose TryFindCompletePath fails (or
+        ///     whose path stalls past <see cref="PathStallEscapeSeconds"/>)
+        ///     stays put with diagnostic logs, no automatic retreat or
+        ///     AbandonWork.
+        /// </summary>
+        public const bool AutoPathRecoveryEnabled = false;
 
         // Time boundaries as day fraction (0-1 where 0.5 = noon)
         // Valheim: 0.25 = 6am, 0.5 = noon, 0.75 = 6pm

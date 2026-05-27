@@ -4,6 +4,7 @@ using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.AI;
 using ValheimVillages.Attributes;
+using ValheimVillages.Settings;
 using ValheimVillages.TaskQueue.Handlers;
 using ValheimVillages.Villager.AI.Pathfinding;
 using Object = UnityEngine.Object;
@@ -52,6 +53,32 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     bake because doors are piece-adjacent.
         /// </summary>
         private static int s_piecePhantomCount;
+
+        // Per-phantom-category counts from the most recent bake. The phantoms
+        // are appended to s_pieceSources in this order: door first, then bed,
+        // then outside-cell. With these counts vv_bake_audit can label each
+        // phantom by category from its sequential index.
+        private static int s_lastDoorPhantoms;
+        private static int s_lastBedPhantoms;
+        private static int s_lastOutsidePhantoms;
+
+        /// <summary>Read-only view of the terrain bake's NavMeshBuildSource list (diagnostic use).</summary>
+        public static IReadOnlyList<NavMeshBuildSource> TerrainSources => s_terrainSources;
+
+        /// <summary>Read-only view of the piece bake's NavMeshBuildSource list, including phantom tail (diagnostic use).</summary>
+        public static IReadOnlyList<NavMeshBuildSource> PieceSources => s_pieceSources;
+
+        /// <summary>Phantom-blocker count appended at the END of <see cref="PieceSources" />. Sum of door + bed + outside-cell phantoms.</summary>
+        public static int PiecePhantomCount => s_piecePhantomCount;
+
+        /// <summary>Phantom door blockers from the most recent bake (first slice of phantom tail).</summary>
+        public static int LastDoorPhantoms => s_lastDoorPhantoms;
+
+        /// <summary>Phantom bed blockers from the most recent bake (second slice of phantom tail).</summary>
+        public static int LastBedPhantoms => s_lastBedPhantoms;
+
+        /// <summary>Phantom outside-cell blockers from the most recent bake (third slice of phantom tail).</summary>
+        public static int LastOutsidePhantoms => s_lastOutsidePhantoms;
 
         private static readonly int s_terrainMask = LayerMask.GetMask("terrain");
 
@@ -121,10 +148,20 @@ namespace ValheimVillages.Villager.AI.Navigation
             // Remove previous bakes to avoid accumulating data across
             // partition runs. Routed through the holder so a hot-reloaded
             // assembly correctly clears the prior assembly's instances.
+            // Also clear any HNA-rebake data from a prior partition —
+            // RebakeFromHnaTriangles (called after RubberBandPrune) adds
+            // a separate HNA slot via Holder.SetHna that would otherwise
+            // accumulate on top of the fresh terrain + piece bakes.
             Holder.RemoveTerrain();
             Holder.RemovePiece();
+            Holder.RemoveHna();
 
+            // Settings is a local struct copy; modifying agentRadius here
+            // inflates the bake's carve distance from obstacles without
+            // affecting slot 31's registered agent settings (NavMesh
+            // queries, SamplePosition etc. still use the original radius).
             var settings = NavMesh.GetSettingsByID(VillagerAgentType.UnityAgentTypeID);
+            settings.agentRadius += VillagerSettings.NavMeshBakeRadiusBuffer;
 
             // --- Terrain bake ---
             var terrainSw = Stopwatch.StartNew();
@@ -186,6 +223,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             s_pieceSources.Clear();
             s_pieceSources.AddRange(pieceSources);
             s_piecePhantomCount = phantomDoors + phantomBeds + phantomOutside;
+            s_lastDoorPhantoms = phantomDoors;
+            s_lastBedPhantoms = phantomBeds;
+            s_lastOutsidePhantoms = phantomOutside;
             result.PieceSourceCount = pieceSources.Count;
 
             if (pieceSources.Count > 0)
@@ -323,7 +363,11 @@ namespace ValheimVillages.Villager.AI.Navigation
                 },
             };
 
+            // Same agentRadius buffer treatment as BakeVillage — keeps the
+            // HNA-rebaked NavMesh consistent with the initial bake's
+            // obstacle clearance, so path corners land in the same place.
             var settings = NavMesh.GetSettingsByID(VillagerAgentType.UnityAgentTypeID);
+            settings.agentRadius += VillagerSettings.NavMeshBakeRadiusBuffer;
             var data = NavMeshBuilder.BuildNavMeshData(
                 settings, sources, bounds, Vector3.zero, Quaternion.identity);
             if (data == null)
@@ -551,13 +595,19 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (door == null || door.transform == null) continue;
                 if (!bounds.Contains(door.transform.position)) continue;
 
-                // Center the blocker at door pivot + 1m up (so the box's
-                // 2m height covers ground to ~2m), oriented with the door's
-                // rotation so the thin axis aligns with the doorway plane.
-                // Slightly wider than a standard 1m Valheim door to ensure
-                // full blockage even at angled placements.
+                // Phantom centered at the door's transform position with no
+                // vertical offset. Valheim's Door prefab pivots at the door
+                // PANEL CENTER (chest height, ~1m above the floor for a
+                // standard 2m-tall door), so a 2m-tall phantom centered
+                // here spans floor to top-of-door — covering the doorway
+                // opening at the agent's footstep elevation. The earlier
+                // "+1m up" offset assumed door.transform was at the floor
+                // and pushed the phantom to 1m-3m above the floor, leaving
+                // the doorway unblocked at NavMesh height and causing
+                // PlaceDoorLinks to think the doorway was already
+                // traversable on the NavMesh (no link needed).
                 var transform = Matrix4x4.TRS(
-                    door.transform.position + Vector3.up * 1.0f,
+                    door.transform.position,
                     door.transform.rotation,
                     Vector3.one);
                 sources.Add(new NavMeshBuildSource
@@ -787,6 +837,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             s_terrainSources.Clear();
             s_pieceSources.Clear();
             s_piecePhantomCount = 0;
+            s_lastDoorPhantoms = 0;
+            s_lastBedPhantoms = 0;
+            s_lastOutsidePhantoms = 0;
         }
 
         public struct BakeResult

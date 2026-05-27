@@ -952,6 +952,22 @@ namespace ValheimVillages.Villager.AI.Navigation
             UnpackXz(key, out gx, out gz);
         }
 
+        /// <summary>
+        ///     Test whether a world-space position falls in an outside cell. Packs the position
+        ///     to an XZ key at <see cref="RegionGraph.LookupCellSize" /> resolution and checks
+        ///     set membership. Used by callers (e.g. VillageStationRegistry) that want to know
+        ///     "is this position inside the village's outer hull, even if it's on top of a
+        ///     non-walkable obstacle like a smelter."
+        /// </summary>
+        public static bool IsOutsideCell(Vector3 worldPos, HashSet<long> outsideCells)
+        {
+            if (outsideCells == null || outsideCells.Count == 0) return false;
+            var cell = RegionGraph.LookupCellSize;
+            var gx = Mathf.FloorToInt(worldPos.x / cell);
+            var gz = Mathf.FloorToInt(worldPos.z / cell);
+            return outsideCells.Contains(XzKey(gx, gz));
+        }
+
         private static void EnqueuePerimeterSeed(int gx, int gz,
             HashSet<long> outsideCells, Queue<long> queue)
         {

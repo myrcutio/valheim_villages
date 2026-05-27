@@ -62,6 +62,25 @@ namespace ValheimVillages.Villager.AI
         /// <summary>When the current movement target was set (for stuck timeout).</summary>
         private float m_targetSetTime;
 
+        // ----- Path-unreachable recovery state -----
+        // When TryFindCompletePath fails, we don't repeatedly retry against
+        // the same unreachable target (which would step-jump forever). Instead
+        // we retreat to a recently-visited KnownLocation, wait an exponential
+        // backoff, then re-issue the original waypoint. After
+        // VillagerSettings.MaxRecoveryAttempts failed retries we fire
+        // IPathUnreachableHandler.OnPathUnreachable so the behavior can give up.
+        private int m_recoveryAttempts;
+        private bool m_recoveryRetreating;
+        private VillagerWaypoint m_recoveryOriginalWaypoint;
+        private float m_recoveryRetryAt;
+
+        // Debounce the TryFindPathCustom-failed warning so it doesn't fire
+        // every tick the path stays unresolvable. Re-log only when the
+        // target changes or PathFailWarnInterval seconds elapse.
+        private Vector3? m_lastPathFailTarget;
+        private float m_lastPathFailWarnTime;
+        private const float PathFailWarnInterval = 10f;
+
         private string m_villagerName;
         private List<Vector3> m_waypointPath;
 
@@ -195,7 +214,28 @@ namespace ValheimVillages.Villager.AI
                 var remaining = Vector3.Distance(transform.position, targetPos);
                 var path = s_pathField?.GetValue(this) as List<Vector3>;
 
-                if (remaining < VillagerSettings.ArrivalThreshold && (path == null || path.Count == 0))
+                // Recovery: if we're retreating and have arrived at the retreat
+                // target, wait for the backoff to elapse, then restore the
+                // original waypoint and let next tick retry the real target.
+                if (m_recoveryRetreating &&
+                    VillagerMovement.IsAtPosition(transform.position, targetPos, VillagerSettings.ArrivalThreshold))
+                {
+                    if (Time.time >= m_recoveryRetryAt && m_recoveryOriginalWaypoint != null)
+                    {
+                        Plugin.Log?.LogInfo(
+                            $"[AI:{m_villagerName}] Recovery backoff elapsed; retrying original target " +
+                            $"({m_recoveryOriginalWaypoint.Position:F1})");
+                        m_currentWaypoint = m_recoveryOriginalWaypoint;
+                        m_recoveryRetreating = false;
+                        m_recoveryOriginalWaypoint = null;
+                        m_targetSetTime = Time.time;
+                        m_lastMovePos = transform.position;
+                        m_lastRealMoveTime = Time.time;
+                        path?.Clear();
+                    }
+                    // else: idle at retreat location until backoff elapses
+                }
+                else if (VillagerMovement.IsAtPosition(transform.position, targetPos, VillagerSettings.ArrivalThreshold))
                 {
                     OnArrivedAtTarget(dt);
                 }
@@ -203,13 +243,45 @@ namespace ValheimVillages.Villager.AI
                 {
                     if (path == null || path.Count == 0)
                     {
-                        FindPath(targetPos);
+                        var found = TryFindPathCustom(targetPos);
                         path = s_pathField?.GetValue(this) as List<Vector3>;
 
-                        if ((path == null || path.Count == 0) && NavMeshLinkPlacer.PlaceLinks())
+                        // No complete path to the target — surface as a
+                        // diagnostic and idle. Per user direction: no
+                        // PlaceLinks fallback here. If links are missing,
+                        // that's something earlier in the pipeline failing
+                        // to keep them in place — Plugin.cs already calls
+                        // PlaceLinks proactively when RegionGraph is
+                        // available and HasLinks is false, so a failure
+                        // here means either that proactive call hasn't
+                        // fired yet OR the target is genuinely unreachable.
+                        // Recovery is gated off so the villager stays
+                        // visibly stuck for investigation.
+                        if (!found && !m_recoveryRetreating)
                         {
-                            FindPath(targetPos);
-                            path = s_pathField?.GetValue(this) as List<Vector3>;
+                            if (VillagerSettings.AutoPathRecoveryEnabled)
+                            {
+                                EnterRecovery(m_currentWaypoint);
+                                return false;
+                            }
+
+                            // Debounce: warn once per target, then at most
+                            // every PathFailWarnInterval seconds. Without
+                            // this, the warning fires every frame the path
+                            // stays unresolvable — recovery is disabled, so
+                            // nothing changes tick-to-tick.
+                            var targetChanged = !m_lastPathFailTarget.HasValue ||
+                                                Vector3.Distance(m_lastPathFailTarget.Value, targetPos) > 0.1f;
+                            var intervalElapsed = Time.time - m_lastPathFailWarnTime > PathFailWarnInterval;
+                            if (targetChanged || intervalElapsed)
+                            {
+                                Plugin.Log?.LogWarning(
+                                    $"[AI:{m_villagerName}] TryFindPathCustom failed for target " +
+                                    $"({targetPos.x:F1},{targetPos.y:F1},{targetPos.z:F1}) and auto-recovery " +
+                                    $"is disabled — villager will idle here until a manual fix or partition rebake.");
+                                m_lastPathFailTarget = targetPos;
+                                m_lastPathFailWarnTime = Time.time;
+                            }
                         }
 
                         // Reject paths that are absurdly indirect (NavMesh gap workaround)
@@ -226,13 +298,11 @@ namespace ValheimVillages.Villager.AI
 
                             if (straightDist > 1f && pathLen > straightDist * 3f)
                             {
+                                // Drop the indirect path and let next tick
+                                // re-evaluate. No PlaceLinks fallback here
+                                // either — same reasoning as the path-empty
+                                // branch above.
                                 path.Clear();
-
-                                if (NavMeshLinkPlacer.PlaceLinks())
-                                {
-                                    FindPath(targetPos);
-                                    path = s_pathField?.GetValue(this) as List<Vector3>;
-                                }
                             }
                         }
                     }
@@ -240,19 +310,18 @@ namespace ValheimVillages.Villager.AI
                     if (path != null && path.Count > 0)
                     {
                         var running = CurrentState == BehaviorState.Patrolling || remaining > 5f;
-                        var closeEnough = running ? 1f : 0.5f;
 
-                        while (path.Count > 1 && Vector3.Distance(path[0], transform.position) <= closeEnough)
+                        while (path.Count > 1 && VillagerMovement.IsAtPosition(transform.position, path[0], VillagerSettings.PathNodePopThreshold))
                             path.RemoveAt(0);
 
                         if (path.Count == 1 &&
-                            Vector3.Distance(path[0], transform.position) < closeEnough)
+                            VillagerMovement.IsAtPosition(transform.position, path[0], VillagerSettings.PathNodePopThreshold))
                         {
                             path.Clear();
                             if (Time.time - m_targetSetTime >= PathRetryInterval)
                             {
                                 m_targetSetTime = Time.time;
-                                FindPath(targetPos);
+                                TryFindPathCustom(targetPos);
                                 path = s_pathField?.GetValue(this) as List<Vector3>;
                             }
                         }
@@ -302,7 +371,8 @@ namespace ValheimVillages.Villager.AI
                                     }
                                 }
 
-                                if (Time.time - m_lastRealMoveTime > 1.5f && m_character != null)
+                                if (VillagerSettings.StepJumpEnabled &&
+                                    Time.time - m_lastRealMoveTime > 1.5f && m_character != null)
                                 {
                                     var stepUp = path[0].y - transform.position.y;
                                     if (stepUp > 0.2f)
@@ -316,6 +386,62 @@ namespace ValheimVillages.Villager.AI
                                         m_character.m_jumpForceForward = origForward;
                                         m_lastRealMoveTime = Time.time;
                                     }
+                                }
+
+                                // Long stall escape: the door / step-jump
+                                // heuristics haven't moved us in
+                                // PathStallEscapeSeconds despite a non-empty
+                                // path. Most likely NavMesh.CalculatePath
+                                // returned PathComplete via an island-bridge
+                                // NavMeshLink that's physically untraversable
+                                // (e.g. vertical jump across a ceiling).
+                                // Consume a recovery attempt — three stalls
+                                // hit MaxRecoveryAttempts and fire
+                                // OnPathUnreachable so the behavior can
+                                // AbandonWork. Fires even while retreating:
+                                // a stall on the retreat path is the same
+                                // failure mode and should escalate.
+                                if (Time.time - m_lastRealMoveTime > VillagerSettings.PathStallEscapeSeconds)
+                                {
+                                    var lastNode = path[path.Count - 1];
+                                    Plugin.Log?.LogWarning(
+                                        $"[AI:{m_villagerName}] Path stall escape after " +
+                                        $"{Time.time - m_lastRealMoveTime:F1}s no move. " +
+                                        $"state={CurrentState} pos=({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}) " +
+                                        $"target=({targetPos.x:F1},{targetPos.y:F1},{targetPos.z:F1}) " +
+                                        $"path.Count={path.Count} " +
+                                        $"path[0]=({path[0].x:F1},{path[0].y:F1},{path[0].z:F1}) " +
+                                        $"path[last]=({lastNode.x:F1},{lastNode.y:F1},{lastNode.z:F1}) " +
+                                        $"distToNext={Vector3.Distance(transform.position, path[0]):F2} " +
+                                        $"distToTarget={Vector3.Distance(transform.position, targetPos):F2} " +
+                                        $"distToLast={Vector3.Distance(transform.position, lastNode):F2} " +
+                                        $"recoveryAttempts={m_recoveryAttempts} retreating={m_recoveryRetreating}");
+                                    // While retreating, escalate against the
+                                    // real original target (the chest we
+                                    // were trying to reach), not the retreat
+                                    // target itself — otherwise we'd lose
+                                    // track of what we were originally
+                                    // trying to do.
+                                    // Gated by AutoPathRecoveryEnabled:
+                                    // when off, the stall logs but does
+                                    // NOT call EnterRecovery, so the
+                                    // villager stays visibly stuck and we
+                                    // can investigate the underlying path
+                                    // failure without recovery hiding it.
+                                    if (VillagerSettings.AutoPathRecoveryEnabled)
+                                    {
+                                        var escalateAgainst =
+                                            m_recoveryOriginalWaypoint ?? m_currentWaypoint;
+                                        EnterRecovery(escalateAgainst);
+                                        return false;
+                                    }
+
+                                    // Reset the stall timer so the log
+                                    // doesn't immediately re-fire next tick;
+                                    // the villager remains stuck but the log
+                                    // line emits at the same cadence as the
+                                    // PathStallEscapeSeconds threshold.
+                                    m_lastRealMoveTime = Time.time;
                                 }
                             }
                         }
@@ -519,6 +645,10 @@ namespace ValheimVillages.Villager.AI
                 m_targetSetTime = Time.time;
                 m_lastMovePos = transform.position;
                 m_lastRealMoveTime = Time.time;
+                // A fresh waypoint from a behavior cancels any in-flight
+                // recovery: we're under new orders, the prior retreat /
+                // backoff / attempt counter no longer applies.
+                ResetRecoveryState();
             }
 
             if (newState == BehaviorState.Idle)
@@ -577,10 +707,137 @@ namespace ValheimVillages.Villager.AI
             return hasPath;
         }
 
+        /// <summary>
+        ///     Replace BaseAI's path with a CalculatePath result against the
+        ///     villager NavMesh (slot 31), but only when the result is
+        ///     <see cref="UnityEngine.AI.NavMeshPathStatus.PathComplete" />.
+        ///     Returns false on partial / invalid paths so the caller can
+        ///     enter the unreachable-target recovery flow rather than
+        ///     walking a path that ends short and re-triggering the same
+        ///     failure every tick.
+        /// </summary>
+        private bool TryFindPathCustom(Vector3 targetPos)
+        {
+            var path = s_pathField?.GetValue(this) as List<Vector3>;
+            if (path == null) return false;
+            return VillagerMovement.TryFindCompletePath(transform.position, targetPos, path);
+        }
+
+        /// <summary>
+        ///     Engage the unreachable-target recovery flow. Swaps
+        ///     <see cref="m_currentWaypoint" /> for a retreat target (most
+        ///     recently visited <see cref="KnownLocation" />, or bed when
+        ///     none qualify) and arms a backoff before re-trying the
+        ///     original. After <see cref="VillagerSettings.MaxRecoveryAttempts" />
+        ///     failed attempts, dispatches <see cref="IPathUnreachableHandler.OnPathUnreachable" />
+        ///     to the active behaviors and clears the waypoint.
+        /// </summary>
+        private void EnterRecovery(VillagerWaypoint originalWaypoint)
+        {
+            m_recoveryAttempts++;
+            var originalPos = originalWaypoint.Position;
+
+            if (m_recoveryAttempts > VillagerSettings.MaxRecoveryAttempts)
+            {
+                Plugin.Log?.LogWarning(
+                    $"[AI:{m_villagerName}] Path unreachable: gave up after " +
+                    $"{m_recoveryAttempts - 1} retries to {originalPos:F1}; firing OnPathUnreachable");
+                m_currentWaypoint = null;
+                ResetRecoveryState();
+
+                foreach (var b in m_behaviors)
+                    if (b is IPathUnreachableHandler h)
+                    {
+                        h.OnPathUnreachable(originalPos);
+                        break;
+                    }
+
+                return;
+            }
+
+            var retreat = Memory?.GetMostRecentlyVisitedLocation(originalPos);
+            var retreatPos = retreat != null ? retreat.Position : m_bedPosition;
+
+            var backoff = Mathf.Min(
+                VillagerSettings.RecoveryBackoffBaseSeconds *
+                Mathf.Pow(2f, m_recoveryAttempts - 1),
+                VillagerSettings.RecoveryBackoffMaxSeconds);
+
+            m_recoveryOriginalWaypoint = originalWaypoint;
+            m_recoveryRetreating = true;
+            m_recoveryRetryAt = Time.time + backoff;
+
+            m_currentWaypoint = VillagerWaypoint.WithDefault(retreatPos);
+            m_targetSetTime = Time.time;
+            m_lastMovePos = transform.position;
+            m_lastRealMoveTime = Time.time;
+            (s_pathField?.GetValue(this) as List<Vector3>)?.Clear();
+
+            Plugin.Log?.LogInfo(
+                $"[AI:{m_villagerName}] Path unreachable to {originalPos:F1} " +
+                $"(attempt {m_recoveryAttempts}/{VillagerSettings.MaxRecoveryAttempts}); " +
+                $"retreating to {retreatPos:F1}, will retry after {backoff:F0}s");
+        }
+
+        private void ResetRecoveryState()
+        {
+            m_recoveryAttempts = 0;
+            m_recoveryRetreating = false;
+            m_recoveryOriginalWaypoint = null;
+            m_recoveryRetryAt = 0f;
+        }
+
+        /// <summary>
+        ///     Clear the cached BaseAI path so the next movement tick falls
+        ///     into the path-empty branch and recomputes against the current
+        ///     NavMesh. Use after a NavMesh rebake / partition rebuild — the
+        ///     prior path's waypoints may sit on geometry that no longer
+        ///     exists or routed through NavMeshLinks that have since been
+        ///     cleared. Intent (m_currentWaypoint) and stuck timers are
+        ///     left untouched.
+        /// </summary>
+        public void ClearCachedPath()
+        {
+            (s_pathField?.GetValue(this) as List<Vector3>)?.Clear();
+        }
+
         private void OnArrivedAtTarget(float dt)
         {
             m_lastArrivalTime = Time.time;
             m_consecutiveStucks = 0;
+            // Successful arrival at the real target — wipe any recovery
+            // bookkeeping. The next failed FindPath starts a fresh attempt
+            // counter rather than inheriting prior unrelated failures.
+            ResetRecoveryState();
+
+            // Clear the cached path now that we've reached the waypoint.
+            // The behavior's OnArrival callback typically calls SetState
+            // with a NEW waypoint (next sub-state: gather → travel-to-station
+            // → return-to-chest, etc). Without clearing m_path here, the
+            // next tick continues following the OLD waypoint's path nodes
+            // until they drain, and the new SetState's path only gets
+            // computed once those stale nodes are gone. The intermediate
+            // ticks can also produce "skip the links" paths because
+            // CalculatePath was never re-invoked for the new target.
+            // Clearing here forces the path-empty branch (and a fresh
+            // TryFindPathCustom) on the very next tick after the behavior
+            // assigns its new target.
+            (s_pathField?.GetValue(this) as List<Vector3>)?.Clear();
+
+            // Stamp the most relevant KnownLocation as visited so the
+            // unreachable-target recovery flow can pick "most recent"
+            // retreat targets that the villager actually has been to.
+            if (Memory != null)
+            {
+                foreach (var loc in Memory.KnownLocations)
+                {
+                    if (loc != null && loc.IsSameLocation(transform.position))
+                    {
+                        loc.LastVisitedAt = Time.time;
+                        break;
+                    }
+                }
+            }
 
             var arrCtx = new BehaviorContext();
             foreach (var b in m_behaviors)

@@ -27,6 +27,10 @@ namespace ValheimVillages.Villager.AI.Memory
 
             // Bed is always known
             DiscoverLocation(bedPosition, LocationType.Bed, 0f, true);
+            // Stamp the bed as visited so recovery has a valid fallback even
+            // before the villager has arrived at any other KnownLocation.
+            var bed = FirstLocationByType(LocationType.Bed);
+            if (bed != null) bed.LastVisitedAt = Time.time;
         }
 
         /// <summary>Highest comfort level experienced.</summary>
@@ -125,6 +129,27 @@ namespace ValheimVillages.Villager.AI.Memory
         public IEnumerable<KnownLocation> GetLocationsByType(LocationType type)
         {
             return m_locations.Where(l => l.Type == type);
+        }
+
+        /// <summary>
+        ///     Returns the KnownLocation with the highest LastVisitedAt timestamp,
+        ///     excluding any location within SameLocationThreshold of
+        ///     <paramref name="exclude" />. Used by the unreachable-target recovery
+        ///     flow to pick a retreat target that isn't the spot we're stuck near.
+        ///     Returns null if no eligible location exists (caller should fall
+        ///     back to bed).
+        /// </summary>
+        public KnownLocation GetMostRecentlyVisitedLocation(Vector3 exclude)
+        {
+            KnownLocation best = null;
+            foreach (var loc in m_locations)
+            {
+                if (loc.IsSameLocation(exclude)) continue;
+                if (best == null || loc.LastVisitedAt > best.LastVisitedAt)
+                    best = loc;
+            }
+
+            return best;
         }
 
         /// <summary>

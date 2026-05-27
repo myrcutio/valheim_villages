@@ -1,3 +1,4 @@
+using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Behaviors.Crafting;
 using ValheimVillages.Behaviors.Farming;
@@ -13,7 +14,7 @@ namespace ValheimVillages.Behaviors.Work
     ///     Tag: "craft", Priority: 50.
     /// </summary>
     [RegisterBehavior("craft")]
-    public class CraftingBehaviorAdapter : IBehavior, IWorkScanBehavior
+    public class CraftingBehaviorAdapter : IBehavior, IWorkScanBehavior, IPathUnreachableHandler
     {
         private readonly VillagerAI m_ai;
 
@@ -42,6 +43,13 @@ namespace ValheimVillages.Behaviors.Work
         public void OnArrival(float dt)
         {
             Crafting?.HandleWorkArrival(dt);
+        }
+
+        public void OnPathUnreachable(Vector3 target)
+        {
+            Plugin.Log?.LogWarning(
+                $"[Work:{m_ai?.NpcName ?? "?"}] Path unreachable to {target}; abandoning work.");
+            Crafting?.AbandonWorkPublic("path unreachable after recovery attempts");
         }
 
         public string GetStatusText()

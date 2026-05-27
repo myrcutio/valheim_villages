@@ -32,10 +32,11 @@
     "Carpenter"
   ],
   "interdependenceDescription": "Adds level to Miner for tin; requires Miner for ore; Carpenter improves tools",
-  "stationName": "",
+  "stationName": "$vv_blacksmith",
   "stationIcon": "Hammer",
   "workStations": [
-    "$piece_forge"
+    "$piece_forge",
+    "$vv_blacksmith"
   ],
   "behaviors": [
     "craft"
@@ -43,7 +44,8 @@
   "tags": [
     "tab:info",
     "tab:debug",
-    "tab:workorder"
+    "tab:workorder",
+    "recipe:smelter"
   ],
   "randomTalk": [
     "The secret to good metalwork is hitting it until it's the right shape. Same applies to most problems, really.",

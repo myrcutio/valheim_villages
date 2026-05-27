@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -8,6 +9,7 @@ using ValheimVillages.Settings;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Work;
+using ValheimVillages.Villages;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
@@ -53,7 +55,17 @@ namespace ValheimVillages.TaskQueue.Handlers
                 // No work orders to do: ACK so the queue continues (no retry/dead-letter).
                 return TaskResult.Ok();
 
-            string lastFailReason = null;
+            if (!VillageStationRegistry.HasVillageFor(bedPos))
+            {
+                // No village registered yet — transient bootstrap state (e.g. partition hasn't
+                // completed after world load / hot reload). Don't surface as a Tasks-tab rejection;
+                // the next scan in WorkScanInterval seconds will retry once the village exists.
+                Plugin.Log?.LogInfo(
+                    $"[WorkOrderScan] {ai.NpcName} deferring scan — no village registered yet at bed {bedPos}");
+                return TaskResult.Ok();
+            }
+
+            var rejections = new List<RejectionRecord>();
             foreach (var match in allMatches)
             {
                 // Check existing output quantity
@@ -62,7 +74,15 @@ namespace ValheimVillages.TaskQueue.Handlers
 
                 if (existingCount >= match.MaxQuantity)
                 {
-                    lastFailReason = $"Already have {existingCount}/{match.MaxQuantity}";
+                    rejections.Add(new RejectionRecord
+                    {
+                        ItemPrefab = match.ItemPrefabName,
+                        Station = match.StationName,
+                        PhysicalStation = null,
+                        Reason = $"Already have {existingCount}/{match.MaxQuantity}",
+                        IsUnimplemented = false,
+                        WorkOrderPosition = match.SourceContainer.transform.position,
+                    });
                     continue;
                 }
 
@@ -70,7 +90,15 @@ namespace ValheimVillages.TaskQueue.Handlers
                 var recipe = StationMatcher.FindRecipeForNpc(match.ItemPrefabName, villagerType);
                 if (recipe == null)
                 {
-                    lastFailReason = $"No recipe for '{match.ItemPrefabName}'";
+                    rejections.Add(new RejectionRecord
+                    {
+                        ItemPrefab = match.ItemPrefabName,
+                        Station = match.StationName,
+                        PhysicalStation = null,
+                        Reason = $"No recipe for '{match.ItemPrefabName}'",
+                        IsUnimplemented = false,
+                        WorkOrderPosition = match.SourceContainer.transform.position,
+                    });
                     continue;
                 }
 
@@ -79,7 +107,15 @@ namespace ValheimVillages.TaskQueue.Handlers
                 if (!ContainerScanner.CanAcceptItem(
                         match.SourceContainer, match.ItemPrefabName, outputAmount))
                 {
-                    lastFailReason = "Output chest full";
+                    rejections.Add(new RejectionRecord
+                    {
+                        ItemPrefab = match.ItemPrefabName,
+                        Station = match.StationName,
+                        PhysicalStation = null,
+                        Reason = "Output chest full",
+                        IsUnimplemented = false,
+                        WorkOrderPosition = match.SourceContainer.transform.position,
+                    });
                     continue;
                 }
 
@@ -87,7 +123,15 @@ namespace ValheimVillages.TaskQueue.Handlers
                 var ingredients = ContainerScanner.FindIngredients(containers, recipe);
                 if (ingredients == null)
                 {
-                    lastFailReason = $"Missing ingredients for {match.ItemPrefabName}";
+                    rejections.Add(new RejectionRecord
+                    {
+                        ItemPrefab = match.ItemPrefabName,
+                        Station = match.StationName,
+                        PhysicalStation = null,
+                        Reason = $"Missing ingredients for {match.ItemPrefabName}",
+                        IsUnimplemented = false,
+                        WorkOrderPosition = match.SourceContainer.transform.position,
+                    });
                     continue;
                 }
 
@@ -103,7 +147,15 @@ namespace ValheimVillages.TaskQueue.Handlers
                         ai, match, recipe, ingredients, existingCount);
                     if (farmContext == null)
                     {
-                        lastFailReason = "No farm location in memory";
+                        rejections.Add(new RejectionRecord
+                        {
+                            ItemPrefab = match.ItemPrefabName,
+                            Station = match.StationName,
+                            PhysicalStation = physicalStation,
+                            Reason = "No farm location in memory",
+                            IsUnimplemented = false,
+                            WorkOrderPosition = match.SourceContainer.transform.position,
+                        });
                         continue;
                     }
 
@@ -122,18 +174,20 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
 
                 CookingStation cookingStationRef = null;
+                Smelter smelterRef = null;
+                string smelterInputName = null;
                 FuelNeed? fuelRequirement = null;
                 Container fuelContainer = null;
                 if (physicalStation == "cookingstation")
                 {
-                    if (StationFinder.TryFindStationAtKnownLocations<CookingStation>(
-                            ai, s => StationFinder.IsCookingStationReady(s), out var pos, out var station))
+                    if (VillageStationRegistry.TryFindStation<CookingStation>(
+                            bedPos, s => StationFinder.IsCookingStationReady(s), out var pos, out var station))
                     {
                         stationPos = pos;
                         cookingStationRef = station;
                     }
-                    else if (StationFinder.TryFindStationAtKnownLocations(
-                                 ai, null, out pos, out station))
+                    else if (VillageStationRegistry.TryFindStation<CookingStation>(
+                                 bedPos, null, out pos, out station))
                     {
                         if (StationFuelHelper.DiagnoseFuelNeed(station, out var need)
                             && StationFuelHelper.FindFuelInContainers(containers, need.FuelItemPrefab, out var fc))
@@ -158,9 +212,54 @@ namespace ValheimVillages.TaskQueue.Handlers
 
                     stationDesc = "CookingStation";
                 }
+                else if (!string.IsNullOrEmpty(physicalStation)
+                         && StationFinder.GetSmelterPrefab(physicalStation) != null)
+                {
+                    if (VillageStationRegistry.TryFindStation<Smelter>(
+                            bedPos,
+                            s => s != null && PrefabNameMatches(s.gameObject.name, physicalStation),
+                            out var pos,
+                            out var smelter))
+                    {
+                        if (StationFinder.IsSmelterReady(smelter))
+                        {
+                            stationPos = pos;
+                            smelterRef = smelter;
+                        }
+                        else if (StationFuelHelper.DiagnoseFuelNeed(smelter, out var need)
+                                 && StationFuelHelper.FindFuelInContainers(containers, need.FuelItemPrefab, out var fc))
+                        {
+                            stationPos = pos;
+                            smelterRef = smelter;
+                            // DiagnoseFuelNeed sets FuelTargetPosition to station.transform.position (the
+                            // smelter centroid, which we already established is unreachable). Replace it
+                            // with the resolved approach point so the fueling leg paths somewhere valid.
+                            need.FuelTargetPosition = pos;
+                            fuelRequirement = need;
+                            fuelContainer = fc;
+                            Plugin.Log?.LogInfo(
+                                $"[WorkOrderScan] Smelter ({physicalStation}) needs fuel ({need.FuelItemPrefab}), found in container. Will fuel before smelting.");
+                        }
+                        else
+                        {
+                            stationPos = null;
+                        }
+
+                        // Smelter input is the first recipe ingredient's prefab name (Smelter conversions are 1:1).
+                        if (smelterRef != null && recipe.m_resources != null && recipe.m_resources.Length > 0 &&
+                            recipe.m_resources[0].m_resItem != null)
+                            smelterInputName = recipe.m_resources[0].m_resItem.gameObject.name;
+                    }
+                    else
+                    {
+                        stationPos = null;
+                    }
+
+                    stationDesc = physicalStation;
+                }
                 else
                 {
-                    if (StationFinder.TryFindStationAtKnownLocations<CraftingStation>(ai,
+                    if (VillageStationRegistry.TryFindStation<CraftingStation>(bedPos,
                             cs => cs.m_name == match.StationName, out var pos, out _))
                         stationPos = pos;
                     else
@@ -170,7 +269,19 @@ namespace ValheimVillages.TaskQueue.Handlers
 
                 if (!stationPos.HasValue)
                 {
-                    lastFailReason = $"No station '{stationDesc}' in memory";
+                    var unimplemented = physicalStation != null
+                                        && physicalStation != "farm"
+                                        && physicalStation != "cookingstation"
+                                        && StationFinder.GetSmelterPrefab(physicalStation) == null;
+                    rejections.Add(new RejectionRecord
+                    {
+                        ItemPrefab = match.ItemPrefabName,
+                        Station = match.StationName,
+                        PhysicalStation = physicalStation,
+                        Reason = $"No station '{stationDesc}' in memory",
+                        IsUnimplemented = unimplemented,
+                        WorkOrderPosition = match.SourceContainer.transform.position,
+                    });
                     continue;
                 }
 
@@ -194,6 +305,11 @@ namespace ValheimVillages.TaskQueue.Handlers
                     CurrentIngredientIndex = 0,
                     FuelRequirement = fuelRequirement,
                     FuelContainer = fuelContainer,
+                    SmelterRef = smelterRef,
+                    SmelterInputItemName = smelterInputName,
+                    SmelterProcessedAtStart = 0,
+                    SmelterRemovalRequested = false,
+                    SmelterItemAlreadyInChest = false,
                 };
 
                 // Log the successful scan to the activity log
@@ -221,10 +337,62 @@ namespace ValheimVillages.TaskQueue.Handlers
             // ingredients missing, output full, etc.). This is a normal "no work to do"
             // state, NOT a retriable error: return Ok with no payload so the callback
             // fires and m_scanPending is cleared, allowing the next scan cycle.
-            Plugin.Log?.LogDebug(
-                $"[WorkOrderScan] No actionable work order for {villagerId}: " +
-                $"{lastFailReason ?? "all complete"}");
+            EmitRejections(rejections, ai, activityLog, villagerId);
+
             return TaskResult.Ok();
+        }
+
+        private void EmitRejections(
+            List<RejectionRecord> rejections,
+            VillagerAI ai,
+            VillagerActivityLog activityLog,
+            string villagerId)
+        {
+            if (rejections.Count == 0) return;
+
+            var anyUnimplemented = rejections.Any(r => r.IsUnimplemented);
+            var lines = rejections.Select(r =>
+            {
+                var stationDisplay = r.PhysicalStation ?? r.Station;
+                return $"  {r.ItemPrefab} [{stationDisplay}] — {r.Reason}";
+            });
+            var summary = $"[WorkOrderScan] {ai.NpcName} blocked on {rejections.Count} orders:\n"
+                          + string.Join("\n", lines);
+
+            if (anyUnimplemented)
+                Plugin.Log?.LogWarning(summary);
+            else
+                Plugin.Log?.LogInfo(summary);
+
+            foreach (var r in rejections)
+            {
+                var stationDisplay = r.PhysicalStation ?? r.Station;
+                activityLog.RecordBlocked(villagerId, TaskName, r.ItemPrefab, stationDisplay, r.Reason, r.WorkOrderPosition);
+            }
+        }
+
+        private struct RejectionRecord
+        {
+            public string ItemPrefab;
+            public string Station;
+            public string PhysicalStation;
+            public string Reason;
+            public bool IsUnimplemented;
+            public Vector3 WorkOrderPosition;
+        }
+
+        /// <summary>
+        ///     Match a GameObject instance name against a prefab name. Instances carry a
+        ///     "(Clone)" suffix (e.g. "smelter(Clone)") while physicalStation strings come from
+        ///     prefab discovery without the suffix.
+        /// </summary>
+        private static bool PrefabNameMatches(string instanceName, string prefabName)
+        {
+            if (string.IsNullOrEmpty(instanceName) || string.IsNullOrEmpty(prefabName)) return false;
+            if (instanceName == prefabName) return true;
+            var cloneIdx = instanceName.IndexOf("(Clone)", StringComparison.Ordinal);
+            if (cloneIdx > 0) instanceName = instanceName.Substring(0, cloneIdx);
+            return instanceName == prefabName;
         }
     }
 }

@@ -59,20 +59,19 @@ namespace ValheimVillages.Behaviors.Patrol
             IsDiscoveryComplete = false;
             IsHnaRoute = false;
             m_hnaPartitionRequested = false;
-            VillageAreaManager.UnregisterArea(m_ai.UniqueId);
+            VillageAreaManager.UnregisterArea(GetVillageKey());
             SaveState();
             m_ai.SetState(BehaviorState.Idle);
             StartDiscovery();
         }
 
-        /// <summary>Restores state from ZDO data. Re-registers village area.</summary>
+        /// <summary>Restores state from ZDO data.</summary>
         public void RestoreState(List<VillagerWaypoint> waypoints, int wpIndex, bool isHna = false)
         {
             m_patrolWaypoints = waypoints;
             m_currentWaypointIndex = wpIndex % (waypoints?.Count ?? 1);
             IsDiscoveryComplete = true;
             IsHnaRoute = isHna;
-            RegisterVillageArea();
             Plugin.Log?.LogInfo(
                 $"[Patrol:{m_ai.NpcName}] Restored {m_patrolWaypoints.Count} waypoints" +
                 $" (hna={isHna}), index={m_currentWaypointIndex}");
@@ -170,7 +169,6 @@ namespace ValheimVillages.Behaviors.Patrol
             m_currentWaypointIndex = 0;
             IsDiscoveryComplete = true;
 
-            RegisterVillageArea();
             SaveState();
 
             var zdo = m_ai?.NView?.GetZDO();
@@ -190,14 +188,6 @@ namespace ValheimVillages.Behaviors.Patrol
                 $"Player=({playerPos.x:F1},{playerPos.y:F1},{playerPos.z:F1})");
 
             AdvanceToNextWaypoint();
-        }
-
-        private void RegisterVillageArea()
-        {
-            if (m_patrolWaypoints == null || ActiveWaypointCount == 0) return;
-            var positions = m_patrolWaypoints.Where(w => w.Active).Select(w => w.Position).ToList();
-            var area = new VillageArea(m_ai.UniqueId, m_ai.Memory.BedPosition, positions);
-            VillageAreaManager.RegisterArea(area);
         }
 
         private void SaveState()
@@ -246,7 +236,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 var lastEntry = circuitWps[circuitWps.Count - 1];
                 m_currentWaypointIndex = lastEntry.index;
                 m_ai.SetPatrolCircuit(lastEntry.wp, fullPath);
-                Plugin.Log?.LogInfo(
+                Plugin.Log?.LogDebug(
                     $"[Patrol:{m_ai.NpcName}] Circuit built: {circuitWps.Count} waypoints, " +
                     $"{fullPath.Count} path nodes, final=W{lastEntry.index}");
             }

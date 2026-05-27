@@ -4,49 +4,33 @@ using System.Globalization;
 using System.IO;
 using BepInEx;
 using UnityEngine;
-using ValheimVillages.Attributes;
 using ValheimVillages.Behaviors.Patrol;
-using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
 using ValheimVillages.Villager.AI.Navigation;
-using ValheimVillages.Villager.AI.Pathfinding;
 
 namespace ValheimVillages.UI.Panels
 {
     /// <summary>
-    ///     List panel showing the village map visualization in the Debug tab.
-    ///     Discovered via NPC tag "listpanel:villagemap".
-    ///     Shows for any villager with the patrol behavior.
+    ///     Helper for rendering per-task maps in the Tasks tab. Composes the patrol
+    ///     map renderer with HNA region cells, optional ground-truth path, and
+    ///     task-specific pins (e.g. work-order chest locations).
     /// </summary>
-    [RegisterListPanel("villagemap", "debug")]
-    public class VillageMapPanel : IListPanelUI
+    public static class VillageMapPanel
     {
         private static List<Vector3> s_groundTruthPath;
         private static bool s_groundTruthLoaded;
 
-        private Texture2D m_cachedMapTexture;
-        private int m_mapWaypointHash;
-        public string Tag => "villagemap";
-        public string ParentTab => "debug";
-
-        public List<TabListItemUI> GetListItems(VillagerBehaviorBridge villager)
+        /// <summary>
+        ///     Render a per-task map for a villager, with optional extra pins for task-relevant locations.
+        ///     Returns null if no useful map can be drawn.
+        /// </summary>
+        public static Texture2D RenderForTask(
+            VillagerBehaviorBridge villager,
+            IReadOnlyList<(Vector3 position, Color color)> extraPins)
         {
-            var items = new List<TabListItemUI>();
-
-            if (villager.villagerInstance) items.Add(new TabListItemUI { TabName = "Village Map" });
-            return items;
-        }
-
-        public TabDetailDataUI GetDetail(int index, VillagerBehaviorBridge villager)
-        {
-            var patrol = villager.AI?.GetBehavior<PerimeterPatrolBehavior>();
-            if (patrol == null) return null;
-
-            var waypoints = patrol.PatrolWaypoints;
-            var count = waypoints?.Count ?? 0;
+            if (villager == null) return null;
 
             List<Vector3> floodFillCells = null;
-            var regionCount = 0;
             foreach (var graph in RegionGraph.GetAll())
             {
                 var centers = graph.GetAllRegionCenters();
@@ -54,61 +38,25 @@ namespace ValheimVillages.UI.Panels
                 {
                     if (floodFillCells == null) floodFillCells = new List<Vector3>();
                     floodFillCells.AddRange(centers);
-                    regionCount += graph.RegionCount;
                 }
             }
 
             var groundTruth = LoadGroundTruth();
+            var bedPosition = villager.AI?.Villager?.BedPosition ?? Vector3.zero;
+            var villagerPosition = villager.transform != null ? villager.transform.position : (Vector3?)null;
+            var patrol = villager.AI?.GetBehavior<PerimeterPatrolBehavior>();
+            var waypoints = patrol?.PatrolWaypoints;
 
-            var hash = ComputeWaypointHash(waypoints, floodFillCells?.Count ?? 0, groundTruth?.Count ?? 0);
-            if (m_cachedMapTexture == null || hash != m_mapWaypointHash)
-            {
-                m_mapWaypointHash = hash;
-                m_cachedMapTexture = PatrolMapRenderer.Render(
-                    waypoints, patrol.BedPosition, villager.transform.position,
-                    floodFillCells, groundTruth);
-            }
-
-            var activeCount = patrol.ActiveWaypointCount;
-            var inactiveCount = count - activeCount;
-
-            var source = patrol.IsHnaRoute ? "HNA boundary" : "Discovery";
-            var desc = patrol.IsDiscoveryComplete
-                ? $"{activeCount} active waypoints | {source}"
-                : $"{activeCount} active waypoints | Mapping...";
-            if (inactiveCount > 0)
-                desc += $"\n{inactiveCount} inactive (pruned)";
-            if (regionCount > 0)
-                desc += $"\nHNA cells: {regionCount}";
-            if (groundTruth != null)
-                desc += $"\nGround truth: {groundTruth.Count} points (magenta)";
-            desc += $"\nBed: ({patrol.BedPosition.x:F0}, {patrol.BedPosition.z:F0})";
-
-            return new TabDetailDataUI
-            {
-                Title = "Village Map",
-                Description = desc,
-                MapTexture = m_cachedMapTexture,
-                ActionText = "Remap",
-                OnAction = () =>
-                {
-                    patrol.ResetDiscovery();
-                    ClearMapCache();
-                    Player.m_localPlayer?.Message(
-                        MessageHud.MessageType.TopLeft,
-                        "Villager will re-map the village");
-                    InventoryGui.instance?.Hide();
-                },
-            };
+            return PatrolMapRenderer.Render(
+                waypoints,
+                bedPosition,
+                villagerPosition,
+                floodFillCells,
+                groundTruth,
+                extraPins: extraPins);
         }
 
-        public void ClearMapCache()
-        {
-            m_cachedMapTexture = null;
-            m_mapWaypointHash = 0;
-        }
-
-        private static List<Vector3> LoadGroundTruth()
+        public static List<Vector3> LoadGroundTruth()
         {
             if (s_groundTruthLoaded) return s_groundTruthPath;
 
@@ -186,23 +134,6 @@ namespace ValheimVillages.UI.Panels
             }
 
             return result;
-        }
-
-        private static int ComputeWaypointHash(
-            IReadOnlyList<VillagerWaypoint> waypoints, int floodFillCount, int groundTruthCount)
-        {
-            var hash = floodFillCount * 7919 + groundTruthCount * 6271;
-            if (waypoints == null || waypoints.Count == 0) return hash;
-            hash += waypoints.Count;
-            for (var i = 0; i < waypoints.Count; i++)
-            {
-                var p = waypoints[i].Position;
-                hash = hash * 31 + p.x.GetHashCode();
-                hash = hash * 31 + p.z.GetHashCode();
-                hash = hash * 31 + (waypoints[i].Active ? 1 : 0);
-            }
-
-            return hash;
         }
     }
 }

@@ -19,6 +19,21 @@ namespace ValheimVillages.Villager.AI.Navigation
         private const float AttemptCooldown = 5f;
 
         /// <summary>
+        ///     Layer mask for the island-bridge capsule-validation check.
+        ///     Includes the physical piece layers (matches the bake source
+        ///     collection) PLUS layer 23 (blocker) and layer 24 (pathblocker)
+        ///     which Valheim uses for AI/path-hint colliders on prefabs like
+        ///     cooking stations (collider_block) and fire pits
+        ///     (Pathfinding_blocker). Those layers are NOT in the bake mask,
+        ///     so the NavMesh doesn't carve them — but they represent the
+        ///     game's intent that NPCs avoid those volumes. Including them
+        ///     here rejects bridges that would route NPCs through fires or
+        ///     onto stations they shouldn't traverse.
+        /// </summary>
+        private static readonly int s_pieceMaskForLinkValidation =
+            LayerMask.GetMask("Default", "static_solid", "piece", "blocker", "pathblocker");
+
+        /// <summary>
         ///     Minimum vertical Δy between a RegionLink's endpoints for it
         ///     to be materialized as a NavMeshLink. Below this, the link is
         ///     skipped because flat-adjacent regions are already connected
@@ -222,6 +237,26 @@ namespace ValheimVillages.Villager.AI.Navigation
                     { skippedNoSnap++; continue; }
                     if (!NavMesh.SamplePosition(link.PositionEnd, out var endHit, 1.0f, filter))
                     { skippedNoSnap++; continue; }
+                    // Same agent-body capsule sweep we apply to island
+                    // bridges: reject RegionGraph links whose straight-line
+                    // path is blocked by piece geometry. Without this, a
+                    // RegionGraph link can describe a slope/stair connection
+                    // whose endpoint snaps put it across a column or wall,
+                    // producing a path[0] the agent can't physically walk
+                    // to. Logs the rejection under the same "Rejecting
+                    // ..." banner so triage stays consistent.
+                    if (!IsLinkGeometricallyTraversable(
+                            startHit.position, endHit.position, out var blockReason))
+                    {
+                        Plugin.Log?.LogInfo(
+                            $"[NavMeshLink] Rejecting RegionGraph link " +
+                            $"({startHit.position.x:F1},{startHit.position.y:F1},{startHit.position.z:F1}) → " +
+                            $"({endHit.position.x:F1},{endHit.position.y:F1},{endHit.position.z:F1}): " +
+                            $"{blockReason}");
+                        skippedInvalid++;
+                        continue;
+                    }
+
                     if (TryAddLink(startHit.position, endHit.position, agentTypeID))
                         placed++;
                     else
@@ -233,9 +268,49 @@ namespace ValheimVillages.Villager.AI.Navigation
                     $"[NavMeshLink] PlaceRegionGraphLinks: {placed} placed, " +
                     $"{skippedFlat} skipped (flat, Δy<{MinVerticalDeltaForLink:F2}m — NavMesh continuous), " +
                     $"{skippedNoSnap} skipped (no agent navmesh within 1m of centroid), " +
-                    $"{skippedInvalid} skipped (NavMesh.AddLink invalid) " +
+                    $"{skippedInvalid} skipped (NavMesh.AddLink invalid OR capsule check blocked) " +
                     $"of {totalLinks} formal links");
             return placed;
+        }
+
+        /// <summary>
+        ///     Shared geometric validation for every NavMeshLink we place
+        ///     (island bridges and RegionGraph links alike). Sweeps the
+        ///     full agent body capsule (bottom 0.5m to top 1.35m above
+        ///     link-Y, radius 0.4m) from <paramref name="linkA" /> to
+        ///     <paramref name="linkB" /> against the piece /
+        ///     blocker / pathblocker layers. Returns false when something
+        ///     sits between the endpoints — those links describe a path
+        ///     CalculatePath would gladly take but that the character's
+        ///     capsule physically can't traverse (column between, wall
+        ///     between, cooking-station blocker volume, fire pit's
+        ///     pathblocker, etc).
+        /// </summary>
+        private static bool IsLinkGeometricallyTraversable(
+            Vector3 linkA, Vector3 linkB, out string blockReason)
+        {
+            blockReason = string.Empty;
+            const float bodyBottomLift = 0.5f;
+            const float bodyTopLift = 1.35f;
+            const float bodyRadius = 0.4f;
+
+            var bottomCap = linkA + Vector3.up * bodyBottomLift;
+            var topCap = linkA + Vector3.up * bodyTopLift;
+            var sweepDir = linkB - linkA;
+            var sweepDist = sweepDir.magnitude;
+            if (sweepDist < 0.001f) return true;
+
+            if (!Physics.CapsuleCast(
+                    bottomCap, topCap, bodyRadius,
+                    sweepDir / sweepDist, out var sweepHit, sweepDist,
+                    s_pieceMaskForLinkValidation, QueryTriggerInteraction.Ignore))
+                return true;
+
+            var hitName = sweepHit.collider != null ? sweepHit.collider.name : "(null)";
+            var hitLayer = sweepHit.collider != null ? sweepHit.collider.gameObject.layer : -1;
+            blockReason =
+                $"agent-body capsule hit '{hitName}' (layer {hitLayer}) at dist {sweepHit.distance:F2}m";
+            return false;
         }
 
         /// <summary>
@@ -412,6 +487,18 @@ namespace ValheimVillages.Villager.AI.Navigation
                     continue;
                 }
 
+                // Reject bridges whose straight-line path passes through
+                // piece / static_solid / blocker geometry. Shared with
+                // PlaceRegionGraphLinks via IsLinkGeometricallyTraversable.
+                if (!IsLinkGeometricallyTraversable(linkA, linkB, out var bridgeBlockReason))
+                {
+                    Plugin.Log?.LogInfo(
+                        $"[NavMeshLink] Rejecting island bridge {i}-{j}: " +
+                        $"between ({linkA.x:F1},{linkA.y:F1},{linkA.z:F1}) and " +
+                        $"({linkB.x:F1},{linkB.y:F1},{linkB.z:F1}): {bridgeBlockReason}");
+                    continue;
+                }
+
                 if (TryAddLink(linkA, linkB, agentTypeID))
                     placed++;
             }
@@ -439,8 +526,18 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (fwd.sqrMagnitude < 0.01f) continue;
                 fwd.Normalize();
 
-                var sideA = pos - fwd * DoorProbeOffset;
-                var sideB = pos + fwd * DoorProbeOffset;
+                // Probe offset scales with the bake radius buffer: when the
+                // bake inflates agent radius (NavMeshBakeRadiusBuffer), the
+                // NavMesh sits further off the doorway's collider on either
+                // side. Sampling at the original 0.5m leaves the probe
+                // point inside the carved-out zone and SamplePosition has
+                // to drift further to find walkable NavMesh, producing
+                // link endpoints that miss the doorway's actual entry
+                // points. Adding the buffer keeps the probe at the
+                // inflated NavMesh boundary.
+                var probeOffset = DoorProbeOffset + VillagerSettings.NavMeshBakeRadiusBuffer;
+                var sideA = pos - fwd * probeOffset;
+                var sideB = pos + fwd * probeOffset;
 
                 if (!NavMesh.SamplePosition(sideA, out var hitA, 2f, filter)) continue;
                 if (!NavMesh.SamplePosition(sideB, out var hitB, 2f, filter)) continue;

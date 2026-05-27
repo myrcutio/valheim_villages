@@ -107,8 +107,13 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         /// <summary>
         ///     Proactively opens doors that lie along the NPC's current path.
-        ///     Checks each upcoming waypoint against NavMeshLinkPlacer's door link registry
-        ///     and opens any closed door the NPC is approaching.
+        ///     A door is opened only when at least one path segment (from the
+        ///     NPC's current position through the next few waypoints)
+        ///     actually crosses the door's perpendicular plane within the
+        ///     doorway opening. The old "any waypoint near door midpoint"
+        ///     check opened doors that the path merely passed near but
+        ///     didn't go through — visible as villagers opening doors as
+        ///     they walked parallel to a wall.
         /// </summary>
         public void OpenDoorsAlongPath(List<Vector3> path)
         {
@@ -116,7 +121,16 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (doorLinks.Count == 0 || path == null || path.Count == 0) return;
 
             var npcPos = transform.position;
+            // Only consider doors the NPC is close enough to interact with;
+            // far-away doors would be opened way ahead of time.
             const float approachRadius = 2.5f;
+            // Half-width of the doorway opening — the crossing point must
+            // fall within this radius of the door's center to count as
+            // "through the door" rather than "near the door".
+            const float doorwayHalfWidth = 0.8f;
+            // Number of upcoming path segments to test. Includes the
+            // current-position -> path[0] segment.
+            const int maxSegmentsToTest = 4;
 
             foreach (var (midpoint, door) in doorLinks)
             {
@@ -126,21 +140,63 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var distToNpc = Vector3.Distance(npcPos, midpoint);
                 if (distToNpc > approachRadius) continue;
 
-                var pathGoesThrough = false;
-                for (var i = 0; i < path.Count && i < 4; i++)
+                var doorFwd = door.transform.forward;
+                doorFwd.y = 0f;
+                if (doorFwd.sqrMagnitude < 0.01f) continue;
+                doorFwd.Normalize();
+
+                var pathCrossesDoor = false;
+                var segStart = npcPos;
+                for (var i = 0; i < path.Count && i < maxSegmentsToTest; i++)
                 {
-                    var distToWaypoint = Vector3.Distance(path[i], midpoint);
-                    if (distToWaypoint < approachRadius)
+                    var segEnd = path[i];
+                    if (SegmentCrossesDoor(segStart, segEnd, midpoint, doorFwd, doorwayHalfWidth))
                     {
-                        pathGoesThrough = true;
+                        pathCrossesDoor = true;
                         break;
                     }
+
+                    segStart = segEnd;
                 }
 
-                if (!pathGoesThrough) continue;
+                if (!pathCrossesDoor) continue;
 
                 OpenDoor(door);
             }
+        }
+
+        /// <summary>
+        ///     True iff the line segment from <paramref name="a" /> to
+        ///     <paramref name="b" /> crosses the door's perpendicular plane
+        ///     (passes from one side of <paramref name="doorForward" /> to
+        ///     the other) AND the crossing point lies within
+        ///     <paramref name="doorwayHalfWidth" /> of the door midpoint
+        ///     horizontally.
+        /// </summary>
+        private static bool SegmentCrossesDoor(
+            Vector3 a, Vector3 b, Vector3 doorMidpoint, Vector3 doorForward, float doorwayHalfWidth)
+        {
+            var aDot = Vector3.Dot(a - doorMidpoint, doorForward);
+            var bDot = Vector3.Dot(b - doorMidpoint, doorForward);
+
+            // Same-sign means both endpoints are on the same side of the
+            // door plane; no crossing.
+            if ((aDot >= 0f) == (bDot >= 0f)) return false;
+
+            // Parameterize the crossing point along a -> b. aDot / (aDot - bDot)
+            // is the t-value where the forward-axis projection equals zero
+            // (i.e. the segment crosses the door plane).
+            var denom = aDot - bDot;
+            if (Mathf.Abs(denom) < 1e-5f) return false;
+            var t = aDot / denom;
+            var cross = Vector3.Lerp(a, b, t);
+
+            // Distance from the crossing point to the door midpoint,
+            // ignoring vertical so a door at Y=1 isn't gated by floor-level
+            // crossings being a bit below.
+            var dx = cross.x - doorMidpoint.x;
+            var dz = cross.z - doorMidpoint.z;
+            return dx * dx + dz * dz <= doorwayHalfWidth * doorwayHalfWidth;
         }
 
         /// <summary>

@@ -63,6 +63,15 @@ namespace ValheimVillages.Behaviors.Crafting
             && !m_context.CookingRemovalRequested;
 
         /// <summary>
+        ///     True when we're in Crafting state at a Smelter, waiting for its output queue to advance
+        ///     (so we can poll on a short interval).
+        /// </summary>
+        public bool IsWaitingForSmelter =>
+            SubState == WorkSubState.Crafting
+            && m_context?.SmelterRef != null
+            && !m_context.SmelterRemovalRequested;
+
+        /// <summary>
         ///     Set the farming behavior for this worker. Called by VillagerAI for Farmer NPCs.
         /// </summary>
         public void SetFarmingBehavior(FarmingBehavior fb)
@@ -191,6 +200,7 @@ namespace ValheimVillages.Behaviors.Crafting
 
             // Cooking station: poll for done items instead of using a fixed timer
             if (TryPollCookingStation()) return;
+            if (TryPollSmelter()) return;
 
             // Fixed timer for non-cooking stations
             var elapsed = Time.time - m_context.CraftStartTime;

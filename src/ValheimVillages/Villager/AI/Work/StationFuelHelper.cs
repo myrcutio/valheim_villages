@@ -13,6 +13,7 @@ namespace ValheimVillages.Villager.AI.Work
         public string FuelItemPrefab;
         public Fireplace FireplaceRef;
         public CookingStation CookingStationRef;
+        public Smelter SmelterRef;
         public bool NeedsFireUnderneath;
         public bool NeedsInternalFuel;
     }
@@ -64,6 +65,25 @@ namespace ValheimVillages.Villager.AI.Work
                 return false;
             }
 
+            return !string.IsNullOrEmpty(need.FuelItemPrefab);
+        }
+
+        /// <summary>
+        ///     Determines whether a Smelter needs internal fueling. Smelters with no m_fuelItem
+        ///     (charcoal_kiln, windmill, piece_spinningwheel) never need separate fuel — Wood/Barley/Flax
+        ///     is the input and there's no parallel fuel slot.
+        /// </summary>
+        public static bool DiagnoseFuelNeed(Smelter station, out FuelNeed need)
+        {
+            need = default;
+            if (station == null) return false;
+            if (station.m_fuelItem == null) return false;
+            if (StationFinder.GetSmelterFuel(station) > 0f) return false;
+
+            need.SmelterRef = station;
+            need.NeedsInternalFuel = true;
+            need.FuelTargetPosition = station.transform.position;
+            need.FuelItemPrefab = station.m_fuelItem.gameObject?.name;
             return !string.IsNullOrEmpty(need.FuelItemPrefab);
         }
 

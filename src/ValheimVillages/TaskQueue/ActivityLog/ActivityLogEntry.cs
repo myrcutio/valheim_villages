@@ -29,5 +29,16 @@ namespace ValheimVillages.TaskQueue.ActivityLog
 
         /// <summary>Villager GUID that this action relates to.</summary>
         public string VillagerId;
+
+        // Populated only for Action == "blocked" entries (work-order scan rejections).
+        public string ItemPrefab;
+        public string StationName;
+        public string Reason;
+
+        // Populated only for Action == "blocked" entries where a chest location is known
+        // (e.g. missing ingredients, output chest full). All three set together or all null.
+        public float? WorkOrderPosX;
+        public float? WorkOrderPosY;
+        public float? WorkOrderPosZ;
     }
 }

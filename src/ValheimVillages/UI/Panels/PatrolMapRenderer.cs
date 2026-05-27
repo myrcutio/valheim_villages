@@ -38,7 +38,8 @@ namespace ValheimVillages.UI.Panels
             Vector3? patrollerPosition,
             List<Vector3> floodFillCells = null,
             List<Vector3> groundTruthPath = null,
-            float cellSize = 3f)
+            float cellSize = 3f,
+            IReadOnlyList<(Vector3 position, Color color)> extraPins = null)
         {
             var activeCount = 0;
             if (waypoints != null)
@@ -48,10 +49,11 @@ namespace ValheimVillages.UI.Panels
 
             if (waypoints == null || activeCount < 3)
                 if ((floodFillCells == null || floodFillCells.Count == 0) &&
-                    (groundTruthPath == null || groundTruthPath.Count == 0))
+                    (groundTruthPath == null || groundTruthPath.Count == 0) &&
+                    (extraPins == null || extraPins.Count == 0))
                     return RenderEmpty();
 
-            ComputeBounds(waypoints, bedPosition, floodFillCells, groundTruthPath, out var min, out var max);
+            ComputeBounds(waypoints, bedPosition, floodFillCells, groundTruthPath, extraPins, out var min, out var max);
 
             var worldW = max.x - min.x;
             var worldH = max.y - min.y;
@@ -84,6 +86,13 @@ namespace ValheimVillages.UI.Panels
                 DrawCircle(tex, bedPx, BedDotRadius, BedColor);
             }
 
+            if (extraPins != null)
+                foreach (var pin in extraPins)
+                {
+                    var pinPx = WorldToPixel(pin.position, min, worldW, worldH);
+                    DrawCircle(tex, pinPx, BedDotRadius, pin.color);
+                }
+
             tex.Apply();
             return tex;
         }
@@ -102,6 +111,7 @@ namespace ValheimVillages.UI.Panels
         private static void ComputeBounds(
             IReadOnlyList<VillagerWaypoint> waypoints, Vector3 bed,
             List<Vector3> floodFillCells, List<Vector3> groundTruthPath,
+            IReadOnlyList<(Vector3 position, Color color)> extraPins,
             out Vector2 min, out Vector2 max)
         {
             float minX = bed.x, maxX = bed.x;
@@ -131,6 +141,16 @@ namespace ValheimVillages.UI.Panels
                 for (var i = 0; i < groundTruthPath.Count; i++)
                 {
                     var p = groundTruthPath[i];
+                    if (p.x < minX) minX = p.x;
+                    if (p.x > maxX) maxX = p.x;
+                    if (p.z < minZ) minZ = p.z;
+                    if (p.z > maxZ) maxZ = p.z;
+                }
+
+            if (extraPins != null)
+                for (var i = 0; i < extraPins.Count; i++)
+                {
+                    var p = extraPins[i].position;
                     if (p.x < minX) minX = p.x;
                     if (p.x > maxX) maxX = p.x;
                     if (p.z < minZ) minZ = p.z;

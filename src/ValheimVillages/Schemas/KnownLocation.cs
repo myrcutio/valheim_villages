@@ -19,6 +19,14 @@ namespace ValheimVillages.Schemas
         public float ComfortValue { get; set; }
 
         /// <summary>
+        ///     In-memory only (NOT persisted to ZDO). Time.time when the
+        ///     villager last arrived at this location. Drives the
+        ///     unreachable-target recovery flow's "retreat to most recent
+        ///     known POI" choice. Zero means never visited this session.
+        /// </summary>
+        public float LastVisitedAt { get; set; }
+
+        /// <summary>
         ///     Check if this is the exact same spot (within 2m).
         /// </summary>
         public bool IsSameLocation(Vector3 other)

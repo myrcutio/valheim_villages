@@ -20,20 +20,44 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             var villageKey = RegionGraph.VillageKey(bedPosition);
             var graph = RegionGraph.Get(villageKey);
-            if (graph == null || !graph.IsAvailable)
-                return new List<Vector3>();
+            return ComputeBoundaryWaypoints(graph, bedPosition);
+        }
+
+        /// <summary>
+        ///     Overload that takes a <see cref="RegionGraph" /> directly so callers without a
+        ///     bed position (e.g. <c>RegionPartitionHandler</c>) can build waypoints. Derives
+        ///     the polygon center from the graph's boundary cells.
+        /// </summary>
+        public static List<Vector3> ComputeBoundaryWaypoints(RegionGraph graph)
+        {
+            if (graph == null || !graph.IsAvailable) return new List<Vector3>();
+
+            var boundaryCells = graph.GetBoundaryCells();
+            if (boundaryCells.Count < 3) return new List<Vector3>();
+
+            // Centroid of boundary cells — the geometric center of the polygon,
+            // matching the role bedPosition plays in the legacy overload.
+            Vector3 sum = Vector3.zero;
+            foreach (var (_, c, _) in boundaryCells) sum += c;
+            var center = sum / boundaryCells.Count;
+            return ComputeBoundaryWaypoints(graph, center);
+        }
+
+        private static List<Vector3> ComputeBoundaryWaypoints(RegionGraph graph, Vector3 center)
+        {
+            if (graph == null || !graph.IsAvailable) return new List<Vector3>();
 
             var boundaryCells = graph.GetBoundaryCells();
             if (boundaryCells.Count < 3)
                 return new List<Vector3>();
 
             var waypoints = new List<Vector3>(boundaryCells.Count);
-            foreach (var (_, center, _) in boundaryCells)
-                waypoints.Add(center);
+            foreach (var (_, cellCenter, _) in boundaryCells)
+                waypoints.Add(cellCenter);
 
             LogYRange("raw centroids", waypoints);
 
-            BoundaryGeometry.SortClockwise(waypoints, bedPosition);
+            BoundaryGeometry.SortClockwise(waypoints, center);
 
             var filter = new NavMeshQueryFilter
             {
@@ -41,7 +65,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 areaMask = NavMesh.AllAreas,
             };
             var preCount = waypoints.Count;
-            waypoints = WaypointRelaxation.Refine(waypoints, bedPosition, filter, graph);
+            waypoints = WaypointRelaxation.Refine(waypoints, center, filter, graph);
             LogYRange("after Refine", waypoints);
 
             var linkInserted = InsertLinkWaypoints(waypoints, filter, graph);

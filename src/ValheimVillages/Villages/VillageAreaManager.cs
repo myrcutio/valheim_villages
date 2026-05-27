@@ -1,13 +1,16 @@
 using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Attributes;
+using ValheimVillages.Behaviors.Patrol;
+using ValheimVillages.Villager.AI.Navigation;
 
 namespace ValheimVillages.Villages
 {
     /// <summary>
-    ///     Static manager for all active village areas.
-    ///     Patrollers register their patrol polygons here after completing a circuit.
-    ///     Spawn protection and enemy avoidance patches query this manager.
+    ///     Static manager for all active village areas. Areas are published by
+    ///     <see cref="RefreshFromRegionGraph" /> the moment HNA partitioning completes,
+    ///     independent of any patroller. Spawn protection and enemy avoidance patches
+    ///     query this manager.
     /// </summary>
     public static class VillageAreaManager
     {
@@ -18,25 +21,55 @@ namespace ValheimVillages.Villages
         /// </summary>
         public static int AreaCount => s_areas.Count;
 
+        /// <summary>Read-only enumeration of all registered village areas.</summary>
+        public static IEnumerable<VillageArea> AllAreas => s_areas.Values;
+
         /// <summary>
-        ///     Register a village area (keyed by patroller's unique ID).
-        ///     Replaces any existing area for the same patroller.
+        ///     Register a village area (keyed by HNA village key).
+        ///     Replaces any existing area for the same village.
         /// </summary>
         public static void RegisterArea(VillageArea area)
         {
             if (area == null) return;
-            s_areas[area.PatrollerId] = area;
+            s_areas[area.VillageKey] = area;
             Plugin.Log?.LogInfo(
-                $"[VillageArea] Registered area for patroller {area.PatrollerId} with {area.Waypoints.Count} waypoints");
+                $"[VillageArea] Registered area for {area.VillageKey} with {area.Waypoints.Count} waypoints");
+            VillageStationRegistry.RefreshFor(area);
         }
 
         /// <summary>
-        ///     Remove a village area by patroller ID.
+        ///     Remove a village area by village key.
         /// </summary>
-        public static void UnregisterArea(string patrollerId)
+        public static void UnregisterArea(string villageKey)
         {
-            if (s_areas.Remove(patrollerId))
-                Plugin.Log?.LogInfo($"[VillageArea] Unregistered area for patroller {patrollerId}");
+            if (s_areas.Remove(villageKey))
+            {
+                Plugin.Log?.LogInfo($"[VillageArea] Unregistered area for {villageKey}");
+                VillageStationRegistry.RemoveFor(villageKey);
+            }
+        }
+
+        /// <summary>
+        ///     Build (or replace) the VillageArea for the given region graph using its boundary cells.
+        ///     Called by RegionPartitionHandler after a partition completes — the village exists the moment
+        ///     HNA finishes, independent of any patroller.
+        /// </summary>
+        public static void RefreshFromRegionGraph(RegionGraph graph)
+        {
+            if (graph == null || !graph.IsAvailable) return;
+
+            var key = graph.RegisteredVillageKey;
+            if (string.IsNullOrEmpty(key)) return;
+
+            var waypoints = BoundaryMapper.ComputeBoundaryWaypoints(graph);
+            if (waypoints == null || waypoints.Count < 3)
+            {
+                Plugin.Log?.LogInfo(
+                    $"[VillageArea] Skipped registration for key={key}: insufficient boundary waypoints ({waypoints?.Count ?? 0})");
+                return;
+            }
+
+            RegisterArea(new VillageArea(key, waypoints));
         }
 
         /// <summary>
@@ -106,6 +139,7 @@ namespace ValheimVillages.Villages
         public static void Clear()
         {
             s_areas.Clear();
+            VillageStationRegistry.Clear();
         }
     }
 }

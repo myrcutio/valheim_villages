@@ -6,6 +6,7 @@ using ValheimVillages.Interfaces;
 using ValheimVillages.Schemas;
 using ValheimVillages.Settings;
 using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.AI.Navigation;
 
 namespace ValheimVillages.Behaviors.Explore
 {
@@ -128,8 +129,7 @@ namespace ValheimVillages.Behaviors.Explore
 
         private void TransitionToLocation(KnownLocation location)
         {
-            var distance = Vector3.Distance(m_ai.Position, location.Position);
-            if (distance > VillagerSettings.ArrivalThreshold)
+            if (!VillagerMovement.IsAtPosition(m_ai.Position, location.Position, VillagerSettings.ArrivalThreshold))
                 m_ai.SetState(BehaviorState.Traveling, location.Position);
         }
     }
