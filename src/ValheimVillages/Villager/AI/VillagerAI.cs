@@ -887,29 +887,88 @@ namespace ValheimVillages.Villager.AI
             if (NavMesh.SamplePosition(transform.position, out _, 1f, filter))
                 return false;
 
-            // Expand the search to find the nearest mesh point. 16m covers
-            // typical building geometry — a villager spawned in the middle
-            // of a tower top, knocked off a 10m foundation, etc.
-            if (!NavMesh.SamplePosition(transform.position, out var rescueHit, 16f, filter))
+            // Off-mesh. We need to find a snap target that's not just
+            // geometrically nearest, but actually REACHABLE — a naive
+            // SamplePosition will happily return a point straight below
+            // through the bed/floor the villager is sitting on, and the
+            // agent can't traverse the solid piece between them. Search
+            // outward in expanding XZ rings, keeping each candidate within
+            // ±agentClimb of the villager's Y so we land on a surface they
+            // could plausibly step onto from where they are (off the side
+            // of a bed, not through it).
+            if (!TryFindReachableMeshSnap(filter, out var rescueHit))
             {
                 Plugin.Log?.LogWarning(
-                    $"[AI:{m_villagerName}] Off-mesh self-rescue failed: no NavMesh polygon " +
-                    $"within 16m of ({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}). " +
+                    $"[AI:{m_villagerName}] Off-mesh self-rescue failed: no reachable NavMesh polygon " +
+                    $"at the villager's elevation within search range of " +
+                    $"({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}). " +
                     "Villager genuinely stranded — check bake coverage or unloaded zone.");
                 return false;
             }
 
             Plugin.Log?.LogInfo(
-                $"[AI:{m_villagerName}] Off-mesh self-rescue: dispatching to nearest mesh " +
-                $"({rescueHit.position.x:F1},{rescueHit.position.y:F1},{rescueHit.position.z:F1}) " +
+                $"[AI:{m_villagerName}] Off-mesh self-rescue: teleporting to nearest reachable mesh " +
+                $"({rescueHit.x:F1},{rescueHit.y:F1},{rescueHit.z:F1}) " +
                 $"from ({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}).");
 
-            SetState(BehaviorState.Traveling, rescueHit.position);
-            // Casual travel: walking back onto the mesh isn't an urgent
-            // errand. Reads as a deliberate "get back to where I belong"
-            // motion rather than a panic sprint.
-            IsCasualTravel = true;
+            // Direct teleport rather than SetState(Traveling). Path-finding
+            // from the current pos fails (NavMesh.SamplePosition can't snap
+            // an off-mesh start) so a Traveling target wouldn't actually
+            // produce movement — confirmed empirically: the previous SetState
+            // approach logged "rescue dispatched" every behavior tick
+            // without the villager moving. Teleporting puts them on a valid
+            // mesh cell at the same elevation (±agentClimb), from which
+            // normal pathing resumes.
+            transform.position = rescueHit;
+            m_lastMovePos = rescueHit;
+            m_lastRealMoveTime = Time.time;
             return true;
+        }
+
+        /// <summary>
+        ///     Find a NavMesh point that's both close in XZ to the villager AND
+        ///     at roughly their own elevation — so the agent can step onto it
+        ///     from where they're standing instead of being told to drop
+        ///     through solid geometry. Probes a small set of XZ offsets around
+        ///     the villager's pos, samples NavMesh at each, accepts the first
+        ///     whose Y delta from the villager is within agentClimb + margin.
+        /// </summary>
+        private bool TryFindReachableMeshSnap(NavMeshQueryFilter filter, out Vector3 snapped)
+        {
+            snapped = default;
+            var maxStep = VillagerAgentType.TryGetClimb(out var climb) ? climb + 0.3f : 0.6f;
+            var pos = transform.position;
+
+            // Probe in concentric rings out to 6m. The center probe (offset 0)
+            // catches a villager standing on a 1-cell hole in the mesh —
+            // common when a piece was removed under their feet. The wider
+            // rings catch the spawned-on-bed / pushed-off-foundation cases
+            // where there's no mesh directly beneath them but a walkable
+            // surface is a step or two to the side.
+            float[] ringRadii = { 0f, 1.5f, 3f, 4.5f, 6f };
+            int[] ringSamples = { 1, 8, 12, 16, 16 };
+            for (var r = 0; r < ringRadii.Length; r++)
+            {
+                var radius = ringRadii[r];
+                var samples = ringSamples[r];
+                for (var i = 0; i < samples; i++)
+                {
+                    var angle = samples == 1 ? 0f : 2f * Mathf.PI * i / samples;
+                    var probe = new Vector3(
+                        pos.x + Mathf.Cos(angle) * radius,
+                        pos.y,
+                        pos.z + Mathf.Sin(angle) * radius);
+                    // SamplePosition with a small vertical search radius so
+                    // we don't snap straight down through a bed/floor. The
+                    // agent climb threshold filters anything that would
+                    // require an unreachable drop or step-up.
+                    if (!NavMesh.SamplePosition(probe, out var hit, maxStep, filter)) continue;
+                    if (Mathf.Abs(hit.position.y - pos.y) > maxStep) continue;
+                    snapped = hit.position;
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>
