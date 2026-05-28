@@ -691,6 +691,19 @@ namespace ValheimVillages.Villager.AI
                 // recovery: we're under new orders, the prior retreat /
                 // backoff / attempt counter no longer applies.
                 ResetRecoveryState();
+                // Invalidate any in-flight path: it was computed against the
+                // previous target and would otherwise keep being followed
+                // until the villager arrived at its old destination (and
+                // only THEN recomputed against the new one). The Update
+                // path-follow code branches on path.Count==0 to trigger a
+                // fresh TryFindPathCustom against m_currentWaypoint, so
+                // clearing here is the minimum surgery that produces the
+                // expected "new target, new path" semantics on the next
+                // tick. Confirmed by incident bundle 001_Farmer (May 2026):
+                // three TargetSet events in 60ms left only the first one's
+                // path live, villager stalled following stale corners.
+                var path = s_pathField?.GetValue(this) as List<Vector3>;
+                path?.Clear();
                 EventRing.RecordTargetSet(waypoint.Position, prevTarget, $"SetState({newState})");
             }
 
