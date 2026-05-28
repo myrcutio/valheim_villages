@@ -88,8 +88,10 @@ namespace ValheimVillages.Villager
             if (bed == null)
                 return true;
 
-            // Check if the bed is unclaimed (owner stored in ZDO)
-            var bedZdoId = bed.GetComponent<ZNetView>()?.GetZDO()?.GetLong("owner") ?? 0L;
+            // Check if the bed is already claimed by a villager.
+            // Stored on the bed ZDO under a mod-namespaced field (vv_owner_villager_id)
+            // rather than the native `owner` field — see SpawnVillagerAtBed for why.
+            var bedZdoId = bed.GetComponent<ZNetView>()?.GetZDO()?.GetLong("vv_owner_villager_id") ?? 0L;
             if (bedZdoId != 0L)
             {
                 player.Message(MessageHud.MessageType.Center, "This bed is already claimed");
@@ -204,8 +206,17 @@ namespace ValheimVillages.Villager
             {
                 var bedZdoId = bedZnetView.GetZDO().m_uid;
                 npcZnetView.GetZDO().Set("vv_assigned_bed", bedZdoId != ZDOID.None ? bedZdoId.ID : 0L);
-                bedZnetView.GetZDO().Set("owner", npcZdoId != ZDOID.None ? npcZdoId.ID : 0L);
-                bedZnetView.GetZDO().Set("ownerName", villagerDef.displayName);
+                // Mod-namespaced ownership only. Writing native owner/ownerName
+                // here puts the bed in a state Valheim's destroy path doesn't
+                // fully recognize (it expects player UIDs in `owner`, not
+                // villager ZDO IDs) — hammer-deconstruct partially completes
+                // but leaves a ghost collider behind, blocking villager
+                // pathing through where the bed used to be. Confirmed by
+                // incident 002_Blacksmith_stall_escape (May 2026) where
+                // segmentCasts hit `bed(Clone)` at a location the user had
+                // already deconstructed.
+                bedZnetView.GetZDO().Set("vv_owner_villager_id",
+                    npcZdoId != ZDOID.None ? npcZdoId.ID : 0L);
                 Plugin.Log?.LogInfo($"Assigned bed to villager '{villagerDef.displayName}' with ZDO ID: {npcZdoId}");
             }
 
