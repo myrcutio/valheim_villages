@@ -188,6 +188,24 @@ namespace ValheimVillages.Villages
         ///     AND close to the target, returns false. The caller must abandon the work, not
         ///     dispatch toward an unreachable position.</para>
         /// </summary>
+        /// <summary>
+        ///     Minimum XZ distance between the resolved approach and the target.
+        ///     The HNA lookup grid can land a "navigable" cell directly on top
+        ///     of a station's pivot — and NavMesh.CalculatePath will happily
+        ///     compute a straight-line path to it because polygon connectivity
+        ///     exists, but the agent capsule physically can't traverse through
+        ///     the station's own collider. Forcing a 1.5m stand-off ensures the
+        ///     resolved approach is genuinely *next to* the obstacle, not *at*
+        ///     it. Still inside station RPC interaction range (~2m), so AddFuel
+        ///     etc. still fire once the agent arrives.
+        ///     <para>Confirmed by incident bundle 002_Blacksmith_stall_escape
+        ///     (May 2026): target=(-2276.5, 39, 1300.5) resolved to approach
+        ///     with same XZ, path[0]=same XZ; agent stalled 2.16m short
+        ///     because the straight-line capsule path grazed the smelter
+        ///     body.</para>
+        /// </summary>
+        private const float MinApproachStandoffXZ = 1.5f;
+
         public static bool TryResolveApproach(Vector3 target, Vector3 pathSource, out Vector3 approach)
         {
             approach = Vector3.zero;
@@ -196,11 +214,21 @@ namespace ValheimVillages.Villages
             var graph = Villager.AI.Navigation.RegionGraph.Get(villageKey);
             if (graph == null) return false;
 
+            var minStandoffSq = MinApproachStandoffXZ * MinApproachStandoffXZ;
             var pathBuffer = new List<Vector3>();
             return graph.TryFindNearestLookupCell(
                 target,
-                candidate => Villager.AI.Navigation.VillagerMovement.TryFindCompletePath(
-                    pathSource, candidate, pathBuffer),
+                candidate =>
+                {
+                    // Stand-off check first — cheaper than the path query and
+                    // the dominant reason candidates near a station get
+                    // rejected.
+                    var dx = candidate.x - target.x;
+                    var dz = candidate.z - target.z;
+                    if (dx * dx + dz * dz < minStandoffSq) return false;
+                    return Villager.AI.Navigation.VillagerMovement.TryFindCompletePath(
+                        pathSource, candidate, pathBuffer);
+                },
                 out approach,
                 out _);
         }
