@@ -57,6 +57,11 @@ namespace ValheimVillages.Villager.AI
         private float m_lastRealMoveTime;
         private float m_lastValidationTime;
 
+        // Path-stall dedup: log "entered" once, "resolved" / "escalated" once,
+        // instead of re-firing the diagnostic every PathStallEscapeSeconds.
+        private bool m_stallLogged;
+        private float m_stallStartTime;
+
         private float m_stuckBackoffUntil;
 
         /// <summary>When the current movement target was set (for stuck timeout).</summary>
@@ -339,6 +344,13 @@ namespace ValheimVillages.Villager.AI
                             {
                                 m_lastMovePos = transform.position;
                                 m_lastRealMoveTime = Time.time;
+                                if (m_stallLogged)
+                                {
+                                    Plugin.Log?.LogInfo(
+                                        $"[AI:{m_villagerName}] Stall resolved after " +
+                                        $"{Time.time - m_stallStartTime:F1}s (moved {moveDelta:F2}m).");
+                                    m_stallLogged = false;
+                                }
                             }
                             else if (Time.time - m_lastRealMoveTime > DoorSettings.MovementStallThreshold)
                             {
@@ -404,18 +416,24 @@ namespace ValheimVillages.Villager.AI
                                 if (Time.time - m_lastRealMoveTime > VillagerSettings.PathStallEscapeSeconds)
                                 {
                                     var lastNode = path[path.Count - 1];
-                                    Plugin.Log?.LogWarning(
-                                        $"[AI:{m_villagerName}] Path stall escape after " +
-                                        $"{Time.time - m_lastRealMoveTime:F1}s no move. " +
-                                        $"state={CurrentState} pos=({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}) " +
-                                        $"target=({targetPos.x:F1},{targetPos.y:F1},{targetPos.z:F1}) " +
-                                        $"path.Count={path.Count} " +
-                                        $"path[0]=({path[0].x:F1},{path[0].y:F1},{path[0].z:F1}) " +
-                                        $"path[last]=({lastNode.x:F1},{lastNode.y:F1},{lastNode.z:F1}) " +
-                                        $"distToNext={Vector3.Distance(transform.position, path[0]):F2} " +
-                                        $"distToTarget={Vector3.Distance(transform.position, targetPos):F2} " +
-                                        $"distToLast={Vector3.Distance(transform.position, lastNode):F2} " +
-                                        $"recoveryAttempts={m_recoveryAttempts} retreating={m_recoveryRetreating}");
+                                    var firedNow = !m_stallLogged;
+                                    if (firedNow)
+                                    {
+                                        m_stallLogged = true;
+                                        m_stallStartTime = m_lastRealMoveTime;
+                                        Plugin.Log?.LogWarning(
+                                            $"[AI:{m_villagerName}] Path stall escape after " +
+                                            $"{Time.time - m_lastRealMoveTime:F1}s no move. " +
+                                            $"state={CurrentState} pos=({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}) " +
+                                            $"target=({targetPos.x:F1},{targetPos.y:F1},{targetPos.z:F1}) " +
+                                            $"path.Count={path.Count} " +
+                                            $"path[0]=({path[0].x:F1},{path[0].y:F1},{path[0].z:F1}) " +
+                                            $"path[last]=({lastNode.x:F1},{lastNode.y:F1},{lastNode.z:F1}) " +
+                                            $"distToNext={Vector3.Distance(transform.position, path[0]):F2} " +
+                                            $"distToTarget={Vector3.Distance(transform.position, targetPos):F2} " +
+                                            $"distToLast={Vector3.Distance(transform.position, lastNode):F2} " +
+                                            $"recoveryAttempts={m_recoveryAttempts} retreating={m_recoveryRetreating}");
+                                    }
                                     // While retreating, escalate against the
                                     // real original target (the chest we
                                     // were trying to reach), not the retreat
@@ -430,17 +448,22 @@ namespace ValheimVillages.Villager.AI
                                     // failure without recovery hiding it.
                                     if (VillagerSettings.AutoPathRecoveryEnabled)
                                     {
+                                        if (firedNow)
+                                            Plugin.Log?.LogInfo(
+                                                $"[AI:{m_villagerName}] Stall escalated to recovery " +
+                                                $"after {Time.time - m_stallStartTime:F1}s.");
+                                        m_stallLogged = false;
                                         var escalateAgainst =
                                             m_recoveryOriginalWaypoint ?? m_currentWaypoint;
                                         EnterRecovery(escalateAgainst);
                                         return false;
                                     }
 
-                                    // Reset the stall timer so the log
-                                    // doesn't immediately re-fire next tick;
-                                    // the villager remains stuck but the log
-                                    // line emits at the same cadence as the
-                                    // PathStallEscapeSeconds threshold.
+                                    // Reset the stall timer so we re-evaluate
+                                    // the gate; m_stallLogged stays true so we
+                                    // don't re-emit the warning every tick. A
+                                    // "Stall resolved" log fires when the
+                                    // villager actually moves.
                                     m_lastRealMoveTime = Time.time;
                                 }
                             }
@@ -720,7 +743,41 @@ namespace ValheimVillages.Villager.AI
         {
             var path = s_pathField?.GetValue(this) as List<Vector3>;
             if (path == null) return false;
-            return VillagerMovement.TryFindCompletePath(transform.position, targetPos, path);
+            var ok = VillagerMovement.TryFindCompletePath(transform.position, targetPos, path);
+
+            // Always log path shape — corner count, segment lengths, HNA region per corner. This
+            // is the ground-truth diagnostic: lets us see whether paths are degenerate (1 corner,
+            // no intermediate turns) or routing through cells the HNA graph doesn't recognize.
+            var graph = ValheimVillages.Villager.AI.Navigation.RegionGraph.GetNearest(transform.position);
+            if (Plugin.Log != null)
+            {
+                if (!ok)
+                {
+                    Plugin.Log.LogInfo(
+                        $"[PathDiag:{m_villagerName}] CalculatePath FAILED from " +
+                        $"({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}) " +
+                        $"to ({targetPos.x:F1},{targetPos.y:F1},{targetPos.z:F1})");
+                }
+                else
+                {
+                    var sb = new System.Text.StringBuilder();
+                    sb.Append($"[PathDiag:{m_villagerName}] path corners={path.Count} ");
+                    sb.Append($"from=({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}) ");
+                    sb.Append($"target=({targetPos.x:F1},{targetPos.y:F1},{targetPos.z:F1})");
+                    for (var i = 0; i < path.Count; i++)
+                    {
+                        var p = path[i];
+                        var reg = graph?.PointToRegionId(p) ?? "(no-graph)";
+                        var segLen = i == 0
+                            ? Vector3.Distance(transform.position, p)
+                            : Vector3.Distance(path[i - 1], p);
+                        sb.Append($"\n  [{i}] ({p.x:F1},{p.y:F1},{p.z:F1}) seg={segLen:F1}m region={reg ?? "(off-graph)"}");
+                    }
+                    Plugin.Log.LogInfo(sb.ToString());
+                }
+            }
+
+            return ok;
         }
 
         /// <summary>

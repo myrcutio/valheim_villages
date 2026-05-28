@@ -121,9 +121,28 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         private static readonly Dictionary<string, RegionGraph> s_registry = new();
 
+        /// <summary>
+        ///     Bucket size (m) for <see cref="VillageKey"/> coordinate snapping.
+        ///     Matches <see cref="RegionPartitionHandler"/>'s 30m
+        ///     <c>RegionBuildRadius</c> — beds within one village's region-build
+        ///     footprint should hash to the same key. Without this, the F0
+        ///     rounding used previously gave two beds 1m apart distinct integer
+        ///     keys, splitting one village's region graph across two entries
+        ///     in <see cref="s_registry"/>.
+        ///
+        ///     <para>Limitation: any bucket is a sharp boundary — two beds 30m
+        ///     apart that straddle a bucket edge still hash differently. The
+        ///     correct long-term fix is to merge keys whose village perimeter
+        ///     geometries intersect; that's a per-rebuild clustering step, not
+        ///     a coordinate hash. Switch to that when this heuristic fails.</para>
+        /// </summary>
+        public const float VillageKeyBucket = 30f;
+
         public static string VillageKey(float anchorX, float anchorZ)
         {
-            return string.Format(CultureInfo.InvariantCulture, "{0:F0}_{1:F0}", anchorX, anchorZ);
+            var bx = Mathf.RoundToInt(anchorX / VillageKeyBucket);
+            var bz = Mathf.RoundToInt(anchorZ / VillageKeyBucket);
+            return string.Format(CultureInfo.InvariantCulture, "{0}_{1}", bx, bz);
         }
 
         public static string VillageKey(Vector3 anchor)
@@ -136,12 +155,68 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (string.IsNullOrEmpty(villageKey)) villageKey = "_default";
             if (!s_registry.TryGetValue(villageKey, out var graph))
             {
+                // Bucket-boundary mitigation: if a requested key falls one
+                // bucket away from a key that already exists, treat them as
+                // the same village and reuse the existing entry. Two beds
+                // 30m apart straddling a bucket edge would otherwise hash
+                // distinctly even though they belong to one village (see
+                // VillageKeyBucket doc). First-come-first-served — the
+                // first villager to request the partition wins the canonical
+                // key. Real fix is perimeter-intersection clustering (TODO
+                // tracked separately); this snap-to-neighbor keeps the
+                // single-village invariant in the meantime.
+                if (TryFindAdjacentRegisteredKey(villageKey, out var adjacent))
+                {
+                    Plugin.Log?.LogInfo(
+                        $"[RegionGraph] Snapping new village key '{villageKey}' to adjacent " +
+                        $"existing key '{adjacent}' (within 1 bucket; treating as same village).");
+                    graph = s_registry[adjacent];
+                    graph.RegisteredVillageKey = adjacent;
+                    return graph;
+                }
+
                 graph = new RegionGraph();
                 s_registry[villageKey] = graph;
             }
 
             graph.RegisteredVillageKey = villageKey;
             return graph;
+        }
+
+        /// <summary>
+        ///     Returns true if any registered key is within Manhattan-1 of the
+        ///     given bucket-encoded key (i.e. at most one bucket step away in
+        ///     X or Z). Out parameter is the matched existing key. Only
+        ///     supports the "<int>_<int>" key shape produced by
+        ///     <see cref="VillageKey(float,float)"/>; falls back to "no
+        ///     adjacent" for legacy "_default" or other non-bucketed keys.
+        /// </summary>
+        private static bool TryFindAdjacentRegisteredKey(string newKey, out string adjacent)
+        {
+            adjacent = null;
+            if (!TryParseBucketKey(newKey, out var nx, out var nz)) return false;
+            foreach (var existing in s_registry.Keys)
+            {
+                if (existing == newKey) continue;
+                if (!TryParseBucketKey(existing, out var ex, out var ez)) continue;
+                if (System.Math.Abs(ex - nx) <= 1 && System.Math.Abs(ez - nz) <= 1)
+                {
+                    adjacent = existing;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryParseBucketKey(string key, out int bx, out int bz)
+        {
+            bx = bz = 0;
+            if (string.IsNullOrEmpty(key)) return false;
+            var sep = key.IndexOf('_');
+            if (sep <= 0 || sep == key.Length - 1) return false;
+            return int.TryParse(key.Substring(0, sep), NumberStyles.Integer, CultureInfo.InvariantCulture, out bx)
+                   && int.TryParse(key.Substring(sep + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out bz);
         }
 
         public static RegionGraph Get(string villageKey)
@@ -303,6 +378,67 @@ namespace ValheimVillages.Villager.AI.Navigation
             return null;
         }
 
+        /// <summary>
+        ///     Walk the lookup-grid cells in order of XZ distance from <paramref name="target"/>
+        ///     and return the first one that satisfies <paramref name="validator"/>. Lookup-grid
+        ///     cells are by construction the points that <see cref="PointToRegionId"/> will agree
+        ///     with — unlike region centroids, which are geometric averages that can land in
+        ///     buckets the lookup grid never indexed. This is the canonical "give me a navigable
+        ///     position near here" entry point for callers that need to dispatch a villager.
+        /// </summary>
+        public bool TryFindNearestLookupCell(
+            Vector3 target,
+            System.Func<Vector3, bool> validator,
+            out Vector3 worldPos,
+            out string regionId)
+        {
+            worldPos = Vector3.zero;
+            regionId = null;
+            if (!m_initialized || m_lookupGrid.Count == 0) return false;
+
+            var ordered = new List<(long key, Vector3 pos, string id, float distSq)>(m_lookupGrid.Count);
+            var halfCell = LookupCellSize * 0.5f;
+            var halfBucket = HeightBucketSize * 0.5f;
+            foreach (var kv in m_lookupGrid)
+            {
+                UnpackLookup(kv.Key, out var gx, out var gz, out var hb);
+                var wx = gx * LookupCellSize + halfCell;
+                var wz = gz * LookupCellSize + halfCell;
+                var wy = hb * HeightBucketSize + halfBucket;
+                var pos = new Vector3(wx, wy, wz);
+                var dx = wx - target.x;
+                var dz = wz - target.z;
+                ordered.Add((kv.Key, pos, kv.Value, dx * dx + dz * dz));
+            }
+            ordered.Sort((a, b) => a.distSq.CompareTo(b.distSq));
+
+            foreach (var (_, pos, id, _) in ordered)
+            {
+                if (validator != null && !validator(pos)) continue;
+                worldPos = pos;
+                regionId = id;
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>Inverse of <see cref="PackLookup"/>. Recovers grid coords + height bucket.</summary>
+        internal static void UnpackLookup(long key, out int gx, out int gz, out int hb)
+        {
+            // Forward packing: gx * 1e6sq + gz * 1e6 + hb. Use Euclidean-style decomposition so
+            // negative gx/gz/hb round-trip correctly.
+            const long M = 1_000_003L;
+            // hb is in [-(M-1)/2, (M-1)/2] practically; recover by mod-with-bias.
+            var rem = ((key % M) + M) % M;
+            hb = (int)rem;
+            if (hb > M / 2) hb -= (int)M;
+            var afterHb = (key - hb) / M;
+            var rem2 = ((afterHb % M) + M) % M;
+            gz = (int)rem2;
+            if (gz > M / 2) gz -= (int)M;
+            gx = (int)((afterHb - gz) / M);
+        }
+
         public bool IsValidRegion(string regionId)
         {
             return m_initialized && !string.IsNullOrEmpty(regionId) && m_regionIds.Contains(regionId);
@@ -428,12 +564,94 @@ namespace ValheimVillages.Villager.AI.Navigation
             return list;
         }
 
-        public List<Vector3> GetAllRegionCenters()
+        /// <summary>
+        ///     Diagnostic accessor for region centroids. Centroids are geometric averages over
+        ///     a region's triangles; they are NOT guaranteed to be inside the lookup grid
+        ///     (so <see cref="PointToRegionId"/> may return null at a centroid position) and
+        ///     can land in Y buckets the lookup never indexed. Safe for visualization, map
+        ///     rendering, and probes — but DO NOT use for navigation. Navigation must use
+        ///     <see cref="TryFindNearestLookupCell"/>, whose results are lookup-grid points
+        ///     that round-trip cleanly through <see cref="PointToRegionId"/>.
+        /// </summary>
+        public DiagnosticsAccess Diagnostics => new DiagnosticsAccess(this);
+
+        /// <summary>
+        ///     Wrapper that gates diagnostic-only RegionGraph operations behind an explicit
+        ///     namespace, so calls like <c>graph.Diagnostics.GetAllRegionCenters()</c>
+        ///     visibly signal intent.
+        /// </summary>
+        public readonly struct DiagnosticsAccess
         {
-            var list = new List<Vector3>();
-            if (!m_initialized) return list;
-            foreach (var c in m_regionCentroids.Values) list.Add(c);
-            return list;
+            private readonly RegionGraph m_g;
+            internal DiagnosticsAccess(RegionGraph g) { m_g = g; }
+
+            /// <summary>
+            ///     Region centroids. Visualization/diagnostic only — NOT navigation-grade.
+            ///     See the doc on <see cref="RegionGraph.Diagnostics"/> for why.
+            /// </summary>
+            public List<Vector3> GetAllRegionCenters()
+            {
+                var list = new List<Vector3>();
+                if (m_g == null || !m_g.m_initialized) return list;
+                foreach (var c in m_g.m_regionCentroids.Values) list.Add(c);
+                return list;
+            }
+
+            /// <summary>
+            ///     AABB of the BFS lookup grid in XZ (the points
+            ///     <see cref="PointToRegionId"/> can actually resolve). Used by
+            ///     the diagnostics sidecar to compare BFS coverage vs the boundary
+            ///     cells the bake produced. A mismatch is the smoking gun for the
+            ///     BFS-coverage class of bugs.
+            /// </summary>
+            public bool TryGetLookupGridBounds(
+                out float minX, out float maxX, out float minZ, out float maxZ)
+            {
+                minX = maxX = minZ = maxZ = 0f;
+                if (m_g == null || !m_g.m_initialized || m_g.m_lookupGrid.Count == 0)
+                    return false;
+                minX = minZ = float.PositiveInfinity;
+                maxX = maxZ = float.NegativeInfinity;
+                var halfCell = LookupCellSize * 0.5f;
+                foreach (var key in m_g.m_lookupGrid.Keys)
+                {
+                    UnpackLookup(key, out var gx, out var gz, out _);
+                    var wx = gx * LookupCellSize + halfCell;
+                    var wz = gz * LookupCellSize + halfCell;
+                    if (wx < minX) minX = wx;
+                    if (wx > maxX) maxX = wx;
+                    if (wz < minZ) minZ = wz;
+                    if (wz > maxZ) maxZ = wz;
+                }
+                return true;
+            }
+
+            /// <summary>
+            ///     AABB of the boundary cells (the cells from which boundary
+            ///     waypoints are seeded). When this exceeds the lookup-grid
+            ///     bounds, the BFS resampler can't find a cell at waypoints the
+            ///     bake placed — exactly the failure mode the sidecar surfaces.
+            /// </summary>
+            public bool TryGetBoundaryCellsBounds(
+                out float minX, out float maxX, out float minZ, out float maxZ)
+            {
+                minX = maxX = minZ = maxZ = 0f;
+                if (m_g == null || !m_g.m_initialized || m_g.m_boundaryCells.Count == 0)
+                    return false;
+                minX = minZ = float.PositiveInfinity;
+                maxX = maxZ = float.NegativeInfinity;
+                foreach (var (_, c, _) in m_g.m_boundaryCells)
+                {
+                    if (c.x < minX) minX = c.x;
+                    if (c.x > maxX) maxX = c.x;
+                    if (c.z < minZ) minZ = c.z;
+                    if (c.z > maxZ) maxZ = c.z;
+                }
+                return true;
+            }
+
+            public int LookupGridCellCount => m_g != null && m_g.m_initialized ? m_g.m_lookupGrid.Count : 0;
+            public int BoundaryCellCount => m_g != null && m_g.m_initialized ? m_g.m_boundaryCells.Count : 0;
         }
 
         internal IEnumerable<string> GetRegionIds()

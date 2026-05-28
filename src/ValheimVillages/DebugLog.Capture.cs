@@ -1,12 +1,15 @@
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading;
 using BepInEx;
 using UnityEngine;
+using ValheimVillages.Behaviors.Patrol;
+using ValheimVillages.Villager.AI.Navigation;
 
 namespace ValheimVillages
 {
@@ -52,6 +55,22 @@ namespace ValheimVillages
     {
         private readonly ConcurrentQueue<string> _pending = new();
 
+        /// <summary>
+        ///     Triggers whose capture should be orchestrated (teleport player to
+        ///     the seed-bed anchor, look straight down, hide HUD, snap, restore
+        ///     state in a <c>finally</c>). Repartition is included because the
+        ///     auto-repartition that follows hot-reload is the canonical "graph
+        ///     is fully rebuilt — show me the state" moment; capturing it
+        ///     orchestrated gives one deterministic PNG per cycle instead of
+        ///     two with the first overwritten. Add new triggers here as they
+        ///     emerge.
+        /// </summary>
+        private static readonly HashSet<string> OrchestratedTriggers = new HashSet<string>
+        {
+            "repartition",
+            "manual",
+        };
+
         private void Update()
         {
             while (_pending.TryDequeue(out var trigger))
@@ -75,23 +94,48 @@ namespace ValheimVillages
             var cam = Camera.main;
             if (cam == null) yield break;
 
-            var pos = cam.transform.position;
-            var euler = cam.transform.eulerAngles;
-            var worldTime = -1f;
+            OrchestrationSession session = null;
+            if (OrchestratedTriggers.Contains(trigger))
+            {
+                session = OrchestrationSession.TryBegin();
+                session?.LogStarted(trigger, session.AnchorPos);
+            }
+
             try
             {
-                if (EnvMan.instance != null) worldTime = EnvMan.instance.GetDayFraction();
+                if (session != null)
+                    // One frame for the player transform / camera follow / HUD
+                    // toggle to settle before we sample camera pose and snap.
+                    yield return null;
+
+                // Re-assert the orchestrated camera pose AFTER the settle frame.
+                // GameCamera is disabled in TryBegin, but other LateUpdate hooks
+                // (other mods, etc.) may still touch the camera; this is the
+                // last write before the frame is captured.
+                session?.ApplyCameraPose();
+
+                var pos = cam.transform.position;
+                var euler = cam.transform.eulerAngles;
+                var worldTime = -1f;
+                try
+                {
+                    if (EnvMan.instance != null) worldTime = EnvMan.instance.GetDayFraction();
+                }
+                catch
+                {
+                    /* EnvMan may be missing on early reload */
+                }
+
+                // CaptureScreenshotAsTexture requires end-of-frame so all camera
+                // passes (incl. debug overlays) have rendered.
+                yield return new WaitForEndOfFrame();
+
+                WritePngAndSidecar(trigger, counter, pos, euler, worldTime);
             }
-            catch
+            finally
             {
-                /* EnvMan may be missing on early reload */
+                session?.Restore();
             }
-
-            // CaptureScreenshotAsTexture requires end-of-frame so all camera
-            // passes (incl. debug overlays) have rendered.
-            yield return new WaitForEndOfFrame();
-
-            WritePngAndSidecar(trigger, counter, pos, euler, worldTime);
         }
 
         private static void WritePngAndSidecar(string trigger, int counter,
@@ -141,7 +185,7 @@ namespace ValheimVillages
             // monotonic counter as the freshness signal for the PNG.
             try
             {
-                var sb = new StringBuilder(256);
+                var sb = new StringBuilder(2048);
                 sb.Append('{');
                 sb.Append("\"counter\":").Append(counter.ToString(CultureInfo.InvariantCulture)).Append(',');
                 sb.Append("\"trigger\":\"").Append(JsonEscape(trigger)).Append("\",");
@@ -157,6 +201,7 @@ namespace ValheimVillages
                     .Append(euler.y.ToString("R", CultureInfo.InvariantCulture)).Append(',');
                 sb.Append("\"cameraPitch\":")
                     .Append(euler.x.ToString("R", CultureInfo.InvariantCulture));
+                AppendDiagnostics(sb);
                 sb.Append('}');
                 File.WriteAllText(jsonPath, sb.ToString());
             }
@@ -166,10 +211,340 @@ namespace ValheimVillages
             }
         }
 
+        /// <summary>
+        ///     Appends a "diagnostics" object to the in-progress sidecar JSON:
+        ///     last-relaxation drop stats (the dedup summary, as structured data),
+        ///     and per-village bounds (BFS lookup grid vs. boundary cells). A
+        ///     mismatch between the two bounds is the smoking gun for the BFS
+        ///     coverage class of bugs that this overhaul exists to make
+        ///     diagnosable without log scraping.
+        /// </summary>
+        private static void AppendDiagnostics(StringBuilder sb)
+        {
+            sb.Append(",\"diagnostics\":{");
+
+            // Last WaypointRelaxation.Refine pass stats.
+            var stats = WaypointRelaxation.LastStats;
+            sb.Append("\"lastRelaxation\":{");
+            if (stats == null)
+            {
+                sb.Append("\"available\":false");
+            }
+            else
+            {
+                sb.Append("\"available\":true,");
+                sb.Append("\"totalDrops\":").Append(stats.TotalDrops).Append(',');
+                sb.Append("\"bfsMisses\":").Append(stats.BfsMisses).Append(',');
+                sb.Append("\"navmeshFailures\":").Append(stats.NavMeshSampleFailures).Append(',');
+                sb.Append("\"yDisagreements\":").Append(stats.YDisagreements).Append(',');
+                sb.Append("\"bakeYNaNs\":").Append(stats.BakeYNaNs).Append(',');
+                sb.Append("\"worstYDelta\":").Append(stats.WorstYDelta.ToString("R", CultureInfo.InvariantCulture)).Append(',');
+                sb.Append("\"worstYDeltaXZ\":[")
+                    .Append(stats.WorstYDeltaXZ.x.ToString("R", CultureInfo.InvariantCulture)).Append(',')
+                    .Append(stats.WorstYDeltaXZ.y.ToString("R", CultureInfo.InvariantCulture)).Append("],");
+                sb.Append("\"drops\":[");
+                // Cap the per-waypoint list so a runaway pass can't blow up the
+                // sidecar file. The summary counts above are the authoritative total.
+                const int MaxDrops = 500;
+                var n = Mathf.Min(stats.Drops.Count, MaxDrops);
+                for (var i = 0; i < n; i++)
+                {
+                    var d = stats.Drops[i];
+                    if (i > 0) sb.Append(',');
+                    sb.Append("{\"x\":").Append(d.X.ToString("R", CultureInfo.InvariantCulture))
+                      .Append(",\"z\":").Append(d.Z.ToString("R", CultureInfo.InvariantCulture))
+                      .Append(",\"reason\":\"").Append(JsonEscape(d.Reason)).Append('"')
+                      .Append(",\"bakeY\":").Append(JsonFloat(d.BakeY))
+                      .Append(",\"delta\":").Append(d.Delta.ToString("R", CultureInfo.InvariantCulture))
+                      .Append('}');
+                }
+                sb.Append(']');
+                if (stats.Drops.Count > MaxDrops)
+                    sb.Append(",\"dropsTruncatedAt\":").Append(MaxDrops);
+            }
+            sb.Append("},");
+
+            // Per-village bounds. Iterates RegionGraph.GetAll() so multi-village
+            // worlds emit one entry per village; the diff between BFS and bake
+            // bounds per village is what the human or a downstream tool reads.
+            sb.Append("\"villages\":[");
+            var first = true;
+            try
+            {
+                foreach (var graph in RegionGraph.GetAll())
+                {
+                    if (!first) sb.Append(',');
+                    first = false;
+                    sb.Append('{');
+                    sb.Append("\"key\":\"").Append(JsonEscape(graph.RegisteredVillageKey ?? "")).Append("\",");
+                    sb.Append("\"regionCount\":").Append(graph.RegionCount).Append(',');
+                    sb.Append("\"linkCount\":").Append(graph.LinkCount).Append(',');
+                    sb.Append("\"bfsCells\":").Append(graph.Diagnostics.LookupGridCellCount).Append(',');
+                    sb.Append("\"boundaryCells\":").Append(graph.Diagnostics.BoundaryCellCount).Append(',');
+                    sb.Append("\"bfsBounds\":");
+                    AppendBounds(sb,
+                        graph.Diagnostics.TryGetLookupGridBounds(
+                            out var bMinX, out var bMaxX, out var bMinZ, out var bMaxZ),
+                        bMinX, bMaxX, bMinZ, bMaxZ);
+                    sb.Append(",\"boundaryBounds\":");
+                    AppendBounds(sb,
+                        graph.Diagnostics.TryGetBoundaryCellsBounds(
+                            out var cMinX, out var cMaxX, out var cMinZ, out var cMaxZ),
+                        cMinX, cMaxX, cMinZ, cMaxZ);
+                    sb.Append('}');
+                }
+            }
+            catch
+            {
+                /* swallow — diagnostics must never break capture */
+            }
+            sb.Append(']');
+
+            sb.Append('}');
+        }
+
+        private static void AppendBounds(StringBuilder sb, bool ok,
+            float minX, float maxX, float minZ, float maxZ)
+        {
+            if (!ok)
+            {
+                sb.Append("null");
+                return;
+            }
+            sb.Append("{\"x\":[")
+              .Append(minX.ToString("R", CultureInfo.InvariantCulture)).Append(',')
+              .Append(maxX.ToString("R", CultureInfo.InvariantCulture)).Append("],\"z\":[")
+              .Append(minZ.ToString("R", CultureInfo.InvariantCulture)).Append(',')
+              .Append(maxZ.ToString("R", CultureInfo.InvariantCulture)).Append("]}");
+        }
+
+        /// <summary>JSON-safe float emitter: NaN/Infinity must become null per RFC 8259.</summary>
+        private static string JsonFloat(float v)
+        {
+            if (float.IsNaN(v) || float.IsInfinity(v)) return "null";
+            return v.ToString("R", CultureInfo.InvariantCulture);
+        }
+
         private static string JsonEscape(string s)
         {
             return (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"")
                 .Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+        }
+    }
+
+    /// <summary>
+    ///     One-shot orchestration of the player's transform + HUD visibility
+    ///     for a deterministic capture. <see cref="TryBegin"/> snapshots the
+    ///     current state, teleports the player to the seed-bed anchor pose,
+    ///     and hides the HUD; <see cref="Restore"/> must be called from a
+    ///     <c>finally</c> so any exception in the capture pipeline still
+    ///     returns the player to where they were and re-shows the HUD.
+    ///
+    ///     <para>Why disable <see cref="GameCamera"/>: Valheim's GameCamera
+    ///     drives the main camera transform every <c>LateUpdate</c> to follow
+    ///     the player. Without disabling it, our orchestrated camera pose is
+    ///     overwritten before <c>WaitForEndOfFrame</c> resolves and the PNG
+    ///     reflects the player-following pose, not the top-down anchor pose.
+    ///     The anchor's <see cref="ApplyCameraPose"/> is re-asserted right
+    ///     before the frame is grabbed to guarantee the snap.</para>
+    ///
+    ///     Returns <c>null</c> from <see cref="TryBegin"/> when prerequisites
+    ///     aren't met (no Player, no seed bed). In that case the capture
+    ///     degrades to a passive snapshot from the current camera — see the
+    ///     "no silent fallbacks" rule: we never substitute fabricated anchor
+    ///     coordinates.
+    /// </summary>
+    internal class OrchestrationSession
+    {
+        private readonly Player m_player;
+        private readonly Vector3 m_savedPos;
+        private readonly Quaternion m_savedRot;
+        private readonly Hud m_hud;
+        private readonly bool m_savedHudVisible;
+        private readonly Vector3 m_savedCamPos;
+        private readonly Quaternion m_savedCamRot;
+        private readonly GameCamera m_gameCamera;
+        private readonly bool m_savedGameCameraEnabled;
+        private readonly Vector3 m_anchorPos;
+        private readonly Quaternion m_anchorRot;
+
+        private OrchestrationSession(Player player, Vector3 savedPos, Quaternion savedRot,
+            Hud hud, bool savedHudVisible, Vector3 savedCamPos, Quaternion savedCamRot,
+            GameCamera gameCamera, bool savedGameCameraEnabled,
+            Vector3 anchorPos, Quaternion anchorRot)
+        {
+            m_player = player;
+            m_savedPos = savedPos;
+            m_savedRot = savedRot;
+            m_hud = hud;
+            m_savedHudVisible = savedHudVisible;
+            m_savedCamPos = savedCamPos;
+            m_savedCamRot = savedCamRot;
+            m_gameCamera = gameCamera;
+            m_savedGameCameraEnabled = savedGameCameraEnabled;
+            m_anchorPos = anchorPos;
+            m_anchorRot = anchorRot;
+        }
+
+        public Vector3 AnchorPos => m_anchorPos;
+
+        /// <summary>
+        ///     Re-assert the orchestrated camera pose. Called immediately before
+        ///     <c>WaitForEndOfFrame</c> in the capture routine to defeat any
+        ///     <c>LateUpdate</c>-driven camera follower that ran during the
+        ///     post-teleport settle frame.
+        /// </summary>
+        public void ApplyCameraPose()
+        {
+            var cam = Camera.main;
+            if (cam == null) return;
+            try
+            {
+                cam.transform.position = m_anchorPos;
+                cam.transform.rotation = m_anchorRot;
+            }
+            catch
+            {
+                /* swallow */
+            }
+        }
+
+        public static OrchestrationSession TryBegin()
+        {
+            var player = Player.m_localPlayer;
+            if (player == null)
+            {
+                Plugin.Log?.LogInfo(
+                    "[Capture] Orchestration skipped: no local player. " +
+                    "Falling back to passive capture.");
+                return null;
+            }
+
+            var anchor = Diagnostics.CaptureAnchor.Resolve(player.transform.position);
+            if (!anchor.HasAnchor)
+            {
+                Plugin.Log?.LogWarning(
+                    $"[Capture] Orchestration skipped: {anchor.Reason}. " +
+                    "Falling back to passive capture (no silent coordinate fabrication).");
+                return null;
+            }
+
+            // Snapshot first — every field we touch must round-trip back in Restore.
+            var savedPos = player.transform.position;
+            var savedRot = player.transform.rotation;
+            var hud = Hud.instance;
+            var savedHudVisible = true;
+            try
+            {
+                if (hud != null) savedHudVisible = hud.gameObject.activeSelf;
+            }
+            catch
+            {
+                /* Hud API may differ across Valheim versions; degrade gracefully */
+            }
+
+            var cam = Camera.main;
+            var savedCamPos = cam != null ? cam.transform.position : Vector3.zero;
+            var savedCamRot = cam != null ? cam.transform.rotation : Quaternion.identity;
+
+            var gameCamera = GameCamera.instance;
+            var savedGameCameraEnabled = gameCamera != null && gameCamera.enabled;
+
+            // Apply the orchestrated pose. Yaw=0 (north-up) means look at +Z;
+            // Pitch=90 means look straight down. Quaternion order: pitch-then-yaw
+            // matches Unity's Euler convention used elsewhere in this file.
+            var anchorRot = Quaternion.Euler(anchor.Pitch, anchor.Yaw, 0f);
+            try
+            {
+                player.transform.position = anchor.Pos;
+                player.transform.rotation = anchorRot;
+                if (cam != null)
+                {
+                    cam.transform.position = anchor.Pos;
+                    cam.transform.rotation = anchorRot;
+                }
+                // Disable GameCamera's follow LateUpdate so our pose survives
+                // until WaitForEndOfFrame resolves. Re-enabled in Restore.
+                if (gameCamera != null) gameCamera.enabled = false;
+                if (hud != null) hud.gameObject.SetActive(false);
+            }
+            catch (System.Exception ex)
+            {
+                // Already snapshotted — best to roll back what we managed to
+                // apply and bail rather than capture in a half-orchestrated state.
+                Plugin.Log?.LogWarning(
+                    $"[Capture] Orchestration apply failed: {ex.GetType().Name}: {ex.Message}. " +
+                    "Restoring state and falling back to passive capture.");
+                try { player.transform.position = savedPos; player.transform.rotation = savedRot; }
+                catch { /* swallow */ }
+                try { if (gameCamera != null) gameCamera.enabled = savedGameCameraEnabled; }
+                catch { /* swallow */ }
+                try { if (hud != null) hud.gameObject.SetActive(savedHudVisible); }
+                catch { /* swallow */ }
+                return null;
+            }
+
+            return new OrchestrationSession(player, savedPos, savedRot,
+                hud, savedHudVisible, savedCamPos, savedCamRot,
+                gameCamera, savedGameCameraEnabled, anchor.Pos, anchorRot);
+        }
+
+        public void LogStarted(string trigger, Vector3 anchorPos)
+        {
+            // Single info line so we can confirm the orchestrated path actually
+            // ran — passive captures emit no log line, so silence on success
+            // would otherwise be indistinguishable from the orchestrator being
+            // skipped entirely.
+            Plugin.Log?.LogInfo(
+                $"[Capture] Orchestrated trigger='{trigger}' anchor=({anchorPos.x:F1},{anchorPos.y:F1},{anchorPos.z:F1}) yaw=0 pitch=90");
+        }
+
+        public void Restore()
+        {
+            try
+            {
+                if (m_gameCamera != null) m_gameCamera.enabled = m_savedGameCameraEnabled;
+            }
+            catch
+            {
+                /* swallow */
+            }
+
+            try
+            {
+                if (m_player != null)
+                {
+                    m_player.transform.position = m_savedPos;
+                    m_player.transform.rotation = m_savedRot;
+                }
+            }
+            catch
+            {
+                /* swallow — restore must never throw past the capture pipeline */
+            }
+
+            try
+            {
+                var cam = Camera.main;
+                if (cam != null)
+                {
+                    cam.transform.position = m_savedCamPos;
+                    cam.transform.rotation = m_savedCamRot;
+                }
+            }
+            catch
+            {
+                /* swallow */
+            }
+
+            try
+            {
+                if (m_hud != null) m_hud.gameObject.SetActive(m_savedHudVisible);
+            }
+            catch
+            {
+                /* swallow */
+            }
         }
     }
 }

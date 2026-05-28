@@ -22,6 +22,69 @@ namespace ValheimVillages.Behaviors.Patrol
         private static readonly float MaxSlopeTan = Mathf.Tan(MaxSlopeAngle * Mathf.Deg2Rad);
 
         /// <summary>
+        ///     Bake-time threshold above which a BFS/NavMesh Y disagreement is rare
+        ///     enough to log individually (per-occurrence) even when bulk-deduping.
+        ///     0.50m is the normal-drop threshold; values above 1.00m are outliers
+        ///     worth surfacing without scrolling a summary.
+        /// </summary>
+        private const float ExtremeYDisagreementThreshold = 1.0f;
+
+        /// <summary>
+        ///     Per-<see cref="Refine" /> drop accumulator. Populated by
+        ///     <see cref="TryResamplePosition" /> while the relaxation runs and
+        ///     summarised once when the pass completes. Exposed via
+        ///     <see cref="LastStats" /> for diagnostic consumers (sidecar JSON, etc.).
+        /// </summary>
+        internal sealed class DropStats
+        {
+            public int BfsMisses;
+            public int NavMeshSampleFailures;
+            public int YDisagreements;
+            public int BakeYNaNs;
+            public float WorstYDelta;
+            public Vector2 WorstYDeltaXZ;
+            public readonly List<DroppedWaypoint> Drops = new List<DroppedWaypoint>();
+
+            /// <summary>
+            ///     Per-pass dedup key set for individually-emitted error lines.
+            ///     The same waypoint XZ is re-evaluated up to <see cref="MaxIterations" />
+            ///     times within one <see cref="Refine" /> pass; without this guard
+            ///     each extreme/NaN drop would log ~16 near-identical errors.
+            /// </summary>
+            internal readonly HashSet<string> IndividuallyEmitted = new HashSet<string>();
+
+            public int TotalDrops => BfsMisses + NavMeshSampleFailures + YDisagreements;
+        }
+
+        /// <summary>One dropped waypoint, recorded for sidecar consumption.</summary>
+        internal readonly struct DroppedWaypoint
+        {
+            public readonly float X;
+            public readonly float Z;
+            public readonly string Reason;
+            public readonly float BakeY;
+            public readonly float Delta;
+
+            public DroppedWaypoint(float x, float z, string reason, float bakeY, float delta)
+            {
+                X = x;
+                Z = z;
+                Reason = reason;
+                BakeY = bakeY;
+                Delta = delta;
+            }
+        }
+
+        /// <summary>
+        ///     Snapshot of the most recently completed <see cref="Refine" /> pass.
+        ///     Single-threaded; safe to read from the bake/sidecar pipeline that
+        ///     runs after relaxation returns.
+        /// </summary>
+        internal static DropStats LastStats { get; private set; } = new DropStats();
+
+        private static DropStats s_current;
+
+        /// <summary>
         ///     Refine waypoints in-place using force-directed relaxation followed by
         ///     elevation chain propagation.
         /// </summary>
@@ -31,10 +94,34 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             if (waypoints.Count < 4) return waypoints;
 
-            RelaxXZ(waypoints, centroid, filter, graph);
-            PropagateElevation(waypoints, filter);
+            s_current = new DropStats();
+            try
+            {
+                RelaxXZ(waypoints, centroid, filter, graph);
+                PropagateElevation(waypoints, filter);
+            }
+            finally
+            {
+                EmitSummary(s_current, waypoints.Count);
+                LastStats = s_current;
+                s_current = null;
+            }
 
             return waypoints;
+        }
+
+        private static void EmitSummary(DropStats stats, int finalCount)
+        {
+            if (stats.TotalDrops == 0) return;
+
+            var worst = stats.WorstYDelta > 0f
+                ? $", worst |Δ|={stats.WorstYDelta:F2}m at ({stats.WorstYDeltaXZ.x:F1},{stats.WorstYDeltaXZ.y:F1})"
+                : "";
+            Plugin.Log?.LogWarning(
+                $"[WaypointRelaxation] Pass complete: {stats.TotalDrops} waypoints dropped " +
+                $"(ring={finalCount}). bfs_miss={stats.BfsMisses}, " +
+                $"navmesh_fail={stats.NavMeshSampleFailures}, " +
+                $"y_disagreement={stats.YDisagreements}, bake_y_nan={stats.BakeYNaNs}{worst}.");
         }
 
         #region Phase 1 — XZ Force-Directed Relaxation
@@ -102,10 +189,7 @@ namespace ValheimVillages.Behaviors.Patrol
             if (!TryGetBfsCellHeight(worldX, worldZ, graph, out var bfsY))
             {
                 var bakeYDiag = RegionGraph.GetSolidHeightAt(worldX, worldZ, out var by) ? by : float.NaN;
-                Plugin.Log?.LogError(
-                    "[WaypointRelaxation] BFS cell height lookup failed at " +
-                    $"({worldX:F2}, {worldZ:F2}); bake Y={bakeYDiag:F2}. " +
-                    "Dropping waypoint (no silent fallback to bake height).");
+                RecordDrop("bfs_miss", worldX, worldZ, bakeYDiag, 0f);
                 return false;
             }
 
@@ -114,10 +198,7 @@ namespace ValheimVillages.Behaviors.Patrol
                     BoundaryGeometry.NavMeshProbeRadius, filter))
             {
                 var bakeYDiag = RegionGraph.GetSolidHeightAt(worldX, worldZ, out var by) ? by : float.NaN;
-                Plugin.Log?.LogError(
-                    "[WaypointRelaxation] NavMesh.SamplePosition failed at " +
-                    $"({worldX:F2}, {bfsY:F2}, {worldZ:F2}); BFS Y={bfsY:F2}, bake Y={bakeYDiag:F2}. " +
-                    "Dropping waypoint.");
+                RecordDrop("navmesh_fail", worldX, worldZ, bakeYDiag, 0f);
                 return false;
             }
 
@@ -125,16 +206,82 @@ namespace ValheimVillages.Behaviors.Patrol
             if (deltaY > YDisagreementTolerance)
             {
                 var bakeYDiag = RegionGraph.GetSolidHeightAt(worldX, worldZ, out var by) ? by : float.NaN;
-                Plugin.Log?.LogError(
-                    "[WaypointRelaxation] BFS/NavMesh Y disagreement at " +
-                    $"({worldX:F2}, {worldZ:F2}): BFS Y={bfsY:F2}, NavMesh Y={hit.position.y:F2}, " +
-                    $"bake Y={bakeYDiag:F2}, |Δ|={deltaY:F2} > {YDisagreementTolerance:F2}m. " +
-                    "Dropping waypoint (HNA region graph is ground truth; no silent substitution).");
+                RecordDrop("y_disagreement", worldX, worldZ, bakeYDiag, deltaY);
+                // Extreme deltas escape the dedup and emit individually — they're the
+                // signal worth seeing without scrolling a summary. Per-XZ-rounded
+                // dedup inside RecordDrop keeps each waypoint to one line per pass.
+                if (deltaY > ExtremeYDisagreementThreshold &&
+                    TryClaimIndividual("y_disagreement_extreme", worldX, worldZ))
+                    Plugin.Log?.LogError(
+                        "[WaypointRelaxation] BFS/NavMesh Y disagreement (extreme) at " +
+                        $"({worldX:F2}, {worldZ:F2}): BFS Y={bfsY:F2}, NavMesh Y={hit.position.y:F2}, " +
+                        $"bake Y={bakeYDiag:F2}, |Δ|={deltaY:F2}m. Dropping waypoint.");
                 return false;
             }
 
             result = hit.position;
             return true;
+        }
+
+        /// <summary>
+        ///     Record one dropped waypoint into the active <see cref="DropStats" />.
+        ///     Bumps the per-reason counter, tracks the worst Y delta seen, appends
+        ///     the drop to the per-waypoint list for sidecar consumption, and emits
+        ///     individually for rare/extreme cases (NaN bake Y, anywhere) so they
+        ///     don't get lost in the summary.
+        /// </summary>
+        private static void RecordDrop(string reason, float worldX, float worldZ, float bakeY, float delta)
+        {
+            var stats = s_current;
+            if (stats == null) return; // Refine() not active — defensive only.
+
+            switch (reason)
+            {
+                case "bfs_miss":
+                    stats.BfsMisses++;
+                    break;
+                case "navmesh_fail":
+                    stats.NavMeshSampleFailures++;
+                    break;
+                case "y_disagreement":
+                    stats.YDisagreements++;
+                    if (delta > stats.WorstYDelta)
+                    {
+                        stats.WorstYDelta = delta;
+                        stats.WorstYDeltaXZ = new Vector2(worldX, worldZ);
+                    }
+
+                    break;
+            }
+
+            if (float.IsNaN(bakeY))
+            {
+                stats.BakeYNaNs++;
+                // NaN bake Y is rare and a latent bug signal — always surface
+                // individually, but only once per unique XZ within this pass.
+                if (TryClaimIndividual("bake_y_nan", worldX, worldZ))
+                    Plugin.Log?.LogError(
+                        $"[WaypointRelaxation] bake Y=NaN at ({worldX:F2}, {worldZ:F2}) " +
+                        $"during {reason}. Dropping waypoint; this points at a NaN-propagation " +
+                        "bug upstream of relaxation.");
+            }
+
+            stats.Drops.Add(new DroppedWaypoint(worldX, worldZ, reason, bakeY, delta));
+        }
+
+        /// <summary>
+        ///     Returns true the first time the given (reason, rounded XZ) is seen
+        ///     within the current <see cref="Refine" /> pass. Subsequent calls with
+        ///     the same key return false so callers can suppress duplicate logs.
+        ///     Rounds to 0.1m to collapse iteration-to-iteration drift on the same
+        ///     waypoint into a single emission.
+        /// </summary>
+        private static bool TryClaimIndividual(string reason, float worldX, float worldZ)
+        {
+            var stats = s_current;
+            if (stats == null) return true;
+            var key = $"{reason}:{Mathf.RoundToInt(worldX * 10f)}:{Mathf.RoundToInt(worldZ * 10f)}";
+            return stats.IndividuallyEmitted.Add(key);
         }
 
         private static bool TryGetBfsCellHeight(float worldX, float worldZ, RegionGraph graph, out float height)

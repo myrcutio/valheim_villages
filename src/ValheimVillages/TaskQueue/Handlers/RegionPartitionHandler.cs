@@ -196,7 +196,10 @@ namespace ValheimVillages.TaskQueue.Handlers
                 beds,
                 minX, minZ, maxX, maxZ,
                 out var droppedRubberBand,
-                out var pass3DiscoveredEdges);
+                out var pass3DiscoveredEdges,
+                out var bedReachableCells,
+                out var pruneOutsideCells,
+                out var prunedPieceKeys);
 
             // Merge Pass 3 discovered edges into the cross-kind adjacency
             // (if it was built) and publish the merged graph to
@@ -292,32 +295,51 @@ namespace ValheimVillages.TaskQueue.Handlers
             // stale positions — masking the new graph's connectivity.
             NavMeshLinkPlacer.RemoveAllLinks();
 
-            // Replace slot-31 NavMesh with one built from the HNA-filtered
-            // triangle set. The first bake (BakeVillage) uses raw runtime
-            // colliders, which Unity's voxelizer handles inconsistently for
-            // non-convex MeshColliders (hollow columns, thin-walled decor):
-            // the voxelizer can leave walkable surface inside the volume
-            // even though the runtime capsule physics correctly hits the
-            // wall mesh. The HNA per-tri filter (RegionBuilder's
-            // CheckCapsule / CheckSphere clearance, see rej_blocked counter)
-            // already rejects those bad triangles — they're absent from
-            // RegionBuilder.CachedTriangles. Rebuilding the slot-31 NavMesh
-            // from CachedTriangles makes the NavMesh and the RegionGraph
-            // represent the same walkable set, so NavMesh.CalculatePath
-            // routes around column volumes instead of through them.
-            var hnaRebake = NavMeshBakeManager.RebakeFromHnaTriangles(
-                RegionBuilder.CachedTriangles, bakeBounds);
-            DebugLog.Event("NavMeshBake", "hna_rebake",
-                ("success", hnaRebake.Success),
-                ("triangles", hnaRebake.TriangleCount),
-                ("vertices", hnaRebake.VertexCount),
-                ("duration_ms", hnaRebake.DurationMs),
-                ("reason", hnaRebake.FailureReason ?? ""));
-            if (!hnaRebake.Success)
+            // Second bake: cells HNA dropped but the first bake left
+            // walkable get masked with ModifierBox NotWalkable volumes
+            // and the piece NavMesh re-baked. The first bake's outside-
+            // cell carve handled the perimeter flood; this handles the
+            // Pass-2 prune residue (cliffs, locked rooms, anything inside
+            // the perimeter but not reachable from a bed). Greedy
+            // rectangle decomposition keeps the source-count tiny —
+            // ~tens of rectangles instead of thousands of per-cell boxes.
+            var pruneRebake = NavMeshBakeManager.RebakeWithPruneComplement(
+                bedReachableCells, pruneOutsideCells, prunedPieceKeys, bakeBounds);
+            DebugLog.Event("NavMeshBake", "prune_complement_rebake",
+                ("success", pruneRebake.Success),
+                ("prune_complement_cells", pruneRebake.PruneComplementCells),
+                ("prune_complement_rects", pruneRebake.PruneComplementRectangles),
+                ("pruned_piece_cells", pruneRebake.PrunedPieceCells),
+                ("pruned_piece_buckets", pruneRebake.PrunedPieceBuckets),
+                ("pruned_piece_rects", pruneRebake.PrunedPieceRectangles),
+                ("total_sources", pruneRebake.TotalSources),
+                ("duration_ms", pruneRebake.DurationMs),
+                ("reason", pruneRebake.FailureReason ?? ""));
+            if (!pruneRebake.Success)
                 Plugin.Log?.LogWarning(
-                    $"[Region] HNA rebake failed ({hnaRebake.FailureReason}); slot-31 NavMesh " +
-                    "still reflects raw runtime colliders — columns and other non-convex " +
-                    "mesh geometry may not carve correctly.");
+                    $"[Region] Prune-complement rebake failed ({pruneRebake.FailureReason}); " +
+                    "slot-31 NavMesh may still cover cells HNA pruning marked unreachable.");
+
+            // Third pass: query the live NavMesh triangulation and block any
+            // walkable polygon whose centroid the HNA graph does not recognize.
+            // Unity's voxelizer can produce sliver triangles / edge artifacts
+            // the region builder never tracked; the two prior prunes only
+            // cover cells HNA explicitly rejected. Iterate up to 3 times —
+            // each ModifierBox rebake can expose a smaller residual fringe.
+            const int maxOrphanIterations = 3;
+            for (var iter = 0; iter < maxOrphanIterations; iter++)
+            {
+                var orphanResult = NavMeshBakeManager.PruneOrphanTriangles(graph, bakeBounds);
+                DebugLog.Event("NavMeshBake", "orphan_prune",
+                    ("iter", iter),
+                    ("orphan_triangles", orphanResult.OrphanTriangles),
+                    ("orphan_cells", orphanResult.OrphanCellsBlocked),
+                    ("buckets", orphanResult.HeightBuckets),
+                    ("rects", orphanResult.Rectangles),
+                    ("did_rebake", orphanResult.DidRebake),
+                    ("duration_ms", orphanResult.DurationMs));
+                if (!orphanResult.DidRebake) break;
+            }
 
             // Invalidate every active villager's cached BaseAI path.
             // The rebake replaced slot-31 NavMesh data and the link
@@ -405,6 +427,17 @@ namespace ValheimVillages.TaskQueue.Handlers
                 float.TryParse(axStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var ax) &&
                 float.TryParse(azStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var az))
                 return RegionGraph.VillageKey(ax, az);
+            // Anchor-less tasks (e.g. vv_repartition, post-hot-reload auto) used
+            // to fall through to "_default", which registered the rebuilt graph
+            // under a key distinct from the per-bed one — producing two graph
+            // instances representing the same village. Derive from the first
+            // available bed instead, so all callers converge on the same key.
+            // Genuinely no-bed case still falls through to "_default" — caller
+            // already early-exits on no_beds_or_areas at Handle(), so this
+            // branch is only hit in tests / boot races.
+            var beds = VillagerAIManager.GetAllBedPositions();
+            if (beds != null && beds.Count > 0)
+                return RegionGraph.VillageKey(beds[0].x, beds[0].z);
             return "_default";
         }
 

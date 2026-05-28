@@ -125,7 +125,10 @@ namespace ValheimVillages
 
             Log.LogInfo($"{PluginName} loaded successfully!");
 
-            if (isHotReload) DebugLog.Capture("hot-reload");
+            // No hot-reload capture: the auto-repartition that follows shortly
+            // after rebuilds the region graph from scratch, so the post-reload
+            // PNG would only ever show stale state. The repartition trigger
+            // (orchestrated, below) captures the canonical post-rebuild view.
 
             // Schedule integration tests via task queue so they run after fixtures are ready
             if (isHotReload && ModTestRunner.AutoRunEnabled)
