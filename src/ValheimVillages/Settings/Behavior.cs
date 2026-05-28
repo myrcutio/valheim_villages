@@ -36,10 +36,15 @@ namespace ValheimVillages.Settings
         ///     smelter, dropped one batch off, came back" and "smelter has
         ///     finished the next batch" — without this, the villager walks
         ///     to the fire and 30s later walks back, repeating endlessly.
-        ///     A villager-specific work-state check would be cleaner long-
-        ///     term, but a simple linger window handles the common case.
+        ///     <para>Tuned short: 15s is enough that if a new work order is
+        ///     pending it'll preempt before the linger expires, but short
+        ///     enough that the villager doesn't visibly hover for an
+        ///     unnatural duration when there's genuinely nothing to do.
+        ///     The follow-up walk to a known location uses
+        ///     <see cref="IsCasualTravel"/>-flagged movement (walk, not
+        ///     run) so even the expired-linger transition reads as relaxed.</para>
         /// </summary>
-        public const float PostWorkLingerSec = 45f;
+        public const float PostWorkLingerSec = 15f;
 
         /// <summary>
         ///     Random jitter range (seconds) applied to each NPC's initial behavior tick.

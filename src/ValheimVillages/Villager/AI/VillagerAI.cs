@@ -96,6 +96,18 @@ namespace ValheimVillages.Villager.AI
         /// <summary>True if a linger window is currently active.</summary>
         public bool IsLingering => Time.time < LingerUntilTime;
 
+        /// <summary>
+        ///     True when the current movement was initiated by a low-priority
+        ///     behavior (Explore — going to fire / shelter / wander spot)
+        ///     rather than a work behavior. Used by the path-follow loop to
+        ///     pick a walk vs. run speed: casual travel walks (visual cue
+        ///     that the villager isn't busy), work travel runs when the
+        ///     destination is more than a few meters away. Set by the
+        ///     initiating behavior; cleared by <see cref="SetState"/> when
+        ///     the next non-casual waypoint is assigned.
+        /// </summary>
+        public bool IsCasualTravel { get; set; }
+
         private float m_stuckBackoffUntil;
 
         /// <summary>When the current movement target was set (for stuck timeout).</summary>
@@ -368,7 +380,14 @@ namespace ValheimVillages.Villager.AI
 
                     if (path != null && path.Count > 0)
                     {
-                        var running = CurrentState == BehaviorState.Patrolling || remaining > 5f;
+                        // Walk when this is Explore-driven travel (visual cue
+                        // that the villager isn't busy); run for Patrolling,
+                        // or for distant work-driven travel. Casual travel
+                        // is cleared by SetState on the next non-casual
+                        // waypoint, so this naturally reverts to run-when-
+                        // far once a real work order arrives.
+                        var running = CurrentState == BehaviorState.Patrolling
+                                      || (!IsCasualTravel && remaining > 5f);
 
                         while (path.Count > 1 && VillagerMovement.IsAtPosition(transform.position, path[0], VillagerSettings.PathNodePopThreshold))
                             path.RemoveAt(0);
@@ -733,6 +752,10 @@ namespace ValheimVillages.Villager.AI
                 // recovery: we're under new orders, the prior retreat /
                 // backoff / attempt counter no longer applies.
                 ResetRecoveryState();
+                // Clear casual-travel marker by default. Behaviors that
+                // WANT casual travel (Explore wandering to a known
+                // location) set it back to true AFTER this returns.
+                IsCasualTravel = false;
                 // Invalidate any in-flight path: it was computed against the
                 // previous target and would otherwise keep being followed
                 // until the villager arrived at its old destination (and

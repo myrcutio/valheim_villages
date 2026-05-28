@@ -142,7 +142,15 @@ namespace ValheimVillages.Behaviors.Explore
         private void TransitionToLocation(KnownLocation location)
         {
             if (!VillagerMovement.IsAtPosition(m_ai.Position, location.Position, VillagerSettings.ArrivalThreshold))
+            {
                 m_ai.SetState(BehaviorState.Traveling, location.Position);
+                // Mark this as casual (Explore-initiated) travel so the
+                // path-follow loop walks instead of runs — visual cue
+                // that the villager isn't on a work errand. SetState
+                // clears IsCasualTravel by default, so this re-arms it
+                // for the freshly-set waypoint only.
+                m_ai.IsCasualTravel = true;
+            }
         }
     }
 }
