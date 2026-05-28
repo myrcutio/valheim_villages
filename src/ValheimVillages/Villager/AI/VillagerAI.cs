@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
+using UnityEngine.AI;
 using ValheimVillages.Behaviors;
 using ValheimVillages.Behaviors.Explore;
 using ValheimVillages.Behaviors.Work;
@@ -13,6 +14,7 @@ using ValheimVillages.Tags;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villager.AI.Memory;
 using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villager.AI.Pathfinding;
 using ValheimVillages.Villager.AI.Pathfinding;
 using ValheimVillages.Villager.Registry;
 using Random = UnityEngine.Random;
@@ -258,13 +260,25 @@ namespace ValheimVillages.Villager.AI
             // travel?" 50 times per second when its target is 5m away.
             if (m_lastBehaviorUpdateTime <= 0f)
             {
-                var ctx = new BehaviorContext();
-                foreach (var b in m_behaviors)
-                    if (b.WantsControl(ctx))
-                    {
-                        b.Update(dt);
-                        break;
-                    }
+                // Off-mesh rescue: if the villager is positioned off the
+                // NavMesh (spawned on top of a bed, bumped off by terrain
+                // change, falling object, etc), every path query will fail
+                // and they'll be stuck. Find the nearest valid mesh point
+                // and walk there as the first action — preempts whatever
+                // behavior would otherwise run. Returns false when the
+                // villager is already on the mesh (the common case);
+                // returns true and sets a movement target when a rescue
+                // was needed.
+                if (!TryRescueOffMesh())
+                {
+                    var ctx = new BehaviorContext();
+                    foreach (var b in m_behaviors)
+                        if (b.WantsControl(ctx))
+                        {
+                            b.Update(dt);
+                            break;
+                        }
+                }
                 // Reset cooldown. Idle re-evaluation cadence — high enough
                 // to stop the thrash, low enough to react to player input
                 // (work orders, manual relocate) within a noticeable window.
@@ -835,6 +849,67 @@ namespace ValheimVillages.Villager.AI
             if (hasPath) m_currentWaypoint = destination;
 
             return hasPath;
+        }
+
+        /// <summary>
+        ///     Off-mesh self-rescue gate. If the villager's current position
+        ///     is more than a small radius from any walkable NavMesh
+        ///     polygon, find the nearest valid mesh point and dispatch the
+        ///     villager toward it as Casual (Explore-style) travel.
+        ///     Returns true when a rescue was issued (caller should skip
+        ///     normal behavior selection), false when the villager is
+        ///     already on the mesh (the common case).
+        ///     <para>Covers a class of off-mesh stalls: spawned on top of
+        ///     a bed / chest / station that the bake correctly excluded
+        ///     from walkable surfaces, bumped off by terrain edits, tree
+        ///     felling, etc. Without this gate the villager would issue
+        ///     path queries forever and they'd all return Failed because
+        ///     NavMesh.SamplePosition at the start can't find a polygon.</para>
+        ///     <para>Per the no-silent-fallbacks rule: if no mesh is found
+        ///     within the maximum search radius, the villager is genuinely
+        ///     stranded (unloaded zone, bake hole). Log loudly + return
+        ///     false so the calling tick proceeds normally — better to let
+        ///     the next stall-escape incident surface the issue than to
+        ///     silently teleport to a fabricated point.</para>
+        /// </summary>
+        private bool TryRescueOffMesh()
+        {
+            if (!VillagerAgentType.IsRegistered) return false;
+            var filter = new NavMeshQueryFilter
+            {
+                agentTypeID = VillagerAgentType.UnityAgentTypeID,
+                areaMask = NavMesh.AllAreas,
+            };
+
+            // Already on the mesh? Tight 1m probe — the agent capsule has
+            // its own ~0.4m body radius so anything within 1m of a polygon
+            // is "on the mesh" for movement purposes.
+            if (NavMesh.SamplePosition(transform.position, out _, 1f, filter))
+                return false;
+
+            // Expand the search to find the nearest mesh point. 16m covers
+            // typical building geometry — a villager spawned in the middle
+            // of a tower top, knocked off a 10m foundation, etc.
+            if (!NavMesh.SamplePosition(transform.position, out var rescueHit, 16f, filter))
+            {
+                Plugin.Log?.LogWarning(
+                    $"[AI:{m_villagerName}] Off-mesh self-rescue failed: no NavMesh polygon " +
+                    $"within 16m of ({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}). " +
+                    "Villager genuinely stranded — check bake coverage or unloaded zone.");
+                return false;
+            }
+
+            Plugin.Log?.LogInfo(
+                $"[AI:{m_villagerName}] Off-mesh self-rescue: dispatching to nearest mesh " +
+                $"({rescueHit.position.x:F1},{rescueHit.position.y:F1},{rescueHit.position.z:F1}) " +
+                $"from ({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}).");
+
+            SetState(BehaviorState.Traveling, rescueHit.position);
+            // Casual travel: walking back onto the mesh isn't an urgent
+            // errand. Reads as a deliberate "get back to where I belong"
+            // motion rather than a panic sprint.
+            IsCasualTravel = true;
+            return true;
         }
 
         /// <summary>
