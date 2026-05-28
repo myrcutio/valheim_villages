@@ -57,10 +57,79 @@ namespace ValheimVillages.Behaviors.Crafting
 
         private void AbandonWork(string reason)
         {
+            // Roll back any items we removed from chests but didn't manage
+            // to commit to a station — without this, a stall mid-walk
+            // drains source chests of items that vanish (the workflow
+            // restarts, pulls fresh items, repeats). User-observed:
+            // Farmer cycling raw meat from a chest into the void during
+            // pathing failures. See WorkOrderContext.HeldItems doc.
+            if (m_context != null && m_context.HeldItems.Count > 0)
+                RollbackHeldItems(m_context.HeldItems, reason);
+
             m_context = null;
             SubState = WorkSubState.Idle;
             if (m_ai != null)
                 m_ai.SetState(BehaviorState.Idle, (VillagerWaypoint)null);
+        }
+
+        /// <summary>
+        ///     Restore items from <see cref="WorkOrderContext.HeldItems"/> to
+        ///     their source containers. If a source container is destroyed
+        ///     or full, drop the items at the villager's feet — better that
+        ///     the player can pick them up than they vanish into context-
+        ///     reset limbo. Per the no-silent-fallbacks rule: log every
+        ///     branch (success / drop-on-ground / source-destroyed) so a
+        ///     leaked transaction is visible in the log.
+        /// </summary>
+        private void RollbackHeldItems(List<HeldItem> held, string reason)
+        {
+            foreach (var item in held)
+            {
+                if (item == null || string.IsNullOrEmpty(item.PrefabName) || item.Amount <= 0)
+                    continue;
+
+                var deposited = item.SourceContainer != null &&
+                                ContainerScanner.TryDepositItem(
+                                    item.SourceContainer, item.PrefabName, item.Amount);
+                if (deposited)
+                {
+                    Plugin.Log?.LogInfo(
+                        $"[Work:{LogName}] Rollback ({reason}): returned {item.Amount}x " +
+                        $"{item.PrefabName} to source container.");
+                    continue;
+                }
+
+                // Source container full or destroyed — drop at villager's
+                // feet so the player can recover the items. ItemDrop.DropItem
+                // would be the ideal API but we don't have a reliable
+                // reference handy here; using ItemDrop spawn via prefab.
+                var pos = m_ai != null && m_ai.transform != null
+                    ? m_ai.transform.position
+                    : Vector3.zero;
+                var prefab = ZNetScene.instance?.GetPrefab(item.PrefabName);
+                if (prefab == null)
+                {
+                    Plugin.Log?.LogError(
+                        $"[Work:{LogName}] Rollback ({reason}): LOST {item.Amount}x " +
+                        $"{item.PrefabName} — prefab not found and source unavailable.");
+                    continue;
+                }
+
+                for (var i = 0; i < item.Amount; i++)
+                {
+                    var dropPos = pos + new Vector3(
+                        UnityEngine.Random.Range(-0.3f, 0.3f),
+                        0.3f,
+                        UnityEngine.Random.Range(-0.3f, 0.3f));
+                    Object.Instantiate(prefab, dropPos, Quaternion.identity);
+                }
+                Plugin.Log?.LogWarning(
+                    $"[Work:{LogName}] Rollback ({reason}): source container unavailable for " +
+                    $"{item.Amount}x {item.PrefabName}; dropped at villager position " +
+                    $"({pos.x:F1},{pos.y:F1},{pos.z:F1}).");
+            }
+
+            held.Clear();
         }
 
         /// <summary>
@@ -117,6 +186,16 @@ namespace ValheimVillages.Behaviors.Crafting
                     Amount = 1,
                     Container = container,
                 },
+            });
+            // Track this pickup as in-transit until the RPC_AddFuel
+            // commits it. If we stall en route, AbandonWork's rollback
+            // returns this to the source chest instead of letting it
+            // vanish.
+            m_context.HeldItems.Add(new HeldItem
+            {
+                SourceContainer = container,
+                PrefabName = fuel.FuelItemPrefab,
+                Amount = 1,
             });
 
             Plugin.Log?.LogInfo(
@@ -183,7 +262,30 @@ namespace ValheimVillages.Behaviors.Crafting
 
             m_context.FuelRequirement = null;
             m_context.FuelContainer = null;
+            // Fuel was successfully committed to the station — clear the
+            // matching HeldItem entry so AbandonWork down the line doesn't
+            // try to roll back already-committed items.
+            ClearHeldItem(fuel.FuelItemPrefab, 1);
             BeginGatheringIngredients();
+        }
+
+        /// <summary>
+        ///     Remove an entry from <see cref="WorkOrderContext.HeldItems"/>
+        ///     after a successful commit to a station. Matches by prefab
+        ///     name + amount; if multiple matching entries exist (e.g. two
+        ///     pickups of the same prefab), removes the first. Caller
+        ///     should pass the exact prefab + amount that was committed.
+        /// </summary>
+        private void ClearHeldItem(string prefabName, int amount)
+        {
+            if (m_context == null || string.IsNullOrEmpty(prefabName)) return;
+            for (var i = 0; i < m_context.HeldItems.Count; i++)
+            {
+                var h = m_context.HeldItems[i];
+                if (h == null || h.PrefabName != prefabName || h.Amount != amount) continue;
+                m_context.HeldItems.RemoveAt(i);
+                return;
+            }
         }
 
         private void BeginGatheringIngredients()
@@ -410,6 +512,21 @@ namespace ValheimVillages.Behaviors.Crafting
                 m_ai.LingerAtPos = m_context.CraftStationPosition;
             }
 
+            // Defensive: any HeldItems left at the end of a "successful"
+            // work cycle is a workflow bug — items pulled from a chest
+            // but never committed at a station. Roll them back rather
+            // than silently leaking. With every commit site calling
+            // ClearHeldItem, this list should be empty here; if it isn't,
+            // the warning + rollback both flag the regression and
+            // preserve the items.
+            if (m_context != null && m_context.HeldItems.Count > 0)
+            {
+                Plugin.Log?.LogWarning(
+                    $"[Work:{LogName}] FinishWork with {m_context.HeldItems.Count} uncommitted " +
+                    "HeldItems — workflow regression, rolling back as if AbandonWork.");
+                RollbackHeldItems(m_context.HeldItems, "finish_with_uncommitted");
+            }
+
             m_context = null;
             SubState = WorkSubState.Idle;
             if (m_ai != null)
@@ -434,6 +551,14 @@ namespace ValheimVillages.Behaviors.Crafting
 
             var singleSource = new List<IngredientSource> { source };
             ContainerScanner.RemoveIngredients(singleSource);
+            // Track this pickup as in-transit (see fuel branch + AbandonWork
+            // rollback for the why).
+            m_context.HeldItems.Add(new HeldItem
+            {
+                SourceContainer = source.Container,
+                PrefabName = source.PrefabName,
+                Amount = source.Amount,
+            });
 
             m_context.CurrentIngredientIndex++;
             WalkToNextIngredientChest();
@@ -466,6 +591,8 @@ namespace ValheimVillages.Behaviors.Crafting
                 smelterNview.InvokeRPC("RPC_AddOre", m_context.SmelterInputItemName);
                 Plugin.Log?.LogInfo(
                     $"[Work:{LogName}] Added 1x {m_context.SmelterInputItemName} to Smelter ({smelter.gameObject.name})");
+                // Ore committed — clear the matching in-transit entry.
+                ClearHeldItem(m_context.SmelterInputItemName, 1);
                 return;
             }
 
@@ -488,6 +615,8 @@ namespace ValheimVillages.Behaviors.Crafting
                 if (nview != null && nview.GetZDO() != null)
                 {
                     nview.InvokeRPC("RPC_AddItem", m_context.CookingInputItemName);
+                    // Cooking input committed — clear the matching in-transit entry.
+                    ClearHeldItem(m_context.CookingInputItemName, 1);
 
                     var conversion = station.m_conversion?.Find(c =>
                         c.m_from != null && c.m_from.gameObject.name == m_context.CookingInputItemName);

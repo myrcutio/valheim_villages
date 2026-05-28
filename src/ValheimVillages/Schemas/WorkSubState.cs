@@ -98,6 +98,31 @@ namespace ValheimVillages.Schemas
 
         /// <summary>The work order match data.</summary>
         public WorkOrderMatch WorkOrder;
+
+        /// <summary>
+        ///     Items pulled from source containers that haven't yet been
+        ///     committed to a station/output. Each entry: (source container,
+        ///     prefab name, amount). On successful commit at a station, the
+        ///     corresponding entry is cleared. On AbandonWork or any other
+        ///     workflow abort, the entries are restored to their source
+        ///     containers (or dropped at the villager's feet if the source
+        ///     is full/destroyed) so the items aren't permanently lost.
+        ///     Without this list, a stall mid-walk between chest and station
+        ///     drains the chest of items that effectively vanish — the
+        ///     workflow restarts, pulls more from the chest, repeats.
+        /// </summary>
+        public List<HeldItem> HeldItems = new List<HeldItem>();
+    }
+
+    /// <summary>
+    ///     One transient "in transit" item — pulled from <see cref="SourceContainer"/>
+    ///     but not yet committed to a station. See <see cref="WorkOrderContext.HeldItems"/>.
+    /// </summary>
+    public class HeldItem
+    {
+        public Container SourceContainer;
+        public string PrefabName;
+        public int Amount;
     }
 
     /// <summary>
