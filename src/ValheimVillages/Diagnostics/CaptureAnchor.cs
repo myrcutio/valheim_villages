@@ -58,6 +58,26 @@ namespace ValheimVillages.Diagnostics
 
             public static Result From(Vector3 bedPos) =>
                 new Result(true, bedPos + Vector3.up * VerticalClearance, 0f, 90f, null);
+
+            /// <summary>
+            ///     Anchor at an arbitrary world position with a caller-provided
+            ///     vertical clearance. Used for incident captures where the
+            ///     anchor is a villager pos or destination pos rather than a
+            ///     seed bed, and the framing scale wants to be tighter (10m)
+            ///     than the village-overview default. Pos/Yaw/Pitch follow the
+            ///     same convention as <see cref="From(Vector3)"/>.
+            /// </summary>
+            public static Result At(Vector3 anchorXZ, float clearance)
+            {
+                // Use the anchor's own Y as the floor, +clearance for the
+                // camera height. If the caller passes a Y of 0 (XZ-only call
+                // site like a console command), the camera lands at sea-level
+                // + clearance, which is usually still useful — Valheim terrain
+                // is rarely above 50m and 10m clearance over Y=0 still frames
+                // the area, just from below ground if terrain rises sharply.
+                // Callers with a real Y (incidents) get the expected behavior.
+                return new Result(true, anchorXZ + Vector3.up * clearance, 0f, 90f, null);
+            }
         }
 
         /// <summary>
@@ -103,6 +123,19 @@ namespace ValheimVillages.Diagnostics
             }
 
             return Result.From(bestBed);
+        }
+
+        /// <summary>
+        ///     Resolve the anchor pose against a caller-supplied world position
+        ///     with a caller-supplied vertical clearance. Used by the incident
+        ///     recorder to anchor at villager pos and destination pos
+        ///     independently. Yaw=0, pitch=90 matches the seed-bed overload so
+        ///     PNG framing semantics stay consistent across capture trigger
+        ///     types.
+        /// </summary>
+        public static Result ResolveAt(Vector3 worldPos, float clearance)
+        {
+            return Result.At(worldPos, clearance);
         }
     }
 }

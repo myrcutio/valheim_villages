@@ -62,6 +62,18 @@ namespace ValheimVillages.Villager.AI
         private bool m_stallLogged;
         private float m_stallStartTime;
 
+        /// <summary>
+        ///     Per-villager 30s ring buffer of AI state mutations. Read by
+        ///     the incident dump system to answer "what was this villager
+        ///     doing in the seconds before the failure?" — distinguishes
+        ///     "TargetSet fired but PathRecompute never followed" (the path-
+        ///     invalidation bug shape) from "PathRecompute returned Empty"
+        ///     and similar runtime distinctions log-grepping can't easily
+        ///     produce. Populated inline at SetState/SetPatrolCircuit/
+        ///     TryFindPathCustom/EnterRecovery; consumed by IncidentRecorder.
+        /// </summary>
+        internal readonly Diagnostics.AiEventRing EventRing = new Diagnostics.AiEventRing();
+
         private float m_stuckBackoffUntil;
 
         /// <summary>When the current movement target was set (for stuck timeout).</summary>
@@ -433,6 +445,11 @@ namespace ValheimVillages.Villager.AI
                                             $"distToTarget={Vector3.Distance(transform.position, targetPos):F2} " +
                                             $"distToLast={Vector3.Distance(transform.position, lastNode):F2} " +
                                             $"recoveryAttempts={m_recoveryAttempts} retreating={m_recoveryRetreating}");
+                                        // Structured incident dump alongside the warning.
+                                        // Composite dedup means re-firing the same key
+                                        // (same villager + same destination bucket +
+                                        // same kind) just bumps a counter on disk.
+                                        Diagnostics.IncidentRecorder.Record(this, targetPos, "stall_escape");
                                     }
                                     // While retreating, escalate against the
                                     // real original target (the chest we
@@ -661,9 +678,11 @@ namespace ValheimVillages.Villager.AI
 
         public void SetState(BehaviorState newState, VillagerWaypoint waypoint)
         {
+            var prevState = CurrentState;
             CurrentState = newState;
             if (waypoint != null)
             {
+                var prevTarget = m_currentWaypoint != null ? m_currentWaypoint.Position : Vector3.zero;
                 m_currentWaypoint = waypoint;
                 m_targetSetTime = Time.time;
                 m_lastMovePos = transform.position;
@@ -672,7 +691,12 @@ namespace ValheimVillages.Villager.AI
                 // recovery: we're under new orders, the prior retreat /
                 // backoff / attempt counter no longer applies.
                 ResetRecoveryState();
+                EventRing.RecordTargetSet(waypoint.Position, prevTarget, $"SetState({newState})");
             }
+
+            if (prevState != newState)
+                EventRing.RecordStateChange(prevState.ToString(), newState.ToString(),
+                    waypoint != null ? "with_waypoint" : "no_waypoint");
 
             if (newState == BehaviorState.Idle)
                 StopMoving();
@@ -690,12 +714,17 @@ namespace ValheimVillages.Villager.AI
         /// </summary>
         public void SetPatrolCircuit(VillagerWaypoint finalTarget, List<Vector3> circuitPath)
         {
+            var prevState = CurrentState;
+            var prevTarget = m_currentWaypoint != null ? m_currentWaypoint.Position : Vector3.zero;
             CurrentState = BehaviorState.Patrolling;
             m_currentWaypoint = finalTarget;
             m_targetSetTime = Time.time;
             m_lastMovePos = transform.position;
             m_lastRealMoveTime = Time.time;
             m_lastArrivalTime = Time.time;
+            EventRing.RecordTargetSet(finalTarget.Position, prevTarget, "SetPatrolCircuit");
+            if (prevState != BehaviorState.Patrolling)
+                EventRing.RecordStateChange(prevState.ToString(), "Patrolling", "SetPatrolCircuit");
 
             var path = s_pathField?.GetValue(this) as List<Vector3>;
             if (path != null)
@@ -742,8 +771,13 @@ namespace ValheimVillages.Villager.AI
         private bool TryFindPathCustom(Vector3 targetPos)
         {
             var path = s_pathField?.GetValue(this) as List<Vector3>;
-            if (path == null) return false;
+            if (path == null)
+            {
+                EventRing.RecordPathRecompute("NullPathField", 0, targetPos);
+                return false;
+            }
             var ok = VillagerMovement.TryFindCompletePath(transform.position, targetPos, path);
+            EventRing.RecordPathRecompute(ok ? "Complete" : "Failed", path.Count, targetPos);
 
             // Always log path shape — corner count, segment lengths, HNA region per corner. This
             // is the ground-truth diagnostic: lets us see whether paths are degenerate (1 corner,

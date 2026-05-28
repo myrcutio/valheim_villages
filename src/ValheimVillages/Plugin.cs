@@ -125,6 +125,11 @@ namespace ValheimVillages
 
             Log.LogInfo($"{PluginName} loaded successfully!");
 
+            // Wipe stale incident dumps from any prior session — world state
+            // changed across hot reload, so past incidents are noise. Done
+            // before any villager can trigger an incident write.
+            Diagnostics.IncidentRecorder.ClearOnLoad();
+
             // Dev: freeze the day/night cycle at noon so screenshots and live
             // debugging happen under consistent lighting. Toggleable via
             // vv_freezetime. TODO: gate or remove before release — see

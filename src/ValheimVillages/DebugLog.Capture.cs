@@ -26,8 +26,23 @@ namespace ValheimVillages
         ///     <see cref="Plugin.Instance" /> or <see cref="Camera.main" /> is
         ///     unavailable (e.g. main-menu reload). Output overwrites
         ///     &lt;SidecarDir&gt;/last_capture.png and last_capture.json on every call.
+        ///
+        ///     <para>For incident captures that need a custom output directory
+        ///     and/or a non-seed-bed anchor, use the
+        ///     <see cref="Capture(CaptureRequest)"/> overload.</para>
         /// </summary>
         public static void Capture(string trigger)
+        {
+            Capture(CaptureRequest.Default(trigger));
+        }
+
+        /// <summary>
+        ///     Request a screenshot with a fully-specified <see cref="CaptureRequest"/>.
+        ///     The request controls trigger name, output directory/filename, and
+        ///     optional anchor override (e.g. anchor at a villager position with
+        ///     a tighter clearance for an incident capture).
+        /// </summary>
+        public static void Capture(CaptureRequest request)
         {
             try
             {
@@ -37,7 +52,7 @@ namespace ValheimVillages
                 if (_captureBehaviour == null)
                     _captureBehaviour = plugin.gameObject.GetComponent<DebugCaptureBehaviour>()
                                         ?? plugin.gameObject.AddComponent<DebugCaptureBehaviour>();
-                _captureBehaviour.Enqueue(trigger ?? "unknown");
+                _captureBehaviour.Enqueue(request);
             }
             catch
             {
@@ -51,9 +66,105 @@ namespace ValheimVillages
         }
     }
 
+    /// <summary>
+    ///     What to capture and where to put it. Constructed by callers
+    ///     (<see cref="DebugLog.Capture(string)"/> for the default
+    ///     last_capture.png flow; the incident recorder for villager-anchored
+    ///     captures into <c>vv_dumps/incidents/&lt;id&gt;/</c>). Marshalled
+    ///     across threads via the capture behaviour's queue.
+    /// </summary>
+    internal readonly struct CaptureRequest
+    {
+        public readonly string Trigger;
+
+        /// <summary>
+        ///     Output directory relative to <c>Paths.ConfigPath/vv_dumps/</c>
+        ///     (empty = directly into vv_dumps/). Created if missing.
+        /// </summary>
+        public readonly string OutputSubdir;
+
+        /// <summary>
+        ///     Base filename for the PNG + sidecar JSON (without extension).
+        ///     Default capture flow uses "last_capture"; incident captures use
+        ///     "villager" / "destination".
+        /// </summary>
+        public readonly string OutputBaseName;
+
+        /// <summary>
+        ///     Optional anchor override. When null, the orchestration session
+        ///     resolves via <see cref="CaptureAnchor.Resolve()"/> (nearest seed
+        ///     bed at default clearance). When set, the session anchors at
+        ///     this position with the provided clearance — incident captures
+        ///     use this with the villager/destination pos and a 10m clearance.
+        /// </summary>
+        public readonly Vector3? AnchorOverride;
+        public readonly float AnchorClearance;
+
+        /// <summary>
+        ///     When true, the sidecar JSON gets the full <c>diagnostics</c>
+        ///     block (last relaxation pass, village bounds). Incident captures
+        ///     set this to false — they have their own diagnostic JSON
+        ///     (incident.json) and don't need to duplicate the global state.
+        /// </summary>
+        public readonly bool IncludeDiagnostics;
+
+        public CaptureRequest(string trigger, string outputSubdir, string outputBaseName,
+            Vector3? anchorOverride, float anchorClearance, bool includeDiagnostics)
+        {
+            Trigger = trigger ?? "unknown";
+            OutputSubdir = outputSubdir ?? "";
+            OutputBaseName = string.IsNullOrEmpty(outputBaseName) ? "last_capture" : outputBaseName;
+            AnchorOverride = anchorOverride;
+            AnchorClearance = anchorClearance;
+            IncludeDiagnostics = includeDiagnostics;
+        }
+
+        /// <summary>
+        ///     Default request: writes vv_dumps/last_capture.{png,json}, uses
+        ///     seed-bed anchor at default clearance, includes diagnostics.
+        ///     Matches the pre-refactor <see cref="DebugLog.Capture(string)"/>
+        ///     contract.
+        /// </summary>
+        public static CaptureRequest Default(string trigger)
+        {
+            return new CaptureRequest(trigger, "", "last_capture",
+                anchorOverride: null,
+                anchorClearance: Diagnostics.CaptureAnchor.VerticalClearance,
+                includeDiagnostics: true);
+        }
+
+        /// <summary>
+        ///     Incident-flow request: anchor at a specific world position with
+        ///     a tighter clearance, write into a per-incident subdirectory,
+        ///     skip the global diagnostics block.
+        /// </summary>
+        public static CaptureRequest ForIncident(string trigger, string incidentSubdir,
+            string baseName, Vector3 anchor, float clearance)
+        {
+            return new CaptureRequest(trigger, incidentSubdir, baseName,
+                anchorOverride: anchor,
+                anchorClearance: clearance,
+                includeDiagnostics: false);
+        }
+    }
+
     internal class DebugCaptureBehaviour : MonoBehaviour
     {
-        private readonly ConcurrentQueue<string> _pending = new();
+        private readonly ConcurrentQueue<CaptureRequest> _pending = new();
+
+        /// <summary>
+        ///     Serialization flag for the capture pipeline. Captures MUST run
+        ///     one-at-a-time: when two are enqueued back-to-back (e.g. the
+        ///     incident system queues a villager view + a destination view),
+        ///     running them in parallel coroutines causes the second
+        ///     <see cref="OrchestrationSession.TryBegin"/> to snapshot the
+        ///     POST-FIRST-TELEPORT state as its "original" — so when the
+        ///     second capture restores, the camera lands at the first
+        ///     capture's anchor pose instead of where the player actually was.
+        ///     Symptom: camera sticks at last-screenshot location after a
+        ///     two-capture incident dump.
+        /// </summary>
+        private bool _processing;
 
         /// <summary>
         ///     Triggers whose capture should be orchestrated (teleport player to
@@ -73,19 +184,54 @@ namespace ValheimVillages
 
         private void Update()
         {
-            while (_pending.TryDequeue(out var trigger))
+            if (_processing) return;
+            if (_pending.IsEmpty) return;
+            StartCoroutine(ProcessQueue());
+        }
+
+        public void Enqueue(CaptureRequest req)
+        {
+            _pending.Enqueue(req);
+        }
+
+        /// <summary>
+        ///     Drain the pending queue sequentially. Each capture's
+        ///     orchestration session must fully complete (teleport, snap,
+        ///     restore) before the next begins, otherwise overlapping
+        ///     TryBegin calls contaminate each other's saved camera/player
+        ///     state — see <see cref="_processing"/> doc.
+        ///
+        ///     <para>The <c>yield return null</c> between captures is load-
+        ///     bearing: after a capture's Restore re-enables GameCamera, that
+        ///     component's LateUpdate needs at least one frame to reposition
+        ///     the camera to follow the player. Without the yield, the next
+        ///     capture's TryBegin snapshots the still-teleported camera pose
+        ///     as its "original", and ends up restoring to that stale value
+        ///     when it finishes. Symptom: camera sticks at the last capture's
+        ///     anchor.</para>
+        /// </summary>
+        private IEnumerator ProcessQueue()
+        {
+            _processing = true;
+            try
             {
-                var counter = DebugLog.NextCaptureCounter();
-                StartCoroutine(CaptureRoutine(trigger, counter));
+                while (_pending.TryDequeue(out var req))
+                {
+                    var counter = DebugLog.NextCaptureCounter();
+                    yield return CaptureRoutine(req, counter);
+                    // Let GameCamera.LateUpdate run so the camera actually
+                    // follows the player back before the next capture
+                    // snapshots its "original" state.
+                    yield return null;
+                }
+            }
+            finally
+            {
+                _processing = false;
             }
         }
 
-        public void Enqueue(string trigger)
-        {
-            _pending.Enqueue(trigger);
-        }
-
-        private IEnumerator CaptureRoutine(string trigger, int counter)
+        private IEnumerator CaptureRoutine(CaptureRequest req, int counter)
         {
             // Let any debug overlay (RegionDebugVisualization etc.) redraw
             // against post-event state before we grab the frame.
@@ -95,10 +241,10 @@ namespace ValheimVillages
             if (cam == null) yield break;
 
             OrchestrationSession session = null;
-            if (OrchestratedTriggers.Contains(trigger))
+            if (OrchestratedTriggers.Contains(req.Trigger) || req.AnchorOverride.HasValue)
             {
-                session = OrchestrationSession.TryBegin();
-                session?.LogStarted(trigger, session.AnchorPos);
+                session = OrchestrationSession.TryBegin(req);
+                session?.LogStarted(req.Trigger, session.AnchorPos);
             }
 
             try
@@ -130,7 +276,7 @@ namespace ValheimVillages
                 // passes (incl. debug overlays) have rendered.
                 yield return new WaitForEndOfFrame();
 
-                WritePngAndSidecar(trigger, counter, pos, euler, worldTime);
+                WritePngAndSidecar(req, counter, pos, euler, worldTime);
             }
             finally
             {
@@ -138,7 +284,7 @@ namespace ValheimVillages
             }
         }
 
-        private static void WritePngAndSidecar(string trigger, int counter,
+        private static void WritePngAndSidecar(CaptureRequest req, int counter,
             Vector3 pos, Vector3 euler, float worldTime)
         {
             string dir;
@@ -155,6 +301,8 @@ namespace ValheimVillages
                 }
 
                 dir = Path.Combine(root, "vv_dumps");
+                if (!string.IsNullOrEmpty(req.OutputSubdir))
+                    dir = Path.Combine(dir, req.OutputSubdir);
                 Directory.CreateDirectory(dir);
             }
             catch
@@ -162,8 +310,8 @@ namespace ValheimVillages
                 return;
             }
 
-            var pngPath = Path.Combine(dir, "last_capture.png");
-            var jsonPath = Path.Combine(dir, "last_capture.json");
+            var pngPath = Path.Combine(dir, req.OutputBaseName + ".png");
+            var jsonPath = Path.Combine(dir, req.OutputBaseName + ".json");
 
             Texture2D tex = null;
             try
@@ -188,7 +336,7 @@ namespace ValheimVillages
                 var sb = new StringBuilder(2048);
                 sb.Append('{');
                 sb.Append("\"counter\":").Append(counter.ToString(CultureInfo.InvariantCulture)).Append(',');
-                sb.Append("\"trigger\":\"").Append(JsonEscape(trigger)).Append("\",");
+                sb.Append("\"trigger\":\"").Append(JsonEscape(req.Trigger)).Append("\",");
                 sb.Append("\"timestampUtc\":\"")
                     .Append(DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)).Append("\",");
                 sb.Append("\"worldTimeOfDay\":")
@@ -201,7 +349,7 @@ namespace ValheimVillages
                     .Append(euler.y.ToString("R", CultureInfo.InvariantCulture)).Append(',');
                 sb.Append("\"cameraPitch\":")
                     .Append(euler.x.ToString("R", CultureInfo.InvariantCulture));
-                AppendDiagnostics(sb);
+                if (req.IncludeDiagnostics) AppendDiagnostics(sb);
                 sb.Append('}');
                 File.WriteAllText(jsonPath, sb.ToString());
             }
@@ -411,7 +559,7 @@ namespace ValheimVillages
             }
         }
 
-        public static OrchestrationSession TryBegin()
+        public static OrchestrationSession TryBegin(CaptureRequest req)
         {
             var player = Player.m_localPlayer;
             if (player == null)
@@ -422,7 +570,20 @@ namespace ValheimVillages
                 return null;
             }
 
-            var anchor = Diagnostics.CaptureAnchor.Resolve(player.transform.position);
+            Diagnostics.CaptureAnchor.Result anchor;
+            if (req.AnchorOverride.HasValue)
+            {
+                // Caller-supplied anchor (incident flow): a specific world
+                // position with a tighter clearance. Bypasses seed-bed
+                // resolution entirely so incidents at distant villagers /
+                // destinations don't get mis-anchored on the wrong village.
+                anchor = Diagnostics.CaptureAnchor.ResolveAt(
+                    req.AnchorOverride.Value, req.AnchorClearance);
+            }
+            else
+            {
+                anchor = Diagnostics.CaptureAnchor.Resolve(player.transform.position);
+            }
             if (!anchor.HasAnchor)
             {
                 Plugin.Log?.LogWarning(
@@ -503,15 +664,10 @@ namespace ValheimVillages
 
         public void Restore()
         {
-            try
-            {
-                if (m_gameCamera != null) m_gameCamera.enabled = m_savedGameCameraEnabled;
-            }
-            catch
-            {
-                /* swallow */
-            }
-
+            // Player transform first: GameCamera reads its position/rotation
+            // on the next LateUpdate to position the follow camera, so the
+            // player needs to be back where they belong BEFORE GameCamera
+            // re-enables.
             try
             {
                 if (m_player != null)
@@ -525,14 +681,15 @@ namespace ValheimVillages
                 /* swallow — restore must never throw past the capture pipeline */
             }
 
+            // Re-enable GameCamera. We deliberately do NOT restore the camera
+            // transform ourselves — explicit cam.transform writes here race
+            // against GameCamera.LateUpdate and leave the camera wedged at
+            // whichever write happened last in the frame. Letting GameCamera
+            // re-attach to the (now-restored) player is what the player
+            // expects anyway: third-person follow at character defaults.
             try
             {
-                var cam = Camera.main;
-                if (cam != null)
-                {
-                    cam.transform.position = m_savedCamPos;
-                    cam.transform.rotation = m_savedCamRot;
-                }
+                if (m_gameCamera != null) m_gameCamera.enabled = m_savedGameCameraEnabled;
             }
             catch
             {
