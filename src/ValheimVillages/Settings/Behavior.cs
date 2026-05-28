@@ -15,6 +15,33 @@ namespace ValheimVillages.Settings
         public const float UpdateInterval = 15f;
 
         /// <summary>
+        ///     Cooldown (s) between consecutive behavior-selection passes.
+        ///     The villager's path-follow inner loop still runs every tick
+        ///     for smooth movement; this only gates the "which task do I
+        ///     want?" fan-out across registered behaviors. A short cooldown
+        ///     prevents the visible thrash where two Workflows take turns
+        ///     winning WantsControl every Update tick (cooking station vs
+        ///     work site, observed in incident timelines as TargetSet/
+        ///     PathRecompute pairs every ~40ms). 2s is short enough that
+        ///     player input (work orders, manual relocate) still feels
+        ///     responsive but long enough to absorb tick-rate evaluation
+        ///     jitter.
+        /// </summary>
+        public const float BehaviorReselectIntervalSec = 2f;
+
+        /// <summary>
+        ///     How long (s) a villager should linger near the spot where it
+        ///     just finished a work step before Explore is allowed to drag
+        ///     it back to the village fire. Bridges the gap between "polled
+        ///     smelter, dropped one batch off, came back" and "smelter has
+        ///     finished the next batch" — without this, the villager walks
+        ///     to the fire and 30s later walks back, repeating endlessly.
+        ///     A villager-specific work-state check would be cleaner long-
+        ///     term, but a simple linger window handles the common case.
+        /// </summary>
+        public const float PostWorkLingerSec = 45f;
+
+        /// <summary>
         ///     Random jitter range (seconds) applied to each NPC's initial behavior tick.
         ///     Prime number so tick offsets rarely re-align over time.
         /// </summary>

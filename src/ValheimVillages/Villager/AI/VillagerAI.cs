@@ -74,6 +74,28 @@ namespace ValheimVillages.Villager.AI
         /// </summary>
         internal readonly Diagnostics.AiEventRing EventRing = new Diagnostics.AiEventRing();
 
+        /// <summary>
+        ///     When set in the future, behavior selectors (notably Explore)
+        ///     should leave the villager idle in place rather than walking
+        ///     them off to a known location. Set by workflows that finish a
+        ///     work step but expect to resume shortly (smelter polling,
+        ///     cooking station polling) so the villager doesn't visibly
+        ///     walk to the fire and immediately walk back. Cleared
+        ///     implicitly by passage of Time.time past LingerUntilTime.
+        /// </summary>
+        public float LingerUntilTime { get; set; }
+
+        /// <summary>
+        ///     World position the villager should idle at while
+        ///     <see cref="LingerUntilTime"/> is in the future. Set by the
+        ///     workflow that armed the linger; typically the position of
+        ///     the station that's still processing.
+        /// </summary>
+        public Vector3 LingerAtPos { get; set; }
+
+        /// <summary>True if a linger window is currently active.</summary>
+        public bool IsLingering => Time.time < LingerUntilTime;
+
         private float m_stuckBackoffUntil;
 
         /// <summary>When the current movement target was set (for stuck timeout).</summary>
@@ -192,7 +214,15 @@ namespace ValheimVillages.Villager.AI
             if (m_lastBehaviorUpdateTime > 0.0)
             {
                 m_lastBehaviorUpdateTime -= dt;
-                return false;
+                // Don't return — we still want path-follow / discovery /
+                // memory save to run every tick. The cooldown only gates
+                // BEHAVIOR SELECTION (which target to pursue), not movement.
+                // Previously this branch returned false, which (combined
+                // with the timer never being reset post-construction)
+                // meant cooldown=0 was the steady state and behavior
+                // selection thrashed every tick. Now: timer ticks down,
+                // behavior selection skipped while > 0, path-follow runs
+                // through.
             }
 
             if (IsPaused) return true;
@@ -209,13 +239,25 @@ namespace ValheimVillages.Villager.AI
                 VillagerPOIDiscovery.ValidateKnownLocations(Memory);
             }
 
-            var ctx = new BehaviorContext();
-            foreach (var b in m_behaviors)
-                if (b.WantsControl(ctx))
-                {
-                    b.Update(dt);
-                    break;
-                }
+            // Behavior selection: gated by m_lastBehaviorUpdateTime. The
+            // path-follow loop below runs every tick regardless. This split
+            // is what stops the visible "twitchiness" — a villager mid-
+            // Traveling shouldn't be re-evaluating "do I really want to
+            // travel?" 50 times per second when its target is 5m away.
+            if (m_lastBehaviorUpdateTime <= 0f)
+            {
+                var ctx = new BehaviorContext();
+                foreach (var b in m_behaviors)
+                    if (b.WantsControl(ctx))
+                    {
+                        b.Update(dt);
+                        break;
+                    }
+                // Reset cooldown. Idle re-evaluation cadence — high enough
+                // to stop the thrash, low enough to react to player input
+                // (work orders, manual relocate) within a noticeable window.
+                m_lastBehaviorUpdateTime = VillagerSettings.BehaviorReselectIntervalSec;
+            }
 
             if (Time.time - m_lastMemorySaveTime > SaveInterval)
             {

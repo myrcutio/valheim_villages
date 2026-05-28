@@ -400,6 +400,16 @@ namespace ValheimVillages.Behaviors.Crafting
 
         private void FinishWork()
         {
+            // Arm a "linger near station" window so Explore doesn't immediately
+            // drag the villager off to the village fire. Smelters/cooking
+            // stations need time to process; without this, the villager
+            // walks to fire and 30s later walks right back. Polish for #29.
+            if (m_ai != null && m_context != null && m_context.CraftStationPosition != Vector3.zero)
+            {
+                m_ai.LingerUntilTime = Time.time + Settings.VillagerSettings.PostWorkLingerSec;
+                m_ai.LingerAtPos = m_context.CraftStationPosition;
+            }
+
             m_context = null;
             SubState = WorkSubState.Idle;
             if (m_ai != null)

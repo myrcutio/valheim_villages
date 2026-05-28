@@ -48,6 +48,18 @@ namespace ValheimVillages.Behaviors.Explore
                 return;
             }
 
+            // Linger window from a recently-finished work step: the villager
+            // is parked next to a station that's still processing (smelter,
+            // cooking) and will need them back shortly. Suppress location-
+            // seeking so the villager doesn't visibly walk to the fire and
+            // immediately walk back. The work scanner above still runs —
+            // if a new work order matches, it preempts the linger.
+            if (m_ai.IsLingering)
+            {
+                m_ai.SetState(BehaviorState.Idle);
+                return;
+            }
+
             var bestLocation = SelectBestKnownLocation(context);
             if (bestLocation != null)
                 TransitionToLocation(bestLocation);
