@@ -36,6 +36,18 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     enter the recovery flow rather than walking a path that ends
         ///     short. Populates <paramref name="outPath" /> with
         ///     <c>navPath.corners</c> only on success; left empty on failure.
+        ///     <para>NOTE: NavMesh.CalculatePath returns Complete based on
+        ///     polygon connectivity, which doesn't catch every case the agent
+        ///     capsule physically can't traverse — see #26 (foundation-edge
+        ///     dropdowns). Two attempts at adding a traversability check were
+        ///     reverted: a geometric corner-Y heuristic produced false
+        ///     positives on legitimate ramps, and a physical CapsuleCast
+        ///     rejected nearly all paths because the static_solid/piece
+        ///     colliders sit closer than capsule radius to the baked
+        ///     NavMesh polygons. Tracked as #27 — needs a more careful
+        ///     approach (segment-by-segment cast that shortens only at the
+        ///     specific corner where the obstacle was hit, allowing the
+        ///     surrounding navigation to proceed).</para>
         /// </summary>
         public static bool TryFindCompletePath(Vector3 start, Vector3 end, List<Vector3> outPath)
         {
