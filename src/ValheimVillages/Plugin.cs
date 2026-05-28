@@ -125,6 +125,12 @@ namespace ValheimVillages
 
             Log.LogInfo($"{PluginName} loaded successfully!");
 
+            // Dev: freeze the day/night cycle at noon so screenshots and live
+            // debugging happen under consistent lighting. Toggleable via
+            // vv_freezetime. TODO: gate or remove before release — see
+            // FreezeTime.AutoFreezeOnLoad.
+            Diagnostics.FreezeTime.ApplyAutoFreeze();
+
             // No hot-reload capture: the auto-repartition that follows shortly
             // after rebuilds the region graph from scratch, so the post-reload
             // PNG would only ever show stale state. The repartition trigger
