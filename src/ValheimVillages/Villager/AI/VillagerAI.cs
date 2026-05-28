@@ -887,27 +887,50 @@ namespace ValheimVillages.Villager.AI
             if (NavMesh.SamplePosition(transform.position, out _, 1f, filter))
                 return false;
 
-            // Off-mesh. We need to find a snap target that's not just
-            // geometrically nearest, but actually REACHABLE — a naive
-            // SamplePosition will happily return a point straight below
-            // through the bed/floor the villager is sitting on, and the
-            // agent can't traverse the solid piece between them. Search
-            // outward in expanding XZ rings, keeping each candidate within
-            // ±agentClimb of the villager's Y so we land on a surface they
-            // could plausibly step onto from where they are (off the side
-            // of a bed, not through it).
-            if (!TryFindReachableMeshSnap(filter, out var rescueHit))
+            // Off-mesh. Three-stage search, each weaker / more permissive:
+            //   1. Elevation-aware NavMesh snap. Probe XZ rings at the
+            //      villager's Y ± agentClimb so the snap target is a step
+            //      the agent could plausibly reach from where they stand.
+            //      Handles spawned-on-bed cleanly: drop to the floor NEXT
+            //      TO the bed instead of straight through it.
+            //   2. HNA lookup-cell snap. Falls back to the village's HNA
+            //      lookup grid — the canonical "any walkable cell in this
+            //      village" set, independent of NavMesh polygon coverage.
+            //      Used when the villager has fallen into a position the
+            //      bake disregarded as outside-the-village-hull (no
+            //      NavMesh nearby, but HNA still knows about valid cells
+            //      a few meters away).
+            //   3. Broad NavMesh fallback. Wide-radius SamplePosition,
+            //      accept any nearby polygon regardless of Y delta. Last
+            //      resort for cases the HNA graph also can't help with
+            //      (e.g. no HNA available yet at boot).
+            Vector3 rescueHit;
+            string snapSource;
+            if (TryFindReachableMeshSnap(filter, out rescueHit))
+            {
+                snapSource = "elevation-aware";
+            }
+            else if (TryFindHnaLookupCellSnap(out rescueHit))
+            {
+                snapSource = "hna-lookup";
+            }
+            else if (NavMesh.SamplePosition(transform.position, out var broadHit, 16f, filter))
+            {
+                rescueHit = broadHit.position;
+                snapSource = "broad-16m";
+            }
+            else
             {
                 Plugin.Log?.LogWarning(
-                    $"[AI:{m_villagerName}] Off-mesh self-rescue failed: no reachable NavMesh polygon " +
-                    $"at the villager's elevation within search range of " +
+                    $"[AI:{m_villagerName}] Off-mesh self-rescue failed: no NavMesh polygon " +
+                    $"and no HNA lookup cell within reach of " +
                     $"({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}). " +
                     "Villager genuinely stranded — check bake coverage or unloaded zone.");
                 return false;
             }
 
             Plugin.Log?.LogInfo(
-                $"[AI:{m_villagerName}] Off-mesh self-rescue: teleporting to nearest reachable mesh " +
+                $"[AI:{m_villagerName}] Off-mesh self-rescue: teleporting to mesh ({snapSource}) " +
                 $"({rescueHit.x:F1},{rescueHit.y:F1},{rescueHit.z:F1}) " +
                 $"from ({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}).");
 
@@ -917,12 +940,51 @@ namespace ValheimVillages.Villager.AI
             // produce movement — confirmed empirically: the previous SetState
             // approach logged "rescue dispatched" every behavior tick
             // without the villager moving. Teleporting puts them on a valid
-            // mesh cell at the same elevation (±agentClimb), from which
-            // normal pathing resumes.
+            // mesh cell, from which normal pathing resumes.
             transform.position = rescueHit;
             m_lastMovePos = rescueHit;
             m_lastRealMoveTime = Time.time;
             return true;
+        }
+
+        /// <summary>
+        ///     Find the nearest HNA lookup-grid cell to the villager's pos via
+        ///     <see cref="RegionGraph.GetNearest"/> + the graph's lookup
+        ///     index. Independent of NavMesh polygon coverage — used when
+        ///     the villager fell into a position outside the bake's walkable
+        ///     area but the village's HNA graph still knows about valid
+        ///     cells nearby. Returns true and writes the cell pos on
+        ///     success.
+        /// </summary>
+        private bool TryFindHnaLookupCellSnap(out Vector3 snapped)
+        {
+            snapped = default;
+            var graph = RegionGraph.GetNearest(transform.position);
+            if (graph == null)
+            {
+                Plugin.Log?.LogDebug(
+                    $"[AI:{m_villagerName}] HNA snap unavailable: RegionGraph.GetNearest returned null " +
+                    $"at ({transform.position.x:F1},{transform.position.y:F1},{transform.position.z:F1}). " +
+                    "No villages registered yet?");
+                return false;
+            }
+            if (!graph.IsAvailable)
+            {
+                Plugin.Log?.LogDebug(
+                    $"[AI:{m_villagerName}] HNA snap unavailable: nearest village graph " +
+                    $"'{graph.RegisteredVillageKey}' is not IsAvailable.");
+                return false;
+            }
+            var ok = graph.TryFindNearestLookupCell(
+                transform.position,
+                validator: null, // any cell is fine; we just want SOME mesh
+                out snapped,
+                out _);
+            if (!ok)
+                Plugin.Log?.LogDebug(
+                    $"[AI:{m_villagerName}] HNA snap unavailable: TryFindNearestLookupCell returned " +
+                    $"false from village '{graph.RegisteredVillageKey}' (lookup-grid empty?).");
+            return ok;
         }
 
         /// <summary>
