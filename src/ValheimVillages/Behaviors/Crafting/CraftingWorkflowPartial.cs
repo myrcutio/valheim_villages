@@ -5,6 +5,7 @@ using ValheimVillages.Enums;
 using ValheimVillages.Schemas;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Work;
+using ValheimVillages.Villages;
 using VillagerWaypoint = ValheimVillages.Villager.AI.Pathfinding.VillagerWaypoint;
 
 namespace ValheimVillages.Behaviors.Crafting
@@ -15,6 +16,29 @@ namespace ValheimVillages.Behaviors.Crafting
     /// </summary>
     public partial class CraftingBehavior
     {
+        /// <summary>
+        ///     Resolve a world-space target to an HNA-valid approach point and set the villager
+        ///     traveling to it in the given sub-state. Returns true on success. Returns false
+        ///     (and abandons work with a clear reason) when no HNA region in the villager's
+        ///     village has a complete path from the villager's current position to the target.
+        ///     Single entry point for all workflow movement so when one path fails the diagnostic
+        ///     applies to every other call site too.
+        /// </summary>
+        private bool TryWalkTo(Vector3 target, WorkSubState substate, string targetDescription)
+        {
+            if (m_ai == null) return false;
+            if (!VillageStationRegistry.TryResolveApproach(target, m_ai.Position, out var approach))
+            {
+                AbandonWork($"no HNA-valid approach to {targetDescription} @ ({target.x:F1},{target.y:F1},{target.z:F1})");
+                return false;
+            }
+
+            SubState = substate;
+            m_ai.SetState(BehaviorState.Working,
+                new VillagerWaypoint(approach, VillagerWaypoint.DefaultStrategyId));
+            return true;
+        }
+
         private static readonly MethodInfo s_smelterGetProcessedQueueSize = typeof(Smelter)
             .GetMethod("GetProcessedQueueSize", BindingFlags.NonPublic | BindingFlags.Instance);
 
@@ -59,11 +83,7 @@ namespace ValheimVillages.Behaviors.Crafting
                 $"[Work:{LogName}] Fueling required ({m_context.FuelRequirement.Value.FuelItemPrefab}), " +
                 "walking to fuel container");
 
-            SubState = WorkSubState.GatheringFuel;
-            var fuelChestPos = VillagerMovement.GetWalkableDestination(
-                m_context.FuelContainer.transform.position);
-            m_ai.SetState(BehaviorState.Working,
-                new VillagerWaypoint(fuelChestPos, VillagerWaypoint.DefaultStrategyId));
+            TryWalkTo(m_context.FuelContainer.transform.position, WorkSubState.GatheringFuel, "fuel container");
         }
 
         private void OnArrivedAtFuelContainer()
@@ -102,10 +122,7 @@ namespace ValheimVillages.Behaviors.Crafting
             Plugin.Log?.LogInfo(
                 $"[Work:{LogName}] Picked up 1x {fuel.FuelItemPrefab}, walking to fuel target");
 
-            SubState = WorkSubState.FuelingStation;
-            var targetPos = VillagerMovement.GetWalkableDestination(fuel.FuelTargetPosition);
-            m_ai.SetState(BehaviorState.Working,
-                new VillagerWaypoint(targetPos, VillagerWaypoint.DefaultStrategyId));
+            TryWalkTo(fuel.FuelTargetPosition, WorkSubState.FuelingStation, "fuel target");
         }
 
         private void OnArrivedAtFuelTarget()
@@ -378,9 +395,7 @@ namespace ValheimVillages.Behaviors.Crafting
                 return;
             }
 
-            SubState = WorkSubState.ReturningToChest;
-            var chestPos = VillagerMovement.GetWalkableDestination(m_context.SourceContainer.transform.position);
-            m_ai.SetState(BehaviorState.Working, new VillagerWaypoint(chestPos, VillagerWaypoint.DefaultStrategyId));
+            TryWalkTo(m_context.SourceContainer.transform.position, WorkSubState.ReturningToChest, "source chest");
         }
 
         private void FinishWork()
@@ -505,12 +520,9 @@ namespace ValheimVillages.Behaviors.Crafting
 
         private void BeginTravelingToStation()
         {
-            SubState = WorkSubState.TravelingToStation;
             if (m_ai != null && m_context != null)
             {
-                var stationTarget = VillagerMovement.GetWalkableDestination(m_context.CraftStationPosition);
-                m_ai.SetState(BehaviorState.Working,
-                    new VillagerWaypoint(stationTarget, VillagerWaypoint.DefaultStrategyId));
+                TryWalkTo(m_context.CraftStationPosition, WorkSubState.TravelingToStation, "craft station");
             }
         }
 
@@ -530,9 +542,7 @@ namespace ValheimVillages.Behaviors.Crafting
                 return;
             }
 
-            SubState = WorkSubState.GatheringIngredients;
-            var targetPos = VillagerMovement.GetWalkableDestination(source.Container.transform.position);
-            m_ai.SetState(BehaviorState.Working, new VillagerWaypoint(targetPos, VillagerWaypoint.DefaultStrategyId));
+            TryWalkTo(source.Container.transform.position, WorkSubState.GatheringIngredients, "ingredient chest");
         }
     }
 }

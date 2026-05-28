@@ -263,7 +263,7 @@ namespace ValheimVillages.IntegrationTests
         {
             var all = new List<Vector3>();
             foreach (var graph in RegionGraph.GetAll())
-                all.AddRange(graph.GetAllRegionCenters());
+                all.AddRange(graph.Diagnostics.GetAllRegionCenters());
             return all;
         }
 

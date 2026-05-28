@@ -524,7 +524,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             var closestDist = float.MaxValue;
             var closestCenter = Vector3.zero;
             var closestId = "";
-            var allCenters = graph.GetAllRegionCenters();
+            var allCenters = graph.Diagnostics.GetAllRegionCenters();
             var idx = 0;
             foreach (var center in allCenters)
             {

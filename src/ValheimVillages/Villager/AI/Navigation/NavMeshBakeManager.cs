@@ -219,6 +219,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 .RubberBandPrune.ComputeOutsideCellsForBake(bounds);
             var phantomOutside = AddOutsideCellBlockers(pieceSources, outsideCells, bounds);
             result.OutsideCellsBlocked = phantomOutside;
+            result.OutsideCellsCount = outsideCells.Count;
 
             s_pieceSources.Clear();
             s_pieceSources.AddRange(pieceSources);
@@ -270,6 +271,444 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int VertexCount;
             public float DurationMs;
             public string FailureReason;
+        }
+
+        /// <summary>
+        ///     Result of a <see cref="RebakeWithPruneComplement" /> call.
+        /// </summary>
+        public struct PruneComplementRebakeResult
+        {
+            public bool Success;
+            public int PruneComplementCells;
+            public int PruneComplementRectangles;
+            public int PrunedPieceCells;
+            public int PrunedPieceBuckets;
+            public int PrunedPieceRectangles;
+            public int TotalSources;
+            public float DurationMs;
+            public string FailureReason;
+        }
+
+        /// <summary>
+        ///     Result of a <see cref="PruneOrphanTriangles" /> call.
+        /// </summary>
+        public struct OrphanPruneResult
+        {
+            public int OrphanTriangles;
+            public int OrphanCellsBlocked;
+            public int Rectangles;
+            public int HeightBuckets;
+            public float DurationMs;
+            public bool DidRebake;
+        }
+
+        /// <summary>
+        ///     Second bake: append <c>NotWalkable</c> ModifierBox volumes
+        ///     covering every cell HNA pruning dropped but the first bake
+        ///     left walkable, then re-bake the piece NavMesh. The first
+        ///     bake already excludes <paramref name="outsideCells" /> via
+        ///     <see cref="AddOutsideCellBlockers" />; this pass closes the
+        ///     remaining gap (Pass 2 cliffs, locked-off rooms, anything
+        ///     inside the perimeter but unreachable from a bed).
+        ///
+        ///     Why ModifierBox + greedy rectangles instead of rebuilding
+        ///     from HNA triangles: the original piece sources include
+        ///     every real collider, which the voxelizer carves correctly
+        ///     at sub-voxel accuracy. Replacing them with a HNA-triangle
+        ///     mesh re-introduces the gap between triangle data and the
+        ///     bake's voxel grid (small obstacles lose carving precision).
+        ///     ModifierBox preserves the original sources' carving and
+        ///     just stamps area=1 over the prune-complement footprint.
+        ///
+        ///     Iff <paramref name="bedReachableCells" /> is null/empty
+        ///     OR every cell is already accounted for, this is a no-op.
+        /// </summary>
+        internal static PruneComplementRebakeResult RebakeWithPruneComplement(
+            HashSet<long> bedReachableCells,
+            HashSet<long> outsideCells,
+            HashSet<long> prunedPieceKeys,
+            Bounds bounds)
+        {
+            var result = new PruneComplementRebakeResult();
+            var sw = Stopwatch.StartNew();
+
+            if (!VillagerAgentType.IsRegistered)
+            {
+                result.FailureReason = "agent_not_registered";
+                sw.Stop();
+                result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+                return result;
+            }
+            if (bedReachableCells == null)
+            {
+                result.FailureReason = "no_bed_reachable_set";
+                sw.Stop();
+                result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+                return result;
+            }
+
+            // Compute the prune-complement cell set: every cell in the
+            // inflated bake-bounds XZ range that is NEITHER bed-reachable
+            // NOR already accounted for by the first bake's outside-cell
+            // blockers. These are the cells HNA's bed-flood determined are
+            // unreachable from any bed but the first bake's voxelizer
+            // still produced walkable polygons for.
+            var cell = ValheimVillages.Villager.AI.Navigation.RegionGraph.LookupCellSize;
+            var gxMin = Mathf.FloorToInt(bounds.min.x / cell) - 1;
+            var gzMin = Mathf.FloorToInt(bounds.min.z / cell) - 1;
+            var gxMax = Mathf.FloorToInt(bounds.max.x / cell) + 1;
+            var gzMax = Mathf.FloorToInt(bounds.max.z / cell) + 1;
+
+            var pruneComplement = new HashSet<long>();
+            for (var gz = gzMin; gz <= gzMax; gz++)
+            for (var gx = gxMin; gx <= gxMax; gx++)
+            {
+                var key = ValheimVillages.Villager.AI.Navigation
+                    .RubberBandPrune.PackXzKey(gx, gz);
+                if (bedReachableCells.Contains(key)) continue;
+                if (outsideCells != null && outsideCells.Contains(key)) continue;
+                pruneComplement.Add(key);
+            }
+            result.PruneComplementCells = pruneComplement.Count;
+
+            // Decompose terrain prune-complement to rectangles.
+            var rects = ValheimVillages.Villager.AI.Navigation
+                .RubberBandPrune.DecomposeToRectangles(pruneComplement);
+            result.PruneComplementRectangles = rects.Count;
+
+            // Piece-layer prune-complement: bucket the HNA-rejected piece keys
+            // by height (hb), decompose each bucket's XZ footprint into greedy
+            // rectangles, and emit one HeightBucketSize-tall ModifierBox per
+            // rectangle per bucket. Tight Y slices instead of full-Y boxes:
+            // piece polygons sit at specific elevations (walkway top, smelter
+            // side, second-floor) and full-Y boxes would over-block neighbour
+            // buckets and risk severing terrain underneath.
+            var pieceBucketed = new Dictionary<int, HashSet<long>>();
+            if (prunedPieceKeys != null)
+            {
+                foreach (var key in prunedPieceKeys)
+                {
+                    ValheimVillages.Villager.AI.Navigation
+                        .RubberBandPrune.UnpackLookup(key, out var pgx, out var pgz, out var phb);
+                    if (!pieceBucketed.TryGetValue(phb, out var set))
+                    {
+                        set = new HashSet<long>();
+                        pieceBucketed[phb] = set;
+                    }
+                    set.Add(ValheimVillages.Villager.AI.Navigation
+                        .RubberBandPrune.PackXzKey(pgx, pgz));
+                }
+            }
+            result.PrunedPieceCells = prunedPieceKeys?.Count ?? 0;
+            result.PrunedPieceBuckets = pieceBucketed.Count;
+
+            if (pruneComplement.Count == 0 && pieceBucketed.Count == 0)
+            {
+                result.Success = true;
+                result.TotalSources = s_pieceSources.Count;
+                Plugin.Log?.LogInfo(
+                    "[NavMeshBake] Second bake skipped: NavMesh already matches HNA " +
+                    "(0 prune-complement cells, 0 pruned piece cells)");
+                sw.Stop();
+                result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+                return result;
+            }
+
+            var ySize = bounds.size.y + 4f;
+            var yCenter = bounds.center.y;
+
+            // Build the second-bake source list: start from the first
+            // piece-bake source set (real colliders + door/bed/outside-cell
+            // phantoms already in place) and append prune-complement
+            // ModifierBox rectangles at the tail.
+            var sources = new List<NavMeshBuildSource>(s_pieceSources.Count + rects.Count);
+            sources.AddRange(s_pieceSources);
+            foreach (var r in rects)
+            {
+                var w = (r.Gx1 - r.Gx0 + 1) * cell;
+                var d = (r.Gz1 - r.Gz0 + 1) * cell;
+                var cx = (r.Gx0 + r.Gx1 + 1) * 0.5f * cell;
+                var cz = (r.Gz0 + r.Gz1 + 1) * 0.5f * cell;
+                sources.Add(new NavMeshBuildSource
+                {
+                    shape = NavMeshBuildSourceShape.ModifierBox,
+                    size = new Vector3(w, ySize, d),
+                    transform = Matrix4x4.TRS(
+                        new Vector3(cx, yCenter, cz),
+                        Quaternion.identity, Vector3.one),
+                    area = 1, // NotWalkable
+                });
+            }
+
+            var pieceRectsTotal = 0;
+            foreach (var bucketKv in pieceBucketed)
+            {
+                var hb = bucketKv.Key;
+                var bucketCenterY = (hb + 0.5f) * ValheimVillages.Villager.AI.Navigation
+                    .RegionGraph.HeightBucketSize;
+                var bucketRects = ValheimVillages.Villager.AI.Navigation
+                    .RubberBandPrune.DecomposeToRectangles(bucketKv.Value);
+                foreach (var r in bucketRects)
+                {
+                    var w = (r.Gx1 - r.Gx0 + 1) * cell;
+                    var d = (r.Gz1 - r.Gz0 + 1) * cell;
+                    var cx = (r.Gx0 + r.Gx1 + 1) * 0.5f * cell;
+                    var cz = (r.Gz0 + r.Gz1 + 1) * 0.5f * cell;
+                    sources.Add(new NavMeshBuildSource
+                    {
+                        shape = NavMeshBuildSourceShape.ModifierBox,
+                        size = new Vector3(w,
+                            ValheimVillages.Villager.AI.Navigation.RegionGraph.HeightBucketSize,
+                            d),
+                        transform = Matrix4x4.TRS(
+                            new Vector3(cx, bucketCenterY, cz),
+                            Quaternion.identity, Vector3.one),
+                        area = 1, // NotWalkable
+                    });
+                    pieceRectsTotal++;
+                }
+            }
+            result.PrunedPieceRectangles = pieceRectsTotal;
+
+            if (prunedPieceKeys != null && prunedPieceKeys.Count > 0)
+                Plugin.Log?.LogInfo(
+                    $"[NavMeshBake] Piece-layer prune: {prunedPieceKeys.Count} pruned cells across " +
+                    $"{pieceBucketed.Count} height buckets -> {pieceRectsTotal} ModifierBox rectangles");
+
+            result.TotalSources = sources.Count;
+
+            // Same agentRadius buffer treatment as BakeVillage so the
+            // second bake's obstacle clearance is consistent with the
+            // first (path corners land in the same place).
+            var settings = NavMesh.GetSettingsByID(VillagerAgentType.UnityAgentTypeID);
+            settings.agentRadius += VillagerSettings.NavMeshBakeRadiusBuffer;
+            var data = NavMeshBuilder.BuildNavMeshData(
+                settings, sources, bounds, Vector3.zero, Quaternion.identity);
+            if (data == null)
+            {
+                result.FailureReason = "build_returned_null";
+                sw.Stop();
+                result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+                return result;
+            }
+
+            // Swap: remove the first piece bake + any prior HNA-slot bake,
+            // install the new prune-complement-aware bake in the HNA slot.
+            // Terrain bake stays as-is (its sources don't change).
+            Holder.RemovePiece();
+            Holder.RemoveHna();
+            Holder.SetHna(NavMesh.AddNavMeshData(data));
+
+            // Persist the new source list so audit/diagnostic tools see the
+            // bake state that's actually live. The new tail is the prune-
+            // complement rectangles; door/bed/outside-cell phantoms are
+            // still in the same relative positions from the first bake.
+            s_pieceSources.Clear();
+            s_pieceSources.AddRange(sources);
+
+            result.Success = true;
+            sw.Stop();
+            result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+            Plugin.Log?.LogInfo(
+                $"[NavMeshBake] Second bake: {pruneComplement.Count} prune-complement " +
+                $"cells -> {rects.Count} ModifierBox rectangles; " +
+                $"piece-layer: {result.PrunedPieceCells} cells / {result.PrunedPieceBuckets} buckets / " +
+                $"{result.PrunedPieceRectangles} rects; duration {result.DurationMs:F1}ms");
+            return result;
+        }
+
+        /// <summary>
+        ///     Third (and any subsequent) bake: walk an XZ × height-bucket
+        ///     grid covering the bake bounds, ask Unity's NavMesh for the
+        ///     nearest slot-31 sample at each cell, and stamp every cell
+        ///     whose sample lands on walkable surface the HNA graph does
+        ///     not recognize. Re-bake with the new ModifierBox tail.
+        ///     Idempotent: a clean run returns
+        ///     <see cref="OrphanPruneResult.DidRebake"/> = false so the
+        ///     caller can stop iterating once NavMesh ⊆ HNA holds.
+        ///
+        ///     Why grid-sample instead of <c>NavMesh.CalculateTriangulation</c>:
+        ///     <c>CalculateTriangulation</c> only returns STATIC scene-baked
+        ///     data (Valheim's pre-baked slot-1 navmesh) — it misses every
+        ///     runtime <c>AddNavMeshData</c> instance, including the entire
+        ///     slot-31 bake we just installed. We'd be blocking phantoms
+        ///     that aren't in our bake at all and never converging.
+        ///     <c>SamplePosition</c> with an agent-typed filter queries the
+        ///     actual installed slot-31 navmesh, so each ModifierBox we add
+        ///     genuinely shrinks the orphan set the next iteration sees.
+        ///
+        ///     Why this exists on top of the two prune passes: Unity's
+        ///     voxelizer can produce walkable polygons from sliver triangles
+        ///     or edge artifacts the region builder never tracked; the two
+        ///     prior prunes only cover cells HNA explicitly rejected. This
+        ///     pass closes whatever's left.
+        ///
+        ///     Sources accumulate across iterations: each call extends
+        ///     <see cref="s_pieceSources"/> with new ModifierBoxes and
+        ///     installs the rebake into the HNA slot via <c>Holder.SetHna</c>,
+        ///     replacing the prior HNA-slot instance.
+        /// </summary>
+        internal static OrphanPruneResult PruneOrphanTriangles(
+            RegionGraph graph,
+            Bounds bounds)
+        {
+            var result = new OrphanPruneResult();
+            var sw = Stopwatch.StartNew();
+
+            if (graph == null || !graph.IsAvailable || !VillagerAgentType.IsRegistered)
+            {
+                result.DidRebake = false;
+                sw.Stop();
+                result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+                return result;
+            }
+
+            var cell = ValheimVillages.Villager.AI.Navigation.RegionGraph.LookupCellSize;
+            var hbSize = ValheimVillages.Villager.AI.Navigation.RegionGraph.HeightBucketSize;
+
+            var gxMin = Mathf.FloorToInt(bounds.min.x / cell);
+            var gxMax = Mathf.FloorToInt(bounds.max.x / cell);
+            var gzMin = Mathf.FloorToInt(bounds.min.z / cell);
+            var gzMax = Mathf.FloorToInt(bounds.max.z / cell);
+            var hbMin = ValheimVillages.Villager.AI.Navigation.RegionGraph.HeightBucket(bounds.min.y);
+            var hbMax = ValheimVillages.Villager.AI.Navigation.RegionGraph.HeightBucket(bounds.max.y);
+
+            var filter = new NavMeshQueryFilter
+            {
+                agentTypeID = VillagerAgentType.UnityAgentTypeID,
+                areaMask = NavMesh.AllAreas,
+            };
+
+            // SamplePosition probes from the cell-center column. Max
+            // distance = half the bucket height so a sample at bucket
+            // center can't snap to a polygon in a neighbouring bucket
+            // (that would mis-attribute an orphan to the wrong hb).
+            var sampleRadius = hbSize * 0.5f;
+            var halfCell = cell * 0.5f;
+
+            var bucketedCells = new Dictionary<int, HashSet<long>>();
+            var samples = 0;
+            var orphanHits = 0;
+            for (var hb = hbMin; hb <= hbMax; hb++)
+            {
+                var py = (hb + 0.5f) * hbSize;
+                for (var gz = gzMin; gz <= gzMax; gz++)
+                for (var gx = gxMin; gx <= gxMax; gx++)
+                {
+                    var px = gx * cell + halfCell;
+                    var pz = gz * cell + halfCell;
+                    samples++;
+                    if (!NavMesh.SamplePosition(
+                            new Vector3(px, py, pz), out var hit, sampleRadius, filter))
+                        continue;
+
+                    // Only count this sample as an orphan IN THIS CELL if the
+                    // hit didn't snap out of the cell. Without this guard the
+                    // same walkable polygon at the edge of an orphan region
+                    // gets discovered from every neighbour cell's probe, and
+                    // each iteration's ModifierBox just shifts the snap by
+                    // one cell — orphan count plateaus instead of converging.
+                    var hitGx = Mathf.FloorToInt(hit.position.x / cell);
+                    var hitGz = Mathf.FloorToInt(hit.position.z / cell);
+                    if (hitGx != gx || hitGz != gz) continue;
+
+                    var hitHb = ValheimVillages.Villager.AI.Navigation
+                        .RegionGraph.HeightBucket(hit.position.y);
+                    if (graph.PointToRegionId(hit.position) != null) continue;
+
+                    orphanHits++;
+                    if (!bucketedCells.TryGetValue(hitHb, out var set))
+                    {
+                        set = new HashSet<long>();
+                        bucketedCells[hitHb] = set;
+                    }
+                    set.Add(ValheimVillages.Villager.AI.Navigation
+                        .RubberBandPrune.PackXzKey(hitGx, hitGz));
+                }
+            }
+
+            result.OrphanTriangles = orphanHits; // grid samples that hit walkable AND had no HNA region
+            result.HeightBuckets = bucketedCells.Count;
+            if (bucketedCells.Count == 0)
+            {
+                result.OrphanCellsBlocked = 0;
+                result.DidRebake = false;
+                sw.Stop();
+                result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+                return result;
+            }
+
+            // Accumulate: start from the current piece-source list (which
+            // RebakeWithPruneComplement extended on its run) and append the
+            // new orphan-bucket ModifierBoxes at the tail. Each iteration
+            // adds more boxes on top of the previous run's, never replacing
+            // — so a 2nd iteration's SamplePosition probes see the effect of
+            // the 1st iteration's ModifierBoxes and only flag NEW orphan
+            // cells.
+            var sources = new List<NavMeshBuildSource>(s_pieceSources.Count + bucketedCells.Count * 8);
+            sources.AddRange(s_pieceSources);
+
+            var totalCells = 0;
+            var totalRects = 0;
+            foreach (var bucketKv in bucketedCells)
+            {
+                var hb = bucketKv.Key;
+                totalCells += bucketKv.Value.Count;
+                var bucketCenterY = (hb + 0.5f) * hbSize;
+                var bucketRects = ValheimVillages.Villager.AI.Navigation
+                    .RubberBandPrune.DecomposeToRectangles(bucketKv.Value);
+                foreach (var r in bucketRects)
+                {
+                    var w = (r.Gx1 - r.Gx0 + 1) * cell;
+                    var d = (r.Gz1 - r.Gz0 + 1) * cell;
+                    var cxR = (r.Gx0 + r.Gx1 + 1) * 0.5f * cell;
+                    var czR = (r.Gz0 + r.Gz1 + 1) * 0.5f * cell;
+                    sources.Add(new NavMeshBuildSource
+                    {
+                        shape = NavMeshBuildSourceShape.ModifierBox,
+                        size = new Vector3(w, hbSize, d),
+                        transform = Matrix4x4.TRS(
+                            new Vector3(cxR, bucketCenterY, czR),
+                            Quaternion.identity, Vector3.one),
+                        area = 1, // NotWalkable
+                    });
+                    totalRects++;
+                }
+            }
+            result.OrphanCellsBlocked = totalCells;
+            result.Rectangles = totalRects;
+
+            var settings = NavMesh.GetSettingsByID(VillagerAgentType.UnityAgentTypeID);
+            settings.agentRadius += VillagerSettings.NavMeshBakeRadiusBuffer;
+            var data = NavMeshBuilder.BuildNavMeshData(
+                settings, sources, bounds, Vector3.zero, Quaternion.identity);
+            if (data == null)
+            {
+                result.DidRebake = false;
+                sw.Stop();
+                result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+                Plugin.Log?.LogWarning(
+                    $"[NavMeshBake] Orphan triangle prune: BuildNavMeshData returned null after " +
+                    $"{totalCells} cells / {totalRects} rects");
+                return result;
+            }
+
+            Holder.RemoveHna();
+            Holder.SetHna(NavMesh.AddNavMeshData(data));
+
+            // Persist the accumulated source list so subsequent orphan-prune
+            // iterations and audit/diagnostic tools see the live bake state.
+            s_pieceSources.Clear();
+            s_pieceSources.AddRange(sources);
+
+            result.DidRebake = true;
+            sw.Stop();
+            result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
+            Plugin.Log?.LogInfo(
+                $"[NavMeshBake] Orphan triangle prune: {orphanHits} orphan hits / {samples} samples -> " +
+                $"{totalCells} cells / {bucketedCells.Count} buckets / {totalRects} rects in " +
+                $"{result.DurationMs:F1}ms");
+            return result;
         }
 
         /// <summary>
@@ -693,29 +1132,43 @@ namespace ValheimVillages.Villager.AI.Navigation
             Bounds bounds)
         {
             if (outsideCells == null || outsideCells.Count == 0) return 0;
+
             var cell = ValheimVillages.Villager.AI.Navigation.RegionGraph.LookupCellSize;
-            var half = cell * 0.5f;
             var ySize = bounds.size.y + 4f;
             var yCenter = bounds.center.y;
-            var boxSize = new Vector3(cell, ySize, cell);
-            var added = 0;
-            foreach (var key in outsideCells)
+
+            // Greedy-decompose contiguous outside-cell blocks into rectangles.
+            // For a village with ~3000 outside cells this typically drops to
+            // tens of ModifierBox sources — ~50x fewer voxelizer inputs. We
+            // use ModifierBox (not Box) so the bake treats this as a pure
+            // area-override volume: it stamps area=1 (NotWalkable) across the
+            // covered XZ column without ALSO producing walkable surface on
+            // top of the box (which a regular Box source would do, defeating
+            // the carve at rampart-top altitude).
+            var rects = ValheimVillages.Villager.AI.Navigation
+                .RubberBandPrune.DecomposeToRectangles(outsideCells);
+            foreach (var r in rects)
             {
-                ValheimVillages.Villager.AI.Navigation
-                    .RubberBandPrune.UnpackOutsideCellKey(key, out var gx, out var gz);
-                var transform = Matrix4x4.TRS(
-                    new Vector3(gx * cell + half, yCenter, gz * cell + half),
-                    Quaternion.identity, Vector3.one);
+                var w = (r.Gx1 - r.Gx0 + 1) * cell;
+                var d = (r.Gz1 - r.Gz0 + 1) * cell;
+                var cx = (r.Gx0 + r.Gx1 + 1) * 0.5f * cell;
+                var cz = (r.Gz0 + r.Gz1 + 1) * 0.5f * cell;
+
                 sources.Add(new NavMeshBuildSource
                 {
-                    shape = NavMeshBuildSourceShape.Box,
-                    size = boxSize,
-                    transform = transform,
+                    shape = NavMeshBuildSourceShape.ModifierBox,
+                    size = new Vector3(w, ySize, d),
+                    transform = Matrix4x4.TRS(
+                        new Vector3(cx, yCenter, cz),
+                        Quaternion.identity, Vector3.one),
                     area = 1, // NotWalkable
                 });
-                added++;
             }
-            return added;
+
+            Plugin.Log?.LogInfo(
+                $"[NavMeshBake] OutsideCellBlockers: {outsideCells.Count} cells -> " +
+                $"{rects.Count} ModifierBox rectangles");
+            return rects.Count;
         }
 
         private static void AppendMesh(List<Vector3> verts, List<int> idx, List<int> triLayers, int layer,
@@ -849,6 +1302,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int DoorsBlocked;
             public int BedsBlocked;
             public int OutsideCellsBlocked;
+            public int OutsideCellsCount;
             public float DurationMs;
             public string FailureReason;
 

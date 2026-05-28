@@ -26,7 +26,7 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         private const float NavLinkPyramidSize = 0.3f;
         private const float HnaCandidateMarkerSize = 0.25f;
         private static PathDebugRenderer s_instance;
-        private static bool s_enabled;
+        private static bool s_enabled = true;
         private static bool s_showTriangulation = true;
 
         /// <summary>
@@ -469,7 +469,7 @@ namespace ValheimVillages.Villager.AI.Pathfinding
 
                 // Per-region data goes to a sidecar so the console summary stays terse.
                 var regionEntries = new List<object>();
-                foreach (var center in graph.GetAllRegionCenters())
+                foreach (var center in graph.Diagnostics.GetAllRegionCenters())
                     regionEntries.Add(
                         $"{center.x:F2},{center.y:F2},{center.z:F2}");
                 DebugLog.List("Region", $"village_{graphIdx}_centers", regionEntries);

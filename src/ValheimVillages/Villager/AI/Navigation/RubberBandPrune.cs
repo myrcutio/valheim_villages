@@ -125,7 +125,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             float minX, float minZ, float maxX, float maxZ,
             out HashSet<string> droppedRegionIds,
             out List<(string fromRid, string toRid,
-                      Vector3 startPos, Vector3 endPos)> pass3DiscoveredEdgeList)
+                      Vector3 startPos, Vector3 endPos)> pass3DiscoveredEdgeList,
+            out HashSet<long> bedReachableCellsOut,
+            out HashSet<long> outsideCellsOut,
+            out HashSet<long> prunedPieceKeysOut)
         {
             var dropped = new HashSet<string>();
             droppedRegionIds = dropped;
@@ -133,6 +136,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             // definite-assignment rule. Pass 3 will overwrite later if it runs.
             pass3DiscoveredEdgeList = new List<(string fromRid, string toRid,
                                                 Vector3 startPos, Vector3 endPos)>();
+            bedReachableCellsOut = new HashSet<long>();
+            outsideCellsOut = new HashSet<long>();
+            prunedPieceKeysOut = new HashSet<long>();
             var stats = new Stats();
             if (regionIds == null || regionIds.Count == 0) return stats;
             if (lookupGrid == null || lookupGrid.Count == 0) return stats;
@@ -633,6 +639,22 @@ namespace ValheimVillages.Villager.AI.Navigation
             stats.BedReachablePieceKeys = pieceReachableKeys.Count;
             pass3DiscoveredEdgeList = pass3EdgePairs;
 
+            // Prune complement on the piece layer: every piece lookup key we
+            // indexed above that Pass 3 did NOT reach. These are the piece
+            // cells HNA rejected — the second NavMesh bake will phantom-block
+            // them with ModifierBox volumes so the agent NavMesh and HNA
+            // graph agree on the piece-layer walkable set.
+            var prunedPieceKeys = new HashSet<long>();
+            foreach (var kv in xzToLookupKeysPiece)
+            {
+                foreach (var pKey in kv.Value)
+                {
+                    if (!pieceReachableKeys.Contains(pKey))
+                        prunedPieceKeys.Add(pKey);
+                }
+            }
+            prunedPieceKeysOut = prunedPieceKeys;
+
             // --- Cell-level apply ---
             // Static_solid sweep runs first so its tris are counted under
             // StaticSolidTrianglesDropped, not TrianglesDropped. Uses the full
@@ -855,6 +877,14 @@ namespace ValheimVillages.Villager.AI.Navigation
             LastPieceMask = pieceMask;
             HasSnapshot = true;
 
+            // Publish authoritative HNA reachability sets to the caller so
+            // the second NavMesh bake can carve cells the prune dropped but
+            // the first bake's voxelizer left walkable. bedReachableCells is
+            // the post-Pass-2 keep set; outsideCells is the Pass-1 perimeter
+            // flood result. Both are at LookupCellSize XZ resolution.
+            bedReachableCellsOut = new HashSet<long>(bedReachableCells);
+            outsideCellsOut = new HashSet<long>(outsideCells);
+
             return stats;
         }
 
@@ -966,6 +996,89 @@ namespace ValheimVillages.Villager.AI.Navigation
             var gx = Mathf.FloorToInt(worldPos.x / cell);
             var gz = Mathf.FloorToInt(worldPos.z / cell);
             return outsideCells.Contains(XzKey(gx, gz));
+        }
+
+        /// <summary>
+        ///     Public XZ-key packer matching the encoding used by
+        ///     <c>outsideCells</c>, <c>bedReachableCells</c>, and the diagnostic
+        ///     snapshot. External callers that need to build sets in the same
+        ///     coordinate space (e.g. the second-bake prune-complement) use this.
+        /// </summary>
+        public static long PackXzKey(int gx, int gz)
+        {
+            return XzKey(gx, gz);
+        }
+
+        /// <summary>
+        ///     Inclusive grid-coordinate rectangle. Used by
+        ///     <see cref="DecomposeToRectangles" /> to describe a contiguous block
+        ///     of XZ cells the caller can collapse into a single ModifierBox.
+        /// </summary>
+        public readonly struct CellRect
+        {
+            public readonly int Gx0, Gz0, Gx1, Gz1;
+            public CellRect(int gx0, int gz0, int gx1, int gz1)
+            {
+                Gx0 = gx0;
+                Gz0 = gz0;
+                Gx1 = gx1;
+                Gz1 = gz1;
+            }
+        }
+
+        /// <summary>
+        ///     Greedy-rectangle decomposition of a packed XZ cell set. For each
+        ///     remaining cell: extend the rectangle horizontally as far as the
+        ///     row stays "on", then extend vertically as far as columns stay
+        ///     "on" for that x-range. Mark covered cells consumed and repeat.
+        ///     O(n) per cell on average. Typically reduces ~3000 cells to tens
+        ///     of rectangles for a village, cutting the bake's source-count by
+        ///     ~50x and the voxelizer's per-source overhead with it.
+        /// </summary>
+        public static List<CellRect> DecomposeToRectangles(HashSet<long> cells)
+        {
+            var result = new List<CellRect>();
+            if (cells == null || cells.Count == 0) return result;
+
+            var remaining = new HashSet<long>(cells);
+            // Deterministic iteration order so log output is comparable
+            // run-to-run when the input set is the same.
+            var ordered = new List<long>(remaining);
+            ordered.Sort();
+
+            foreach (var startKey in ordered)
+            {
+                if (!remaining.Contains(startKey)) continue;
+                UnpackXz(startKey, out var gx0, out var gz0);
+
+                var gx1 = gx0;
+                while (remaining.Contains(XzKey(gx1 + 1, gz0))) gx1++;
+
+                var gz1 = gz0;
+                while (true)
+                {
+                    var nextZ = gz1 + 1;
+                    var rowComplete = true;
+                    for (var x = gx0; x <= gx1; x++)
+                    {
+                        if (!remaining.Contains(XzKey(x, nextZ)))
+                        {
+                            rowComplete = false;
+                            break;
+                        }
+                    }
+                    if (!rowComplete) break;
+                    gz1 = nextZ;
+                }
+
+                for (var z = gz0; z <= gz1; z++)
+                for (var x = gx0; x <= gx1; x++)
+                    remaining.Remove(XzKey(x, z));
+
+                result.Add(new CellRect(gx0, gz0, gx1, gz1));
+            }
+
+            return result;
         }
 
         private static void EnqueuePerimeterSeed(int gx, int gz,
@@ -1568,7 +1681,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         // Inverse of RegionGraph.PackLookup. Uses symmetric mod centred on
         // zero so negative gx/gz/hb round-trip correctly.
-        private static void UnpackLookup(long key, out int gx, out int gz, out int hb)
+        internal static void UnpackLookup(long key, out int gx, out int gz, out int hb)
         {
             var h = key % PackK;
             if (h > PackKHalf) h -= PackK;

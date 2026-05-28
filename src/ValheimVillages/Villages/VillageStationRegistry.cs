@@ -157,23 +157,52 @@ namespace ValheimVillages.Villages
 
             if (best == null) return false;
 
-            // For stations whose centroid sits on a non-walkable obstacle (e.g. Smelter, CharcoalKiln),
-            // direct pathing to transform.position fails. We need a walkable approach point INSIDE the
-            // village hull AND with a complete NavMesh path from the village interior — Unity's
-            // NavMesh.SamplePosition has no containment-polygon mask, and a sampled cell can sit on a
-            // disconnected NavMesh island (close in straight-line distance, no path from inside).
-            // We probe compass offsets around the centroid and validate each candidate with both
-            // checks before committing.
-            s_outsideCellsByVillage.TryGetValue(villageKey, out var outsideCells);
-            stationPos = best.transform.position;
-            System.Func<Vector3, bool> hullPredicate = outsideCells == null
-                ? (System.Func<Vector3, bool>)null
-                : p => !Villager.AI.Navigation.RubberBandPrune.IsOutsideCell(p, outsideCells);
-            if (Villager.AI.Navigation.VillagerMovement.TryResolveApproach(
-                    best.transform.position, position, hullPredicate, out var approach))
-                stationPos = approach;
+            if (!TryResolveApproach(best.transform.position, position, out var approach))
+            {
+                Plugin.Log?.LogDebug(
+                    $"[VillageStationRegistry] {villageKey}: no HNA-valid approach to {best.gameObject.name} " +
+                    $"@ ({best.transform.position.x:F1},{best.transform.position.y:F1},{best.transform.position.z:F1})");
+                stationPos = Vector3.zero;
+                component = null;
+                return false;
+            }
+
+            stationPos = approach;
             component = best;
             return true;
+        }
+
+        /// <summary>
+        ///     Resolve a world-space target (station, chest, anything) to a position the villager
+        ///     can actually reach: walk the village's HNA lookup-grid cells in order of XZ
+        ///     distance to the target, return the first cell that has a complete NavMesh path
+        ///     from <paramref name="pathSource"/> (the villager's current or bed position).
+        ///     <para>This is the SINGLE entry point for "where should the villager actually walk
+        ///     to reach this thing?" Used by station lookup AND container-target navigation in
+        ///     CraftingWorkflow — same rules everywhere, so when one path fails the diagnostic
+        ///     applies to all the others too.</para>
+        ///     <para>Lookup-grid cells (not region centroids) are the canonical HNA positions
+        ///     that round-trip through PointToRegionId. Centroids are geometric averages and
+        ///     can land in buckets the lookup grid never indexed.</para>
+        ///     <para>No fallback. If no lookup cell in the path-source's village is reachable
+        ///     AND close to the target, returns false. The caller must abandon the work, not
+        ///     dispatch toward an unreachable position.</para>
+        /// </summary>
+        public static bool TryResolveApproach(Vector3 target, Vector3 pathSource, out Vector3 approach)
+        {
+            approach = Vector3.zero;
+            if (!TryGetVillage(pathSource, out var villageKey)) return false;
+
+            var graph = Villager.AI.Navigation.RegionGraph.Get(villageKey);
+            if (graph == null) return false;
+
+            var pathBuffer = new List<Vector3>();
+            return graph.TryFindNearestLookupCell(
+                target,
+                candidate => Villager.AI.Navigation.VillagerMovement.TryFindCompletePath(
+                    pathSource, candidate, pathBuffer),
+                out approach,
+                out _);
         }
 
         [RegisterCleanup]

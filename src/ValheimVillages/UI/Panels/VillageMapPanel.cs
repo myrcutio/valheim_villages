@@ -33,7 +33,7 @@ namespace ValheimVillages.UI.Panels
             List<Vector3> floodFillCells = null;
             foreach (var graph in RegionGraph.GetAll())
             {
-                var centers = graph.GetAllRegionCenters();
+                var centers = graph.Diagnostics.GetAllRegionCenters();
                 if (centers.Count > 0)
                 {
                     if (floodFillCells == null) floodFillCells = new List<Vector3>();
