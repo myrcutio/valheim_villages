@@ -233,7 +233,7 @@ namespace ValheimVillages
             else
             {
                 sb.Append("\"available\":true,");
-                sb.Append("\"totalDrops\":").Append(stats.TotalDrops).Append(',');
+                sb.Append("\"totalRetentions\":").Append(stats.TotalRetentions).Append(',');
                 sb.Append("\"bfsMisses\":").Append(stats.BfsMisses).Append(',');
                 sb.Append("\"navmeshFailures\":").Append(stats.NavMeshSampleFailures).Append(',');
                 sb.Append("\"yDisagreements\":").Append(stats.YDisagreements).Append(',');
@@ -242,14 +242,16 @@ namespace ValheimVillages
                 sb.Append("\"worstYDeltaXZ\":[")
                     .Append(stats.WorstYDeltaXZ.x.ToString("R", CultureInfo.InvariantCulture)).Append(',')
                     .Append(stats.WorstYDeltaXZ.y.ToString("R", CultureInfo.InvariantCulture)).Append("],");
-                sb.Append("\"drops\":[");
+                sb.Append("\"retentions\":[");
                 // Cap the per-waypoint list so a runaway pass can't blow up the
                 // sidecar file. The summary counts above are the authoritative total.
-                const int MaxDrops = 500;
-                var n = Mathf.Min(stats.Drops.Count, MaxDrops);
+                // Each entry is a single iteration where the waypoint kept its
+                // previous position — NOT a dropped waypoint.
+                const int MaxRetentions = 500;
+                var n = Mathf.Min(stats.Retentions.Count, MaxRetentions);
                 for (var i = 0; i < n; i++)
                 {
-                    var d = stats.Drops[i];
+                    var d = stats.Retentions[i];
                     if (i > 0) sb.Append(',');
                     sb.Append("{\"x\":").Append(d.X.ToString("R", CultureInfo.InvariantCulture))
                       .Append(",\"z\":").Append(d.Z.ToString("R", CultureInfo.InvariantCulture))
@@ -259,8 +261,8 @@ namespace ValheimVillages
                       .Append('}');
                 }
                 sb.Append(']');
-                if (stats.Drops.Count > MaxDrops)
-                    sb.Append(",\"dropsTruncatedAt\":").Append(MaxDrops);
+                if (stats.Retentions.Count > MaxRetentions)
+                    sb.Append(",\"retentionsTruncatedAt\":").Append(MaxRetentions);
             }
             sb.Append("},");
 

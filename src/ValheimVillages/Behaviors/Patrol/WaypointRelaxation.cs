@@ -30,12 +30,22 @@ namespace ValheimVillages.Behaviors.Patrol
         private const float ExtremeYDisagreementThreshold = 1.0f;
 
         /// <summary>
-        ///     Per-<see cref="Refine" /> drop accumulator. Populated by
+        ///     Per-<see cref="Refine" /> retention accumulator. Populated by
         ///     <see cref="TryResamplePosition" /> while the relaxation runs and
         ///     summarised once when the pass completes. Exposed via
         ///     <see cref="LastStats" /> for diagnostic consumers (sidecar JSON, etc.).
+        ///
+        ///     <para><b>What a "retention" is:</b> the force-directed loop in
+        ///     <see cref="RelaxXZ" /> proposes a new XZ for each waypoint every
+        ///     iteration. When <see cref="TryResamplePosition" /> can't validate
+        ///     the proposed position (BFS miss, NavMesh sample fail, or BFS/NavMesh
+        ///     Y disagreement), the waypoint <b>retains its previous position</b>
+        ///     for that iteration — it is NOT dropped from the ring. Final ring
+        ///     count is unchanged by retentions. A high retention rate means the
+        ///     relaxation isn't converging as quickly as it could, not that the
+        ///     output is broken.</para>
         /// </summary>
-        internal sealed class DropStats
+        internal sealed class RelaxationStats
         {
             public int BfsMisses;
             public int NavMeshSampleFailures;
@@ -43,21 +53,25 @@ namespace ValheimVillages.Behaviors.Patrol
             public int BakeYNaNs;
             public float WorstYDelta;
             public Vector2 WorstYDeltaXZ;
-            public readonly List<DroppedWaypoint> Drops = new List<DroppedWaypoint>();
+            public readonly List<RetainedStep> Retentions = new List<RetainedStep>();
 
             /// <summary>
             ///     Per-pass dedup key set for individually-emitted error lines.
             ///     The same waypoint XZ is re-evaluated up to <see cref="MaxIterations" />
             ///     times within one <see cref="Refine" /> pass; without this guard
-            ///     each extreme/NaN drop would log ~16 near-identical errors.
+            ///     each extreme/NaN retention would log ~16 near-identical errors.
             /// </summary>
             internal readonly HashSet<string> IndividuallyEmitted = new HashSet<string>();
 
-            public int TotalDrops => BfsMisses + NavMeshSampleFailures + YDisagreements;
+            public int TotalRetentions => BfsMisses + NavMeshSampleFailures + YDisagreements;
         }
 
-        /// <summary>One dropped waypoint, recorded for sidecar consumption.</summary>
-        internal readonly struct DroppedWaypoint
+        /// <summary>
+        ///     One retained relaxation step, recorded for sidecar consumption.
+        ///     The waypoint at (X, Z) failed validation on a single iteration
+        ///     and kept its previous position; this is NOT a dropped waypoint.
+        /// </summary>
+        internal readonly struct RetainedStep
         {
             public readonly float X;
             public readonly float Z;
@@ -65,7 +79,7 @@ namespace ValheimVillages.Behaviors.Patrol
             public readonly float BakeY;
             public readonly float Delta;
 
-            public DroppedWaypoint(float x, float z, string reason, float bakeY, float delta)
+            public RetainedStep(float x, float z, string reason, float bakeY, float delta)
             {
                 X = x;
                 Z = z;
@@ -80,9 +94,9 @@ namespace ValheimVillages.Behaviors.Patrol
         ///     Single-threaded; safe to read from the bake/sidecar pipeline that
         ///     runs after relaxation returns.
         /// </summary>
-        internal static DropStats LastStats { get; private set; } = new DropStats();
+        internal static RelaxationStats LastStats { get; private set; } = new RelaxationStats();
 
-        private static DropStats s_current;
+        private static RelaxationStats s_current;
 
         /// <summary>
         ///     Refine waypoints in-place using force-directed relaxation followed by
@@ -94,7 +108,7 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             if (waypoints.Count < 4) return waypoints;
 
-            s_current = new DropStats();
+            s_current = new RelaxationStats();
             try
             {
                 RelaxXZ(waypoints, centroid, filter, graph);
@@ -110,18 +124,25 @@ namespace ValheimVillages.Behaviors.Patrol
             return waypoints;
         }
 
-        private static void EmitSummary(DropStats stats, int finalCount)
+        private static void EmitSummary(RelaxationStats stats, int finalCount)
         {
-            if (stats.TotalDrops == 0) return;
+            if (stats.TotalRetentions == 0) return;
 
             var worst = stats.WorstYDelta > 0f
                 ? $", worst |Δ|={stats.WorstYDelta:F2}m at ({stats.WorstYDeltaXZ.x:F1},{stats.WorstYDeltaXZ.y:F1})"
                 : "";
-            Plugin.Log?.LogWarning(
-                $"[WaypointRelaxation] Pass complete: {stats.TotalDrops} waypoints dropped " +
-                $"(ring={finalCount}). bfs_miss={stats.BfsMisses}, " +
-                $"navmesh_fail={stats.NavMeshSampleFailures}, " +
-                $"y_disagreement={stats.YDisagreements}, bake_y_nan={stats.BakeYNaNs}{worst}.");
+            // Info, not Warning: a retention is the relaxation loop holding a
+            // waypoint at its previous position for one iteration when the
+            // proposed step couldn't be validated. The waypoint isn't dropped
+            // and the final ring count is unaffected. A high retention rate
+            // is interesting (the relaxation isn't converging as fast as it
+            // could) but it's not a bug — see RelaxationStats doc.
+            Plugin.Log?.LogInfo(
+                $"[WaypointRelaxation] Pass complete: ring={finalCount}, " +
+                $"{stats.TotalRetentions} relaxation steps retained " +
+                $"(bfs_miss={stats.BfsMisses}, navmesh_fail={stats.NavMeshSampleFailures}, " +
+                $"y_disagreement={stats.YDisagreements}, bake_y_nan={stats.BakeYNaNs}{worst}). " +
+                "Final ring count unchanged.");
         }
 
         #region Phase 1 — XZ Force-Directed Relaxation
@@ -173,10 +194,12 @@ namespace ValheimVillages.Behaviors.Patrol
         ///     Re-sample Y via BFS cell height (HNA region graph is the ground truth),
         ///     then validate against NavMesh. Fail-fast on any disagreement: if BFS
         ///     fails, NavMesh fails, or the two disagree by more than
-        ///     <see cref="YDisagreementTolerance" />, log a LogError naming the
-        ///     position with both Y sources and drop the waypoint. No silent
-        ///     fallback to GetSolidHeightAt — a bake/graph mismatch is a real bug
-        ///     that needs to surface, not be papered over.
+        ///     <see cref="YDisagreementTolerance" />, record the retention and
+        ///     return false so <see cref="RelaxXZ"/> keeps the waypoint at its
+        ///     previous position for this iteration. The waypoint is NOT removed
+        ///     from the ring — it just doesn't move on this step. No silent
+        ///     fallback to GetSolidHeightAt — a bake/graph mismatch is a real
+        ///     bug that needs to surface, not be papered over.
         /// </summary>
         private const float YDisagreementTolerance = 0.5f;
 
@@ -189,7 +212,7 @@ namespace ValheimVillages.Behaviors.Patrol
             if (!TryGetBfsCellHeight(worldX, worldZ, graph, out var bfsY))
             {
                 var bakeYDiag = RegionGraph.GetSolidHeightAt(worldX, worldZ, out var by) ? by : float.NaN;
-                RecordDrop("bfs_miss", worldX, worldZ, bakeYDiag, 0f);
+                RecordRetention("bfs_miss", worldX, worldZ, bakeYDiag, 0f);
                 return false;
             }
 
@@ -198,7 +221,7 @@ namespace ValheimVillages.Behaviors.Patrol
                     BoundaryGeometry.NavMeshProbeRadius, filter))
             {
                 var bakeYDiag = RegionGraph.GetSolidHeightAt(worldX, worldZ, out var by) ? by : float.NaN;
-                RecordDrop("navmesh_fail", worldX, worldZ, bakeYDiag, 0f);
+                RecordRetention("navmesh_fail", worldX, worldZ, bakeYDiag, 0f);
                 return false;
             }
 
@@ -206,16 +229,16 @@ namespace ValheimVillages.Behaviors.Patrol
             if (deltaY > YDisagreementTolerance)
             {
                 var bakeYDiag = RegionGraph.GetSolidHeightAt(worldX, worldZ, out var by) ? by : float.NaN;
-                RecordDrop("y_disagreement", worldX, worldZ, bakeYDiag, deltaY);
+                RecordRetention("y_disagreement", worldX, worldZ, bakeYDiag, deltaY);
                 // Extreme deltas escape the dedup and emit individually — they're the
                 // signal worth seeing without scrolling a summary. Per-XZ-rounded
-                // dedup inside RecordDrop keeps each waypoint to one line per pass.
+                // dedup inside RecordRetention keeps each waypoint to one line per pass.
                 if (deltaY > ExtremeYDisagreementThreshold &&
                     TryClaimIndividual("y_disagreement_extreme", worldX, worldZ))
                     Plugin.Log?.LogError(
                         "[WaypointRelaxation] BFS/NavMesh Y disagreement (extreme) at " +
                         $"({worldX:F2}, {worldZ:F2}): BFS Y={bfsY:F2}, NavMesh Y={hit.position.y:F2}, " +
-                        $"bake Y={bakeYDiag:F2}, |Δ|={deltaY:F2}m. Dropping waypoint.");
+                        $"bake Y={bakeYDiag:F2}, |Δ|={deltaY:F2}m. Waypoint retained at previous position.");
                 return false;
             }
 
@@ -224,13 +247,14 @@ namespace ValheimVillages.Behaviors.Patrol
         }
 
         /// <summary>
-        ///     Record one dropped waypoint into the active <see cref="DropStats" />.
-        ///     Bumps the per-reason counter, tracks the worst Y delta seen, appends
-        ///     the drop to the per-waypoint list for sidecar consumption, and emits
-        ///     individually for rare/extreme cases (NaN bake Y, anywhere) so they
+        ///     Record one retained relaxation step into the active
+        ///     <see cref="RelaxationStats" />. Bumps the per-reason counter,
+        ///     tracks the worst Y delta seen, appends the step to the
+        ///     per-waypoint list for sidecar consumption, and emits
+        ///     individually for rare/extreme cases (NaN bake Y) so they
         ///     don't get lost in the summary.
         /// </summary>
-        private static void RecordDrop(string reason, float worldX, float worldZ, float bakeY, float delta)
+        private static void RecordRetention(string reason, float worldX, float worldZ, float bakeY, float delta)
         {
             var stats = s_current;
             if (stats == null) return; // Refine() not active — defensive only.
@@ -262,11 +286,11 @@ namespace ValheimVillages.Behaviors.Patrol
                 if (TryClaimIndividual("bake_y_nan", worldX, worldZ))
                     Plugin.Log?.LogError(
                         $"[WaypointRelaxation] bake Y=NaN at ({worldX:F2}, {worldZ:F2}) " +
-                        $"during {reason}. Dropping waypoint; this points at a NaN-propagation " +
-                        "bug upstream of relaxation.");
+                        $"during {reason}. Waypoint retained at previous position; this " +
+                        "points at a NaN-propagation bug upstream of relaxation.");
             }
 
-            stats.Drops.Add(new DroppedWaypoint(worldX, worldZ, reason, bakeY, delta));
+            stats.Retentions.Add(new RetainedStep(worldX, worldZ, reason, bakeY, delta));
         }
 
         /// <summary>
