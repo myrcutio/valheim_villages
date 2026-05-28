@@ -257,7 +257,86 @@ namespace ValheimVillages.Diagnostics
                 if (i > 0) sb.Append(',');
                 sb.Append(JsonVec3(corners[i]));
             }
-            sb.Append("]}");
+            sb.Append("]");
+
+            // Per-segment capsule cast: villager pos → corner[0] → corner[1] → …
+            // Reports which segment (if any) is physically blocked by a
+            // piece / static-solid collider and what hit. This is the
+            // missing diagnostic when NavMesh says the path is Complete but
+            // the agent capsule can't actually walk it — the kind of stall
+            // that incident 002_Blacksmith (May 2026) surfaced.
+            sb.Append(",\"segmentCasts\":");
+            AppendSegmentCasts(sb, ai.transform != null ? ai.transform.position : Vector3.zero, corners);
+
+            sb.Append('}');
+        }
+
+        /// <summary>
+        ///     Sweep an agent-sized capsule along each path segment and emit a
+        ///     JSON array entry per segment with hit info. Diagnostic-only —
+        ///     a "blocked" result here doesn't change the path the AI is
+        ///     trying to walk; it just tells the next investigation
+        ///     <em>what is in the way</em> without needing a separate probe
+        ///     command. Capsule dimensions match
+        ///     <c>NavMeshLinkPlacer.IsAgentBodyClear</c>'s body model so the
+        ///     diagnostic agrees with the link-validation rejection log
+        ///     lines on the same geometry.
+        /// </summary>
+        private static void AppendSegmentCasts(StringBuilder sb, Vector3 villagerPos, List<Vector3> corners)
+        {
+            sb.Append('[');
+            const float bodyBottomLift = 0.5f;
+            const float bodyTopLift = 1.35f;
+            const float bodyRadius = 0.4f;
+            var mask = UnityEngine.LayerMask.GetMask(
+                "Default", "static_solid", "piece", "blocker", "pathblocker");
+
+            var prev = villagerPos;
+            for (var i = 0; i < corners.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                var cur = corners[i];
+                var dir = cur - prev;
+                var dist = dir.magnitude;
+                sb.Append("{\"segment\":").Append(i)
+                  .Append(",\"distM\":").Append(dist.ToString("F2", CultureInfo.InvariantCulture));
+                if (dist < 0.001f)
+                {
+                    sb.Append(",\"degenerate\":true}");
+                    prev = cur;
+                    continue;
+                }
+
+                try
+                {
+                    var bottomCap = prev + UnityEngine.Vector3.up * bodyBottomLift;
+                    var topCap = prev + UnityEngine.Vector3.up * bodyTopLift;
+                    if (UnityEngine.Physics.CapsuleCast(
+                            bottomCap, topCap, bodyRadius,
+                            dir / dist, out var hit, dist,
+                            mask, UnityEngine.QueryTriggerInteraction.Ignore))
+                    {
+                        var hitName = hit.collider != null ? hit.collider.name : "(null)";
+                        var hitLayer = hit.collider != null ? hit.collider.gameObject.layer : -1;
+                        sb.Append(",\"blocked\":true")
+                          .Append(",\"hitName\":\"").Append(JsonEscape(hitName)).Append('"')
+                          .Append(",\"hitLayer\":").Append(hitLayer)
+                          .Append(",\"hitDistM\":").Append(hit.distance.ToString("F2", CultureInfo.InvariantCulture))
+                          .Append(",\"hitPos\":").Append(JsonVec3(hit.point));
+                    }
+                    else
+                    {
+                        sb.Append(",\"blocked\":false");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    sb.Append(",\"castError\":\"").Append(JsonEscape(ex.GetType().Name)).Append('"');
+                }
+                sb.Append('}');
+                prev = cur;
+            }
+            sb.Append(']');
         }
 
         private static List<Vector3> TryGetCurrentPathCorners(VillagerAI ai)
