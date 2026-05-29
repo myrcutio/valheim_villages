@@ -5,22 +5,19 @@ using Object = UnityEngine.Object;
 namespace ValheimVillages.Patches
 {
     /// <summary>
-    ///     When a villager dies, clear the mod-namespaced
-    ///     <c>vv_owner_villager_id</c> ZDO field on the bed they were
-    ///     assigned to. SpawnPatch sets this field when a player uses a
-    ///     pawn item to spawn a villager (so the mod can tell whether a
-    ///     bed is already claimed), but nothing historically cleared it
-    ///     when the villager died — leaving the bed permanently claimed.
-    ///     <para>The cleanup runs on the unified Character.OnDeath path so
-    ///     it catches every death cause (combat, fall damage, dev `kill`,
+    ///     When a villager dies, clear the <c>owner</c> / <c>ownerName</c>
+    ///     ZDO fields on the bed they were assigned to. SpawnPatch sets
+    ///     these fields when a player uses a pawn item to spawn a villager
+    ///     (so the bed appears claimed in Valheim's UI), but nothing
+    ///     historically cleared them when the villager died — leaving the
+    ///     bed permanently claimed by a now-dead villager and (depending
+    ///     on Valheim version) preventing deconstruction with the hammer.
+    ///     The cleanup runs on the unified Character.OnDeath path so it
+    ///     catches every death cause (combat, fall damage, dev `kill`,
     ///     etc). Position-based bed lookup keyed on the villager's
     ///     persisted <c>vv_bed_position</c> rather than the truncated
-    ///     <c>vv_assigned_bed</c> ZDOID-as-long, which loses the userId
-    ///     portion of the ZDOID.</para>
-    ///     <para>We deliberately do NOT touch the native <c>owner</c> /
-    ///     <c>ownerName</c> fields here — SpawnPatch no longer writes them
-    ///     either, and those fields belong to Valheim's player-sleep
-    ///     binding which we shouldn't interfere with.</para>
+    ///     <c>vv_assigned_bed</c> ZDOID-as-long, which loses the
+    ///     userId portion of the ZDOID.
     /// </summary>
     [HarmonyPatch(typeof(Character), "OnDeath")]
     public static class VillagerDeathBedReleasePatch
@@ -61,7 +58,7 @@ namespace ValheimVillages.Patches
                 var zdo = nview?.GetZDO();
                 if (zdo == null) continue;
 
-                var priorOwner = zdo.GetLong("vv_owner_villager_id", 0L);
+                var priorOwner = zdo.GetLong("owner", 0L);
                 if (priorOwner == 0L)
                 {
                     Plugin.Log?.LogDebug(
@@ -69,9 +66,10 @@ namespace ValheimVillages.Patches
                     return;
                 }
 
-                zdo.Set("vv_owner_villager_id", 0L);
+                zdo.Set("owner", 0L);
+                zdo.Set("ownerName", "");
                 Plugin.Log?.LogInfo(
-                    $"[Bed] Released vv_owner_villager_id on bed at {bed.transform.position} after '{villagerName}' died " +
+                    $"[Bed] Released owner on bed at {bed.transform.position} after '{villagerName}' died " +
                     $"(prior owner ZDOID={priorOwner})");
                 return;
             }
