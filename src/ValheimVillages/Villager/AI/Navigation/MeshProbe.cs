@@ -515,8 +515,9 @@ namespace ValheimVillages.Villager.AI.Navigation
                     {
                         var dest = lnk.ToRegionId;
                         var destKind = graph.GetRegionKind(dest);
+                        var destAlive = graph.IsValidRegion(dest) ? "alive" : "DROPPED";
                         sb.AppendLine(
-                            $"    link -> {dest} ({destKind}, {lnk.LinkType}) " +
+                            $"    link -> {dest} ({destKind}, {lnk.LinkType}, {destAlive}) " +
                             $"at ({lnk.PositionEnd.x:F1}, {lnk.PositionEnd.y:F1}, {lnk.PositionEnd.z:F1})");
                     }
             }

@@ -9,7 +9,7 @@ namespace ValheimVillages.Settings
         public const float MaxWanderRange = 200f;
 
         /// <summary>Radius to check for nearby POIs while wandering.</summary>
-        public const float DiscoveryRadius = 15f;
+        public const float DiscoveryRadius = 20f;
 
         /// <summary>How often to re-evaluate behavior (seconds).</summary>
         public const float UpdateInterval = 15f;
@@ -105,8 +105,19 @@ namespace ValheimVillages.Settings
         ///     carved out entirely (1m doorways at 0.5m base radius become
         ///     unreachable past +0.0m buffer — but door NavMeshLinks bridge
         ///     them, so this is fine in practice). Keep modest (≤0.2m).
+        ///
+        ///     Empirically: 0.12m was wide enough to delete slot-31 polygons
+        ///     from a narrow upper-level balcony (probe @ (-2256.94, 43.38,
+        ///     1292.88) returned 0 polys within 5m for slot 31 while
+        ///     Humanoid hit at 0.94m — same colliders, same bounds). Dropped
+        ///     to 0.0m to let the slot-31 bake match Humanoid's coverage;
+        ///     re-evaluate if villagers start scraping piece edges on
+        ///     turns. The original "extra clearance on turns" justification
+        ///     is now mostly redundant with the NavMeshLink corner-offset
+        ///     (RegionGraphWaypoints.WallClearance=0.15m) that the corridor
+        ///     planner injects at every direction change.
         /// </summary>
-        public const float NavMeshBakeRadiusBuffer = 0.12f;
+        public const float NavMeshBakeRadiusBuffer = 0.025f;
 
         /// <summary>
         ///     Hard timeout: seconds since last successful waypoint arrival before
@@ -123,7 +134,7 @@ namespace ValheimVillages.Settings
         ///     and StepJump's 1.5s so the door / step-jump heuristics get
         ///     to run first.
         /// </summary>
-        public const float PathStallEscapeSeconds = 5f;
+        public const float PathStallEscapeSeconds = 10f;
 
         /// <summary>
         ///     Maximum recovery attempts when FindPath returns an incomplete

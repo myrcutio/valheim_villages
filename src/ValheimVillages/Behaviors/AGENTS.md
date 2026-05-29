@@ -1,6 +1,6 @@
 # Behaviors
 
-Keywords: behavior, patrol, alarm, craft, farming, explore, tidy, IBehavior, BehaviorFactory, RegisterBehavior,
+Keywords: behavior, patrol, alarm, craft, farming, tidy, IBehavior, BehaviorFactory, RegisterBehavior,
 PatrolStateMachine, PerimeterPatrolBehavior, BreachAlarmBehavior, TidyBehavior, breach detection, patrol discovery,
 waypoint, circuit tracing, scouting, region boundary, patrol geometry, patrol persistence, stall detection, behavior
 priority, WantsControl, CookingStation
@@ -16,8 +16,6 @@ Composable NPC behaviors driven by tags in NPC JSON definitions. Each behavior h
 Behaviors/
   IBehavior.cs                         -- IBehaviorPersistence interface (Save/Load to ZDO)
   BehaviorFactory.cs                   -- Maps behavior tags to creator functions; CreateBehaviors(ai, tags)
-  Explore/
-    ExploreBehaviorAdapter.cs          -- [RegisterBehavior("explore")] wraps VillagerBehaviorLogic
   Work/
     CraftingBehaviorAdapter.cs         -- [RegisterBehavior("craft")] wraps CraftingBehavior
     FarmBehaviorAdapter.cs             -- [RegisterBehavior("farming")] wraps FarmingBehavior, linked to crafting

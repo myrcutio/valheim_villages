@@ -7,6 +7,7 @@ using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Items.VirtualRecipes;
 using ValheimVillages.Schemas;
+using ValheimVillages.Villages;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
@@ -31,9 +32,8 @@ namespace ValheimVillages.TaskQueue.Handlers
             var outputItem = match.ItemPrefabName;
             var bedPos = ai.BedPosition;
 
-            // Find a farm location in the NPC's memory
-            var farmLoc = ai.KnownLocations
-                .Where(l => l.Type == LocationType.Farm)
+            // Find a farm location from the village registry, nearest the bed.
+            var farmLoc = VillagePoiRegistry.GetPois(bedPos, LocationType.Farm)
                 .OrderBy(l => Vector3.Distance(bedPos, l.Position))
                 .FirstOrDefault();
 
@@ -61,7 +61,7 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             // Check for harvestable crops first
             var harvestTarget = HarvestHelper.FindNearestHarvestableCrop(
-                ai, ai.Position, outputItem, HarvestHelper.HarvestScanRadius);
+                ai.Position, outputItem, HarvestHelper.HarvestScanRadius);
 
             if (harvestTarget != null)
             {

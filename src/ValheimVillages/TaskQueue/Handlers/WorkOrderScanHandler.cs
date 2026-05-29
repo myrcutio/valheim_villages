@@ -278,7 +278,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                         ItemPrefab = match.ItemPrefabName,
                         Station = match.StationName,
                         PhysicalStation = physicalStation,
-                        Reason = $"No station '{stationDesc}' in memory",
+                        Reason = $"No station '{stationDesc}' in village",
                         IsUnimplemented = unimplemented,
                         WorkOrderPosition = match.SourceContainer.transform.position,
                     });

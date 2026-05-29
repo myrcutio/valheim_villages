@@ -22,9 +22,13 @@ namespace ValheimVillages.Villager.AI.Navigation
     ///             the OUTER ring, so secondary courtyards are not marked outside.
     ///         </item>
     ///         <item>
-    ///             <b>Pass 2</b> (terrain): inside-out flood seeded from each bed's
-    ///             XZ column (the terrain cell directly under/over the bed). Same
-    ///             <c>WallBlocks</c> primitive, refuses to expand into <c>outsideCells</c>.
+    ///             <b>Pass 2</b> (terrain): inside-out flood seeded from each bed,
+    ///             snapped to the nearest populated cell (the floor the villager
+    ///             stands on, not the terrain hole a metre below a raised
+    ///             foundation). Flood surface Y is the region-centroid surface
+    ///             (max of terrain/piece) so the waist probe sits above the floor
+    ///             and bed; <c>WallBlocks</c> ignores bed colliders; refuses to
+    ///             expand into <c>outsideCells</c>.
     ///             Output: <c>bedReachableCells</c> (terrain XZ keys reachable from at
     ///             least one bed). Catches internal cliffs, pits, locked-off rooms.
     ///         </item>
@@ -288,67 +292,107 @@ namespace ValheimVillages.Villager.AI.Navigation
                     stats.OutsideTerrainCells++;
 
             // --- Pass 2: inside-out flood from beds ---
-            // Walks any non-outside cell in the bake bounds (NOT only cells in
-            // xzMaxYTerrain). The prior xzMaxYTerrain.ContainsKey gate made the
-            // flood depend on the terrain bake's region coverage: in villages
-            // heavily covered by piece floors / foundations / paving the
-            // terrain under those pieces gets rejBlocked'd by RegionBuilder,
-            // so xzMaxYTerrain has no entry there, and Pass 2 couldn't bridge
-            // across them — fragmented inside-village walkable area into tiny
-            // islands. A villager can legitimately walk on any non-outside
-            // cell that isn't wall-blocked from its neighbour, regardless of
-            // whether the terrain region centroid landed on this XZ.
+            // Walks any reachable cell in the bake bounds. A villager can
+            // legitimately walk on any non-outside cell that isn't
+            // wall-blocked from its neighbour, regardless of whether a terrain
+            // region centroid landed on this XZ.
             //
-            // Bed seeding: bed's exact XZ cell, period. No 30m direct-scan
-            // fallback (that was masking the real seeding semantics: a bed
-            // outside the perimeter, or out of bake bounds, is a real bug
-            // worth surfacing, not silently snapping to a nearby cell).
+            // Flood surface (cell Y): the partition's own region surface — the
+            // max region-centroid Y across the terrain AND piece regions at the
+            // cell (SurfaceY below). In a floored village the walkable surface
+            // is the floor PIECES (≈1m above the terrain heightmap), so the old
+            // GetGroundHeight anchor put the waist probe a metre too low, where
+            // it clipped the floor pieces (and the bed) and walled every cell
+            // off from its neighbour. Anchoring on the region surface puts the
+            // probe band above the floor/bed and below walls — exactly the
+            // height Pass 1's diagnostic uses to report WallBlocks=false across
+            // a floor. GetGroundHeight is the fallback only for cells with no
+            // region at all (unpopulated).
             //
-            // Cell Y comes from ZoneSystem.GetGroundHeight (per-cell heightmap),
-            // not xzMaxYTerrain (region-centroid Y can drift up to ~0.75m).
+            // Bed seeding (PRIMARY = snap to the nearest populated cell): a bed
+            // commonly sits on a floor whose own XZ cell is carved out of the
+            // partition (the bed blocker shadows it), leaving it unpopulated.
+            // Seeding the literal bed cell put the flood on the terrain hole
+            // under the bed. We snap each bed to the nearest cell that actually
+            // carries a region — the floor the villager stands on. This is the
+            // main position marker, not a fallback.
+            //
+            // bedReachableCellY records each reached cell's surface Y so Pass 3
+            // seeds the piece flood at the same height (not the terrain a metre
+            // below, which would exceed MaxClimb and orphan the floor pieces).
             var bedReachableCells = new HashSet<long>();
+            var bedReachableCellY = new Dictionary<long, float>();
             var pass2Seeds = 0;
+
+            // Region surface Y at a cell: the highest region-centroid Y present
+            // there across both kinds (floor pieces win over the terrain they
+            // shadow). Falls back to the terrain heightmap for cells with no
+            // region. `populated` reports whether any region covers the cell.
+            float SurfaceY(long xzKey, int gx, int gz, out bool populated)
+            {
+                var best = float.MinValue;
+                if (xzMaxYTerrain.TryGetValue(xzKey, out var ty)) best = ty;
+                if (xzMaxYPiece.TryGetValue(xzKey, out var py) && py > best) best = py;
+                populated = best > float.MinValue;
+                if (populated) return best;
+                return ZoneSystem.instance != null
+                    ? ZoneSystem.instance.GetGroundHeight(
+                        new Vector3(gx * cell + cell * 0.5f, 0f, gz * cell + cell * 0.5f))
+                    : 0f;
+            }
+
             if (beds != null && beds.Count > 0 && ZoneSystem.instance != null)
             {
-                var bedQueue = new Queue<long>();
+                const int bedSnapRingMax = 6; // search radius (cells) for nearest populated cell
+                var bedQueue = new Queue<(long key, float y)>();
                 foreach (var bed in beds)
                 {
-                    var bgx = Mathf.FloorToInt(bed.x / cell);
-                    var bgz = Mathf.FloorToInt(bed.z / cell);
-                    if (bgx < gxMin || bgx > gxMax || bgz < gzMin || bgz > gzMax)
+                    var bgx0 = Mathf.FloorToInt(bed.x / cell);
+                    var bgz0 = Mathf.FloorToInt(bed.z / cell);
+
+                    // Snap to the nearest populated, non-outside cell (the floor
+                    // the bed rests on, even when the bed's own cell is carved).
+                    int bgx = bgx0, bgz = bgz0;
+                    var snapped = false;
+                    for (var r = 0; r <= bedSnapRingMax && !snapped; r++)
+                    for (var ox = -r; ox <= r && !snapped; ox++)
+                    for (var oz = -r; oz <= r && !snapped; oz++)
+                    {
+                        if (Mathf.Max(Mathf.Abs(ox), Mathf.Abs(oz)) != r) continue; // ring only
+                        var cx = bgx0 + ox;
+                        var cz = bgz0 + oz;
+                        if (cx < gxMin || cx > gxMax || cz < gzMin || cz > gzMax) continue;
+                        var ck = XzKey(cx, cz);
+                        if (outsideCells.Contains(ck)) continue;
+                        if (!xzMaxYTerrain.ContainsKey(ck) && !xzMaxYPiece.ContainsKey(ck)) continue;
+                        bgx = cx;
+                        bgz = cz;
+                        snapped = true;
+                    }
+
+                    if (!snapped)
                     {
                         Plugin.Log?.LogWarning(
                             $"[RubberBand] Pass 2 bed skipped: bed=({bed.x:F1},{bed.z:F1}) " +
-                            $"cell=({bgx},{bgz}) out_of_bake_bounds " +
-                            $"[{gxMin}..{gxMax}, {gzMin}..{gzMax}]");
+                            $"cell=({bgx0},{bgz0}) — no populated, non-outside cell within " +
+                            $"{bedSnapRingMax} cells (bed walled off or outside the village?).");
                         continue;
                     }
 
                     var bedKey = XzKey(bgx, bgz);
-                    if (outsideCells.Contains(bedKey))
-                    {
-                        Plugin.Log?.LogWarning(
-                            $"[RubberBand] Pass 2 bed skipped: bed=({bed.x:F1},{bed.z:F1}) " +
-                            $"cell=({bgx},{bgz}) lies in outsideCells " +
-                            "(perimeter flood reached the bed's cell — bed outside walls?)");
-                        continue;
-                    }
-
                     if (bedReachableCells.Add(bedKey))
                     {
-                        bedQueue.Enqueue(bedKey);
+                        var seedY = SurfaceY(bedKey, bgx, bgz, out _);
+                        bedReachableCellY[bedKey] = seedY;
+                        bedQueue.Enqueue((bedKey, seedY));
                         pass2Seeds++;
                     }
                 }
 
-                var halfCell = cell * 0.5f;
                 while (bedQueue.Count > 0)
                 {
-                    var curKey = bedQueue.Dequeue();
+                    var (curKey, curY) = bedQueue.Dequeue();
                     UnpackXz(curKey, out var gx, out var gz);
-                    var curWx = gx * cell + halfCell;
-                    var curWz = gz * cell + halfCell;
-                    var curY = ZoneSystem.instance.GetGroundHeight(new Vector3(curWx, 0f, curWz));
                     for (var d = 0; d < 4; d++)
                     {
                         int ngx = gx + dx[d], ngz = gz + dz[d];
@@ -357,13 +401,12 @@ namespace ValheimVillages.Villager.AI.Navigation
                         if (bedReachableCells.Contains(nKey)) continue;
                         if (outsideCells.Contains(nKey)) continue;
 
-                        var nwx = ngx * cell + halfCell;
-                        var nwz = ngz * cell + halfCell;
-                        var nY = ZoneSystem.instance.GetGroundHeight(new Vector3(nwx, 0f, nwz));
+                        var nY = SurfaceY(nKey, ngx, ngz, out _);
                         if (WallBlocks(gx, gz, ngx, ngz, curY, nY, cell, pieceMask)) continue;
 
                         bedReachableCells.Add(nKey);
-                        bedQueue.Enqueue(nKey);
+                        bedReachableCellY[nKey] = nY;
+                        bedQueue.Enqueue((nKey, nY));
                     }
                 }
             }
@@ -535,7 +578,13 @@ namespace ValheimVillages.Villager.AI.Navigation
                     UnpackXz(xz, out var gx, out var gz);
                     var wx = gx * cell + half;
                     var wz = gz * cell + half;
-                    var ty = ZoneSystem.instance.GetGroundHeight(new Vector3(wx, 0f, wz));
+                    // Seed at the surface Pass 2 actually walked (floor pieces
+                    // in a floored village), not the terrain a metre below —
+                    // otherwise the floor pieces sit > MaxClimb above the seed
+                    // and Pass 3 never reaches them.
+                    var ty = bedReachableCellY.TryGetValue(xz, out var sy)
+                        ? sy
+                        : ZoneSystem.instance.GetGroundHeight(new Vector3(wx, 0f, wz));
                     pieceQueue.Enqueue((xz, ty, true, null));
                 }
 
@@ -558,7 +607,11 @@ namespace ValheimVillages.Villager.AI.Navigation
                         {
                             var nwx = ngx * cell + half;
                             var nwz = ngz * cell + half;
-                            var tnY = ZoneSystem.instance.GetGroundHeight(new Vector3(nwx, 0f, nwz));
+                            // Bridge at Pass 2's recorded surface Y (same
+                            // reason as the seed loop above).
+                            var tnY = bedReachableCellY.TryGetValue(nXz, out var nsy)
+                                ? nsy
+                                : ZoneSystem.instance.GetGroundHeight(new Vector3(nwx, 0f, nwz));
                             if (Mathf.Abs(tnY - curY) <= MaxClimb) pieceQueue.Enqueue((nXz, tnY, true, null));
                         }
 
@@ -1112,13 +1165,36 @@ namespace ValheimVillages.Villager.AI.Navigation
                    || (yA != yB && ProbeAtWaist(gxA, gzA, gxB, gzB, yB, cell, mask));
         }
 
+        // Reused buffer for the bed-aware waist probe. Sized generously —
+        // dense village cells can stack many piece colliders in one waist box.
+        private static readonly Collider[] s_waistProbeBuf = new Collider[64];
+
         private static bool ProbeAtWaist(int gxA, int gzA, int gxB, int gzB,
             float floorY, float cell, int mask)
         {
             ComputeWaistProbeBox(gxA, gzA, gxB, gzB, floorY, cell,
                 out var center, out var halfExtents);
-            return Physics.CheckBox(center, halfExtents, Quaternion.identity,
-                mask, QueryTriggerInteraction.Ignore);
+            var count = Physics.OverlapBoxNonAlloc(center, halfExtents,
+                s_waistProbeBuf, Quaternion.identity, mask,
+                QueryTriggerInteraction.Ignore);
+            for (var i = 0; i < count; i++)
+            {
+                var col = s_waistProbeBuf[i];
+                if (col == null) continue;
+                // Beds are carved out of the agent NavMesh by the bake, so
+                // they must never ALSO gate flood reachability. A bed standing
+                // on a raised floor sits squarely in the waist band and would
+                // otherwise wall off its own seed cell (and any neighbour it
+                // overhangs), collapsing bed-reachability to nothing.
+                if (IsBedCollider(col)) continue;
+                return true;
+            }
+            return false;
+        }
+
+        private static bool IsBedCollider(Collider col)
+        {
+            return col.GetComponentInParent<Bed>() != null;
         }
 
         /// <summary>
@@ -1607,20 +1683,30 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             var names = new List<string>(Mathf.Min(total, 8));
+            // Mirror ProbeAtWaist: bed colliders are ignored for the blocking
+            // verdict (the bake carves them out of the agent NavMesh) but still
+            // listed — tagged — so vv_probe shows what's physically there.
+            var blocked = false;
 
             void AddNames(Collider[] arr, int max)
             {
                 if (arr == null) return;
-                var limit = Mathf.Min(arr.Length, max);
-                for (var i = 0; i < limit; i++)
-                    names.Add(arr[i] != null ? arr[i].name : "<null>");
+                for (var i = 0; i < arr.Length; i++)
+                {
+                    var col = arr[i];
+                    var isBed = col != null && IsBedCollider(col);
+                    if (!isBed && col != null) blocked = true; // verdict scans all
+                    if (i >= max) continue;                    // names are capped
+                    if (col == null) names.Add("<null>");
+                    else names.Add(isBed ? col.name + "(bed,ignored)" : col.name);
+                }
             }
 
             AddNames(hitsA, 4);
             AddNames(hitsB, 4);
             hitNames = string.Join(";", names);
             if (total > names.Count) hitNames += $";+{total - names.Count}";
-            return true;
+            return blocked;
         }
 
         // Build the waist-height probe box for a 4-neighbour step between

@@ -147,45 +147,5 @@ namespace ValheimVillages.Villager.AI.Work
                     return true;
             return false;
         }
-
-        /// <summary>
-        ///     Find the first station of type T at the NPC's known CraftStation locations,
-        ///     ordered by distance from bed. Returns position and component when filter passes.
-        /// </summary>
-        [Obsolete("Use VillageStationRegistry.TryFindStation; per-villager LOS discovery no longer classifies stations.")]
-        public static bool TryFindStationAtKnownLocations<T>(
-            IVillagerStationLookup ai,
-            Func<T, bool> filter,
-            out Vector3 position,
-            out T component) where T : Component
-        {
-            position = Vector3.zero;
-            component = null;
-
-            if (ai?.KnownLocations == null) return false;
-
-            var bedPos = ai.BedPosition;
-            // Smelter-family prefabs aren't registered with a Smelter-specific LocationType today;
-            // VillagerPOIDiscovery.ClassifyObject tags them as CraftStation when a nearby
-            // CraftingStation/CookingStation is present, so the existing filter is the closest match
-            // for "stations the villager works at." Revisit if smelters get their own LocationType.
-            var craftStations = ai.KnownLocations
-                .Where(l => l.Type == LocationType.CraftStation || l.Type == LocationType.CookingStation)
-                .OrderBy(l => Vector3.Distance(bedPos, l.Position))
-                .ToList();
-
-            foreach (var loc in craftStations)
-            {
-                var c = PhysicsHelper.GetFirstInRadius<T>(loc.Position, StationLookupRadius);
-                if (c != null && (filter == null || filter(c)))
-                {
-                    position = c.transform.position;
-                    component = c;
-                    return true;
-                }
-            }
-
-            return false;
-        }
     }
 }

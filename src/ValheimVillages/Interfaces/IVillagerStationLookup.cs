@@ -1,21 +1,19 @@
-using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.Schemas;
 
 namespace ValheimVillages.Interfaces
 {
     /// <summary>
-    ///     Minimal interface for resolving crafting/cooking stations from known locations.
-    ///     Implemented by both Villager.AI.VillagerAI and legacy AI for StationFinder.
+    ///     Minimal villager context for resolving village stations/PoIs by
+    ///     position (anchored on the villager's bed). Implemented by
+    ///     Villager.AI.VillagerAI.
     /// </summary>
     public interface IVillagerStationLookup
     {
-        IReadOnlyList<KnownLocation> KnownLocations { get; }
         Vector3 BedPosition { get; }
     }
 
     /// <summary>
-    ///     Extended lookup for work-order handlers (farm context, logging). Implemented by both AI types.
+    ///     Extended lookup for work-order handlers (farm context, logging).
     /// </summary>
     public interface IVillagerWorkContext : IVillagerStationLookup
     {

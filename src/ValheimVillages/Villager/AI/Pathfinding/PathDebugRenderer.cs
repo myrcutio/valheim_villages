@@ -30,6 +30,13 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         private static bool s_showTriangulation = true;
 
         /// <summary>
+        ///     When set, debug overlays render ONLY for the camera with this name
+        ///     (e.g. ValheimMCP's off-screen render camera), keeping them off the
+        ///     player's view. Null = draw for every camera. Set via <c>cam=&lt;name&gt;</c>.
+        /// </summary>
+        private static string s_targetCameraName;
+
+        /// <summary>
         ///     Region IDs whose triangulation edges should be drawn with extra
         ///     emphasis (overlaid in bright white at multiple Y offsets). Set
         ///     by <c>vv_bfs_trace</c> to highlight the path from a target
@@ -75,6 +82,13 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         {
             if (!s_enabled && !s_showTriangulation) return;
 
+            // Camera filter: when targeting a specific camera (e.g. the off-screen
+            // MCP render camera), skip every other camera's render pass so the
+            // overlay never appears in the player's view.
+            if (s_targetCameraName != null &&
+                (Camera.current == null || Camera.current.name != s_targetCameraName))
+                return;
+
             m_lineMaterial.SetPass(0);
             GL.PushMatrix();
             GL.MultMatrix(Matrix4x4.identity);
@@ -98,9 +112,15 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             GL.PopMatrix();
         }
 
-        [DevCommand("Toggle path debug visualization for all villagers", Name = "vv_path_debug")]
-        public static void Toggle()
+        [DevCommand("Toggle villager path debug viz. Optional cam=<cameraName> restricts the overlay to that camera (cam=off clears).", Name = "vv_path_debug")]
+        public static void Toggle(Terminal.ConsoleEventArgs args)
         {
+            if (TryApplyCameraArg(args, out var camMsg))
+            {
+                Console.instance?.Print(camMsg);
+                return;
+            }
+
             s_enabled = !s_enabled;
 
             if (s_enabled)
@@ -114,21 +134,64 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             }
 
             var state = s_enabled ? "ON" : "OFF";
-            Console.instance?.Print($"Path debug rendering {state}");
+            Console.instance?.Print($"Path debug rendering {state}{CamSuffix()}");
             Plugin.Log?.LogInfo($"[PathDebug] Visualization {state}");
         }
 
-        [DevCommand("Toggle NavMesh triangulation wireframe overlay", Name = "vv_tri_debug")]
-        public static void ToggleTriangulation()
+        [DevCommand("Toggle NavMesh triangulation wireframe. Optional cam=<cameraName> restricts the overlay to that camera (cam=off clears).", Name = "vv_tri_debug")]
+        public static void ToggleTriangulation(Terminal.ConsoleEventArgs args)
         {
+            if (TryApplyCameraArg(args, out var camMsg))
+            {
+                Console.instance?.Print(camMsg);
+                return;
+            }
+
             s_showTriangulation = !s_showTriangulation;
             if (s_showTriangulation)
                 EnsureInstance();
 
             var state = s_showTriangulation ? "ON" : "OFF";
             var count = RegionBuilder.CachedTriangles?.Count ?? 0;
-            Console.instance?.Print($"Triangulation wireframe {state} ({count} triangles)");
+            Console.instance?.Print($"Triangulation wireframe {state} ({count} triangles){CamSuffix()}");
             Plugin.Log?.LogInfo($"[PathDebug] Triangulation wireframe {state}");
+        }
+
+        private static string CamSuffix()
+        {
+            return s_targetCameraName != null ? $" [cam={s_targetCameraName}]" : "";
+        }
+
+        /// <summary>
+        ///     Parse an optional <c>cam=&lt;name&gt;</c> argument. <c>cam=&lt;name&gt;</c>
+        ///     restricts overlays to that camera (and ensures the renderer exists);
+        ///     <c>cam=off</c> (or empty) clears the filter. Returns true if a cam= arg
+        ///     was present and handled (so the caller skips its normal toggle).
+        /// </summary>
+        private static bool TryApplyCameraArg(Terminal.ConsoleEventArgs args, out string message)
+        {
+            message = null;
+            if (args?.Args == null) return false;
+            foreach (var a in args.Args)
+            {
+                if (string.IsNullOrEmpty(a) || !a.StartsWith("cam=")) continue;
+                var val = a.Substring(4);
+                if (val.Length == 0 || val.Equals("off", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    s_targetCameraName = null;
+                    message = "Debug overlay camera filter cleared (renders to all cameras).";
+                }
+                else
+                {
+                    s_targetCameraName = val;
+                    EnsureInstance();
+                    message = $"Debug overlay restricted to camera '{val}'.";
+                }
+
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>

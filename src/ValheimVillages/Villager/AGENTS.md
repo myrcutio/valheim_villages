@@ -1,13 +1,14 @@
 # Villager
 
 Keywords: Villager, VillagerAI, VillagerAIManager, VillagerRestoration, VillagerStation, VillagerDef, VillagerRegistry,
-SpawnPatch, VillagerPawnPatch, POI discovery, VillagerPOIDiscovery, DoorHandler, hot reload, restoration, memory,
+SpawnPatch, VillagerPawnPatch, comfort, VillagerComfort, DoorHandler, hot reload, restoration, memory,
 behavior logic
 
 ## Purpose
 
 Villager lifecycle, AI, and restoration. Owns the single spawn path (SpawnPatch), restoration after hot reload
-(VillagerRestoration), POI discovery (VillagerPOIDiscovery), look behavior, and Villager.Station.VillagerStation.
+(VillagerRestoration), per-villager comfort sampling (VillagerComfort), look behavior, and Villager.Station.VillagerStation.
+Shared points of interest are discovered at the village level (Villages/VillagePoiRegistry), not per villager.
 
 ## Directory Structure
 
@@ -28,9 +29,9 @@ Villager/
     VillagerAI.cs                      -- UpdateAI loop, behavior iteration, memory save/load
     BehaviorLogic.cs                   -- VillagerBehaviorLogic (e.g. CheckShelter)
     Memory/
-      VillagerMemory.cs                -- IVillagerMemory implementation; known locations, patrol state
+      VillagerMemory.cs                -- IVillagerMemory implementation; per-villager bed + best-comfort (shared PoIs live in Villages/VillagePoiRegistry)
     Discovery/
-      VillagerPOIDiscovery.cs          -- DiscoverNearbyPOIs, DiscoverVisiblePOIs, ValidateKnownLocations (Transform + IVillagerMemory)
+      VillagerComfort.cs               -- UpdateExperiencedComfort: samples shelter+fire comfort into memory (PoI discovery is village-level now)
     Navigation/
       DoorHandler.cs, VillagerMovement.cs, VillagerWaypoint.cs, Region*.cs, BoundaryDump.cs, SpatialDump.cs, NavMeshLinkPlacer.cs
     Work/
@@ -39,7 +40,6 @@ Villager/
 
 ## Integration
 
-- **TaskQueue/** -- POIDiscoveryHandler uses VillagerPOIDiscovery and VillagerAIManager.
 - **Behaviors/** -- BehaviorFactory.CreateBehaviors (VillagerAI, tags); VillagerAI runs behaviors each tick.
 - **UI/** -- VillagerBehaviorBridge uses VillagerAIManager.ActiveVillagers; `tab:workorder` tag drives Orders tab
   visibility via VillagerStation.HasCraftingRecipes.

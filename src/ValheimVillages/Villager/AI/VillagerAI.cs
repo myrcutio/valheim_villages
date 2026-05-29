@@ -4,7 +4,6 @@ using System.Reflection;
 using UnityEngine;
 using UnityEngine.AI;
 using ValheimVillages.Behaviors;
-using ValheimVillages.Behaviors.Explore;
 using ValheimVillages.Behaviors.Work;
 using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
@@ -15,13 +14,13 @@ using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villager.AI.Memory;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
-using ValheimVillages.Villager.AI.Pathfinding;
 using ValheimVillages.Villager.Registry;
+using ValheimVillages.Villages;
 using Random = UnityEngine.Random;
 
 namespace ValheimVillages.Villager.AI
 {
-    public class VillagerAI : BaseAI, IVillagerWorkContext
+    public partial class VillagerAI : BaseAI, IVillagerWorkContext
     {
         private const float StuckBackoffBase = 10f;
         private const float StuckBackoffMax = 600f;
@@ -57,7 +56,6 @@ namespace ValheimVillages.Villager.AI
 
         private Vector3 m_lastMovePos;
         private float m_lastRealMoveTime;
-        private float m_lastValidationTime;
 
         // Path-stall dedup: log "entered" once, "resolved" / "escalated" once,
         // instead of re-firing the diagnostic every PathStallEscapeSeconds.
@@ -217,7 +215,6 @@ namespace ValheimVillages.Villager.AI
 
         public void RegisterOwnedBed()
         {
-            Memory.DiscoverLocation(m_bedPosition, LocationType.Bed, 0f, true);
             Memory.BedPosition = m_bedPosition;
         }
 
@@ -241,16 +238,13 @@ namespace ValheimVillages.Villager.AI
 
             if (IsPaused) return true;
 
+            // Shared PoIs are discovered at the village level now; the only
+            // per-villager thing left to sample is the comfort the villager
+            // is currently experiencing (kept for save/load + future use).
             if (Time.time - m_lastDiscoveryTime > 4f)
             {
                 m_lastDiscoveryTime = Time.time;
-                VillagerPOIDiscovery.DiscoverNearbyPOIs(transform, Memory);
-            }
-
-            if (Time.time - m_lastValidationTime > 30f)
-            {
-                m_lastValidationTime = Time.time;
-                VillagerPOIDiscovery.ValidateKnownLocations(Memory);
+                VillagerComfort.UpdateExperiencedComfort(transform, Memory);
             }
 
             // Behavior selection: gated by m_lastBehaviorUpdateTime. The
@@ -272,12 +266,27 @@ namespace ValheimVillages.Villager.AI
                 if (!TryRescueOffMesh())
                 {
                     var ctx = new BehaviorContext();
+                    var handled = false;
                     foreach (var b in m_behaviors)
                         if (b.WantsControl(ctx))
                         {
                             b.Update(dt);
+                            handled = true;
                             break;
                         }
+
+                    // No behavior wanted control — the villager is idle. Trigger
+                    // work scanning here (this used to live in the always-on
+                    // Explore fallback, which has been removed) and settle to
+                    // Idle. Crafting takes over on the next tick once a scan
+                    // result flips the state to Working.
+                    if (!handled)
+                    {
+                        if (CurrentState != BehaviorState.Working)
+                            GetWorkScanner()?.TryScanForWork();
+                        if (CurrentState != BehaviorState.Idle)
+                            SetState(BehaviorState.Idle);
+                    }
                 }
                 // Reset cooldown. Idle re-evaluation cadence — high enough
                 // to stop the thrash, low enough to react to player input
@@ -344,12 +353,6 @@ namespace ValheimVillages.Villager.AI
                         // visibly stuck for investigation.
                         if (!found && !m_recoveryRetreating)
                         {
-                            if (VillagerSettings.AutoPathRecoveryEnabled)
-                            {
-                                EnterRecovery(m_currentWaypoint);
-                                return false;
-                            }
-
                             // Debounce: warn once per target, then at most
                             // every PathFailWarnInterval seconds. Without
                             // this, the warning fires every frame the path
@@ -538,18 +541,6 @@ namespace ValheimVillages.Villager.AI
                                     // villager stays visibly stuck and we
                                     // can investigate the underlying path
                                     // failure without recovery hiding it.
-                                    if (VillagerSettings.AutoPathRecoveryEnabled)
-                                    {
-                                        if (firedNow)
-                                            Plugin.Log?.LogInfo(
-                                                $"[AI:{m_villagerName}] Stall escalated to recovery " +
-                                                $"after {Time.time - m_stallStartTime:F1}s.");
-                                        m_stallLogged = false;
-                                        var escalateAgainst =
-                                            m_recoveryOriginalWaypoint ?? m_currentWaypoint;
-                                        EnterRecovery(escalateAgainst);
-                                        return false;
-                                    }
 
                                     // Reset the stall timer so we re-evaluate
                                     // the gate; m_stallLogged stays true so we
@@ -632,13 +623,6 @@ namespace ValheimVillages.Villager.AI
             var farmAdapter = GetBehavior<FarmBehaviorAdapter>();
             if (craftAdapter != null && farmAdapter != null)
                 farmAdapter.LinkToCraftingAdapter(craftAdapter);
-
-            // Auto-inject explore as universal lowest-priority fallback
-            if (GetBehavior<ExploreBehaviorAdapter>() == null)
-            {
-                m_behaviors.Add(new ExploreBehaviorAdapter(this));
-                m_behaviors.Sort((a, b) => b.Priority.CompareTo(a.Priority));
-            }
         }
 
         #region Main AI Loop
@@ -724,9 +708,6 @@ namespace ValheimVillages.Villager.AI
 
         /// <summary>Villager type string from JSON definition (e.g. "Guard", "Farmer").</summary>
         public string VillagerType { get; private set; }
-
-        IReadOnlyList<KnownLocation> IVillagerStationLookup.KnownLocations =>
-            Memory?.KnownLocations ?? Array.Empty<KnownLocation>();
 
         Vector3 IVillagerStationLookup.BedPosition =>
             Memory != null ? Memory.BedPosition : default;
@@ -881,10 +862,35 @@ namespace ValheimVillages.Villager.AI
                 areaMask = NavMesh.AllAreas,
             };
 
-            // Already on the mesh? Tight 1m probe — the agent capsule has
-            // its own ~0.4m body radius so anything within 1m of a polygon
-            // is "on the mesh" for movement purposes.
-            if (NavMesh.SamplePosition(transform.position, out _, 1f, filter))
+            // Already on the mesh AND on the HNA graph? "On the mesh"
+            // alone isn't enough — Unity's voxelizer leaves sliver/orphan
+            // polygons where HNA correctly excluded space, and a villager
+            // standing on one of those would silently early-return here
+            // even though every CalculatePath from that polygon will fail
+            // (the corridor planner rejects off-HNA starts). Tight 1m
+            // probe (agent body ~0.4m → 1m clearance for movement); HNA
+            // resolution via the village graph containing the villager's
+            // position.
+            var onMesh = NavMesh.SamplePosition(transform.position, out _, 1f, filter);
+            var onHna = false;
+            if (onMesh)
+            {
+                foreach (var graph in RegionGraph.GetAll())
+                {
+                    if (!string.IsNullOrEmpty(graph.PointToRegionId(transform.position)))
+                    {
+                        onHna = true;
+                        break;
+                    }
+                }
+                // If no HNA graph is yet built for this area (e.g. villager
+                // spawned before the first partition completed), treat
+                // on-mesh as sufficient — the corridor planner falls
+                // through to unconstrained CalculatePath in that case too.
+                if (!RegionGraph.IsAnyAvailable) onHna = true;
+            }
+
+            if (onMesh && onHna)
                 return false;
 
             // Off-mesh. Three-stage search, each weaker / more permissive:
@@ -956,7 +962,7 @@ namespace ValheimVillages.Villager.AI
         ///     cells nearby. Returns true and writes the cell pos on
         ///     success.
         /// </summary>
-        private bool TryFindHnaLookupCellSnap(out Vector3 snapped)
+        public bool TryFindHnaLookupCellSnap(out Vector3 snapped)
         {
             snapped = default;
             var graph = RegionGraph.GetNearest(transform.position);
@@ -1007,6 +1013,18 @@ namespace ValheimVillages.Villager.AI
             // rings catch the spawned-on-bed / pushed-off-foundation cases
             // where there's no mesh directly beneath them but a walkable
             // surface is a step or two to the side.
+            //
+            // Each candidate snap must satisfy BOTH:
+            //   (1) NavMesh.SamplePosition succeeds at maxStep.
+            //   (2) The hit position is on the HNA graph (or no HNA graph
+            //       is built yet — then NavMesh alone is sufficient).
+            // Without (2), the snap can land on the same prune-orphan
+            // sliver polygon the villager was already standing on,
+            // producing a rescue→teleport→rescue loop (observed
+            // empirically: Farmer 36.9 → 37.0, Blacksmith 37.4 → 36.9, both
+            // still off-HNA). (2) makes the rescue actually walk the
+            // villager out of the prune-orphan zone.
+            var hnaAvailable = RegionGraph.IsAnyAvailable;
             float[] ringRadii = { 0f, 1.5f, 3f, 4.5f, 6f };
             int[] ringSamples = { 1, 8, 12, 16, 16 };
             for (var r = 0; r < ringRadii.Length; r++)
@@ -1026,9 +1044,26 @@ namespace ValheimVillages.Villager.AI
                     // require an unreachable drop or step-up.
                     if (!NavMesh.SamplePosition(probe, out var hit, maxStep, filter)) continue;
                     if (Mathf.Abs(hit.position.y - pos.y) > maxStep) continue;
+                    if (hnaAvailable && !IsOnAnyHnaGraph(hit.position)) continue;
                     snapped = hit.position;
                     return true;
                 }
+            }
+            return false;
+        }
+
+        /// <summary>
+        ///     True iff <paramref name="position"/> resolves to a region in
+        ///     any registered RegionGraph. Used by self-rescue to gate
+        ///     NavMesh snap candidates so the rescue doesn't land on a
+        ///     prune-orphaned sliver polygon (still on NavMesh, off HNA).
+        /// </summary>
+        private static bool IsOnAnyHnaGraph(Vector3 position)
+        {
+            foreach (var graph in RegionGraph.GetAll())
+            {
+                if (!string.IsNullOrEmpty(graph.PointToRegionId(position)))
+                    return true;
             }
             return false;
         }
@@ -1120,8 +1155,20 @@ namespace ValheimVillages.Villager.AI
                 return;
             }
 
-            var retreat = Memory?.GetMostRecentlyVisitedLocation(originalPos);
-            var retreatPos = retreat != null ? retreat.Position : m_bedPosition;
+            // Retreat toward the nearest village PoI that isn't the spot we're
+            // stuck at; fall back to the bed when the village has no usable PoI.
+            var retreatPos = m_bedPosition;
+            var bestRetreatDistSq = float.MaxValue;
+            foreach (var poi in VillagePoiRegistry.GetPois(m_bedPosition))
+            {
+                if (poi.IsSameLocation(originalPos)) continue;
+                var dSq = (poi.Position - transform.position).sqrMagnitude;
+                if (dSq < bestRetreatDistSq)
+                {
+                    bestRetreatDistSq = dSq;
+                    retreatPos = poi.Position;
+                }
+            }
 
             var backoff = Mathf.Min(
                 VillagerSettings.RecoveryBackoffBaseSeconds *
@@ -1188,21 +1235,6 @@ namespace ValheimVillages.Villager.AI
             // TryFindPathCustom) on the very next tick after the behavior
             // assigns its new target.
             (s_pathField?.GetValue(this) as List<Vector3>)?.Clear();
-
-            // Stamp the most relevant KnownLocation as visited so the
-            // unreachable-target recovery flow can pick "most recent"
-            // retreat targets that the villager actually has been to.
-            if (Memory != null)
-            {
-                foreach (var loc in Memory.KnownLocations)
-                {
-                    if (loc != null && loc.IsSameLocation(transform.position))
-                    {
-                        loc.LastVisitedAt = Time.time;
-                        break;
-                    }
-                }
-            }
 
             var arrCtx = new BehaviorContext();
             foreach (var b in m_behaviors)

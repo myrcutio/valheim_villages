@@ -8,6 +8,7 @@ using ValheimVillages.Settings;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Work;
+using ValheimVillages.Villages;
 
 namespace ValheimVillages.Behaviors.Tidy
 {
@@ -22,7 +23,6 @@ namespace ValheimVillages.Behaviors.Tidy
     public class TidyBehavior : IBehavior
     {
         private const float ScanInterval = 10f;
-        private const float StationLookupRadius = 2f;
         private const float ItemPickupRadius = 3f;
         private readonly VillagerAI m_ai;
         private bool m_active;
@@ -79,21 +79,16 @@ namespace ValheimVillages.Behaviors.Tidy
 
         private bool FindDirtyStation()
         {
-            var memory = m_ai.GetMemory();
-            if (memory == null) return false;
-
-            foreach (var loc in memory.KnownLocations)
+            // Cooking stations come from the shared village registry (resolved by
+            // the villager's bed), not per-villager memory. TryFindStation returns
+            // the nearest one matching the filter that also has a reachable
+            // approach, so an unreachable mess won't be picked.
+            var bedPos = m_ai.GetMemory().BedPosition;
+            if (VillageStationRegistry.TryFindStation<CookingStation>(
+                    bedPos, HasDoneOrBurntItems, out _, out var station))
             {
-                if (loc.Type != LocationType.CookingStation) continue;
-
-                var station = PhysicsHelper.GetFirstInRadius<CookingStation>(
-                    loc.Position, StationLookupRadius);
-
-                if (station != null && HasDoneOrBurntItems(station))
-                {
-                    m_targetStation = station;
-                    return true;
-                }
+                m_targetStation = station;
+                return true;
             }
 
             return false;

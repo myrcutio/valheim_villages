@@ -35,6 +35,7 @@ namespace ValheimVillages.Villages
             Plugin.Log?.LogInfo(
                 $"[VillageArea] Registered area for {area.VillageKey} with {area.Waypoints.Count} waypoints");
             VillageStationRegistry.RefreshFor(area);
+            VillagePoiRegistry.RefreshFor(area);
         }
 
         /// <summary>
@@ -46,6 +47,7 @@ namespace ValheimVillages.Villages
             {
                 Plugin.Log?.LogInfo($"[VillageArea] Unregistered area for {villageKey}");
                 VillageStationRegistry.RemoveFor(villageKey);
+                VillagePoiRegistry.RemoveFor(villageKey);
             }
         }
 
@@ -135,11 +137,48 @@ namespace ValheimVillages.Villages
         /// <summary>
         ///     Clear all registered areas (e.g. on world unload).
         /// </summary>
+        /// <summary>
+        ///     Find the village whose polygon contains the position. When several
+        ///     overlap, return the smallest (most specific) polygon's key. Shared
+        ///     by the station and PoI registries so they agree on membership.
+        /// </summary>
+        public static bool TryGetContainingVillageKey(Vector3 position, out string villageKey)
+        {
+            villageKey = null;
+            string best = null;
+            var bestSizeSq = float.MaxValue;
+
+            foreach (var area in s_areas.Values)
+            {
+                if (area == null || !area.IsInsideArea(position)) continue;
+                float minX = float.MaxValue, minZ = float.MaxValue;
+                float maxX = float.MinValue, maxZ = float.MinValue;
+                foreach (var wp in area.Waypoints)
+                {
+                    if (wp.x < minX) minX = wp.x;
+                    if (wp.x > maxX) maxX = wp.x;
+                    if (wp.z < minZ) minZ = wp.z;
+                    if (wp.z > maxZ) maxZ = wp.z;
+                }
+
+                var sizeSq = (maxX - minX) * (maxZ - minZ);
+                if (sizeSq < bestSizeSq)
+                {
+                    bestSizeSq = sizeSq;
+                    best = area.VillageKey;
+                }
+            }
+
+            villageKey = best;
+            return best != null;
+        }
+
         [RegisterCleanup]
         public static void Clear()
         {
             s_areas.Clear();
             VillageStationRegistry.Clear();
+            VillagePoiRegistry.Clear();
         }
     }
 }

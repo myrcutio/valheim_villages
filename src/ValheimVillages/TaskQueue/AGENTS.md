@@ -1,7 +1,7 @@
 # TaskQueue
 
 Keywords: task queue, GlobalTaskQueue, TaskHandlerRegistry, ITaskHandler, VillagerTask, TaskResult, TaskPriority, task
-handler, work order scan, WorkOrderScanHandler, POI discovery, POIDiscoveryHandler, breach check, BreachCheckHandler,
+handler, work order scan, WorkOrderScanHandler, breach check, BreachCheckHandler,
 region partition, RegionPartitionHandler, RegionBuilder, container scan, ContainerScanHandler, recipe discovery,
 RecipeDiscoveryRefreshHandler, FarmWorkOrderHelper, activity log, VillagerActivityLog, deduplication, priority tier,
 RegisterTaskHandler, ProcessBatch
@@ -25,7 +25,6 @@ TaskQueue/
     VillagerActivityLog.cs             -- Per-villager log of handler actions; persisted to ZDO
   Handlers/
     WorkOrderScanHandler.cs            -- work_order_scan: finds containers, matches work orders to NPC
-    POIDiscoveryHandler.cs             -- poi_discovery / poi_validation: discovers nearby POIs
     BreachCheckHandler.cs              -- breach_check: checks for wall breaches at waypoints
     RegionPartitionHandler.cs             -- hna_partition: builds region graph
     RegionBuilder.cs                  -- Internal grid builder for region partitioning
@@ -42,7 +41,6 @@ TaskQueue/
 | `TaskHandlerRegistry`    | Maps task name strings to `ITaskHandler` instances                   |
 | `VillagerActivityLog`    | Per-villager action log persisted to ZDO; shown in Debug tab         |
 | `WorkOrderScanHandler`   | Scans containers for work orders matching NPC station type           |
-| `POIDiscoveryHandler`    | Discovers beds, fires, chairs, stations near villager                |
 | `RegionPartitionHandler` | Builds region graph from village area bounds                         |
 
 ## Entry Points and Registration
@@ -54,8 +52,7 @@ TaskQueue/
 
 ## Integration
 
-- **Villager/** -- `VillagerAI` (Villager.AI) enqueues `poi_discovery`; **Behaviors/** `CraftingBehavior` enqueues
-  `work_order_scan`.
+- **Villager/** -- **Behaviors/** `CraftingBehavior` enqueues `work_order_scan`.
 - **Behaviors/** -- Patrollers enqueue `breach_check` via `BreachAlarmBehavior`.
 - **Villages/** -- `RegionPartitionHandler` uses `VillageAreaManager.TryGetCombinedBounds()`.
 - **Items/** -- `RecipeDiscoveryRefreshHandler` calls `VirtualRecipeLoader.RecheckDiscoveredRecipes()`.

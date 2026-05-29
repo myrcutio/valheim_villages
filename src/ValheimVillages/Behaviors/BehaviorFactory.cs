@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using ValheimVillages.Behaviors.Explore;
 using ValheimVillages.Behaviors.Patrol;
 using ValheimVillages.Behaviors.Tidy;
 using ValheimVillages.Behaviors.Work;
@@ -21,7 +20,6 @@ namespace ValheimVillages.Behaviors
             { "craft", ai => new CraftingBehaviorAdapter(ai) },
             { "farming", ai => new FarmBehaviorAdapter(ai) },
             { "tidy", ai => new TidyBehavior(ai) },
-            { "explore", ai => new ExploreBehaviorAdapter(ai) },
         };
 
         /// <summary>

@@ -80,12 +80,27 @@ namespace ValheimVillages.TaskQueue.Handlers
 
         // Villager-sized vertical capsule used to probe for obstructions on
         // terrain spots. Tuned smaller than the agent's strict body bounds
-        // (radius 0.3 vs ~0.4) to avoid catching pieces NEAR but not actually
-        // on the terrain (paving edges, banners, fences). Height 1.4 (vs
-        // ~1.8) skips overhead clearance which the agent NavMesh already
-        // accounts for. Lift 0.1m above centroid so fuzzy heightmap bumps
-        // and the high side of a sloped tri don't self-hit.
-        private const float CapsuleRadius = 0.3f;
+        // (radius 0.2 vs ~0.4) to avoid catching pieces NEAR but not actually
+        // on the terrain (paving edges, banners, fences) AND to avoid false-
+        // rejecting tris that sit under thin vertical posts the agent can
+        // physically pass between (blackmarble_column, fence post, lamp
+        // pole). The probe explicitly answers "could the agent body stand on
+        // this terrain centroid", not "is there *anything* nearby", so a
+        // small radius is correct here — wall geometry sits within ~0.5m of
+        // the centroid in dense piece zones and would over-block at 0.3m+.
+        // Height 1.4 (vs ~1.8) skips overhead clearance which the agent
+        // NavMesh already accounts for. Lift 0.25m above centroid so fuzzy
+        // heightmap bumps and the high side of a sloped tri don't self-hit.
+        //
+        // Previous value 0.3m was rejecting ~80% of upward-facing tris near
+        // the user's hex-fort balcony (probe @ -2266.50,1294.53 showed
+        // capsule_ok=84 of 328 candidates, rest BLOCKED by the surrounding
+        // blackmarble_column posts). 0.2m drops that false-positive while
+        // remaining wider than typical wall thickness (~5-10cm) so a real
+        // wall on the tri still rejects. Tighter than the per-piece
+        // PieceWaistProbeRadius (0.1m) which guards against centroid-inside-
+        // wall via overlap rather than capsule sweep.
+        private const float CapsuleRadius = 0.2f;
         private const float CapsuleHeight = 1.4f;
         private const float CapsuleLift = 0.25f;
 
@@ -1291,7 +1306,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             return Vector3.Cross(b - a, c - a).magnitude * 0.5f;
         }
 
-        private static bool PointInTri2D(float px, float pz,
+        internal static bool PointInTri2D(float px, float pz,
             float ax, float az, float bx, float bz, float cx, float cz)
         {
             var d1 = (px - bx) * (az - bz) - (ax - bx) * (pz - bz);
@@ -1300,7 +1315,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
         }
 
-        private static float InterpHeight(float px, float pz, Vector3 a, Vector3 b, Vector3 c)
+        internal static float InterpHeight(float px, float pz, Vector3 a, Vector3 b, Vector3 c)
         {
             var det = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
             if (Mathf.Abs(det) < 0.0001f) return (a.y + b.y + c.y) / 3f;

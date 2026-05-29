@@ -9,6 +9,7 @@ using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
 using ValheimVillages.Villager.AI.Pathfinding;
+using ValheimVillages.Villages;
 
 namespace ValheimVillages.UI.Tabs
 {
@@ -146,8 +147,7 @@ namespace ValheimVillages.UI.Tabs
                 info += $"\nTarget: {dist:F0}m away";
             }
 
-            var variety = villager.Memory?.GetLocationTypeVariety() ?? 0;
-            info += $"\nVariety: {variety} types";
+            info += $"\nBest comfort: {villager.Memory?.BestComfortLevel ?? 0f:F1}";
 
             m_commands.Add(new DebugCommand
             {
@@ -202,23 +202,38 @@ namespace ValheimVillages.UI.Tabs
                 ActionText = "Go",
                 OnAction = () =>
                 {
-                    var memory = v.villagerInstance?.villagerAI?.GetMemory();
-                    if (memory == null)
+                    var ai = v.villagerInstance?.villagerAI;
+                    if (ai == null)
                     {
-                        Msg("No memory available.");
+                        Msg("No villager available.");
                         return;
                     }
 
-                    var nearestKnownLocation = memory.FirstLocationByType(type);
-                    if (nearestKnownLocation == null)
+                    var bedPos = ai.GetMemory()?.BedPosition ?? ai.Position;
+
+                    // Bed is per-villager; everything else comes from the
+                    // village PoI registry (nearest of the requested type).
+                    Vector3 dest;
+                    if (type == LocationType.Bed)
                     {
-                        Msg($"No {type} location known.");
-                        return;
+                        dest = bedPos;
+                    }
+                    else
+                    {
+                        var nearest = VillagePoiRegistry.GetPois(bedPos, type)
+                            .OrderBy(l => Vector3.Distance(bedPos, l.Position))
+                            .FirstOrDefault();
+                        if (nearest == null)
+                        {
+                            Msg($"No {type} location known.");
+                            return;
+                        }
+
+                        dest = nearest.Position;
                     }
 
-                    var newDestination =
-                        new VillagerWaypoint(nearestKnownLocation.Position, "default", $"{name} destination");
-                    v.villagerInstance.villagerAI.FindPath(newDestination);
+                    var newDestination = new VillagerWaypoint(dest, "default", $"{name} destination");
+                    ai.FindPath(newDestination);
                     Msg($"Going to {type}");
                     InventoryGui.instance?.Hide();
                 },

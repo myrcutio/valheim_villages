@@ -1,12 +1,9 @@
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using UnityEngine;
 using ValheimVillages.Enums;
-using ValheimVillages.Interfaces;
-using ValheimVillages.Schemas;
 using ValheimVillages.Villager.AI;
-using ValheimVillages.Villager.AI.Memory;
+using ValheimVillages.Villages;
 
 namespace ValheimVillages.Behaviors.Farming
 {
@@ -58,26 +55,27 @@ namespace ValheimVillages.Behaviors.Farming
         }
 
         /// <summary>
-        ///     Find any harvestable Pickable near farm locations in the NPC's memory.
-        ///     Returns the first match with its position, or null if none found.
+        ///     Find any harvestable Pickable near the village's Farm PoIs.
+        ///     Returns the nearest match, or null if none found.
         /// </summary>
         public static Pickable FindNearestHarvestableCrop(
             VillagerAI ai, string outputItemName, float radius)
         {
-            return FindNearestHarvestableCrop(ai, ai.transform.position, outputItemName, radius);
+            return FindNearestHarvestableCrop(ai.transform.position, outputItemName, radius);
         }
 
         /// <summary>
-        ///     Overload for work-order handler: uses known locations and current position from interface.
+        ///     Find a harvestable Pickable near the Farm PoIs of the village that
+        ///     contains <paramref name="currentPosition" />. Farms come from the
+        ///     shared village registry, not per-villager memory.
         /// </summary>
         public static Pickable FindNearestHarvestableCrop(
-            IVillagerStationLookup ai, Vector3 currentPosition, string outputItemName, float radius)
+            Vector3 currentPosition, string outputItemName, float radius)
         {
-            if (ai?.KnownLocations == null) return null;
             Pickable nearest = null;
             var nearestDist = float.MaxValue;
 
-            foreach (var loc in ai.KnownLocations.Where(l => l.Type == LocationType.Farm))
+            foreach (var loc in VillagePoiRegistry.GetPois(currentPosition, LocationType.Farm))
             {
                 var crops = FindHarvestableCrops(loc.Position, radius, outputItemName);
                 foreach (var crop in crops)
@@ -117,7 +115,7 @@ namespace ValheimVillages.Behaviors.Farming
             VillagerAI ai, string outputItemName, float radius)
         {
             var count = 0;
-            foreach (var loc in FindKnownFarms(ai.GetMemory()))
+            foreach (var loc in VillagePoiRegistry.GetPois(ai.transform.position, LocationType.Farm))
                 count += FindHarvestableCrops(loc.Position, radius, outputItemName).Count;
             return count;
         }
@@ -129,14 +127,6 @@ namespace ValheimVillages.Behaviors.Farming
         {
             if (s_pickedField == null) return false;
             return (bool)s_pickedField.GetValue(pickable);
-        }
-
-        public static IEnumerable<KnownLocation> FindKnownFarms(VillagerMemory villagerMemory)
-        {
-            var farmLocations = villagerMemory.GetLocationsByType(LocationType.Farm);
-            if (farmLocations == null) return null;
-
-            return farmLocations;
         }
     }
 }

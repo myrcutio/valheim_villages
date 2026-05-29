@@ -34,18 +34,27 @@ namespace ValheimVillages.Villager.AI.Navigation
             LayerMask.GetMask("Default", "static_solid", "piece", "blocker", "pathblocker");
 
         /// <summary>
-        ///     Minimum vertical Δy between a RegionLink's endpoints for it
-        ///     to be materialized as a NavMeshLink. Below this, the link is
-        ///     skipped because flat-adjacent regions are already connected
-        ///     by the continuous baked NavMesh — an explicit link there is
-        ///     planner noise that adds search cost without bridging
-        ///     anything. Above this, NavMesh likely couldn't span the
-        ///     transition (slope / stair riser / step-up exceeds the slot-31
-        ///     agent's climb of ~0.3m) and we genuinely need the link.
-        ///     Tuned a touch below the agent climb to catch borderline
-        ///     slopes the bake voxelizer may have disconnected.
+        ///     Vertical-Δy threshold below which we previously assumed
+        ///     NavMesh was naturally continuous. Kept as a constant for the
+        ///     diagnostic's `flat_skip` field, but no longer used as a
+        ///     placer gate — empirically (need_link_candidates sidecar) the
+        ///     assumption was wrong: voxelizer leaves cm-scale gaps even at
+        ///     Δy=0.01m. The placer now runs CalculatePath directly between
+        ///     the snapped endpoints to decide.
         /// </summary>
-        private const float MinVerticalDeltaForLink = 0.2f;
+        private const float MinVerticalDeltaForLink = 0.3f;
+
+        /// <summary>
+        ///     SamplePosition radius used by the placer to snap a
+        ///     RegionLink endpoint to the agent NavMesh. Widened from 1m to
+        ///     3m after the need_link_candidates diagnostic showed two
+        ///     legitimate stair endpoints on the west ring of village
+        ///     -75_43 sat 1.5-2.5m from their nearest baked polygon and
+        ///     were silently dropped. The diagnostic itself uses 4m; 3m
+        ///     stays a touch tighter to keep the placer from snapping
+        ///     across truly unrelated polygons.
+        /// </summary>
+        private const float EndpointSnapRadius = 3.0f;
 
         /// <summary>Probe grid step size in meters for island detection.</summary>
         private const float ProbeStep = 3f;
@@ -178,6 +187,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             var skippedNoSnap = 0;
             var skippedInvalid = 0;
             var skippedFlat = 0;
+            var skippedBakeGap = 0;
             var totalLinks = 0;
 
             // Diagnostic: confirm the agentTypeID we're placing links with
@@ -209,42 +219,136 @@ namespace ValheimVillages.Villager.AI.Navigation
                 foreach (var link in links)
                 {
                     totalLinks++;
-                    // Vertical-only filter: NavMesh is naturally continuous
-                    // across flat-adjacent regions, so explicit NavMeshLinks
-                    // between two same-Y centroids are noise that adds path-
-                    // planner overhead without bridging anything real. The
-                    // agent only needs a link when there's a vertical
-                    // transition the bake couldn't span — slopes / stair
-                    // risers / step-ups taller than the agent's climb (0.3m
-                    // for Humanoid-cloned slot 31).
-                    //
-                    // Threshold 0.2m: a touch below the 0.3m climb limit so
-                    // sloped surfaces near the climb threshold get links
-                    // (NavMesh may or may not have spanned them depending on
-                    // bake voxelization). Bump to 0.3m if too many "almost-
-                    // flat" links survive.
+
+                    // 1. Snap each endpoint to the agent NavMesh. The radius
+                    //    here used to be 1m and silently dropped 2-of-8
+                    //    need_link candidates around (-2261,41,1284) (sidecar
+                    //    need_link_candidates_*.json) — RegionLink endpoints
+                    //    sat further than 1m from the nearest baked polygon
+                    //    in west-ring isolated-waypoint clusters. 3m matches
+                    //    the diagnostic's tolerance and reaches those
+                    //    endpoints. If a region's NavMesh is more than 3m
+                    //    from its RegionLink endpoint, the region itself is
+                    //    orphaned from the bake and should surface as a
+                    //    [Region] integrity warning (not yet wired).
                     var verticalDelta = Mathf.Abs(link.PositionEnd.y - link.PositionStart.y);
-                    if (verticalDelta < MinVerticalDeltaForLink)
+                    if (!NavMesh.SamplePosition(link.PositionStart, out var startHit,
+                            EndpointSnapRadius, filter))
                     {
-                        skippedFlat++;
+                        skippedNoSnap++;
+                        // Surface the bake-orphaned region so a future
+                        // RubberBandPrune pass can drop it. RegionGraph
+                        // holds a link to a region whose NavMesh polygon
+                        // doesn't exist within EndpointSnapRadius — the
+                        // graph and the bake disagree, and the disagreement
+                        // is invisible to villagers (they path on NavMesh
+                        // alone) but visible to off-mesh self-rescue and
+                        // BoundaryMapper, both of which surface as errors.
+                        DebugLog.Event("Region", "orphan_no_navmesh",
+                            ("side", "start"),
+                            ("region", link.FromRegionId ?? "(null)"),
+                            ("x", link.PositionStart.x),
+                            ("y", link.PositionStart.y),
+                            ("z", link.PositionStart.z),
+                            ("snap_r", EndpointSnapRadius));
+                        Plugin.Log?.LogDebug(
+                            $"[NavMeshLink] no-snap RegionGraph link start " +
+                            $"({link.PositionStart.x:F1},{link.PositionStart.y:F1},{link.PositionStart.z:F1}) " +
+                            $"→ end ({link.PositionEnd.x:F1},{link.PositionEnd.y:F1},{link.PositionEnd.z:F1}) " +
+                            $"(start failed SamplePosition r={EndpointSnapRadius:F1}m)");
                         continue;
                     }
-                    // Snap each endpoint to the agent NavMesh. Region
-                    // centroids drift up to ~0.75m off (sloped triangles,
-                    // coplanar merges) — SamplePosition with a 1m radius
-                    // catches the typical case.
-                    if (!NavMesh.SamplePosition(link.PositionStart, out var startHit, 1.0f, filter))
-                    { skippedNoSnap++; continue; }
-                    if (!NavMesh.SamplePosition(link.PositionEnd, out var endHit, 1.0f, filter))
-                    { skippedNoSnap++; continue; }
-                    // Same agent-body capsule sweep we apply to island
-                    // bridges: reject RegionGraph links whose straight-line
-                    // path is blocked by piece geometry. Without this, a
-                    // RegionGraph link can describe a slope/stair connection
-                    // whose endpoint snaps put it across a column or wall,
-                    // producing a path[0] the agent can't physically walk
-                    // to. Logs the rejection under the same "Rejecting
-                    // ..." banner so triage stays consistent.
+                    if (!NavMesh.SamplePosition(link.PositionEnd, out var endHit,
+                            EndpointSnapRadius, filter))
+                    {
+                        skippedNoSnap++;
+                        DebugLog.Event("Region", "orphan_no_navmesh",
+                            ("side", "end"),
+                            ("region", link.ToRegionId ?? "(null)"),
+                            ("x", link.PositionEnd.x),
+                            ("y", link.PositionEnd.y),
+                            ("z", link.PositionEnd.z),
+                            ("snap_r", EndpointSnapRadius));
+                        Plugin.Log?.LogDebug(
+                            $"[NavMeshLink] no-snap RegionGraph link end " +
+                            $"({link.PositionEnd.x:F1},{link.PositionEnd.y:F1},{link.PositionEnd.z:F1}) " +
+                            $"← start ({link.PositionStart.x:F1},{link.PositionStart.y:F1},{link.PositionStart.z:F1}) " +
+                            $"(end failed SamplePosition r={EndpointSnapRadius:F1}m)");
+                        continue;
+                    }
+
+                    // 2a. Skip iff NavMesh is ACTUALLY continuous between the
+                    //    snapped endpoints (not just guess-by-Δy). Replaces
+                    //    the old MinVerticalDeltaForLink<0.2m gate, which
+                    //    diagnostic need_link_candidates revealed was
+                    //    silently dropping 3-of-8 disconnected slope links
+                    //    with dy ∈ [0.01, 0.12]m. The CalculatePath probe is
+                    //    cheap (small bake, single query) and matches what
+                    //    the diagnostic ran to classify "already_connected".
+                    if (verticalDelta < MinVerticalDeltaForLink &&
+                        IsAlreadyConnected(startHit.position, endHit.position, filter,
+                            queryAgentTypeID == agentTypeID))
+                    {
+                        skippedFlat++;
+                        Plugin.Log?.LogDebug(
+                            $"[NavMeshLink] flat+continuous-skip RegionGraph link " +
+                            $"({link.PositionStart.x:F1},{link.PositionStart.y:F1},{link.PositionStart.z:F1}) → " +
+                            $"({link.PositionEnd.x:F1},{link.PositionEnd.y:F1},{link.PositionEnd.z:F1}) " +
+                            $"Δy={verticalDelta:F3}m AND CalculatePath PathComplete+walkable");
+                        continue;
+                    }
+
+                    // 2b. Bake-gap suspicion: flat AND short links describe
+                    //    sub-meter horizontal hops between two regions whose
+                    //    snapped endpoints are essentially coplanar. If the
+                    //    bake produced disconnected polygons here, that is
+                    //    a bake gap to surface, not a hop to bridge —
+                    //    placing the link adds a tiny, visually noisy
+                    //    NavMeshLink that masks the real connectivity bug.
+                    //    Emit a [Region] bake_gap_suspected event with the
+                    //    coords so RubberBandPrune / RegionBuilder triage
+                    //    can locate and fix the underlying gap. Skip the
+                    //    placement.
+                    //
+                    //    Use SNAPPED Δy (not raw centroid Δy): centroids
+                    //    can drift in Y after snapping to the actual mesh
+                    //    edge — raw Δy=0.25m may snap to 0.03m flat. The
+                    //    user-observed nonsense link near probe was
+                    //    (-2265.60,37.35,1293.90)→(-2265.45,37.32,1294.54)
+                    //    with snapped Δy=0.03m and len=0.66m. The previous
+                    //    rule that gated on raw Δy let this through.
+                    //
+                    //    Length threshold 1.0m: bake voxel size is
+                    //    ~0.166m, so any genuine connectivity gap should
+                    //    span well over a meter. Sub-1m gaps are almost
+                    //    certainly bake-side sliver disconnects between
+                    //    adjacent polygons.
+                    var snappedLen = Vector3.Distance(startHit.position, endHit.position);
+                    var snappedDy = Mathf.Abs(endHit.position.y - startHit.position.y);
+                    if (snappedDy < MinVerticalDeltaForLink && snappedLen < 1.0f)
+                    {
+                        skippedBakeGap++;
+                        DebugLog.Event("Region", "bake_gap_suspected",
+                            ("from_x", startHit.position.x),
+                            ("from_y", startHit.position.y),
+                            ("from_z", startHit.position.z),
+                            ("to_x", endHit.position.x),
+                            ("to_y", endHit.position.y),
+                            ("to_z", endHit.position.z),
+                            ("len", snappedLen),
+                            ("snapped_dy", snappedDy),
+                            ("raw_dy", verticalDelta));
+                        continue;
+                    }
+
+                    // 3. Same agent-body capsule sweep we apply to island
+                    //    bridges: reject RegionGraph links whose straight-line
+                    //    path is blocked by piece geometry. The capsule's
+                    //    bottom-lift is 0.95m (above stair tread height) so
+                    //    bridging two stair regions doesn't trip on the
+                    //    riser/tread between them — empirically observed in
+                    //    need_link_candidates for 3 stair-pair links rejected
+                    //    at dist ≈ 0.15m against "collider (4)".
                     if (!IsLinkGeometricallyTraversable(
                             startHit.position, endHit.position, out var blockReason))
                     {
@@ -266,11 +370,61 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (totalLinks > 0)
                 Plugin.Log?.LogInfo(
                     $"[NavMeshLink] PlaceRegionGraphLinks: {placed} placed, " +
-                    $"{skippedFlat} skipped (flat, Δy<{MinVerticalDeltaForLink:F2}m — NavMesh continuous), " +
-                    $"{skippedNoSnap} skipped (no agent navmesh within 1m of centroid), " +
+                    $"{skippedFlat} skipped (Δy<{MinVerticalDeltaForLink:F2}m AND CalculatePath continuous), " +
+                    $"{skippedBakeGap} skipped (flat-and-short bake-gap suspected — see [Region] bake_gap_suspected events), " +
+                    $"{skippedNoSnap} skipped (no agent navmesh within {EndpointSnapRadius:F1}m of centroid), " +
                     $"{skippedInvalid} skipped (NavMesh.AddLink invalid OR capsule check blocked) " +
                     $"of {totalLinks} formal links");
+
+            // Dump every placed link to a sidecar so triage can answer
+            // "which link is at coord X?". One line per link, packed with
+            // the structural fields most likely to reveal nonsense:
+            // length, vertical delta, raw endpoints, link type. Cross-
+            // reference with vv_probe coords to identify which link is
+            // suspect at any given spot.
+            if (Holder.LinkCount > 0)
+            {
+                var rows = new List<object>(Holder.LinkCount);
+                foreach (var (start, end) in Holder.Endpoints)
+                {
+                    var dy = Mathf.Abs(end.y - start.y);
+                    var len = Vector3.Distance(start, end);
+                    var midXz = $"({(start.x + end.x) * 0.5f:F1},{(start.z + end.z) * 0.5f:F1})";
+                    rows.Add(
+                        $"start=({start.x:F2},{start.y:F2},{start.z:F2}) " +
+                        $"end=({end.x:F2},{end.y:F2},{end.z:F2}) " +
+                        $"len={len:F2} dy={dy:F2} mid_xz={midXz}");
+                }
+                DebugLog.List("NavMeshLink", "placed_links", rows);
+            }
             return placed;
+        }
+
+        /// <summary>
+        ///     True iff NavMesh.CalculatePath between the two snapped
+        ///     endpoints returns PathComplete AND is physically walkable
+        ///     for the agent (slope/climb within slot 31 limits). Replaces
+        ///     the old "assume continuous if Δy < 0.2m" heuristic in
+        ///     PlaceRegionGraphLinks — the need_link_candidates diagnostic
+        ///     proved that assumption wrong for 3-of-8 candidates in
+        ///     village -75_43 (Δy ∈ [0.01, 0.12]m, path=PathPartial).
+        ///
+        ///     The agentTypeID-already-validated flag lets the caller skip
+        ///     the redundant slope/climb resolution when it already
+        ///     verified slot 31 is registered — but if slope/climb cannot
+        ///     be read we fail closed (return false → place the link) so a
+        ///     registration race never silently drops a needed bridge.
+        /// </summary>
+        private static bool IsAlreadyConnected(
+            Vector3 snappedStart, Vector3 snappedEnd, NavMeshQueryFilter filter,
+            bool agentTypeIDAlreadyValidated)
+        {
+            if (!VillagerAgentType.TryGetSlope(out var maxSlope) ||
+                !VillagerAgentType.TryGetClimb(out var maxClimb))
+                return false;
+            var path = new NavMeshPath();
+            NavMesh.CalculatePath(snappedStart, snappedEnd, filter, path);
+            return IsPathPhysicallyWalkableCore(path, maxSlope, maxClimb);
         }
 
         /// <summary>
@@ -290,7 +444,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             Vector3 linkA, Vector3 linkB, out string blockReason)
         {
             blockReason = string.Empty;
-            const float bodyBottomLift = 0.5f;
+            const float bodyBottomLift = 0.95f;
             const float bodyTopLift = 1.35f;
             const float bodyRadius = 0.4f;
 
@@ -299,6 +453,18 @@ namespace ValheimVillages.Villager.AI.Navigation
             var sweepDir = linkB - linkA;
             var sweepDist = sweepDir.magnitude;
             if (sweepDist < 0.001f) return true;
+
+            // CapsuleCast on a sweep shorter than the capsule's own radius
+            // degenerates to "is there anything in a sphere around linkA",
+            // which false-positives on any nearby wall — even one the
+            // agent's bake already accepted (both endpoints snapped via
+            // SamplePosition before this is called). Need_link_candidates
+            // showed 2 sub-0.3m stair-pair links rejected at dist≈0.15m
+            // against piece colliders the snap had already cleared. For
+            // sweeps shorter than the radius, trust the prior
+            // SamplePosition validation and skip the redundant sphere
+            // probe. (Longer sweeps still get the full capsule check.)
+            if (sweepDist < bodyRadius) return true;
 
             if (!Physics.CapsuleCast(
                     bottomCap, topCap, bodyRadius,
@@ -716,6 +882,32 @@ namespace ValheimVillages.Villager.AI.Navigation
             public Vector3 End;
             public RegionLinkType LinkType;
             public HnaCandidateStatus Status;
+
+            // Raw RegionLink endpoints (pre-FindClosestEdge snap).
+            public Vector3 RawStart;
+            public Vector3 RawEnd;
+
+            // SamplePosition outcome at diagnostic 4m radius.
+            public bool SampledA4m;
+            public bool SampledB4m;
+            public float SampleDistA;
+            public float SampleDistB;
+
+            // Whether SamplePosition would succeed at placer 1m radius.
+            public bool WouldSnapAt1mA;
+            public bool WouldSnapAt1mB;
+
+            // CalculatePath outcome between sampled endpoints.
+            public NavMeshPathStatus PathStatus;
+            public int PathCornerCount;
+
+            // When PathComplete but walkability rejected, the offender.
+            public int OffendingCornerIndex;
+            public float OffendingSlopeDeg;
+            public float OffendingClimb;
+
+            // Vertical delta between raw endpoints; <0.2m would be flat-skipped.
+            public float VerticalDelta;
         }
 
         private static readonly List<HnaCandidate> s_hnaCandidates = new();
@@ -803,22 +995,57 @@ namespace ValheimVillages.Villager.AI.Navigation
                     Start = edgeA,
                     End = edgeB,
                     LinkType = link.LinkType,
+                    RawStart = link.PositionStart,
+                    RawEnd = link.PositionEnd,
+                    VerticalDelta = Mathf.Abs(link.PositionEnd.y - link.PositionStart.y),
+                    OffendingCornerIndex = -1,
                 };
 
                 // Check if NavMesh already connects these points
                 var path = new NavMeshPath();
                 var sampledA = NavMesh.SamplePosition(link.PositionStart, out var hitA, 4f, filter);
                 var sampledB = NavMesh.SamplePosition(link.PositionEnd, out var hitB, 4f, filter);
+                candidate.SampledA4m = sampledA;
+                candidate.SampledB4m = sampledB;
+                candidate.SampleDistA = sampledA
+                    ? Vector3.Distance(link.PositionStart, hitA.position) : float.NaN;
+                candidate.SampleDistB = sampledB
+                    ? Vector3.Distance(link.PositionEnd, hitB.position) : float.NaN;
+
+                // PlaceRegionGraphLinks snaps at 1m, not 4m. Re-sample at the
+                // placer's radius so the sidecar can reveal silent
+                // skippedNoSnap (snap succeeded here, fails in the placer).
+                candidate.WouldSnapAt1mA =
+                    NavMesh.SamplePosition(link.PositionStart, out _, 1.0f, filter);
+                candidate.WouldSnapAt1mB =
+                    NavMesh.SamplePosition(link.PositionEnd, out _, 1.0f, filter);
 
                 if (sampledA && sampledB)
                 {
                     NavMesh.CalculatePath(hitA.position, hitB.position, filter, path);
+                    candidate.PathStatus = path.status;
+                    candidate.PathCornerCount = path.corners != null ? path.corners.Length : 0;
+
                     if (IsPathPhysicallyWalkableCore(path, maxSlope, maxClimb))
                     {
                         candidate.Status = HnaCandidateStatus.AlreadyConnected;
                         s_hnaCandidates.Add(candidate);
                         continue;
                     }
+
+                    // Path either Partial/Invalid, or PathComplete but a
+                    // slope/climb step exceeded the agent limit. Record the
+                    // offender so the sidecar shows which corner pair broke.
+                    if (path.status == NavMeshPathStatus.PathComplete && path.corners != null)
+                        FindWalkabilityOffender(path, maxSlope, maxClimb,
+                            out candidate.OffendingCornerIndex,
+                            out candidate.OffendingSlopeDeg,
+                            out candidate.OffendingClimb);
+                }
+                else
+                {
+                    candidate.PathStatus = NavMeshPathStatus.PathInvalid;
+                    candidate.PathCornerCount = 0;
                 }
 
                 // Check clearance at both endpoints
@@ -856,6 +1083,82 @@ namespace ValheimVillages.Villager.AI.Navigation
             DebugLog.Event("NavMeshLink", "hna_candidates",
                 ("total", s_hnaCandidates.Count), ("need_link", needs), ("already_connected", connected),
                 ("wall_blocked", walled), ("no_clearance", noClr));
+
+            // Drop the per-need_link detail to a sidecar so each entry is
+            // cross-referenceable by coordinate against PlaceRegionGraphLinks
+            // skip log lines (flat / no-snap / capsule-rejected). One line
+            // per NeedsLink candidate, packed dense.
+            if (needs > 0)
+            {
+                var detail = new List<object>(needs);
+                foreach (var c in s_hnaCandidates)
+                {
+                    if (c.Status != HnaCandidateStatus.NeedsLink) continue;
+                    detail.Add(FormatNeedLinkDetail(c));
+                }
+
+                DebugLog.List("NavMeshLink", "need_link_candidates", detail);
+            }
+        }
+
+        private static string FormatNeedLinkDetail(HnaCandidate c)
+        {
+            // Single dense line per candidate so jq/grep is easy.
+            // dy: raw vertical delta; flat_skip: would PlaceRegionGraphLinks
+            // silently drop this as "flat"?; snap1m: per-side 1m snap;
+            // snap4m_d: distance from raw to 4m snap (NaN if missed);
+            // path: NavMesh.CalculatePath status + corner count; off: slope/climb
+            // offender corner if PathComplete failed walkability.
+            var sda = float.IsNaN(c.SampleDistA) ? "miss" : c.SampleDistA.ToString("F2");
+            var sdb = float.IsNaN(c.SampleDistB) ? "miss" : c.SampleDistB.ToString("F2");
+            var flatSkip = c.VerticalDelta < MinVerticalDeltaForLink ? "yes" : "no";
+            var offender = c.OffendingCornerIndex >= 0
+                ? $"off_corner={c.OffendingCornerIndex} slope={c.OffendingSlopeDeg:F1} climb={c.OffendingClimb:F2}"
+                : "off=none";
+            return
+                $"type={c.LinkType} " +
+                $"raw_a=({c.RawStart.x:F1},{c.RawStart.y:F1},{c.RawStart.z:F1}) " +
+                $"raw_b=({c.RawEnd.x:F1},{c.RawEnd.y:F1},{c.RawEnd.z:F1}) " +
+                $"dy={c.VerticalDelta:F2} flat_skip={flatSkip} " +
+                $"snap1m_a={(c.WouldSnapAt1mA ? "ok" : "miss")} " +
+                $"snap1m_b={(c.WouldSnapAt1mB ? "ok" : "miss")} " +
+                $"snap4m_a={sda} snap4m_b={sdb} " +
+                $"path={c.PathStatus} corners={c.PathCornerCount} {offender}";
+        }
+
+        private static void FindWalkabilityOffender(
+            NavMeshPath path, float maxSlope, float maxClimb,
+            out int offenderIdx, out float offSlope, out float offClimb)
+        {
+            offenderIdx = -1;
+            offSlope = 0f;
+            offClimb = 0f;
+            if (path.corners == null || path.corners.Length < 2) return;
+            for (var k = 1; k < path.corners.Length; k++)
+            {
+                var dy = Mathf.Abs(path.corners[k].y - path.corners[k - 1].y);
+                var dxh = path.corners[k].x - path.corners[k - 1].x;
+                var dzh = path.corners[k].z - path.corners[k - 1].z;
+                var horiz = Mathf.Sqrt(dxh * dxh + dzh * dzh);
+                if (horiz > 0.01f)
+                {
+                    var slope = Mathf.Atan2(dy, horiz) * Mathf.Rad2Deg;
+                    if (slope > maxSlope)
+                    {
+                        offenderIdx = k;
+                        offSlope = slope;
+                        offClimb = dy;
+                        return;
+                    }
+                }
+                else if (dy > maxClimb)
+                {
+                    offenderIdx = k;
+                    offSlope = 90f;
+                    offClimb = dy;
+                    return;
+                }
+            }
         }
 
         private static bool HasClearanceAbove(Vector3 pos, int mask)
