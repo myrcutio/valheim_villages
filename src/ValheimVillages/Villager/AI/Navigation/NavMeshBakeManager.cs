@@ -163,7 +163,16 @@ namespace ValheimVillages.Villager.AI.Navigation
             var settings = NavMesh.GetSettingsByID(VillagerAgentType.UnityAgentTypeID);
             settings.agentRadius += VillagerSettings.NavMeshBakeRadiusBuffer;
 
-            // --- Terrain bake ---
+            // --- Terrain geometry collection (combined into the single bake
+            //     below, NOT baked into its own slot) ---
+            // The old design baked terrain into a separate slot from the terrain
+            // mask only — no piece colliders. SamplePosition/CalculatePath union
+            // every slot, so a column standing on terrain at ~floor height stayed
+            // walkable in the un-eroded terrain slot even though the piece slot
+            // carved it. Baking terrain + piece TOGETHER lets Unity's voxelizer
+            // erode the walkable surface (terrain included) around real obstacles
+            // by agent radius, so columns/walls carve precisely with no cell-grid
+            // hacks and no over-carving of reachable-but-un-flooded areas.
             var terrainSw = Stopwatch.StartNew();
             var terrainSources = new List<NavMeshBuildSource>();
             NavMeshBuilder.CollectSources(
@@ -173,13 +182,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             s_terrainSources.Clear();
             s_terrainSources.AddRange(terrainSources);
             result.TerrainSourceCount = terrainSources.Count;
-
-            if (terrainSources.Count > 0)
-            {
-                var data = NavMeshBuilder.BuildNavMeshData(
-                    settings, terrainSources, bounds, Vector3.zero, Quaternion.identity);
-                if (data != null) Holder.SetTerrain(NavMesh.AddNavMeshData(data));
-            }
+            Holder.RemoveTerrain(); // no separate terrain slot in the combined design
 
             terrainSw.Stop();
             result.TerrainDurationMs = (float)terrainSw.Elapsed.TotalMilliseconds;
@@ -229,10 +232,18 @@ namespace ValheimVillages.Villager.AI.Navigation
             s_lastOutsidePhantoms = phantomOutside;
             result.PieceSourceCount = pieceSources.Count;
 
-            if (pieceSources.Count > 0)
+            // Single combined bake: terrain + piece geometry + phantom blockers
+            // (door/bed/outside). Unity erodes the walkable surface around every
+            // obstacle by the inflated agentRadius, so columns and walls carve
+            // precisely and the terrain beneath them carves too.
+            var combinedSources = new List<NavMeshBuildSource>(
+                terrainSources.Count + pieceSources.Count);
+            combinedSources.AddRange(terrainSources);
+            combinedSources.AddRange(pieceSources);
+            if (combinedSources.Count > 0)
             {
                 var data = NavMeshBuilder.BuildNavMeshData(
-                    settings, pieceSources, bounds, Vector3.zero, Quaternion.identity);
+                    settings, combinedSources, bounds, Vector3.zero, Quaternion.identity);
                 if (data != null) Holder.SetPiece(NavMesh.AddNavMeshData(data));
             }
 
@@ -301,6 +312,28 @@ namespace ValheimVillages.Villager.AI.Navigation
             public float DurationMs;
             public bool DidRebake;
         }
+
+        /// <summary>
+        ///     Human-readable summary of the most recent partition's bake
+        ///     prune passes (prune-complement + orphan iterations). Populated by
+        ///     RegionPartitionHandler; surfaced by the vv_orphan_status command
+        ///     so the carve counts are visible without reading BepInEx logs.
+        /// </summary>
+        public static string LastPrunePassSummary = "(no partition yet)";
+
+        /// <summary>
+        ///     When false (the default), the post-bake graph-prune passes
+        ///     (RebakeWithPruneComplement + PruneOrphanTriangles) are skipped.
+        ///     They rebuilt the piece slot from piece-only sources to carve
+        ///     cells the HNA bed-flood marked unreachable — but that (a) discards
+        ///     the combined bake's terrain geometry and (b) over-carved
+        ///     physically-walkable surface the flood simply didn't reach (e.g.
+        ///     the smelter platform). With the single combined bake, Unity's
+        ///     voxelizer already carves real obstacles by agent radius and the
+        ///     perimeter phantom blockers handle confinement, so these passes are
+        ///     redundant. Confinement to the village is the A* corridor's job.
+        /// </summary>
+        public static bool EnableGraphPrunePasses = false;
 
         /// <summary>
         ///     Second bake: append <c>NotWalkable</c> ModifierBox volumes
@@ -614,7 +647,17 @@ namespace ValheimVillages.Villager.AI.Navigation
 
                     var hitHb = ValheimVillages.Villager.AI.Navigation
                         .RegionGraph.HeightBucket(hit.position.y);
-                    if (graph.PointToRegionId(hit.position) != null) continue;
+                    // Carve this cell ONLY if the agent's torso is physically
+                    // blocked here (a pillar/wall through a 1m cell the navmesh
+                    // still calls walkable). We deliberately do NOT carve merely
+                    // off-HNA-graph cells: the navmesh feeds the local agent and
+                    // should keep every physically-walkable surface (e.g. the
+                    // smelter platform, which the bed-flood may not reach), with
+                    // confinement left to the A* corridor planner. The body
+                    // probe is a waist band, so stairs/ramps and beds aren't
+                    // carved. (graph is unused now but kept in the signature for
+                    // diagnostics / future graph-aware passes.)
+                    if (!IsAgentBodyBlocked(hit.position)) continue;
 
                     orphanHits++;
                     if (!bucketedCells.TryGetValue(hitHb, out var set))
@@ -680,8 +723,22 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             var settings = NavMesh.GetSettingsByID(VillagerAgentType.UnityAgentTypeID);
             settings.agentRadius += VillagerSettings.NavMeshBakeRadiusBuffer;
+
+            // Combine terrain + piece sources + all accumulated NotWalkable
+            // boxes into ONE bake. The terrain slot is built blocker-free in
+            // BakeVillage and never carved, so a column / outside cell sitting
+            // on terrain at ~floor height stays walkable in the terrain slot
+            // even after the piece slot is carved (SamplePosition unions the
+            // slots, so the terrain surface wins). Merging into a single slot —
+            // and removing the separate terrain/piece slots — makes queries see
+            // exactly the carved union. s_terrainSources is NOT folded into
+            // s_pieceSources (kept separate) so the next iteration re-prepends
+            // it once rather than duplicating it.
+            var bakeSources = new List<NavMeshBuildSource>(s_terrainSources.Count + sources.Count);
+            bakeSources.AddRange(s_terrainSources);
+            bakeSources.AddRange(sources);
             var data = NavMeshBuilder.BuildNavMeshData(
-                settings, sources, bounds, Vector3.zero, Quaternion.identity);
+                settings, bakeSources, bounds, Vector3.zero, Quaternion.identity);
             if (data == null)
             {
                 result.DidRebake = false;
@@ -693,10 +750,13 @@ namespace ValheimVillages.Villager.AI.Navigation
                 return result;
             }
 
+            Holder.RemoveTerrain();
+            Holder.RemovePiece();
             Holder.RemoveHna();
             Holder.SetHna(NavMesh.AddNavMeshData(data));
 
-            // Persist the accumulated source list so subsequent orphan-prune
+            // Persist the accumulated piece source list (piece + phantom blockers
+            // + prune/orphan boxes, NO terrain) so subsequent orphan-prune
             // iterations and audit/diagnostic tools see the live bake state.
             s_pieceSources.Clear();
             s_pieceSources.AddRange(sources);
@@ -1060,6 +1120,57 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             return added;
+        }
+
+        /// <summary>
+        ///     Append a phantom <c>NotWalkable</c> box over every column/pillar
+        ///     piece in bounds. Their convex mesh colliders are collected by
+        ///     CollectSources but bake as area=0 (Walkable) and leave a walkable
+        ///     sliver straight through the column — the navmesh runs through it
+        ///     while physics blocks the agent, so paths drive into the column.
+        ///     A NotWalkable box over the collider bounds forces a real hole so
+        ///     CalculatePath routes around (e.g. up the adjacent walkable stairs).
+        /// </summary>
+        private static readonly int s_bodyBlockMask =
+            LayerMask.GetMask("Default", "static_solid", "piece");
+
+        private static readonly Collider[] s_bodyBlockBuf = new Collider[16];
+
+        /// <summary>
+        ///     True if the agent's torso is physically blocked at this walkable
+        ///     surface point — i.e. a solid piece/rock occupies a waist-height
+        ///     band over the cell. Uses the same waist band as
+        ///     RubberBandPrune.WallBlocks (0.7–1.3m), so it catches walls and
+        ///     pillars (which span the band) but NOT stairs/ramps (risers sit
+        ///     below it) or low furniture. Beds are excluded (carved separately).
+        ///     The orphan-prune pass carves cells that test true so the navmesh
+        ///     stops claiming a pillar-occupied cell is walkable.
+        /// </summary>
+        internal static bool IsAgentBodyBlocked(Vector3 surfacePos)
+        {
+            // Box at waist height (0.7–1.3m above the surface) sized so it
+            // catches any solid the agent's BODY would intersect while standing
+            // anywhere in this 1m cell: half-extent = cell-half (0.5) + agent
+            // radius (~0.4) ≈ 0.9m. The orphan loop probes one point per cell
+            // (the cell centre), so a tight box missed columns/walls sitting at
+            // a cell CORNER — the agent stands in the adjacent walkable cell and
+            // clips the column even though the column's own (un-navmeshed) cell
+            // is never sampled. The waist band means stairs/ramps (risers below
+            // the band) don't trip it; beds are excluded (carved separately).
+            var center = surfacePos + Vector3.up * 1.0f;     // waist-band centre
+            var halfExtents = new Vector3(0.9f, 0.3f, 0.9f); // cell-half + agent radius
+            var count = Physics.OverlapBoxNonAlloc(
+                center, halfExtents, s_bodyBlockBuf, Quaternion.identity,
+                s_bodyBlockMask, QueryTriggerInteraction.Ignore);
+            for (var i = 0; i < count; i++)
+            {
+                var c = s_bodyBlockBuf[i];
+                if (c == null) continue;
+                if (c.GetComponentInParent<Bed>() != null) continue;
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>

@@ -47,6 +47,11 @@ namespace ValheimVillages.Behaviors.Crafting
 
         public WorkSubState SubState { get; private set; } = WorkSubState.Idle;
 
+        /// <summary>Last notable workflow event (abandon reason, scan result) for diagnostics — surfaced by vv_get_villagers.</summary>
+        public string LastWorkNote { get; private set; } = "(none)";
+
+        internal void SetWorkNote(string note) => LastWorkNote = note;
+
         public bool IsWorking => SubState != WorkSubState.Idle || (FarmingBehavior?.IsWorking ?? false);
 
         /// <summary>Current item prefab name being crafted (from crafting context or farming behavior).</summary>
@@ -164,14 +169,18 @@ namespace ValheimVillages.Behaviors.Crafting
 
             var context = result.Payload as WorkOrderContext;
             if (context == null)
+            {
                 // Success with no payload = no work to do (e.g. work order already complete); just ACK and continue.
+                SetWorkNote($"scan: no work payload @ t={Time.time:F0}");
                 return;
+            }
 
             Plugin.Log?.LogInfo(
                 $"[WorkScan:{LogName}] Scan result: starting work on " +
                 $"{context.WorkOrder.ItemPrefabName} at {context.CraftStationPosition}");
 
             m_context = context;
+            SetWorkNote($"start {context.WorkOrder.ItemPrefabName} @ t={Time.time:F0}");
             VillagerActivityLog.Instance.Record(
                 UniqueIdForLog, context.WorkOrder.ItemPrefabName, "start", "crafting");
             BeginFueling();
@@ -242,6 +251,13 @@ namespace ValheimVillages.Behaviors.Crafting
                     break;
                 case WorkSubState.ReturningToChest:
                     OnArrivedAtOutputChest();
+                    break;
+                case WorkSubState.Crafting:
+                    // Stationary wait (smelting/cooking). A stray arrival here is
+                    // benign — the waypoint should already be cleared, but if the
+                    // mover re-fires arrival we must NOT abandon the in-progress
+                    // craft. Just ensure we're stopped and keep waiting.
+                    m_ai?.ClearWaypoint();
                     break;
                 default:
                     Plugin.Log?.LogWarning(

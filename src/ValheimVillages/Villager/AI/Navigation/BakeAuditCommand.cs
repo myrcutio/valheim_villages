@@ -37,6 +37,8 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.AppendLine(
                 $"[BakeAudit] pos=({pos.x:F2}, {pos.y:F2}, {pos.z:F2}) source={source} radius={Radius:F1}m");
 
+            sb.AppendLine($"--- agent-body waist probe ---\n  IsAgentBodyBlocked(pos)={NavMeshBakeManager.IsAgentBodyBlocked(pos)}");
+            ReportOrphanProbe(sb, pos);
             ReportNavMeshSample(sb, pos);
             ReportRuntimePhysics(sb, pos, out var runtimeHits);
             ReportBakeSources(sb, pos, out var sourceMatches, out var phantomMatches);
@@ -47,6 +49,147 @@ namespace ValheimVillages.Villager.AI.Navigation
             var output = sb.ToString();
             Console.instance?.Print(output);
             Plugin.Log?.LogInfo(output);
+        }
+
+        /// <summary>
+        ///     Replicate PruneOrphanTriangles' per-cell decision at the cell
+        ///     containing <paramref name="pos" />: for each height bucket, probe
+        ///     the cell CENTER, report whether the sample lands in-cell, and
+        ///     whether IsAgentBodyBlocked fires there. Shows why a cell is (or
+        ///     isn't) carved by the orphan pass.
+        /// </summary>
+        private static void ReportOrphanProbe(StringBuilder sb, Vector3 pos)
+        {
+            var cell = RegionGraph.LookupCellSize;
+            var hbSize = RegionGraph.HeightBucketSize;
+            var gx = Mathf.FloorToInt(pos.x / cell);
+            var gz = Mathf.FloorToInt(pos.z / cell);
+            var px = gx * cell + cell * 0.5f;
+            var pz = gz * cell + cell * 0.5f;
+            var sampleRadius = hbSize * 0.5f;
+            var filter = new NavMeshQueryFilter
+            {
+                agentTypeID = VillagerAgentType.UnityAgentTypeID,
+                areaMask = NavMesh.AllAreas,
+            };
+            var groundY = ZoneSystem.instance != null
+                ? ZoneSystem.instance.GetGroundHeight(new Vector3(pos.x, pos.y, pos.z))
+                : float.NaN;
+            sb.AppendLine(
+                $"--- orphan-loop probe @ cell ({gx},{gz}) center=({px:F2},{pz:F2}) sampleR={sampleRadius:F1} " +
+                $"terrainGroundY={groundY:F2} ---");
+            var hbCenter = RegionGraph.HeightBucket(pos.y);
+            for (var hb = hbCenter - 1; hb <= hbCenter + 1; hb++)
+            {
+                var py = (hb + 0.5f) * hbSize;
+                if (!NavMesh.SamplePosition(new Vector3(px, py, pz), out var hit, sampleRadius, filter))
+                {
+                    sb.AppendLine($"  hb={hb} py={py:F1}: SamplePosition MISS (r={sampleRadius:F1})");
+                    continue;
+                }
+                var hitGx = Mathf.FloorToInt(hit.position.x / cell);
+                var hitGz = Mathf.FloorToInt(hit.position.z / cell);
+                var inCell = hitGx == gx && hitGz == gz;
+                var blocked = NavMeshBakeManager.IsAgentBodyBlocked(hit.position);
+                sb.AppendLine(
+                    $"  hb={hb} py={py:F1}: HIT ({hit.position.x:F2},{hit.position.y:F2},{hit.position.z:F2}) " +
+                    $"hitCell=({hitGx},{hitGz}) inCell={inCell} blocked={blocked} " +
+                    $"=> {(inCell ? (blocked ? "CARVE" : "keep") : "skip(out-of-cell)")}");
+            }
+        }
+
+        [DevCommand("Print the most recent partition's bake prune-pass summary (carve counts).",
+            Name = "vv_orphan_status")]
+        public static void OrphanStatus(Terminal.ConsoleEventArgs args)
+        {
+            var output = "[OrphanStatus]\n" + NavMeshBakeManager.LastPrunePassSummary;
+            Console.instance?.Print(output);
+            Plugin.Log?.LogInfo(output);
+        }
+
+        [DevCommand("Compare a NavMesh path on the villager (slot 31) bake vs Valheim's Humanoid agent. " +
+                    "Usage: vv_pathcompare <fromX> <fromZ> <toX> <toZ>",
+            Name = "vv_pathcompare")]
+        public static void PathCompare(Terminal.ConsoleEventArgs args)
+        {
+            var inv = CultureInfo.InvariantCulture;
+            if (args?.Args == null || args.Args.Length < 5
+                || !float.TryParse(args.Args[1], NumberStyles.Float, inv, out var fx)
+                || !float.TryParse(args.Args[2], NumberStyles.Float, inv, out var fz)
+                || !float.TryParse(args.Args[3], NumberStyles.Float, inv, out var tx)
+                || !float.TryParse(args.Args[4], NumberStyles.Float, inv, out var tz))
+            {
+                Console.instance?.Print("Usage: vv_pathcompare <fromX> <fromZ> <toX> <toZ>");
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"[PathCompare] from=({fx:F1},{fz:F1}) to=({tx:F1},{tz:F1})");
+            AppendAgentPath(sb, "raw slot31", VillagerAgentType.UnityAgentTypeID, fx, fz, tx, tz);
+            AppendAgentPath(sb, "raw Humanoid",
+                VillagerAgentType.ResolveValheimHumanoidAgentTypeID(), fx, fz, tx, tz);
+
+            // HNA corridor path — what the villager actually walks (A* over the
+            // HNA lookup grid + per-segment NavMesh validation), as opposed to
+            // the raw NavMesh.CalculatePath above. This is the one the graph viz
+            // reflects.
+            var slot31Filter = new NavMeshQueryFilter
+            {
+                agentTypeID = VillagerAgentType.UnityAgentTypeID,
+                areaMask = NavMesh.AllAreas,
+            };
+            var y = NavMesh.SamplePosition(new Vector3(fx, 40f, fz), out var yh, 8f, slot31Filter)
+                ? yh.position.y
+                : 37.4f;
+            var hnaBuf = new List<Vector3>();
+            var hnaOk = VillagerMovement.TryFindCompletePath(
+                new Vector3(fx, y, fz), new Vector3(tx, y, tz), hnaBuf);
+            var hnaLen = 0f;
+            for (var i = 1; i < hnaBuf.Count; i++) hnaLen += Vector3.Distance(hnaBuf[i - 1], hnaBuf[i]);
+            var hnaStraight = Vector3.Distance(new Vector3(fx, y, fz), new Vector3(tx, y, tz));
+            sb.AppendLine(
+                $"  HNA corridor (villager): complete={hnaOk} corners={hnaBuf.Count} " +
+                $"len={hnaLen:F1}m straight={hnaStraight:F1}m " +
+                $"detour={(hnaStraight > 0.01f ? hnaLen / hnaStraight : 1f):F2}x");
+
+            var output = sb.ToString();
+            Console.instance?.Print(output);
+            Plugin.Log?.LogInfo(output);
+        }
+
+        // Sample both endpoints onto the given agent's mesh, compute a path, and
+        // report status + corner count + length + detour ratio (path / straight
+        // line). A detour > ~1.1x with extra corners means the mesh routed the
+        // agent AROUND an obstacle; ~1.0x with 2 corners means a straight line
+        // (no obstacle carved on that agent's mesh).
+        private static void AppendAgentPath(StringBuilder sb, string label, int agentTypeId,
+            float fx, float fz, float tx, float tz)
+        {
+            var filter = new NavMeshQueryFilter
+            {
+                agentTypeID = agentTypeId,
+                areaMask = NavMesh.AllAreas,
+            };
+            var fromOk = NavMesh.SamplePosition(new Vector3(fx, 40f, fz), out var fHit, 8f, filter);
+            var toOk = NavMesh.SamplePosition(new Vector3(tx, 40f, tz), out var tHit, 8f, filter);
+            if (!fromOk || !toOk)
+            {
+                sb.AppendLine($"  {label} (id={agentTypeId}): sample fail (from={fromOk}, to={toOk})");
+                return;
+            }
+
+            var path = new NavMeshPath();
+            NavMesh.CalculatePath(fHit.position, tHit.position, filter, path);
+            var corners = path.corners;
+            var len = 0f;
+            for (var i = 1; i < corners.Length; i++) len += Vector3.Distance(corners[i - 1], corners[i]);
+            var straight = Vector3.Distance(fHit.position, tHit.position);
+            sb.AppendLine(
+                $"  {label} (id={agentTypeId}): status={path.status} corners={corners.Length} " +
+                $"len={len:F1}m straight={straight:F1}m " +
+                $"detour={(straight > 0.01f ? len / straight : 1f):F2}x " +
+                $"fromSnap=({fHit.position.x:F1},{fHit.position.y:F1},{fHit.position.z:F1}) " +
+                $"toSnap=({tHit.position.x:F1},{tHit.position.y:F1},{tHit.position.z:F1})");
         }
 
         private static bool TryResolvePosition(
@@ -155,11 +298,24 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var layerName = LayerMask.LayerToName(go.layer);
                 if (string.IsNullOrEmpty(layerName)) layerName = "(unnamed)";
                 var b = c.bounds;
+                // For mesh colliders, surface the two properties that decide
+                // whether NavMeshBuilder can voxelize them: a non-readable
+                // sharedMesh is collected as a source but contributes nothing
+                // to the bake (no carve), and convex changes the PhysX shape.
+                var meshInfo = "";
+                if (c is MeshCollider mc)
+                {
+                    var m = mc.sharedMesh;
+                    meshInfo = m != null
+                        ? $" mesh[readable={m.isReadable},convex={mc.convex},tris={(m.isReadable ? m.triangles.Length / 3 : -1)}]"
+                        : " mesh[null]";
+                }
+
                 sb.AppendLine(
                     $"  '{go.name}' root='{rootName}' layer={go.layer}:{layerName} " +
                     $"colliderType={c.GetType().Name} bounds=center({b.center.x:F1},{b.center.y:F1},{b.center.z:F1}) " +
                     $"size({b.size.x:F2},{b.size.y:F2},{b.size.z:F2}) " +
-                    $"dist={Vector3.Distance(b.center, pos):F2}m");
+                    $"dist={Vector3.Distance(b.center, pos):F2}m{meshInfo}");
             }
         }
 

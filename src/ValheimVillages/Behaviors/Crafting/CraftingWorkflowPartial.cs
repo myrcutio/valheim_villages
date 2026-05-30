@@ -27,7 +27,12 @@ namespace ValheimVillages.Behaviors.Crafting
         private bool TryWalkTo(Vector3 target, WorkSubState substate, string targetDescription)
         {
             if (m_ai == null) return false;
-            if (!VillageStationRegistry.TryResolveApproach(target, m_ai.Position, out var approach))
+            // Anchor the village on the BED, not m_ai.Position: if the agent has
+            // been bumped off the graph, its current position may resolve to no
+            // village (or the wrong one), but its home village is always known.
+            // Current position is still the path start (2nd arg).
+            if (!VillageStationRegistry.TryResolveApproach(
+                    target, m_ai.Position, out var approach, m_ai.BedPosition))
             {
                 AbandonWork($"no HNA-valid approach to {targetDescription} @ ({target.x:F1},{target.y:F1},{target.z:F1})");
                 return false;
@@ -57,6 +62,7 @@ namespace ValheimVillages.Behaviors.Crafting
 
         private void AbandonWork(string reason)
         {
+            SetWorkNote($"abandon[{SubState}]: {reason} @ t={Time.time:F0}");
             // Roll back any items we removed from chests but didn't manage
             // to commit to a station — without this, a stall mid-walk
             // drains source chests of items that vanish (the workflow
@@ -346,69 +352,106 @@ namespace ValheimVillages.Behaviors.Crafting
             if (smelter == null) return false;
             if (m_context.SmelterRemovalRequested) return true;
 
-            if (!StationFinder.IsSmelterReady(smelter))
+            // Fuel-burning smelters (regular smelter, blast furnace) must still
+            // have fuel to finish the current product; the charcoal kiln
+            // (m_fuelItem == null) consumes its input as fuel and never runs dry
+            // that way.
+            if (smelter.m_fuelItem != null && !StationFinder.IsSmelterReady(smelter))
             {
                 AbandonWork("smelter fuel ran out before output");
                 return true;
             }
 
-            var processedNow = GetSmelterProcessedQueueSize(smelter);
-            if (processedNow <= m_context.SmelterProcessedAtStart) return true;
+            // BOTH the charcoal kiln AND the regular smelter spawn their finished
+            // product as ground item-drops at the output point — there's no
+            // reliable "extract" step (the old processed-queue trigger missed
+            // them, so bars/coal piled up uncollected while the villager waited
+            // for a queue that never advanced). So while we wait at the station,
+            // tidy the output point: collect a batch of the ground-spawned output
+            // (bounded by chest room) and carry it back. CollectSmelterOutput
+            // returns 0 until the station actually spits something out, so this
+            // naturally polls.
+            var collected = CollectSmelterOutput(smelter, OutputBatchPerTrip);
+            if (collected > 0)
+            {
+                m_context.SmelterRemovalRequested = true;
+                m_context.CraftedCount += collected;
+                BeginReturningToChest();
+            }
 
-            var nview = smelter.GetComponent<ZNetView>();
-            if (nview == null || nview.GetZDO() == null) return false;
-
-            m_context.SmelterRemovalRequested = true;
-            nview.InvokeRPC("RPC_EmptyProcessed");
-
-            TryPickupSmelterOutput(smelter);
-
-            m_context.CraftedCount++;
-            BeginReturningToChest();
-            return true;
+            return true; // keep waiting/polling until output appears
         }
 
-        private void TryPickupSmelterOutput(Smelter smelter)
+        /// <summary>Max output items the villager will carry back per return trip.</summary>
+        private const int OutputBatchPerTrip = 5;
+
+        /// <summary>
+        ///     Collect up to <paramref name="maxItems" /> ground-spawned output
+        ///     items of the work order's output prefab from around the station's
+        ///     output point, bounded by how many the destination chest can still
+        ///     hold. Destroys the collected drops and records them as a single
+        ///     carried <see cref="HeldItem" /> (so an abandon mid-return rolls
+        ///     them back to the chest); the actual deposit happens on arrival in
+        ///     <see cref="OnArrivedAtOutputChest" />. Returns the count collected.
+        /// </summary>
+        private int CollectSmelterOutput(Smelter smelter, int maxItems)
         {
             var outputPos = smelter.m_outputPoint != null
                 ? smelter.m_outputPoint.position
                 : smelter.transform.position;
-            const float searchRadius = 3f;
+            const float searchRadius = 10f;
 
             var outputPrefab = m_context.WorkOrder?.ItemPrefabName;
-            if (string.IsNullOrEmpty(outputPrefab)) return;
+            if (string.IsNullOrEmpty(outputPrefab)) return 0;
 
             var allDrops = PhysicsHelper.GetAllInRadius<ItemDrop>(outputPos, searchRadius);
-            ItemDrop closest = null;
-            var closestDist = float.MaxValue;
+            var matches = new List<(ItemDrop drop, float dist)>();
             foreach (var drop in allDrops)
             {
                 if (drop == null || drop.m_itemData == null) continue;
                 var dropPrefab = drop.m_itemData.m_dropPrefab?.name
                                  ?? drop.gameObject.name.Replace("(Clone)", "").Trim();
                 if (dropPrefab != outputPrefab) continue;
-                var dist = Vector3.Distance(drop.transform.position, outputPos);
-                if (dist < closestDist)
-                {
-                    closest = drop;
-                    closestDist = dist;
-                }
+                matches.Add((drop, Vector3.Distance(drop.transform.position, outputPos)));
             }
 
-            if (closest != null)
+            if (matches.Count == 0) return 0;
+            matches.Sort((a, b) => a.dist.CompareTo(b.dist));
+
+            // Cap by batch size and by remaining chest capacity — don't carry
+            // more than will fit, so we never strand a deposit on arrival.
+            var want = Mathf.Min(maxItems, matches.Count);
+            var room = want;
+            if (m_context.SourceContainer == null)
+                room = 0;
+            else
+                while (room > 0 && !ContainerScanner.CanAcceptItem(
+                           m_context.SourceContainer, outputPrefab, room))
+                    room--;
+            if (room <= 0) return 0;
+
+            var collected = 0;
+            for (var i = 0; i < matches.Count && collected < room; i++)
             {
-                var dropNview = closest.GetComponent<ZNetView>();
+                var drop = matches[i].drop;
+                var dropNview = drop.GetComponent<ZNetView>();
                 if (dropNview != null && dropNview.GetZDO() != null)
-                    ZNetScene.instance.Destroy(closest.gameObject);
+                    ZNetScene.instance.Destroy(drop.gameObject);
                 else
-                    Object.Destroy(closest.gameObject);
-
-                if (m_context.SourceContainer != null)
-                {
-                    ContainerScanner.TryDepositItem(m_context.SourceContainer, outputPrefab, 1);
-                    m_context.SmelterItemAlreadyInChest = true;
-                }
+                    Object.Destroy(drop.gameObject);
+                collected++;
             }
+
+            if (collected <= 0) return 0;
+
+            // Carry the whole batch as one tracked entry — deposit on arrival.
+            m_context.HeldItems.Add(new HeldItem
+            {
+                SourceContainer = m_context.SourceContainer,
+                PrefabName = outputPrefab,
+                Amount = collected,
+            });
+            return collected;
         }
 
         private void TryPickupDroppedItem(CookingStation station, string slotItemName)
@@ -570,6 +613,16 @@ namespace ValheimVillages.Behaviors.Crafting
 
             m_context.CraftStartTime = Time.time;
             SubState = WorkSubState.Crafting;
+            // Stop here and drop the movement waypoint. We've arrived; the
+            // crafting wait is stationary (poll the smelter/cooking station).
+            // Without this the per-frame mover keeps re-detecting "arrived" at
+            // the station waypoint and re-firing OnArrival, which lands in the
+            // HandleWorkArrival default ("unexpected arrival in Crafting") and
+            // abandons the order — dropping the just-loaded ore/fuel on the
+            // ground. Stay in Working (so UpdateWorkAI keeps polling) but with
+            // no waypoint.
+            m_ai?.ClearWaypoint();
+            SetWorkNote($"crafting @ station t={Time.time:F0}");
 
             var smelter = m_context.SmelterRef;
             if (smelter != null && !string.IsNullOrEmpty(m_context.SmelterInputItemName))
@@ -642,7 +695,21 @@ namespace ValheimVillages.Behaviors.Crafting
             {
                 var outputPrefab = m_context.WorkOrder?.ItemPrefabName;
                 if (!string.IsNullOrEmpty(outputPrefab))
-                    ContainerScanner.TryDepositItem(m_context.SourceContainer, outputPrefab, 1);
+                {
+                    // Deposit the WHOLE carried batch now that we've actually
+                    // arrived at the chest. The carried amount is the sum of the
+                    // HeldItem entries for this prefab (CollectSmelterOutput adds
+                    // one batch entry); fall back to 1 for the legacy path where
+                    // nothing was tracked. Clear the entries only on a successful
+                    // deposit so a full chest leaves them to roll back.
+                    var carried = 0;
+                    foreach (var h in m_context.HeldItems)
+                        if (h != null && h.PrefabName == outputPrefab)
+                            carried += h.Amount;
+                    if (carried <= 0) carried = 1;
+                    if (ContainerScanner.TryDepositItem(m_context.SourceContainer, outputPrefab, carried))
+                        m_context.HeldItems.RemoveAll(h => h != null && h.PrefabName == outputPrefab);
+                }
             }
 
             m_context.CookingItemAlreadyInChest = false;

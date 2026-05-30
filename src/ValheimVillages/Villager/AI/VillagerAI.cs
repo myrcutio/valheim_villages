@@ -31,6 +31,27 @@ namespace ValheimVillages.Villager.AI
         private static readonly FieldInfo s_pathField = typeof(BaseAI).GetField(
             "m_path", BindingFlags.NonPublic | BindingFlags.Instance);
 
+        /// <summary>
+        ///     EXPERIMENT toggle: when true, villager movement is driven by a
+        ///     real Unity NavMeshAgent (advisory mode — updatePosition=false; we
+        ///     read desiredVelocity and feed it into Valheim's character via
+        ///     MoveTowards). Lets Unity own path-following, local steering, and
+        ///     off-mesh link traversal instead of the hand-rolled corner-walker.
+        ///     Flip with vv_agentmover.
+        /// </summary>
+        public static bool NavMeshAgentMover = true;
+
+        /// <summary>
+        ///     EXPERIMENT toggle: off-mesh self-rescue (teleport the villager
+        ///     back onto the nearest mesh/HNA cell when it's off-graph). Disabled
+        ///     for now — climbing a hill/stairs legitimately takes the villager
+        ///     off the HNA graph briefly, and the rescue was yanking it back down
+        ///     mid-climb. Flip with vv_offmeshrescue.
+        /// </summary>
+        public static bool OffMeshRescueEnabled = false;
+
+        private NavMeshAgent m_navAgent;
+
         private Vector3 m_bedPosition;
 
         // Composable behaviors (populated by BehaviorFactory from NPC definition)
@@ -329,9 +350,26 @@ namespace ValheimVillages.Villager.AI
                     }
                     // else: idle at retreat location until backoff elapses
                 }
-                else if (VillagerMovement.IsAtPosition(transform.position, targetPos, VillagerSettings.ArrivalThreshold))
+                else if (NavMeshAgentMover
+                             ? AgentHasArrived(targetPos)
+                             : VillagerMovement.IsAtPosition(transform.position, targetPos, VillagerSettings.ArrivalThreshold))
                 {
+                    // Arrival = the villager actually REACHED the resolved
+                    // approach cell. That cell is already validated (standoff +
+                    // complete path + line-of-sight + same level), so reaching
+                    // it is the correct "ready to use the station" signal — no
+                    // generous arrival radius that would let it interact several
+                    // metres short (roasting/depositing through the air). For the
+                    // NavMeshAgent mover that means its complete path is traversed
+                    // to within the agent stopping distance; the legacy custom
+                    // mover still uses the ArrivalThreshold radius.
                     OnArrivedAtTarget(dt);
+                }
+                else if (NavMeshAgentMover)
+                {
+                    var agentRunning = CurrentState == BehaviorState.Patrolling
+                                       || (!IsCasualTravel && remaining > 5f);
+                    UpdateAgentMovement(targetPos, agentRunning);
                 }
                 else
                 {
@@ -712,6 +750,14 @@ namespace ValheimVillages.Villager.AI
         Vector3 IVillagerStationLookup.BedPosition =>
             Memory != null ? Memory.BedPosition : default;
 
+        /// <summary>
+        ///     This villager's bed (home) position. Station/approach lookups
+        ///     anchor the VILLAGE on this — not the villager's transient
+        ///     position — so a villager bumped off the graph still resolves work
+        ///     against its home village instead of "no village here".
+        /// </summary>
+        public Vector3 BedPosition => m_bedPosition;
+
         string IVillagerWorkContext.NpcName => NpcName;
         Vector3 IVillagerWorkContext.Position => Position;
 
@@ -723,6 +769,24 @@ namespace ValheimVillages.Villager.AI
 
         /// <summary>True while the AI is in a hard-stuck backoff cooldown and should not start new tasks.</summary>
         public bool IsInBackoff => Time.time < m_stuckBackoffUntil;
+
+        /// <summary>
+        ///     Drop the current movement waypoint and stop, WITHOUT changing
+        ///     BehaviorState. Used when a workflow enters a stationary "wait"
+        ///     sub-state (e.g. smelting/cooking at a station): the villager
+        ///     should stay in Working so its behavior keeps ticking, but must
+        ///     stop moving so the per-frame movement loop doesn't keep
+        ///     re-detecting "arrived" at the station waypoint and re-firing
+        ///     OnArrival (which the work state machine treats as an unexpected
+        ///     arrival and abandons). SetState(state, (VillagerWaypoint)null)
+        ///     does NOT clear the waypoint, so this explicit path is required.
+        /// </summary>
+        public void ClearWaypoint()
+        {
+            m_currentWaypoint = null;
+            (s_pathField?.GetValue(this) as List<Vector3>)?.Clear();
+            StopMoving();
+        }
 
         public void SetState(BehaviorState newState, Vector3? target = null)
         {
@@ -855,6 +919,10 @@ namespace ValheimVillages.Villager.AI
         /// </summary>
         private bool TryRescueOffMesh()
         {
+            // Disabled while we let villagers climb off-graph terrain (stairs/
+            // hills) — the rescue was teleporting climbers back down. Returning
+            // false = "not rescued", so the normal movement tick proceeds.
+            if (!OffMeshRescueEnabled) return false;
             if (!VillagerAgentType.IsRegistered) return false;
             var filter = new NavMeshQueryFilter
             {
@@ -1077,6 +1145,153 @@ namespace ValheimVillages.Villager.AI
         ///     walking a path that ends short and re-triggering the same
         ///     failure every tick.
         /// </summary>
+        /// <summary>
+        ///     Lazily create + configure the advisory NavMeshAgent. updatePosition
+        ///     /updateRotation are off so the agent never moves the Valheim
+        ///     character's transform — we only read its steering. agentTypeID is
+        ///     slot 31 (the village bake).
+        /// </summary>
+        private void EnsureAgent()
+        {
+            if (m_navAgent != null) return;
+            if (!VillagerAgentType.IsRegistered) return;
+
+            m_navAgent = gameObject.GetComponent<NavMeshAgent>()
+                         ?? gameObject.AddComponent<NavMeshAgent>();
+            m_navAgent.agentTypeID = VillagerAgentType.UnityAgentTypeID;
+            m_navAgent.updatePosition = false;
+            m_navAgent.updateRotation = false;
+            m_navAgent.updateUpAxis = false;
+            m_navAgent.baseOffset = 0f;
+            m_navAgent.autoBraking = true;
+            m_navAgent.autoRepath = true;
+            m_navAgent.autoTraverseOffMeshLink = false; // we cross links manually
+            m_navAgent.speed = 5f;          // only desiredVelocity DIRECTION is used
+            m_navAgent.acceleration = 12f;
+            m_navAgent.angularSpeed = 1080f;
+            m_navAgent.stoppingDistance = 0.3f;
+
+            if (NavMesh.SamplePosition(transform.position, out var hit, 3f, AgentFilter()))
+                m_navAgent.Warp(hit.position);
+        }
+
+        private static NavMeshQueryFilter AgentFilter()
+        {
+            return new NavMeshQueryFilter
+            {
+                agentTypeID = VillagerAgentType.UnityAgentTypeID,
+                areaMask = NavMesh.AllAreas,
+            };
+        }
+
+        /// <summary>
+        ///     Advisory NavMeshAgent movement: sync the agent to the character's
+        ///     real position, let it compute/steer the path to <paramref name="targetPos"/>,
+        ///     and feed its desired direction into Valheim's character movement.
+        ///     The agent owns pathing + local steering + link sequencing; the
+        ///     physics character still does the actual moving.
+        /// </summary>
+        /// <summary>
+        ///     True when the NavMesh agent has actually traversed its COMPLETE
+        ///     path to <paramref name="targetPos" /> — i.e. it physically reached
+        ///     the (already-validated) approach cell, within the agent's stopping
+        ///     distance. This replaces a generous arrival radius: since the
+        ///     approach cell is resolved with standoff + complete path + LOS +
+        ///     same-level gates, reaching it IS the "ready to use the station"
+        ///     condition. Guards reject the not-yet-pathed, still-computing, and
+        ///     partial-path cases (a partial path's end is short of the target,
+        ///     so its small remainingDistance must NOT read as arrived).
+        /// </summary>
+        private bool AgentHasArrived(Vector3 targetPos)
+        {
+            if (m_navAgent == null || !m_navAgent.isOnNavMesh) return false;
+            if (m_navAgent.pathPending || !m_navAgent.hasPath) return false;
+            // Destination must be THIS target (UpdateAgentMovement sets it). On
+            // the first tick after a new waypoint it isn't set yet → not arrived.
+            if ((m_navAgent.destination - targetPos).sqrMagnitude > 0.25f) return false;
+            if (m_navAgent.pathStatus != NavMeshPathStatus.PathComplete) return false;
+            return m_navAgent.remainingDistance <= m_navAgent.stoppingDistance + 0.25f;
+        }
+
+        private void UpdateAgentMovement(Vector3 targetPos, bool running)
+        {
+            EnsureAgent();
+            // CRITICAL: every early exit below must StopMoving() first. Valheim's
+            // Character.m_moveDir PERSISTS across frames — it keeps applying the
+            // last movement command until something changes it. If this method
+            // just `return`s on a frame where it can't produce a valid direction
+            // (agent off-mesh and un-warpable, path still computing, zero desired
+            // velocity), the character keeps walking the PREVIOUS frame's
+            // direction with no target — observed as a villager bumped off-mesh
+            // onto a pillar then marching in a straight line into the village
+            // outer wall. Stopping on every no-move frame makes the agent hold
+            // position until a valid path/velocity is available again.
+            if (m_navAgent == null)
+            {
+                StopMoving();
+                return;
+            }
+
+            // Keep the agent's internal position glued to the physics character.
+            if (m_navAgent.isOnNavMesh)
+            {
+                m_navAgent.nextPosition = transform.position;
+            }
+            else
+            {
+                // Character drifted off the agent's navmesh — warp it back.
+                if (NavMesh.SamplePosition(transform.position, out var hit, 3f, AgentFilter()))
+                {
+                    m_navAgent.Warp(hit.position);
+                }
+                else
+                {
+                    StopMoving();
+                    return;
+                }
+            }
+
+            if (!m_navAgent.hasPath ||
+                (m_navAgent.destination - targetPos).sqrMagnitude > 0.25f)
+                m_navAgent.SetDestination(targetPos);
+
+            if (m_navAgent.pathPending)
+            {
+                StopMoving();
+                return;
+            }
+
+            // A failed/partial path means there's no valid route to the target
+            // from here — don't drift on a stale velocity, hold position.
+            if (m_navAgent.pathStatus == NavMeshPathStatus.PathInvalid)
+            {
+                StopMoving();
+                return;
+            }
+
+            Vector3 dir;
+            if (m_navAgent.isOnOffMeshLink)
+            {
+                // Drive straight across the link; complete it once we arrive.
+                var end = m_navAgent.currentOffMeshLinkData.endPos;
+                dir = end - transform.position;
+                if (dir.sqrMagnitude < 0.09f) m_navAgent.CompleteOffMeshLink();
+            }
+            else
+            {
+                dir = m_navAgent.desiredVelocity;
+            }
+
+            dir.y = 0f;
+            if (dir.sqrMagnitude < 1e-4f)
+            {
+                StopMoving();
+                return;
+            }
+
+            MoveTowards(dir.normalized, running);
+        }
+
         private bool TryFindPathCustom(Vector3 targetPos)
         {
             var path = s_pathField?.GetValue(this) as List<Vector3>;

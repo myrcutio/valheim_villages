@@ -149,6 +149,9 @@ namespace ValheimVillages.Villager.AI
                     var status = b?.GetStatusText();
                     if (!string.IsNullOrEmpty(status))
                         sb.AppendLine($"    status[{b.Tag}]: {status}");
+                    if (b is ValheimVillages.Behaviors.Work.CraftingBehaviorAdapter cba
+                        && cba.Crafting != null)
+                        sb.AppendLine($"    note[{b.Tag}]: {cba.Crafting.LastWorkNote}");
                 }
             }
         }

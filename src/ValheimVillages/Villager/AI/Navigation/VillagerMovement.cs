@@ -52,6 +52,16 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     The fallthrough is logged so cases that *should* be
         ///     corridor-planned but slip through are visible.</para>
         /// </summary>
+        /// <summary>
+        ///     EXPERIMENT toggle: when true, villager pathing bypasses the HNA
+        ///     corridor planner and uses the raw slot-31 NavMesh directly. The
+        ///     bake already carves obstacles (columns) that the coarse HNA cell
+        ///     graph keeps walkable, and already excludes outside/pruned cells —
+        ///     so the raw mesh is both more accurate AND still confined. Flip
+        ///     with vv_rawpathing to A/B against the corridor planner.
+        /// </summary>
+        public static bool RawNavMeshPathing = true;
+
         public static bool TryFindCompletePath(Vector3 start, Vector3 end, List<Vector3> outPath)
         {
             outPath?.Clear();
@@ -63,6 +73,9 @@ namespace ValheimVillages.Villager.AI.Navigation
                 agentTypeID = VillagerAgentType.UnityAgentTypeID,
                 areaMask = NavMesh.AllAreas,
             };
+
+            if (RawNavMeshPathing)
+                return TryFindUnconstrainedPath(start, end, filter, outPath);
 
             // Pick the HNA graph that covers either endpoint. Prefer the
             // start-side graph (where the villager actually lives) so
@@ -84,6 +97,54 @@ namespace ValheimVillages.Villager.AI.Navigation
             return TryFindCorridorPath(graph, filter, start, end, outPath);
         }
 
+        // Agent body-capsule model for traversability sweeps. MUST match
+        // IncidentRecorder.AppendSegmentCasts (the diagnostic that surfaces
+        // these blockages) so the gate and the diagnostic agree on the same
+        // geometry.
+        private const float BodyBottomLift = 0.5f;
+        private const float BodyTopLift = 1.35f;
+        private const float BodyRadius = 0.4f;
+        private static int s_bodyMask = -1;
+
+        private static int BodyMask =>
+            s_bodyMask != -1
+                ? s_bodyMask
+                : s_bodyMask = LayerMask.GetMask(
+                    "Default", "static_solid", "piece", "blocker", "pathblocker");
+
+        /// <summary>
+        ///     Sweep an agent-sized body capsule along each segment of a path
+        ///     (<paramref name="start"/> → corners[0] → corners[1] → …) and
+        ///     return false if any segment is physically blocked by a solid
+        ///     collider. This catches the case where NavMesh.CalculatePath
+        ///     reports PathComplete but the agent capsule can't actually walk
+        ///     the corridor — e.g. an approach that hugs a chest/wall/foundation
+        ///     edge. Used to reject approaches the villager would stall on.
+        /// </summary>
+        public static bool IsPathCapsuleClear(Vector3 start, List<Vector3> corners)
+        {
+            if (corners == null || corners.Count == 0) return false;
+
+            var prev = start;
+            for (var i = 0; i < corners.Count; i++)
+            {
+                var cur = corners[i];
+                var dir = cur - prev;
+                var dist = dir.magnitude;
+                if (dist < 0.001f) { prev = cur; continue; }
+
+                var bottomCap = prev + Vector3.up * BodyBottomLift;
+                var topCap = prev + Vector3.up * BodyTopLift;
+                if (Physics.CapsuleCast(bottomCap, topCap, BodyRadius, dir / dist,
+                        out _, dist, BodyMask, QueryTriggerInteraction.Ignore))
+                    return false;
+
+                prev = cur;
+            }
+
+            return true;
+        }
+
         /// <summary>
         ///     Legacy single-shot CalculatePath retained for the
         ///     no-graph-available fallthrough. Behaviour matches the
@@ -92,8 +153,16 @@ namespace ValheimVillages.Villager.AI.Navigation
         private static bool TryFindUnconstrainedPath(
             Vector3 start, Vector3 end, NavMeshQueryFilter filter, List<Vector3> outPath)
         {
-            if (!NavMesh.SamplePosition(start, out var startHit, 1f, filter)) return false;
-            if (!NavMesh.SamplePosition(end, out var endHit, 1f, filter)) return false;
+            // Snap radius 3m (was 1m). The start/end here are HNA graph LOOKUP
+            // CELLS (from TryResolveApproach's snap), which don't always sit on
+            // the combined-bake navmesh — a bed whose nearest lookup cell lands
+            // in an eroded/blocked spot can be >1m off the walkable surface. With
+            // a 1m radius that start failed to map and EVERY approach from that
+            // bed reported unreachable (observed: the Farmer's bed-2, snapped
+            // pathStart 1.24m off-mesh, resolved 0 of 270 candidates). 3m maps it
+            // onto the nearby walkable surface without reaching a different level.
+            if (!NavMesh.SamplePosition(start, out var startHit, 3f, filter)) return false;
+            if (!NavMesh.SamplePosition(end, out var endHit, 3f, filter)) return false;
             var navPath = new NavMeshPath();
             if (!NavMesh.CalculatePath(startHit.position, endHit.position, filter, navPath))
                 return false;

@@ -390,7 +390,8 @@ namespace ValheimVillages.Villager.AI.Navigation
             Vector3 target,
             System.Func<Vector3, bool> validator,
             out Vector3 worldPos,
-            out string regionId)
+            out string regionId,
+            float maxXzDist = float.MaxValue)
         {
             worldPos = Vector3.zero;
             regionId = null;
@@ -412,8 +413,15 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
             ordered.Sort((a, b) => a.distSq.CompareTo(b.distSq));
 
-            foreach (var (_, pos, id, _) in ordered)
+            // Bound the (potentially expensive) validator calls to cells within
+            // maxXzDist of the target. Cells are distance-sorted, so once one
+            // exceeds the cap every remaining one does too — break. Without
+            // this, an unreachable target makes a capsule/path-validating
+            // caller walk the ENTIRE grid (thousands of full corridor plans).
+            var maxDistSq = maxXzDist >= float.MaxValue ? float.MaxValue : maxXzDist * maxXzDist;
+            foreach (var (_, pos, id, distSq) in ordered)
             {
+                if (distSq > maxDistSq) break;
                 if (validator != null && !validator(pos)) continue;
                 worldPos = pos;
                 regionId = id;

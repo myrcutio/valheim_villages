@@ -54,16 +54,21 @@ namespace ValheimVillages.Settings
 
         /// <summary>How close to target before considering arrived (meters).</summary>
         /// <remarks>
-        ///     Generous final-arrival radius used by VillagerAI's
-        ///     OnArrivedAtTarget gate and the explore adapter's
-        ///     "do I need to travel?" check. Sized for stations / chests
-        ///     where physical colliders (cooking station body, chest box)
-        ///     prevent the agent from getting closer than ~1.5-2m to the
-        ///     prefab's pivot. NOT used for intermediate path-node popping
-        ///     — that uses the much tighter <see cref="PathNodePopThreshold"/>
-        ///     so routing corners around obstacles don't get prematurely eaten.
+        ///     Final-arrival radius used by VillagerAI's OnArrivedAtTarget gate
+        ///     and the explore adapter's "do I need to travel?" check. This is
+        ///     the moment a work interaction fires (roast/smelt/deposit), so it
+        ///     doubles as the "allowable distance" from a station: the approach
+        ///     already sits ~1.5m off the prefab pivot (MinApproachStandoffXZ),
+        ///     and the villager interacts as soon as it's within this radius of
+        ///     that approach. At 2m a villager would roast/deposit from up to
+        ///     ~3.5-4m out; 1m keeps it right at the station (~1.5-2.5m). The
+        ///     NavMesh agent drives to within its 0.3m stopping distance of the
+        ///     approach, so 1m still registers arrival reliably. NOT used for
+        ///     intermediate path-node popping — that uses the tighter
+        ///     <see cref="PathNodePopThreshold"/> so routing corners around
+        ///     obstacles don't get prematurely eaten.
         /// </remarks>
-        public const float ArrivalThreshold = 2f;
+        public const float ArrivalThreshold = 1f;
 
         /// <summary>
         ///     Distance threshold for popping intermediate path nodes from

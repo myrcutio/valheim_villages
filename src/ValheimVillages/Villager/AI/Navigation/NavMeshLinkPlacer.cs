@@ -126,8 +126,27 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     Only scans once per tile generation until <see cref="RemoveAllLinks" /> resets.
         /// </summary>
         /// <returns>True if links were placed in this call.</returns>
+        /// <summary>
+        ///     EXPERIMENT toggle: when true, no NavMeshLinks are placed at all.
+        ///     With raw NavMesh pathing the bake already carves walkable
+        ///     stairs/floors, and the villager's custom mover can't traverse a
+        ///     link's straight off-mesh segment (it walks them into geometry,
+        ///     e.g. through stair sides). Skipping placement tests whether pure
+        ///     navmesh connectivity is sufficient. Flip with vv_skiplinks.
+        /// </summary>
+        public static bool SkipLinkPlacement = true;
+
         public static bool PlaceLinks()
         {
+            if (SkipLinkPlacement)
+            {
+                // Ensure no stale links, THEN mark scanned (RemoveAllLinks resets
+                // the scan flag, so set it after) so callers stop retrying.
+                if (HasLinks) RemoveAllLinks();
+                s_scanned = true;
+                return false;
+            }
+
             if (s_scanned) return false;
             if (Time.time - s_lastAttemptTime < AttemptCooldown) return false;
             s_lastAttemptTime = Time.time;
@@ -277,24 +296,28 @@ namespace ValheimVillages.Villager.AI.Navigation
                         continue;
                     }
 
-                    // 2a. Skip iff NavMesh is ACTUALLY continuous between the
-                    //    snapped endpoints (not just guess-by-Δy). Replaces
-                    //    the old MinVerticalDeltaForLink<0.2m gate, which
-                    //    diagnostic need_link_candidates revealed was
-                    //    silently dropping 3-of-8 disconnected slope links
-                    //    with dy ∈ [0.01, 0.12]m. The CalculatePath probe is
-                    //    cheap (small bake, single query) and matches what
-                    //    the diagnostic ran to classify "already_connected".
-                    if (verticalDelta < MinVerticalDeltaForLink &&
-                        IsAlreadyConnected(startHit.position, endHit.position, filter,
+                    // 2a. Skip iff the NavMesh is ALREADY walkably continuous
+                    //    between the snapped endpoints — regardless of Δy. This
+                    //    used to be gated on verticalDelta < MinVerticalDeltaForLink
+                    //    (only flat links were checked), which let a SLOPED link
+                    //    across a walkable staircase through: the regions are
+                    //    connected by the steps, but the placer still dropped a
+                    //    redundant off-mesh link that shortcuts diagonally INTO
+                    //    the stair side (user-observed path-into-stairs).
+                    //    IsAlreadyConnected runs CalculatePath + a slope/climb
+                    //    walkability check, and a link-based (off-mesh) hop fails
+                    //    that check — so this only skips genuine on-mesh
+                    //    connectivity (walkable stairs/ramps), never a real gap
+                    //    that needs bridging.
+                    if (IsAlreadyConnected(startHit.position, endHit.position, filter,
                             queryAgentTypeID == agentTypeID))
                     {
                         skippedFlat++;
                         Plugin.Log?.LogDebug(
-                            $"[NavMeshLink] flat+continuous-skip RegionGraph link " +
+                            $"[NavMeshLink] already-connected-skip RegionGraph link " +
                             $"({link.PositionStart.x:F1},{link.PositionStart.y:F1},{link.PositionStart.z:F1}) → " +
                             $"({link.PositionEnd.x:F1},{link.PositionEnd.y:F1},{link.PositionEnd.z:F1}) " +
-                            $"Δy={verticalDelta:F3}m AND CalculatePath PathComplete+walkable");
+                            $"Δy={verticalDelta:F3}m (CalculatePath PathComplete + slope/climb-walkable)");
                         continue;
                     }
 

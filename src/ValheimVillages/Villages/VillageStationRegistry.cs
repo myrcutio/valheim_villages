@@ -213,13 +213,70 @@ namespace ValheimVillages.Villages
         /// </summary>
         private const float PathSourceSnapMaxY = 3f;
 
-        public static bool TryResolveApproach(Vector3 target, Vector3 pathSource, out Vector3 approach)
+        /// <summary>
+        ///     Max XZ distance (m) an approach cell may sit from the target. A
+        ///     work approach should be right next to the station/chest; this also
+        ///     bounds the capsule/path validation so an unreachable target can't
+        ///     make the search walk the whole lookup grid.
+        /// </summary>
+        private const float ApproachMaxXzDist = 10f;
+
+        /// <summary>
+        ///     Max vertical gap (m) an approach cell may sit from the target —
+        ///     ~one storey. Lookup-cell candidates are ranked by XZ distance and
+        ///     ignore Y, so without this a cell directly below/above the target
+        ///     (e.g. terrain ~10m under an elevated floor) could win and the
+        ///     villager would interact with the chest/station through the floor
+        ///     from another level (observed: a deposit from ~10m below). The
+        ///     interaction itself (deposit / RPC) ignores distance, so the
+        ///     approach is the only place to enforce "same level".
+        /// </summary>
+        private const float ApproachMaxYDelta = 3f;
+
+        /// <summary>Diagnostic breakdown of the most recent TryResolveApproach call (vv_approach).</summary>
+        public static string LastApproachDiag = "(none)";
+
+        /// <param name="villageAnchor">
+        ///     Position used to select the VILLAGE/graph (defaults to
+        ///     <paramref name="pathSource" /> when null). Pass the villager's BED
+        ///     here: the village a villager works in is defined by its home, not
+        ///     by wherever it's physically standing. Without this a villager
+        ///     bumped off the graph (its current position outside every village
+        ///     polygon) resolves to "no village" / the wrong nearest village and
+        ///     can't look up its own stations — leaving it stuck. The current
+        ///     position is still used as the path START (snapped onto the chosen
+        ///     graph).
+        /// </param>
+        public static bool TryResolveApproach(
+            Vector3 target, Vector3 pathSource, out Vector3 approach, Vector3? villageAnchor = null)
         {
             approach = Vector3.zero;
-            if (!TryGetVillage(pathSource, out var villageKey)) return false;
-
-            var graph = Villager.AI.Navigation.RegionGraph.Get(villageKey);
-            if (graph == null) return false;
+            var anchor = villageAnchor ?? pathSource;
+            Villager.AI.Navigation.RegionGraph graph;
+            if (TryGetVillage(anchor, out var villageKey))
+            {
+                graph = Villager.AI.Navigation.RegionGraph.Get(villageKey);
+            }
+            else
+            {
+                // Anchor is outside every village AREA polygon — but the HNA
+                // graph (and navmesh) can still cover it. This happens when the
+                // anchor is a functional-but-not-polygon-enclosed spot, e.g. a
+                // smelter platform just outside the drawn boundary: the graph has
+                // regions there (PointToRegionId is non-null) yet TryGetVillage
+                // returns false. A hard fail here made the villager abandon ALL
+                // work the moment it stepped onto such a spot ("no HNA-valid
+                // approach"). Fall back to the nearest village graph so
+                // resolution proceeds — graph/navmesh coverage is the real "can I
+                // path from here" test, not polygon membership.
+                graph = Villager.AI.Navigation.RegionGraph.GetNearest(anchor);
+                villageKey = "(nearest)";
+            }
+            if (graph == null)
+            {
+                LastApproachDiag = $"no graph for source ({pathSource.x:F1},{pathSource.y:F1},{pathSource.z:F1})";
+                return false;
+            }
 
             // Snap the path source onto the graph before planning. The usual
             // source is a bed, which sits on a cell the HNA prune carved out
@@ -235,33 +292,140 @@ namespace ValheimVillages.Villages
             // the same XZ — and then only that upper floor is reachable, sending
             // every approach to the wrong level.
             Vector3 pathStart;
+            var snapped = true;
             if (!graph.TryFindNearestLookupCell(pathSource,
                     cell => Mathf.Abs(cell.y - pathSource.y) <= PathSourceSnapMaxY,
                     out pathStart, out _))
             {
                 // Nothing at the source's height — fall back to nearest at any
                 // height (degenerate, but better than refusing to path).
+                snapped = false;
                 if (!graph.TryFindNearestLookupCell(pathSource, null, out pathStart, out _))
                     pathStart = pathSource;
             }
 
             var minStandoffSq = MinApproachStandoffXZ * MinApproachStandoffXZ;
             var pathBuffer = new List<Vector3>();
-            return graph.TryFindNearestLookupCell(
+            var considered = 0;
+            var levelPass = 0;
+            var standoffPass = 0;
+            var pathPass = 0;
+            var losPass = 0;
+            var ok = graph.TryFindNearestLookupCell(
                 target,
                 candidate =>
                 {
-                    // Stand-off check first — cheaper than the path query and
+                    considered++;
+                    // Same vertical level only — reject candidates more than ~one
+                    // storey above/below the target so the villager can't approach
+                    // (and then interact with) a chest/station from another floor.
+                    if (Mathf.Abs(candidate.y - target.y) > ApproachMaxYDelta) return false;
+                    levelPass++;
+                    // Stand-off check next — cheaper than the path query and
                     // the dominant reason candidates near a station get
                     // rejected.
                     var dx = candidate.x - target.x;
                     var dz = candidate.z - target.z;
                     if (dx * dx + dz * dz < minStandoffSq) return false;
-                    return Villager.AI.Navigation.VillagerMovement.TryFindCompletePath(
-                        pathStart, candidate, pathBuffer);
+                    standoffPass++;
+                    // Require BOTH a complete NavMesh corridor AND a path the
+                    // agent capsule can physically sweep. NavMesh-complete alone
+                    // accepts approaches that hug a chest/wall, where the agent
+                    // then stalls a few metres short. Capsule-clear rejects
+                    // those so we keep walking outward to a reachable cell.
+                    if (!Villager.AI.Navigation.VillagerMovement.TryFindCompletePath(
+                            pathStart, candidate, pathBuffer))
+                        return false;
+                    pathPass++;
+                    // Require a clear physical line-of-sight from the approach
+                    // point to the station. A complete NavMesh path can still
+                    // end at a cell on the WRONG SIDE of a wall or on a different
+                    // floor — the villager then "uses" the station through the
+                    // collider (the interaction is an RPC that ignores geometry).
+                    // The LOS ray at interaction height also rejects different-
+                    // floor approaches: a ceiling/floor between the approach and
+                    // the station blocks the diagonal ray, so we keep searching
+                    // outward for a same-level, unobstructed cell.
+                    if (!HasClearLineToStation(candidate, target)) return false;
+                    losPass++;
+                    // The capsule gate exists to catch the HNA corridor planner
+                    // routing straight through obstacles. On the raw NavMesh a
+                    // complete path is already physically traversable (the bake
+                    // carves obstacles by agent-radius), so the gate is redundant
+                    // and over-rejects the weaving raw paths — skip it there.
+                    if (Villager.AI.Navigation.VillagerMovement.RawNavMeshPathing)
+                        return true;
+                    return Villager.AI.Navigation.VillagerMovement.IsPathCapsuleClear(
+                        pathStart, pathBuffer);
                 },
                 out approach,
-                out _);
+                out _,
+                ApproachMaxXzDist);
+
+            LastApproachDiag =
+                $"src=({pathSource.x:F1},{pathSource.y:F1},{pathSource.z:F1}) snap={(snapped ? "y" : "fallback")} " +
+                $"pathStart=({pathStart.x:F1},{pathStart.y:F1},{pathStart.z:F1}) " +
+                $"tgt=({target.x:F1},{target.y:F1},{target.z:F1}) " +
+                $"considered={considered} levelPass={levelPass} standoffPass={standoffPass} pathPass={pathPass} losPass={losPass} " +
+                $"result={(ok ? $"({approach.x:F1},{approach.y:F1},{approach.z:F1})" : "FAIL")}";
+            return ok;
+        }
+
+        /// <summary>Layers that block a villager↔station sightline (walls, floors, terrain).</summary>
+        private static readonly int s_losMask =
+            LayerMask.GetMask("Default", "static_solid", "piece", "terrain");
+
+        /// <summary>
+        ///     True when nothing solid sits between the approach point and the
+        ///     station at interaction height. Casts at ~chest height and stops a
+        ///     short pad before the station so the station's OWN collider doesn't
+        ///     register as an obstruction. A wall (vertical) blocks the ray; a
+        ///     different-floor station makes the ray climb into the intervening
+        ///     floor/ceiling and blocks too — so this also enforces "same level".
+        /// </summary>
+        private static bool HasClearLineToStation(Vector3 approach, Vector3 station)
+        {
+            const float eyeHeight = 1.2f;   // villager/station interaction height
+            const float stationPad = 1.5f;  // don't probe the station's own volume
+
+            var from = approach + Vector3.up * eyeHeight;
+            var to = station + Vector3.up * eyeHeight;
+            var delta = to - from;
+            var dist = delta.magnitude;
+            if (dist <= stationPad) return true; // adjacent — trivially usable
+
+            var dir = delta / dist;
+            var probe = dist - stationPad;
+            return !Physics.Raycast(from, dir, probe, s_losMask,
+                QueryTriggerInteraction.Ignore);
+        }
+
+        [DevCommand("Diagnose HNA approach resolution to a target from a source (default player). " +
+                    "Usage: vv_approach <tx> <tz> [<sx> <sz>]", Name = "vv_approach")]
+        public static void ApproachDiag(Terminal.ConsoleEventArgs args)
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            if (args?.Args == null || args.Args.Length < 3
+                || !float.TryParse(args.Args[1], System.Globalization.NumberStyles.Float, inv, out var tx)
+                || !float.TryParse(args.Args[2], System.Globalization.NumberStyles.Float, inv, out var tz))
+            {
+                global::Console.instance?.Print("Usage: vv_approach <tx> <tz> [<sx> <sz>]");
+                return;
+            }
+
+            var src = Player.m_localPlayer != null ? Player.m_localPlayer.transform.position : Vector3.zero;
+            if (args.Args.Length >= 5
+                && float.TryParse(args.Args[3], System.Globalization.NumberStyles.Float, inv, out var sx)
+                && float.TryParse(args.Args[4], System.Globalization.NumberStyles.Float, inv, out var sz))
+                src = new Vector3(sx, src.y, sz);
+
+            var groundT = ZoneSystem.instance != null
+                ? ZoneSystem.instance.GetGroundHeight(new Vector3(tx, 0f, tz)) : 0f;
+            var target = new Vector3(tx, groundT, tz);
+            var ok = TryResolveApproach(target, src, out var approach);
+            var msg = $"[vv_approach] ok={ok} approach=({approach.x:F1},{approach.y:F1},{approach.z:F1})\n  {LastApproachDiag}";
+            global::Console.instance?.Print(msg);
+            Plugin.Log?.LogInfo(msg);
         }
 
         [DevCommand("Dump cached village stations + HNA approach resolution for each villager bed",

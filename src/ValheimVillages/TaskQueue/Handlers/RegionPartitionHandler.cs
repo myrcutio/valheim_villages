@@ -519,6 +519,14 @@ namespace ValheimVillages.TaskQueue.Handlers
             // the perimeter but not reachable from a bed). Greedy
             // rectangle decomposition keeps the source-count tiny —
             // ~tens of rectangles instead of thousands of per-cell boxes.
+            if (!NavMeshBakeManager.EnableGraphPrunePasses)
+            {
+                NavMeshBakeManager.LastPrunePassSummary =
+                    "(graph-prune passes disabled — single combined bake; Unity erosion + " +
+                    "perimeter phantoms handle obstacles/confinement)";
+            }
+            else
+            {
             var pruneRebake = NavMeshBakeManager.RebakeWithPruneComplement(
                 bedReachableCells, pruneOutsideCells, prunedPieceKeys, bakeBounds);
             DebugLog.Event("NavMeshBake", "prune_complement_rebake",
@@ -543,9 +551,21 @@ namespace ValheimVillages.TaskQueue.Handlers
             // cover cells HNA explicitly rejected. Iterate up to 3 times —
             // each ModifierBox rebake can expose a smaller residual fringe.
             const int maxOrphanIterations = 3;
+            var pruneSummary = new System.Text.StringBuilder();
+            pruneSummary.Append(
+                $"prune-complement: success={pruneRebake.Success} " +
+                $"complement_cells={pruneRebake.PruneComplementCells} " +
+                $"complement_rects={pruneRebake.PruneComplementRectangles} " +
+                $"pruned_piece_cells={pruneRebake.PrunedPieceCells} " +
+                $"pruned_piece_rects={pruneRebake.PrunedPieceRectangles}");
             for (var iter = 0; iter < maxOrphanIterations; iter++)
             {
                 var orphanResult = NavMeshBakeManager.PruneOrphanTriangles(graph, bakeBounds);
+                pruneSummary.Append(
+                    $"\norphan[{iter}]: orphan_hits={orphanResult.OrphanTriangles} " +
+                    $"cells={orphanResult.OrphanCellsBlocked} buckets={orphanResult.HeightBuckets} " +
+                    $"rects={orphanResult.Rectangles} did_rebake={orphanResult.DidRebake}");
+                NavMeshBakeManager.LastPrunePassSummary = pruneSummary.ToString();
                 DebugLog.Event("NavMeshBake", "orphan_prune",
                     ("iter", iter),
                     ("orphan_triangles", orphanResult.OrphanTriangles),
@@ -555,6 +575,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                     ("did_rebake", orphanResult.DidRebake),
                     ("duration_ms", orphanResult.DurationMs));
                 if (!orphanResult.DidRebake) break;
+            }
             }
 
             // Invalidate every active villager's cached BaseAI path.

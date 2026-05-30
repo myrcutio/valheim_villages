@@ -44,6 +44,14 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         /// </summary>
         public static readonly HashSet<string> HighlightedRegions = new();
 
+        /// <summary>
+        ///     Ad-hoc polyline to overlay (magenta), set by <c>vv_drawpath</c>.
+        ///     Used to visualize a raw NavMesh path's corners for comparison
+        ///     against the HNA graph. Empty = nothing drawn.
+        /// </summary>
+        public static readonly List<Vector3> DebugPolyline = new();
+        private static readonly Color ColorDebugPolyline = Color.magenta;
+
         private static readonly FieldInfo s_pathField = typeof(BaseAI).GetField(
             "m_path", BindingFlags.NonPublic | BindingFlags.Instance);
 
@@ -80,7 +88,7 @@ namespace ValheimVillages.Villager.AI.Pathfinding
 
         private void OnRenderObject()
         {
-            if (!s_enabled && !s_showTriangulation) return;
+            if (!s_enabled && !s_showTriangulation && DebugPolyline.Count == 0) return;
 
             // Camera filter: when targeting a specific camera (e.g. the off-screen
             // MCP render camera), skip every other camera's render pass so the
@@ -109,7 +117,30 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             if (s_showTriangulation)
                 DrawTriangulation();
 
+            if (DebugPolyline.Count > 0)
+                DrawDebugPolyline();
+
             GL.PopMatrix();
+        }
+
+        // Draw the ad-hoc DebugPolyline (set by vv_drawpath) as a bright magenta
+        // line through its corners, lifted well above the floor so it's legible
+        // over the triangulation overlay, with a marker at each corner.
+        private void DrawDebugPolyline()
+        {
+            var yOff = Vector3.up * 0.4f;
+            GL.Begin(GL.LINES);
+            GL.Color(ColorDebugPolyline);
+            for (var i = 0; i < DebugPolyline.Count - 1; i++)
+            {
+                GL.Vertex(DebugPolyline[i] + yOff);
+                GL.Vertex(DebugPolyline[i + 1] + yOff);
+            }
+
+            GL.End();
+
+            for (var i = 0; i < DebugPolyline.Count; i++)
+                DrawWireOctahedron(DebugPolyline[i] + yOff, NodeMarkerSize * 2f, ColorDebugPolyline);
         }
 
         [DevCommand("Toggle villager path debug viz. Optional cam=<cameraName> restricts the overlay to that camera (cam=off clears).", Name = "vv_path_debug")]
@@ -136,6 +167,96 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             var state = s_enabled ? "ON" : "OFF";
             Console.instance?.Print($"Path debug rendering {state}{CamSuffix()}");
             Plugin.Log?.LogInfo($"[PathDebug] Visualization {state}");
+        }
+
+        [DevCommand("Overlay the raw slot-31 NavMesh path between two points (magenta). " +
+                    "Usage: vv_drawpath <fromX> <fromZ> <toX> <toZ> | vv_drawpath off", Name = "vv_drawpath")]
+        public static void DrawRawPath(Terminal.ConsoleEventArgs args)
+        {
+            if (args?.Args != null && args.Args.Length >= 2 &&
+                args.Args[1].Equals("off", StringComparison.OrdinalIgnoreCase))
+            {
+                DebugPolyline.Clear();
+                Console.instance?.Print("[vv_drawpath] cleared");
+                return;
+            }
+
+            var inv = CultureInfo.InvariantCulture;
+            if (args?.Args == null || args.Args.Length < 5
+                || !float.TryParse(args.Args[1], NumberStyles.Float, inv, out var fx)
+                || !float.TryParse(args.Args[2], NumberStyles.Float, inv, out var fz)
+                || !float.TryParse(args.Args[3], NumberStyles.Float, inv, out var tx)
+                || !float.TryParse(args.Args[4], NumberStyles.Float, inv, out var tz))
+            {
+                Console.instance?.Print("Usage: vv_drawpath <fromX> <fromZ> <toX> <toZ> | vv_drawpath off");
+                return;
+            }
+
+            var filter = new NavMeshQueryFilter
+            {
+                agentTypeID = VillagerAgentType.UnityAgentTypeID,
+                areaMask = NavMesh.AllAreas,
+            };
+            if (!NavMesh.SamplePosition(new Vector3(fx, 40f, fz), out var fHit, 8f, filter)
+                || !NavMesh.SamplePosition(new Vector3(tx, 40f, tz), out var tHit, 8f, filter))
+            {
+                Console.instance?.Print("[vv_drawpath] endpoint sample failed");
+                return;
+            }
+
+            var path = new NavMeshPath();
+            NavMesh.CalculatePath(fHit.position, tHit.position, filter, path);
+            DebugPolyline.Clear();
+            DebugPolyline.AddRange(path.corners);
+            EnsureInstance();
+            Console.instance?.Print(
+                $"[vv_drawpath] status={path.status} corners={path.corners.Length} (magenta overlay)");
+        }
+
+        [DevCommand("Toggle villager off-mesh self-rescue (teleport-to-nearest-mesh when off-graph).",
+            Name = "vv_offmeshrescue")]
+        public static void ToggleOffMeshRescue(Terminal.ConsoleEventArgs args)
+        {
+            VillagerAI.OffMeshRescueEnabled = !VillagerAI.OffMeshRescueEnabled;
+            var mode = VillagerAI.OffMeshRescueEnabled ? "ENABLED" : "DISABLED";
+            Console.instance?.Print($"[vv_offmeshrescue] off-mesh rescue = {mode}");
+            Plugin.Log?.LogInfo($"[vv_offmeshrescue] off-mesh rescue = {mode}");
+        }
+
+        [DevCommand("Toggle villager mover between Unity NavMeshAgent (advisory) and the hand-rolled corner-walker.",
+            Name = "vv_agentmover")]
+        public static void ToggleAgentMover(Terminal.ConsoleEventArgs args)
+        {
+            VillagerAI.NavMeshAgentMover = !VillagerAI.NavMeshAgentMover;
+            VillagerAIManager.InvalidatePathsAfterRebake();
+            var mode = VillagerAI.NavMeshAgentMover ? "NavMeshAgent (advisory)" : "hand-rolled corner-walker";
+            Console.instance?.Print($"[vv_agentmover] villager mover = {mode}");
+            Plugin.Log?.LogInfo($"[vv_agentmover] villager mover = {mode}");
+        }
+
+        [DevCommand("Toggle NavMeshLink placement. on = skip all links (pure navmesh); off = place links normally.",
+            Name = "vv_skiplinks")]
+        public static void ToggleSkipLinks(Terminal.ConsoleEventArgs args)
+        {
+            NavMeshLinkPlacer.SkipLinkPlacement = !NavMeshLinkPlacer.SkipLinkPlacement;
+            if (NavMeshLinkPlacer.SkipLinkPlacement)
+                NavMeshLinkPlacer.RemoveAllLinks();
+            VillagerAIManager.InvalidatePathsAfterRebake();
+            var mode = NavMeshLinkPlacer.SkipLinkPlacement ? "SKIP (pure navmesh)" : "PLACE links";
+            Console.instance?.Print($"[vv_skiplinks] link placement = {mode}");
+            Plugin.Log?.LogInfo($"[vv_skiplinks] link placement = {mode}");
+        }
+
+        [DevCommand("Toggle villager pathing between raw slot-31 NavMesh (on) and the HNA corridor planner (off).",
+            Name = "vv_rawpathing")]
+        public static void ToggleRawPathing(Terminal.ConsoleEventArgs args)
+        {
+            VillagerMovement.RawNavMeshPathing = !VillagerMovement.RawNavMeshPathing;
+            // Clear cached paths so every villager re-plans under the new mode.
+            VillagerAIManager.InvalidatePathsAfterRebake();
+            var mode = VillagerMovement.RawNavMeshPathing ? "RAW slot-31 NavMesh" : "HNA corridor planner";
+            Console.instance?.Print($"[vv_rawpathing] villager pathing = {mode}");
+            Plugin.Log?.LogInfo($"[vv_rawpathing] villager pathing = {mode}");
         }
 
         [DevCommand("Toggle NavMesh triangulation wireframe. Optional cam=<cameraName> restricts the overlay to that camera (cam=off clears).", Name = "vv_tri_debug")]
