@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
@@ -247,45 +248,17 @@ namespace ValheimVillages.Villager.AI.Navigation
             // piece is never a bridge between outside and inside terrain.
             // outsideCells contains every cell (populated or not) the flood
             // could reach without tripping WallBlocks on the piece layer.
-            var outsideCells = new HashSet<long>();
-            var queue = new Queue<long>();
-            for (var gx = gxMin; gx <= gxMax; gx++)
-            {
-                EnqueuePerimeterSeed(gx, gzMin, outsideCells, queue);
-                EnqueuePerimeterSeed(gx, gzMax, outsideCells, queue);
-            }
+            // Pass 1 flood now lives in the pure PerimeterOutsideFlood helper;
+            // here we inject terrain cell heights and the piece-layer wall gate.
+            var outsideCells = PerimeterOutsideFlood(gxMin, gzMin, gxMax, gzMax,
+                (gx, gz) => GetCellY(gx, gz, xzMaxYTerrain, cell),
+                (ax, az, bx, bz, ya, yb) => WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask),
+                out var perimeterSeeds);
+            stats.PerimeterSeeds = perimeterSeeds;
 
-            for (var gz = gzMin + 1; gz <= gzMax - 1; gz++)
-            {
-                EnqueuePerimeterSeed(gxMin, gz, outsideCells, queue);
-                EnqueuePerimeterSeed(gxMax, gz, outsideCells, queue);
-            }
-
-            stats.PerimeterSeeds = outsideCells.Count;
-
+            // dx/dz are reused by Passes 2 and 3 below.
             int[] dx = { 1, -1, 0, 0 };
             int[] dz = { 0, 0, 1, -1 };
-
-            while (queue.Count > 0)
-            {
-                var curKey = queue.Dequeue();
-                UnpackXz(curKey, out var gx, out var gz);
-                var curY = GetCellY(gx, gz, xzMaxYTerrain, cell);
-
-                for (var d = 0; d < 4; d++)
-                {
-                    int ngx = gx + dx[d], ngz = gz + dz[d];
-                    if (ngx < gxMin || ngx > gxMax || ngz < gzMin || ngz > gzMax) continue;
-                    var nKey = XzKey(ngx, ngz);
-                    if (outsideCells.Contains(nKey)) continue;
-
-                    var nY = GetCellY(ngx, ngz, xzMaxYTerrain, cell);
-                    if (WallBlocks(gx, gz, ngx, ngz, curY, nY, cell, pieceMask)) continue;
-
-                    outsideCells.Add(nKey);
-                    queue.Enqueue(nKey);
-                }
-            }
 
             foreach (var kv in xzMaxYTerrain)
                 if (outsideCells.Contains(kv.Key))
@@ -343,72 +316,16 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             if (beds != null && beds.Count > 0 && ZoneSystem.instance != null)
             {
-                const int bedSnapRingMax = 6; // search radius (cells) for nearest populated cell
-                var bedQueue = new Queue<(long key, float y)>();
-                foreach (var bed in beds)
-                {
-                    var bgx0 = Mathf.FloorToInt(bed.x / cell);
-                    var bgz0 = Mathf.FloorToInt(bed.z / cell);
-
-                    // Snap to the nearest populated, non-outside cell (the floor
-                    // the bed rests on, even when the bed's own cell is carved).
-                    int bgx = bgx0, bgz = bgz0;
-                    var snapped = false;
-                    for (var r = 0; r <= bedSnapRingMax && !snapped; r++)
-                    for (var ox = -r; ox <= r && !snapped; ox++)
-                    for (var oz = -r; oz <= r && !snapped; oz++)
-                    {
-                        if (Mathf.Max(Mathf.Abs(ox), Mathf.Abs(oz)) != r) continue; // ring only
-                        var cx = bgx0 + ox;
-                        var cz = bgz0 + oz;
-                        if (cx < gxMin || cx > gxMax || cz < gzMin || cz > gzMax) continue;
-                        var ck = XzKey(cx, cz);
-                        if (outsideCells.Contains(ck)) continue;
-                        if (!xzMaxYTerrain.ContainsKey(ck) && !xzMaxYPiece.ContainsKey(ck)) continue;
-                        bgx = cx;
-                        bgz = cz;
-                        snapped = true;
-                    }
-
-                    if (!snapped)
-                    {
-                        Plugin.Log?.LogWarning(
-                            $"[RubberBand] Pass 2 bed skipped: bed=({bed.x:F1},{bed.z:F1}) " +
-                            $"cell=({bgx0},{bgz0}) — no populated, non-outside cell within " +
-                            $"{bedSnapRingMax} cells (bed walled off or outside the village?).");
-                        continue;
-                    }
-
-                    var bedKey = XzKey(bgx, bgz);
-                    if (bedReachableCells.Add(bedKey))
-                    {
-                        var seedY = SurfaceY(bedKey, bgx, bgz, out _);
-                        bedReachableCellY[bedKey] = seedY;
-                        bedQueue.Enqueue((bedKey, seedY));
-                        pass2Seeds++;
-                    }
-                }
-
-                while (bedQueue.Count > 0)
-                {
-                    var (curKey, curY) = bedQueue.Dequeue();
-                    UnpackXz(curKey, out var gx, out var gz);
-                    for (var d = 0; d < 4; d++)
-                    {
-                        int ngx = gx + dx[d], ngz = gz + dz[d];
-                        if (ngx < gxMin || ngx > gxMax || ngz < gzMin || ngz > gzMax) continue;
-                        var nKey = XzKey(ngx, ngz);
-                        if (bedReachableCells.Contains(nKey)) continue;
-                        if (outsideCells.Contains(nKey)) continue;
-
-                        var nY = SurfaceY(nKey, ngx, ngz, out _);
-                        if (WallBlocks(gx, gz, ngx, ngz, curY, nY, cell, pieceMask)) continue;
-
-                        bedReachableCells.Add(nKey);
-                        bedReachableCellY[nKey] = nY;
-                        bedQueue.Enqueue((nKey, nY));
-                    }
-                }
+                // Pass 2 flood now lives in the pure BedReachableFlood helper.
+                // isPopulated keeps the bed-snap on the ContainsKey fast path (no
+                // ground cast); surfaceY supplies the walk-surface height.
+                BedReachableFlood(
+                    gxMin, gzMin, gxMax, gzMax, beds, outsideCells, cell, bedSnapRingMax: 6,
+                    isPopulated: ck => xzMaxYTerrain.ContainsKey(ck) || xzMaxYPiece.ContainsKey(ck),
+                    surfaceY: (xzKey, gx, gz) => SurfaceY(xzKey, gx, gz, out _),
+                    wallBlocks: (ax, az, bx, bz, ya, yb) => WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask),
+                    out bedReachableCells, out bedReachableCellY, out pass2Seeds,
+                    warn: msg => Plugin.Log?.LogWarning(msg));
             }
 
             stats.Pass2Seeds = pass2Seeds;
@@ -962,6 +879,161 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
         /// <summary>
+        ///     Pure Pass-1 perimeter ("outside-in") flood. 4-connected BFS seeded
+        ///     from every cell on the border of [gxMin..gxMax] x [gzMin..gzMax].
+        ///     A cell→cell step is severed when <paramref name="wallBlocks" />
+        ///     returns true; per-cell heights come from <paramref name="cellY" />.
+        ///     Engine-free — callers inject the ground/wall providers (live code
+        ///     wires them to ZoneSystem/Physics, tests pass synthetic grids).
+        ///     Returns every cell reachable from the perimeter without crossing a
+        ///     wall — i.e. everything outside the outermost wall ring.
+        ///     <paramref name="perimeterSeedCount" /> reports the seed count
+        ///     (set before the BFS expands) for the diagnostic stats.
+        /// </summary>
+        internal static HashSet<long> PerimeterOutsideFlood(
+            int gxMin, int gzMin, int gxMax, int gzMax,
+            Func<int, int, float> cellY,
+            Func<int, int, int, int, float, float, bool> wallBlocks,
+            out int perimeterSeedCount)
+        {
+            var outsideCells = new HashSet<long>();
+            var queue = new Queue<long>();
+            for (var gx = gxMin; gx <= gxMax; gx++)
+            {
+                EnqueuePerimeterSeed(gx, gzMin, outsideCells, queue);
+                EnqueuePerimeterSeed(gx, gzMax, outsideCells, queue);
+            }
+
+            for (var gz = gzMin + 1; gz <= gzMax - 1; gz++)
+            {
+                EnqueuePerimeterSeed(gxMin, gz, outsideCells, queue);
+                EnqueuePerimeterSeed(gxMax, gz, outsideCells, queue);
+            }
+
+            perimeterSeedCount = outsideCells.Count;
+
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+            while (queue.Count > 0)
+            {
+                var curKey = queue.Dequeue();
+                UnpackXz(curKey, out var gx, out var gz);
+                var curY = cellY(gx, gz);
+                for (var d = 0; d < 4; d++)
+                {
+                    int ngx = gx + dx[d], ngz = gz + dz[d];
+                    if (ngx < gxMin || ngx > gxMax || ngz < gzMin || ngz > gzMax) continue;
+                    var nKey = XzKey(ngx, ngz);
+                    if (outsideCells.Contains(nKey)) continue;
+                    var nY = cellY(ngx, ngz);
+                    if (wallBlocks(gx, gz, ngx, ngz, curY, nY)) continue;
+                    outsideCells.Add(nKey);
+                    queue.Enqueue(nKey);
+                }
+            }
+
+            return outsideCells;
+        }
+
+        /// <summary>
+        ///     Pure Pass-2 bed-reachable ("inside-out") flood. For each bed, snaps
+        ///     to the nearest populated, non-outside cell within
+        ///     <paramref name="bedSnapRingMax" /> rings (the floor the villager
+        ///     stands on, even when the bed's own cell is carved out), then runs a
+        ///     4-connected BFS that refuses to enter <paramref name="outsideCells" />
+        ///     and is gated by <paramref name="wallBlocks" />. Engine-free:
+        ///     <paramref name="isPopulated" /> answers "does any region cover this
+        ///     cell" (the bed-snap fast path) and <paramref name="surfaceY" /> gives
+        ///     each cell's walk-surface height. Beds that cannot snap are reported
+        ///     via <paramref name="warn" /> and skipped.
+        /// </summary>
+        internal static void BedReachableFlood(
+            int gxMin, int gzMin, int gxMax, int gzMax,
+            IReadOnlyList<Vector3> beds,
+            HashSet<long> outsideCells,
+            float cell,
+            int bedSnapRingMax,
+            Func<long, bool> isPopulated,
+            Func<long, int, int, float> surfaceY,
+            Func<int, int, int, int, float, float, bool> wallBlocks,
+            out HashSet<long> bedReachableCells,
+            out Dictionary<long, float> bedReachableCellY,
+            out int seedCount,
+            Action<string> warn = null)
+        {
+            bedReachableCells = new HashSet<long>();
+            bedReachableCellY = new Dictionary<long, float>();
+            seedCount = 0;
+            if (beds == null || beds.Count == 0) return;
+
+            var bedQueue = new Queue<(long key, float y)>();
+            foreach (var bed in beds)
+            {
+                var bgx0 = Mathf.FloorToInt(bed.x / cell);
+                var bgz0 = Mathf.FloorToInt(bed.z / cell);
+
+                // Snap to the nearest populated, non-outside cell (the floor the
+                // bed rests on, even when the bed's own cell is carved).
+                int bgx = bgx0, bgz = bgz0;
+                var snapped = false;
+                for (var r = 0; r <= bedSnapRingMax && !snapped; r++)
+                for (var ox = -r; ox <= r && !snapped; ox++)
+                for (var oz = -r; oz <= r && !snapped; oz++)
+                {
+                    if (Mathf.Max(Mathf.Abs(ox), Mathf.Abs(oz)) != r) continue; // ring only
+                    var cx = bgx0 + ox;
+                    var cz = bgz0 + oz;
+                    if (cx < gxMin || cx > gxMax || cz < gzMin || cz > gzMax) continue;
+                    var ck = XzKey(cx, cz);
+                    if (outsideCells.Contains(ck)) continue;
+                    if (!isPopulated(ck)) continue;
+                    bgx = cx;
+                    bgz = cz;
+                    snapped = true;
+                }
+
+                if (!snapped)
+                {
+                    warn?.Invoke(
+                        $"[RubberBand] Pass 2 bed skipped: bed=({bed.x:F1},{bed.z:F1}) " +
+                        $"cell=({bgx0},{bgz0}) — no populated, non-outside cell within " +
+                        $"{bedSnapRingMax} cells (bed walled off or outside the village?).");
+                    continue;
+                }
+
+                var bedKey = XzKey(bgx, bgz);
+                if (bedReachableCells.Add(bedKey))
+                {
+                    var seedY = surfaceY(bedKey, bgx, bgz);
+                    bedReachableCellY[bedKey] = seedY;
+                    bedQueue.Enqueue((bedKey, seedY));
+                    seedCount++;
+                }
+            }
+
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+            while (bedQueue.Count > 0)
+            {
+                var (curKey, curY) = bedQueue.Dequeue();
+                UnpackXz(curKey, out var gx, out var gz);
+                for (var d = 0; d < 4; d++)
+                {
+                    int ngx = gx + dx[d], ngz = gz + dz[d];
+                    if (ngx < gxMin || ngx > gxMax || ngz < gzMin || ngz > gzMax) continue;
+                    var nKey = XzKey(ngx, ngz);
+                    if (bedReachableCells.Contains(nKey)) continue;
+                    if (outsideCells.Contains(nKey)) continue;
+                    var nY = surfaceY(nKey, ngx, ngz);
+                    if (wallBlocks(gx, gz, ngx, ngz, curY, nY)) continue;
+                    bedReachableCells.Add(nKey);
+                    bedReachableCellY[nKey] = nY;
+                    bedQueue.Enqueue((nKey, nY));
+                }
+            }
+        }
+
+        /// <summary>
         ///     Compute the outside-cell set for a bake using only
         ///     <c>ZoneSystem.GetGroundHeight</c> for cell Y values.
         ///     Runs the same perimeter flood as Pass 1 but doesn't require
@@ -975,54 +1047,24 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// </summary>
         public static HashSet<long> ComputeOutsideCellsForBake(Bounds bounds)
         {
-            var outsideCells = new HashSet<long>();
             var pieceMask = LayerMask.GetMask("piece");
-            if (pieceMask == 0) return outsideCells;
-            if (ZoneSystem.instance == null) return outsideCells;
+            if (pieceMask == 0) return new HashSet<long>();
+            if (ZoneSystem.instance == null) return new HashSet<long>();
 
             var cell = RegionGraph.LookupCellSize;
             var gxMin = Mathf.FloorToInt(bounds.min.x / cell) - 1;
             var gzMin = Mathf.FloorToInt(bounds.min.z / cell) - 1;
             var gxMax = Mathf.FloorToInt(bounds.max.x / cell) + 1;
             var gzMax = Mathf.FloorToInt(bounds.max.z / cell) + 1;
-
-            var queue = new Queue<long>();
-            for (var gx = gxMin; gx <= gxMax; gx++)
-            {
-                EnqueuePerimeterSeed(gx, gzMin, outsideCells, queue);
-                EnqueuePerimeterSeed(gx, gzMax, outsideCells, queue);
-            }
-            for (var gz = gzMin + 1; gz <= gzMax - 1; gz++)
-            {
-                EnqueuePerimeterSeed(gxMin, gz, outsideCells, queue);
-                EnqueuePerimeterSeed(gxMax, gz, outsideCells, queue);
-            }
-
-            int[] dx = { 1, -1, 0, 0 };
-            int[] dz = { 0, 0, 1, -1 };
-
             var half = cell * 0.5f;
-            while (queue.Count > 0)
-            {
-                var curKey = queue.Dequeue();
-                UnpackXz(curKey, out var gx, out var gz);
-                var curY = ZoneSystem.instance.GetGroundHeight(
-                    new Vector3(gx * cell + half, 0f, gz * cell + half));
-                for (var d = 0; d < 4; d++)
-                {
-                    int ngx = gx + dx[d], ngz = gz + dz[d];
-                    if (ngx < gxMin || ngx > gxMax || ngz < gzMin || ngz > gzMax) continue;
-                    var nKey = XzKey(ngx, ngz);
-                    if (outsideCells.Contains(nKey)) continue;
-                    var nY = ZoneSystem.instance.GetGroundHeight(
-                        new Vector3(ngx * cell + half, 0f, ngz * cell + half));
-                    if (WallBlocks(gx, gz, ngx, ngz, curY, nY, cell, pieceMask)) continue;
-                    outsideCells.Add(nKey);
-                    queue.Enqueue(nKey);
-                }
-            }
 
-            return outsideCells;
+            // Same perimeter flood as Apply's Pass 1, but cell heights come from
+            // the ZoneSystem heightmap (no baked centroids exist yet at bake time).
+            return PerimeterOutsideFlood(gxMin, gzMin, gxMax, gzMax,
+                (gx, gz) => ZoneSystem.instance.GetGroundHeight(
+                    new Vector3(gx * cell + half, 0f, gz * cell + half)),
+                (ax, az, bx, bz, ya, yb) => WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask),
+                out _);
         }
 
         /// <summary>
