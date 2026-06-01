@@ -204,15 +204,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
                 $"[vv_drawpath] status={path.status} corners={path.corners.Length} (magenta overlay)");
         }
 
-        [DevCommand("Toggle villager off-mesh self-rescue (teleport-to-nearest-mesh when off-graph).",
-            Name = "vv_offmeshrescue")]
-        public static void ToggleOffMeshRescue(Terminal.ConsoleEventArgs args)
-        {
-            VillagerAI.OffMeshRescueEnabled = !VillagerAI.OffMeshRescueEnabled;
-            var mode = VillagerAI.OffMeshRescueEnabled ? "ENABLED" : "DISABLED";
-            Console.instance?.Print($"[vv_offmeshrescue] off-mesh rescue = {mode}");
-            Plugin.Log?.LogInfo($"[vv_offmeshrescue] off-mesh rescue = {mode}");
-        }
 
         [DevCommand("Toggle villager mover between Unity NavMeshAgent (advisory) and the hand-rolled corner-walker.",
             Name = "vv_agentmover")]
