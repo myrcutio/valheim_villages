@@ -5,7 +5,6 @@ using UnityEngine;
 using UnityEngine.AI;
 using ValheimVillages.Attributes;
 using ValheimVillages.Settings;
-using ValheimVillages.TaskQueue.Handlers;
 using ValheimVillages.Villager.AI.Pathfinding;
 using Object = UnityEngine.Object;
 

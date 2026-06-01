@@ -3,10 +3,9 @@ using System.Linq;
 using UnityEngine;
 using UnityEngine.AI;
 using ValheimVillages.Attributes;
-using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
 
-namespace ValheimVillages.TaskQueue.Handlers
+namespace ValheimVillages.Villager.AI.Navigation
 {
     /// <summary>
     ///     Builds the village region graph from NavMesh triangulation data.

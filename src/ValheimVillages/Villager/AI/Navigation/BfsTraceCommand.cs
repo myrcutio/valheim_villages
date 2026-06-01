@@ -4,7 +4,6 @@ using System.Linq;
 using System.Text;
 using UnityEngine;
 using ValheimVillages.Attributes;
-using ValheimVillages.TaskQueue.Handlers;
 using ValheimVillages.Villager.AI.Pathfinding;
 
 namespace ValheimVillages.Villager.AI.Navigation
