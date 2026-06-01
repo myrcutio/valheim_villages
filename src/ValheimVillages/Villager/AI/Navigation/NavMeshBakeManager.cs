@@ -194,6 +194,22 @@ namespace ValheimVillages.Villager.AI.Navigation
                 bounds, s_pieceMask, NavMeshCollectGeometry.PhysicsColliders,
                 0, new List<NavMeshBuildMarkup>(), pieceSources);
 
+            // Drop the real, movable Door/Gate geometry before baking. A door
+            // PANEL rotates with open/close state, so baking its collider
+            // carves the room interior when the door is open inward and the
+            // exterior when open outward — a navmesh that depends on a
+            // moment-to-moment piece state. The phantom doorway blocker added
+            // immediately below represents the opening DETERMINISTICALLY (fixed
+            // box at the door pivot regardless of swing), and villagers cross
+            // doorways via RegionLinks, not walkable navmesh — so the real
+            // geometry is pure liability. Removing the whole Door hierarchy
+            // (panel + frame) is safe: the phantom plus the flanking wall
+            // pieces cover the opening. Valheim uses the Door component for
+            // both doors and gates, so this catches both.
+            var doorGeometryDropped = pieceSources.RemoveAll(s =>
+                s.component != null && s.component.GetComponentInParent<Door>() != null);
+            result.DoorPiecesDropped = doorGeometryDropped;
+
             // Add phantom solid blockers for every Door in bounds. Doors are
             // dynamic (rotate to open/close), but the bake snapshots one
             // moment in time — if a door is open when CollectSources runs,
@@ -992,7 +1008,13 @@ namespace ValheimVillages.Villager.AI.Navigation
                         AppendMesh(verts, idx, triLayers, layer, src.transform, mesh, minX, minZ, maxX, maxZ);
                         break;
                     case NavMeshBuildSourceShape.Box:
-                        AppendBox(verts, idx, triLayers, layer, src.transform, src.size, minX, minZ, maxX, maxZ);
+                        // Subdivide walkable faces on the piece pass only: piece
+                        // box floors arrive as 4m faces the centroid-based filter
+                        // fails wholesale; terrain is already finely tessellated
+                        // and welded, and over-tessellating it would bloat tri
+                        // count for no gain.
+                        AppendBox(verts, idx, triLayers, layer, src.transform, src.size,
+                            minX, minZ, maxX, maxZ, kind == SurfaceKind.Piece);
                         break;
                     default:
                         skippedShape++;
@@ -1347,9 +1369,16 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
         }
 
+        // Minimum world-space normal.y for a box face to be finely
+        // tessellated. Mirrors RegionBuilder's MinNormalY pre-filter (cos 60°):
+        // only faces that could plausibly be walkable get the lattice; vertical
+        // wall/side faces stay 2 triangles (they're normal-rejected downstream
+        // anyway), keeping the triangle-count increase focused on floors.
+        private const float SubdivFaceMinNormalY = 0.5f;
+
         private static void AppendBox(List<Vector3> verts, List<int> idx, List<int> triLayers, int layer,
             Matrix4x4 t, Vector3 size,
-            float minX, float minZ, float maxX, float maxZ)
+            float minX, float minZ, float maxX, float maxZ, bool subdivide)
         {
             // Box bounds check via the world-space transform origin; boxes
             // are typically small (door blockers, piece colliders) so a
@@ -1359,32 +1388,98 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (worldCenter.x < minX || worldCenter.x > maxX ||
                 worldCenter.z < minZ || worldCenter.z > maxZ) return;
 
+            // Each face is an origin corner + two edge vectors (u, v) spanning
+            // it, plus the local outward axis. Walkable (upward-facing) faces
+            // are tessellated into a shared-vertex lattice at <= LookupCellSize
+            // edges so the per-triangle walkability filter rejects only the
+            // cells a piece collider (chest, anvil) actually intersects, instead
+            // of failing a whole 4m floor at its single centroid. The lattice is
+            // conforming (shared verts within a face) so the floor stays one
+            // connected region rather than shattering into pruned slivers.
             var h = size * 0.5f;
-            var b = verts.Count;
-            verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x, -h.y, -h.z))); // 0
-            verts.Add(t.MultiplyPoint3x4(new Vector3(h.x, -h.y, -h.z))); // 1
-            verts.Add(t.MultiplyPoint3x4(new Vector3(h.x, -h.y, h.z))); // 2
-            verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x, -h.y, h.z))); // 3
-            verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x, h.y, -h.z))); // 4
-            verts.Add(t.MultiplyPoint3x4(new Vector3(h.x, h.y, -h.z))); // 5
-            verts.Add(t.MultiplyPoint3x4(new Vector3(h.x, h.y, h.z))); // 6
-            verts.Add(t.MultiplyPoint3x4(new Vector3(-h.x, h.y, h.z))); // 7
+            var ux = new Vector3(2f * h.x, 0f, 0f);
+            var uy = new Vector3(0f, 2f * h.y, 0f);
+            var uz = new Vector3(0f, 0f, 2f * h.z);
 
-            // 6 faces × 2 triangles, counter-clockwise from outside.
-            int[] boxTris =
+            // +Y top / -Y bottom span X×Z.
+            AppendBoxFace(verts, idx, triLayers, layer, t,
+                new Vector3(-h.x, h.y, -h.z), ux, uz, Vector3.up, subdivide);
+            AppendBoxFace(verts, idx, triLayers, layer, t,
+                new Vector3(-h.x, -h.y, -h.z), ux, uz, Vector3.down, subdivide);
+            // +Z front / -Z back span X×Y.
+            AppendBoxFace(verts, idx, triLayers, layer, t,
+                new Vector3(-h.x, -h.y, h.z), ux, uy, Vector3.forward, subdivide);
+            AppendBoxFace(verts, idx, triLayers, layer, t,
+                new Vector3(-h.x, -h.y, -h.z), ux, uy, Vector3.back, subdivide);
+            // +X right / -X left span Z×Y.
+            AppendBoxFace(verts, idx, triLayers, layer, t,
+                new Vector3(h.x, -h.y, -h.z), uz, uy, Vector3.right, subdivide);
+            AppendBoxFace(verts, idx, triLayers, layer, t,
+                new Vector3(-h.x, -h.y, -h.z), uz, uy, Vector3.left, subdivide);
+        }
+
+        /// <summary>
+        ///     Emit one box face (origin corner + edge vectors u, v) as either a
+        ///     single quad (2 tris) or, when <paramref name="subdivide" /> and the
+        ///     face points up, a shared-vertex lattice at &lt;= LookupCellSize
+        ///     edges. Per-cell winding is corrected so each triangle's normal
+        ///     points along the face's outward axis — the walkability filter keys
+        ///     on normal.y, so winding must be outward.
+        /// </summary>
+        private static void AppendBoxFace(List<Vector3> verts, List<int> idx, List<int> triLayers,
+            int layer, Matrix4x4 t, Vector3 originLocal, Vector3 uLocal, Vector3 vLocal,
+            Vector3 axisLocal, bool subdivide)
+        {
+            var worldOut = t.MultiplyVector(axisLocal).normalized;
+
+            var nu = 1;
+            var nv = 1;
+            if (subdivide && worldOut.y >= SubdivFaceMinNormalY)
             {
-                0, 1, 2, 0, 2, 3, // -Y bottom
-                4, 6, 5, 4, 7, 6, // +Y top
-                0, 5, 1, 0, 4, 5, // -Z back
-                2, 7, 3, 2, 6, 7, // +Z front
-                0, 3, 7, 0, 7, 4, // -X left
-                1, 5, 2, 5, 6, 2, // +X right
-            };
-            for (var i = 0; i < boxTris.Length; i++)
-                idx.Add(b + boxTris[i]);
-            // 12 triangles (6 faces × 2), all sharing this box's source layer.
-            for (var i = 0; i < 12; i++)
+                var maxEdge = RegionGraph.LookupCellSize;
+                var uLen = t.MultiplyVector(uLocal).magnitude;
+                var vLen = t.MultiplyVector(vLocal).magnitude;
+                nu = Mathf.Max(1, Mathf.CeilToInt(uLen / maxEdge));
+                nv = Mathf.Max(1, Mathf.CeilToInt(vLen / maxEdge));
+            }
+
+            // (nu+1)*(nv+1) world-space lattice, shared across cells.
+            var baseIdx = verts.Count;
+            for (var j = 0; j <= nv; j++)
+            {
+                var tv = (float)j / nv;
+                for (var i = 0; i <= nu; i++)
+                {
+                    var su = (float)i / nu;
+                    verts.Add(t.MultiplyPoint3x4(originLocal + uLocal * su + vLocal * tv));
+                }
+            }
+
+            var stride = nu + 1;
+            for (var j = 0; j < nv; j++)
+            for (var i = 0; i < nu; i++)
+            {
+                var p00 = baseIdx + j * stride + i;
+                var p10 = p00 + 1;
+                var p01 = p00 + stride;
+                var p11 = p01 + 1;
+
+                // Orient winding so the cell normal faces outward.
+                var n = Vector3.Cross(verts[p10] - verts[p00], verts[p11] - verts[p00]);
+                if (Vector3.Dot(n, worldOut) >= 0f)
+                {
+                    idx.Add(p00); idx.Add(p10); idx.Add(p11);
+                    idx.Add(p00); idx.Add(p11); idx.Add(p01);
+                }
+                else
+                {
+                    idx.Add(p00); idx.Add(p11); idx.Add(p10);
+                    idx.Add(p00); idx.Add(p01); idx.Add(p11);
+                }
+
                 triLayers.Add(layer);
+                triLayers.Add(layer);
+            }
         }
 
         /// <summary>
@@ -1411,6 +1506,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             public bool Success;
             public int SourceCount;
             public int DoorsBlocked;
+            public int DoorPiecesDropped;
             public int BedsBlocked;
             public int OutsideCellsBlocked;
             public int OutsideCellsCount;

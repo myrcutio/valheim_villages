@@ -120,6 +120,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("terrain_sources", bakeResult.TerrainSourceCount),
                 ("piece_sources", bakeResult.PieceSourceCount),
                 ("doors_blocked", bakeResult.DoorsBlocked),
+                ("door_pieces_dropped", bakeResult.DoorPiecesDropped),
                 ("beds_blocked", bakeResult.BedsBlocked),
                 ("outside_cells_blocked", bakeResult.OutsideCellsBlocked),
                 ("duration_ms", bakeResult.DurationMs),
