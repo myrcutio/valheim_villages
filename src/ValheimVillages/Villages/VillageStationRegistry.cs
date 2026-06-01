@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Villager.AI.Navigation;
@@ -15,6 +16,99 @@ namespace ValheimVillages.Villages
     public static class VillageStationRegistry
     {
         private static readonly Dictionary<string, List<Component>> s_stationsByVillage = new();
+
+        /// <summary>Broad-phase XZ padding (m) around the village polygon AABB when
+        /// gathering station candidates. Generous on purpose — it is only a coarse
+        /// prefilter; region-graph membership (<see cref="BelongsToVillage" />) is the
+        /// real inside test, so a wide box just ensures edge stations reach it.</summary>
+        private const float StationScanPadXZ = 12f;
+
+        /// <summary>Max XZ gap (m) to a walkable village cell accepted for an
+        /// obstacle-mounted station (smelter/kiln) whose own pivot has no lookup cell.</summary>
+        private const float StationVillageReachXZ = 3f;
+
+        // Per-component-type cache: does the type expose an `m_conversion` field? That
+        // field is the input→output table shared by CookingStation, Smelter, Fermenter,
+        // and modded conversion stations — the generic "is a station" signal that needs
+        // no hard-coded prefab/type list.
+        private static readonly Dictionary<Type, bool> s_conversionTypeCache = new();
+
+        private static bool HasConversionField(Type t)
+        {
+            if (s_conversionTypeCache.TryGetValue(t, out var has)) return has;
+            has = t.GetField("m_conversion",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance) != null;
+            s_conversionTypeCache[t] = has;
+            return has;
+        }
+
+        /// <summary>
+        ///     Classify a built piece as a "station" the village should track, with no
+        ///     hard-coded prefab/type list. A station is any piece carrying a
+        ///     <see cref="CraftingStation" /> (the crafting benches recipes point at) OR
+        ///     any component exposing an <c>m_conversion</c> field (CookingStation,
+        ///     Smelter, Fermenter, modded conversion stations). Writes the station
+        ///     component to register and returns true.
+        /// </summary>
+        public static bool TryClassifyStation(GameObject go, out Component station)
+        {
+            station = null;
+            if (go == null) return false;
+
+            var cs = go.GetComponentInParent<CraftingStation>();
+            if (cs != null) { station = cs; return true; }
+
+            var root = go.GetComponentInParent<Piece>();
+            var host = root != null ? root.gameObject : go;
+            foreach (var comp in host.GetComponentsInChildren<MonoBehaviour>(true))
+            {
+                if (comp == null) continue;
+                if (HasConversionField(comp.GetType())) { station = comp; return true; }
+            }
+            return false;
+        }
+
+        /// <summary>
+        ///     True when <paramref name="pos" /> belongs to the given village's region
+        ///     graph. PointToRegionId resolves walkable pivots directly; obstacle-mounted
+        ///     stations (smelter/kiln) sit on non-walkable tops with no lookup cell, so we
+        ///     also accept a walkable village cell within <see cref="StationVillageReachXZ" />.
+        /// </summary>
+        private static bool BelongsToVillage(RegionGraph graph, Vector3 pos)
+        {
+            if (graph == null) return false;
+            if (!string.IsNullOrEmpty(graph.PointToRegionId(pos))) return true;
+            return graph.TryFindNearestLookupCell(pos, null, out _, out _, StationVillageReachXZ);
+        }
+
+        /// <summary>
+        ///     Incrementally register a freshly-built station with the village that owns
+        ///     its position, so a newly-placed station is usable immediately instead of
+        ///     waiting for the next partition rescan. No-op when the piece isn't a station
+        ///     or sits in no known village graph. Deduplicated; the periodic
+        ///     <see cref="RefreshFor" /> rescan stays the authority that prunes stale entries.
+        /// </summary>
+        public static void RegisterStation(GameObject go)
+        {
+            if (!TryClassifyStation(go, out var station)) return;
+            var pos = station.transform.position;
+            foreach (var graph in RegionGraph.GetAll())
+            {
+                if (!BelongsToVillage(graph, pos)) continue;
+                var key = graph.RegisteredVillageKey;
+                if (string.IsNullOrEmpty(key)) continue;
+                if (!s_stationsByVillage.TryGetValue(key, out var list))
+                    s_stationsByVillage[key] = list = new List<Component>();
+                if (!list.Contains(station))
+                {
+                    list.Add(station);
+                    Plugin.Log?.LogInfo(
+                        $"[VillageStationRegistry] +{station.GetType().Name} {station.gameObject.name} " +
+                        $"@ ({pos.x:F1},{pos.y:F1},{pos.z:F1}) → {key} (on build)");
+                }
+                return;
+            }
+        }
 
         /// <summary>
         ///     (Re)scan stations inside the given VillageArea. Called from VillageAreaManager
@@ -40,49 +134,31 @@ namespace ValheimVillages.Villages
 
             // Pad Y bounds generously — patrol waypoints sit at terrain height, stations may be above
             var center = new Vector3((minX + maxX) * 0.5f, (minY + maxY) * 0.5f, (minZ + maxZ) * 0.5f);
-            var halfExtents = new Vector3((maxX - minX) * 0.5f + 1f, (maxY - minY) * 0.5f + 20f, (maxZ - minZ) * 0.5f + 1f);
+            var halfExtents = new Vector3((maxX - minX) * 0.5f + StationScanPadXZ, (maxY - minY) * 0.5f + 20f, (maxZ - minZ) * 0.5f + StationScanPadXZ);
 
-            // Outer-hull mask: cells outside the village's outermost wall ring. Stations whose XZ
-            // cell IS in this set are outside the village. Cells NOT in this set are inside the
-            // outer hull — even when they sit on top of a non-walkable obstacle like a smelter,
-            // which HNA's walkable polygon excludes by design.
-            var hullBounds = new Bounds(center, new Vector3(halfExtents.x * 2f, halfExtents.y * 2f, halfExtents.z * 2f));
-            var outsideCells = RubberBandPrune.ComputeOutsideCellsForBake(hullBounds);
+            // Station membership is decided by region-graph coverage
+            // (PointToRegionId / nearest walkable cell), NOT the boundary polygon: a
+            // too-tight polygon/AABB edge was silently dropping legitimate interior
+            // stations (e.g. a south-wing oven/cauldron) whenever a build shifted the
+            // computed boundary. The OverlapBox below is only a coarse prefilter now.
+            var graph = RegionGraph.Get(area.VillageKey);
 
             var found = new List<Component>();
             var seen = new HashSet<Component>();
-
-            // Diagnostic counters: how many of each type we encountered (a) in the AABB and
-            // (b) kept after the outer-hull filter. If a Smelter shows up in AABB but
-            // not in cache, it lives outside the village's outer hull.
-            int aabbCraft = 0, aabbCook = 0, aabbSmelter = 0;
-            int keptCraft = 0, keptCook = 0, keptSmelter = 0;
+            var candidates = 0;
+            var kept = 0;
 
             var hits = Physics.OverlapBox(center, halfExtents, Quaternion.identity);
             foreach (var col in hits)
             {
                 if (col == null || col.gameObject == null) continue;
-
-                // Each prefab may have only one of these components — check all three.
-                var cs = col.GetComponentInParent<CraftingStation>();
-                if (cs != null && seen.Add(cs))
+                if (!TryClassifyStation(col.gameObject, out var station)) continue;
+                if (!seen.Add(station)) continue;
+                candidates++;
+                if (graph == null || BelongsToVillage(graph, station.transform.position))
                 {
-                    aabbCraft++;
-                    if (!RubberBandPrune.IsOutsideCell(cs.transform.position, outsideCells)) { found.Add(cs); keptCraft++; }
-                }
-
-                var ck = col.GetComponentInParent<CookingStation>();
-                if (ck != null && seen.Add(ck))
-                {
-                    aabbCook++;
-                    if (!RubberBandPrune.IsOutsideCell(ck.transform.position, outsideCells)) { found.Add(ck); keptCook++; }
-                }
-
-                var sm = col.GetComponentInParent<Smelter>();
-                if (sm != null && seen.Add(sm))
-                {
-                    aabbSmelter++;
-                    if (!RubberBandPrune.IsOutsideCell(sm.transform.position, outsideCells)) { found.Add(sm); keptSmelter++; }
+                    found.Add(station);
+                    kept++;
                 }
             }
 
@@ -91,19 +167,13 @@ namespace ValheimVillages.Villages
             if (Plugin.Log != null)
             {
                 Plugin.Log.LogInfo(
-                    $"[VillageStationRegistry] {area.VillageKey}: cached {found.Count} stations inside hull " +
-                    $"(AABB→kept: Craft {aabbCraft}→{keptCraft}, Cook {aabbCook}→{keptCook}, Smelter {aabbSmelter}→{keptSmelter})");
+                    $"[VillageStationRegistry] {area.VillageKey}: cached {found.Count} stations " +
+                    $"(candidates {candidates} → kept {kept})");
                 foreach (var comp in found)
                 {
-                    string kind;
-                    string name;
-                    if (comp is CraftingStation cs) { kind = "Craft"; name = cs.m_name ?? cs.gameObject.name; }
-                    else if (comp is CookingStation ck) { kind = "Cook"; name = ck.m_name ?? ck.gameObject.name; }
-                    else if (comp is Smelter sm) { kind = "Smelter"; name = sm.m_name ?? sm.gameObject.name; }
-                    else { kind = comp.GetType().Name; name = comp.gameObject.name; }
                     var p = comp.transform.position;
                     Plugin.Log.LogInfo(
-                        $"  [{kind}] {name} @ ({p.x:F1},{p.y:F1},{p.z:F1}) prefab={comp.gameObject.name}");
+                        $"  [{comp.GetType().Name}] {comp.gameObject.name} @ ({p.x:F1},{p.y:F1},{p.z:F1})");
                 }
             }
         }
