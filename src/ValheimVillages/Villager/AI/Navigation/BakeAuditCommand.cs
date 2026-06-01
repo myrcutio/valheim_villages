@@ -27,7 +27,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <summary>Wider radius for character-layer overlap (we want to know about NPCs across a wider area).</summary>
         private const float CharacterRadius = 3f;
 
-        [DevCommand("Audit bake collider coverage at a position (defaults to player). Usage: vv_bake_audit [x y z]",
+        [DevCommand("Audit bake collider coverage at a position (defaults to player). Usage: vv_bake_audit [x z [y]]",
             Name = "vv_bake_audit")]
         public static void Audit(Terminal.ConsoleEventArgs args)
         {
@@ -195,21 +195,23 @@ namespace ValheimVillages.Villager.AI.Navigation
         private static bool TryResolvePosition(
             Terminal.ConsoleEventArgs args, out Vector3 pos, out string source)
         {
-            if (args?.Args != null && args.Args.Length >= 4)
+            if (args?.Args != null && args.Args.Length >= 3)
             {
                 var inv = CultureInfo.InvariantCulture;
+                // Valheim convention: X Z [Y]. Matches goto/tp/pos so coords
+                // copy between commands without reordering. Y is optional and
+                // defaults to the ground height at (X, Z) like goto.
                 if (!float.TryParse(args.Args[1], NumberStyles.Float, inv, out var x)
-                    || !float.TryParse(args.Args[2], NumberStyles.Float, inv, out var y)
-                    || !float.TryParse(args.Args[3], NumberStyles.Float, inv, out var z))
+                    || !float.TryParse(args.Args[2], NumberStyles.Float, inv, out var z))
                 {
                     Console.instance?.Print(
-                        "Usage: vv_bake_audit (no args = player pos) | vv_bake_audit <x> <y> <z>");
+                        "Usage: vv_bake_audit (no args = player pos) | vv_bake_audit <x> <z> [y]");
                     pos = default;
                     source = "";
                     return false;
                 }
 
-                pos = new Vector3(x, y, z);
+                pos = new Vector3(x, MeshProbe.ResolveY(x, z, args, 3, inv), z);
                 source = "args";
                 return true;
             }
@@ -218,7 +220,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (p == null || p.transform == null)
             {
                 Console.instance?.Print(
-                    "No local player; pass coords instead: vv_bake_audit <x> <y> <z>");
+                    "No local player; pass coords instead: vv_bake_audit <x> <z> [y]");
                 pos = default;
                 source = "";
                 return false;

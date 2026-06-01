@@ -27,24 +27,42 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <summary>Physics.OverlapSphere radius for collider report (m).</summary>
         private const float ColliderRadius = 1f;
 
-        [DevCommand("Probe NavMesh + colliders at the player's position (or pass x y z to override)",
+        /// <summary>
+        ///     Resolve the optional Y for an X Z [Y] coordinate triple. If
+        ///     args[yIndex] parses as a float it wins; otherwise fall back to
+        ///     the ground height at (x, z), matching the goto command.
+        /// </summary>
+        internal static float ResolveY(float x, float z, Terminal.ConsoleEventArgs args,
+            int yIndex, CultureInfo inv)
+        {
+            if (args?.Args != null && args.Args.Length > yIndex
+                && float.TryParse(args.Args[yIndex], NumberStyles.Float, inv, out var y))
+                return y;
+            return ZoneSystem.instance != null
+                ? ZoneSystem.instance.GetGroundHeight(new Vector3(x, 0f, z))
+                : 0f;
+        }
+
+        [DevCommand("Probe NavMesh + colliders at the player's position (or pass x z [y] to override)",
             Name = "vv_probe")]
         public static void Probe(Terminal.ConsoleEventArgs args)
         {
             Vector3 pos;
             bool fromPlayer;
-            if (args?.Args != null && args.Args.Length >= 4)
+            if (args?.Args != null && args.Args.Length >= 3)
             {
                 var inv = CultureInfo.InvariantCulture;
+                // Valheim convention: X Z [Y]. Matches goto/tp/pos so coords
+                // copy between commands without reordering. Y is optional and
+                // defaults to the ground height at (X, Z) like goto.
                 if (!float.TryParse(args.Args[1], NumberStyles.Float, inv, out var x)
-                    || !float.TryParse(args.Args[2], NumberStyles.Float, inv, out var y)
-                    || !float.TryParse(args.Args[3], NumberStyles.Float, inv, out var z))
+                    || !float.TryParse(args.Args[2], NumberStyles.Float, inv, out var z))
                 {
-                    Console.instance?.Print("Usage: vv_probe (no args = player pos) | vv_probe <x> <y> <z>");
+                    Console.instance?.Print("Usage: vv_probe (no args = player pos) | vv_probe <x> <z> [y]");
                     return;
                 }
 
-                pos = new Vector3(x, y, z);
+                pos = new Vector3(x, ResolveY(x, z, args, 3, inv), z);
                 fromPlayer = false;
             }
             else
@@ -52,7 +70,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var p = Player.m_localPlayer;
                 if (p == null || p.transform == null)
                 {
-                    Console.instance?.Print("No local player; pass coords instead: vv_probe <x> <y> <z>");
+                    Console.instance?.Print("No local player; pass coords instead: vv_probe <x> <z> [y]");
                     return;
                 }
 
