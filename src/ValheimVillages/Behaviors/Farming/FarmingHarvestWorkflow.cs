@@ -38,8 +38,12 @@ namespace ValheimVillages.Behaviors.Farming
             }
 
             SubState = FarmSubState.TravelingToHarvest;
-            var cropTarget = VillagerMovement.GetWalkableDestination(m_context.CurrentHarvestTarget.transform.position);
-            m_ai.SetState(BehaviorState.Working, cropTarget);
+            if (!m_ai.NavTo(m_context.CurrentHarvestTarget.transform.position,
+                    BehaviorState.Working, "crop"))
+            {
+                AbandonWork("no reachable approach to crop");
+                return;
+            }
             Plugin.Log?.LogDebug(
                 $"[Farming:{m_ai.NpcName}] Walking to crop at " +
                 $"{m_context.CurrentHarvestTarget.transform.position}");
@@ -164,8 +168,11 @@ namespace ValheimVillages.Behaviors.Farming
             }
 
             SubState = FarmSubState.ReturningToChest;
-            var chestTarget = VillagerMovement.GetWalkableDestination(container.transform.position);
-            m_ai.SetState(BehaviorState.Working, new VillagerWaypoint(chestTarget, VillagerWaypoint.DefaultStrategyId));
+            if (!m_ai.NavTo(container.transform.position, BehaviorState.Working, "deposit chest"))
+            {
+                AbandonWork("no reachable approach to deposit chest");
+                return;
+            }
             Plugin.Log?.LogDebug(
                 $"[Farming:{m_ai.NpcName}] Walking to container to deposit {m_context.CarriedHarvestCount}x");
         }

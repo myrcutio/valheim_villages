@@ -232,9 +232,18 @@ namespace ValheimVillages.UI.Tabs
                         dest = nearest.Position;
                     }
 
-                    var newDestination = new VillagerWaypoint(dest, "default", $"{name} destination");
-                    ai.FindPath(newDestination);
-                    Msg($"Going to {type}");
+                    // Funnel through the single NavTo entry point: it snaps to a
+                    // reachable approach, clears any stale path, sets state, and
+                    // resets the agent. (Was ai.FindPath → native BaseAI.FindPath,
+                    // which left a stale path the agent mover ignored and stranded
+                    // the villager.)
+                    // directOrder: outranks task pickup / idling until arrival,
+                    // so the behavior loop's idle fallback can't reset it.
+                    if (ai.NavTo(dest, BehaviorState.Traveling, $"{name} destination",
+                            directOrder: true))
+                        Msg($"Going to {type}");
+                    else
+                        Msg($"Can't reach {type} from here");
                     InventoryGui.instance?.Hide();
                 },
             });

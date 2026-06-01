@@ -108,14 +108,44 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             get
             {
-                if (s_holder == null)
+                if (s_holder != null) return s_holder;
+
+                const string holderName = "VV_NavMeshLinkHolder";
+                // Find by name first — a holder created by a prior assembly
+                // survives via DontDestroyOnLoad and still owns its links.
+                var existing = GameObject.Find(holderName);
+                if (existing != null)
                 {
-                    var go = new GameObject("VV_NavMeshLinkHolder");
-                    Object.DontDestroyOnLoad(go);
-                    go.hideFlags = HideFlags.HideInHierarchy;
-                    s_holder = go.AddComponent<NavMeshLinkHolder>();
+                    var current = existing.GetComponent<NavMeshLinkHolder>();
+                    if (current == null)
+                    {
+                        // HOT-RELOAD STALENESS FIX (mirrors NavMeshBakeManager.Holder):
+                        // after a script reload the holder component is the PRIOR
+                        // assembly's NavMeshLinkHolder TYPE, so GetComponent<>()
+                        // (this assembly's type) misses it. The old code then
+                        // created a SECOND holder GameObject and orphaned the old
+                        // one's installed NavMeshLinkInstances — stale links that
+                        // survive every rebake (RemoveAllLinks only touches the
+                        // current holder) and that the agent can route onto. Those
+                        // are the "invalid link on the stairs" the villager snags
+                        // on. Destroy any prior-assembly holder component by name
+                        // match: DestroyImmediate fires its OnDestroy (old assembly
+                        // code, still loaded) which RemoveLink()s the orphaned links
+                        // before we install a fresh holder.
+                        foreach (var mb in existing.GetComponents<MonoBehaviour>())
+                            if (mb != null && mb.GetType().Name == nameof(NavMeshLinkHolder))
+                                Object.DestroyImmediate(mb);
+                        current = existing.AddComponent<NavMeshLinkHolder>();
+                    }
+
+                    s_holder = current;
+                    return s_holder;
                 }
 
+                var go = new GameObject(holderName);
+                Object.DontDestroyOnLoad(go);
+                go.hideFlags = HideFlags.HideInHierarchy;
+                s_holder = go.AddComponent<NavMeshLinkHolder>();
                 return s_holder;
             }
         }

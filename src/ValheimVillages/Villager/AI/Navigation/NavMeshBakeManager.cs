@@ -95,8 +95,31 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var existing = GameObject.Find(HolderName);
                 if (existing != null)
                 {
-                    s_holder = existing.GetComponent<NavMeshBakeHolder>()
-                               ?? existing.AddComponent<NavMeshBakeHolder>();
+                    var current = existing.GetComponent<NavMeshBakeHolder>();
+                    if (current == null)
+                    {
+                        // HOT-RELOAD STALENESS FIX: after a script reload the
+                        // holder's component is the PRIOR assembly's
+                        // NavMeshBakeHolder TYPE, so GetComponent<>() (this
+                        // assembly's type) misses it. The old code then
+                        // AddComponent'd a second, EMPTY holder — orphaning the
+                        // old one's still-installed NavMeshDataInstances. Those
+                        // stale instances stay added to Unity's NavMesh (only
+                        // OnDestroy removes them, which never fired), so
+                        // SamplePosition keeps unioning the previous bake and
+                        // rebakes appear to do nothing (bed/obstacle cells
+                        // survive; only a full game restart clears it). Destroy
+                        // any prior-assembly holder component by name match:
+                        // DestroyImmediate fires its OnDestroy (old assembly
+                        // code is still loaded) which removes its orphaned
+                        // NavMesh instances before we install a fresh holder.
+                        foreach (var mb in existing.GetComponents<MonoBehaviour>())
+                            if (mb != null && mb.GetType().Name == nameof(NavMeshBakeHolder))
+                                Object.DestroyImmediate(mb);
+                        current = existing.AddComponent<NavMeshBakeHolder>();
+                    }
+
+                    s_holder = current;
                     return s_holder;
                 }
 
@@ -128,6 +151,25 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
         /// <summary>
+        ///     Max walkable slope (degrees) for the villager NavMesh bake. Matches
+        ///     the HNA region builder's walkable cutoff (cos 27°) so the baked
+        ///     navmesh and the region graph agree on what's traversable — the
+        ///     navmesh must not bridge slopes the region graph (and the humanoid)
+        ///     reject, or the agent mover commits to un-traversable routes.
+        /// </summary>
+        private const float NavMeshBakeMaxSlopeDegrees = 27f;
+
+        /// <summary>
+        ///     Max step height (m) the villager NavMesh bake will bridge. Capped
+        ///     at a realistic humanoid step so the voxelizer doesn't stitch
+        ///     walkable navmesh over tall stair risers / ledges the character
+        ///     can't actually step up (which the agent mover would then commit to
+        ///     and wedge on). Lower than Valheim's permissive Humanoid-cloned
+        ///     value.
+        /// </summary>
+        private const float NavMeshBakeMaxClimb = 0.2f;
+
+        /// <summary>
         ///     Bake a fresh NavMesh for the villager agent over <paramref name="bounds" />.
         ///     Two passes (terrain + piece) both register into slot 31; queries
         ///     union the results. Removes any previous bakes first.
@@ -156,12 +198,36 @@ namespace ValheimVillages.Villager.AI.Navigation
             Holder.RemovePiece();
             Holder.RemoveHna();
 
-            // Settings is a local struct copy; modifying agentRadius here
-            // inflates the bake's carve distance from obstacles without
-            // affecting slot 31's registered agent settings (NavMesh
-            // queries, SamplePosition etc. still use the original radius).
+            // Settings is a local struct copy; modifying it here shapes the
+            // baked topology without affecting slot 31's registered agent
+            // settings (NavMesh queries, SamplePosition etc. still use the
+            // originals).
             var settings = NavMesh.GetSettingsByID(VillagerAgentType.UnityAgentTypeID);
             settings.agentRadius += VillagerSettings.NavMeshBakeRadiusBuffer;
+
+            // Enforce the SAME max walkable slope the HNA region builder uses
+            // (RegionBuilder rejects normals steeper than cos(27°)). The slot-31
+            // agent is cloned from Valheim's Humanoid verbatim, whose slope
+            // tolerance is more permissive — so the voxelizer bridged steep
+            // ledges (e.g. a 0.66m rise over 1m ≈ 33°) that the region graph
+            // correctly excludes and a humanoid can't actually traverse. The
+            // agent mover rides the navmesh (not the HNA graph), so it committed
+            // to those un-traversable routes and wedged. Matching the bake slope
+            // to the region builder makes the navmesh stop bridging them, so the
+            // planner routes around (or reports unreachable) instead of stalling.
+            settings.agentSlope = NavMeshBakeMaxSlopeDegrees;
+
+            // Lower the step-climb the voxelizer will bridge. Stairs become
+            // walkable navmesh when each riser is <= agentClimb, regardless of
+            // overall slope — so the permissive Humanoid-cloned climb let the
+            // bake stitch a continuous walkable surface over tall stone-stair
+            // risers (~0.5m) the character can't actually step up, and the agent
+            // mover then committed to them and wedged. Capping climb at a
+            // realistic humanoid step (0.2m) means risers taller than that are
+            // NOT bridged: the navmesh ends at the base of an un-stepable stair,
+            // so the planner routes around or reports unreachable instead of
+            // wedging. Local copy — bake topology only, not query settings.
+            settings.agentClimb = NavMeshBakeMaxClimb;
 
             // --- Terrain geometry collection (combined into the single bake
             //     below, NOT baked into its own slot) ---
@@ -194,33 +260,37 @@ namespace ValheimVillages.Villager.AI.Navigation
                 bounds, s_pieceMask, NavMeshCollectGeometry.PhysicsColliders,
                 0, new List<NavMeshBuildMarkup>(), pieceSources);
 
-            // Drop the real, movable Door/Gate geometry before baking. A door
-            // PANEL rotates with open/close state, so baking its collider
-            // carves the room interior when the door is open inward and the
-            // exterior when open outward — a navmesh that depends on a
-            // moment-to-moment piece state. The phantom doorway blocker added
-            // immediately below represents the opening DETERMINISTICALLY (fixed
-            // box at the door pivot regardless of swing), and villagers cross
-            // doorways via RegionLinks, not walkable navmesh — so the real
-            // geometry is pure liability. Removing the whole Door hierarchy
-            // (panel + frame) is safe: the phantom plus the flanking wall
-            // pieces cover the opening. Valheim uses the Door component for
-            // both doors and gates, so this catches both.
+            // Drop the real, movable Door/Gate geometry before baking, and
+            // leave the doorway as plain WALKABLE navmesh — no phantom blocker,
+            // no off-mesh link. A door PANEL rotates with open/close state, so
+            // baking its collider makes the navmesh depend on a moment-to-moment
+            // piece state (open-inward carves the room, open-outward carves the
+            // exterior, closed carves the doorway shut). Excluding the whole Door
+            // hierarchy (panel + frame) is the ONE load-bearing step: the doorway
+            // then bakes as a clean walkable gap between the flanking wall pieces,
+            // independent of door state. Villagers walk straight through on
+            // continuous navmesh and open the physical door on approach
+            // (UpdateAgentMovement → DoorHandler.GetBlockingDoor). This replaces
+            // the old phantom-blocker + door-link pipeline (fewer moving parts:
+            // one bake filter + one proximity check, vs. exclude + phantom +
+            // link placement + manual link traversal). Valheim uses the Door
+            // component for both doors and gates, so this catches both.
             var doorGeometryDropped = pieceSources.RemoveAll(s =>
                 s.component != null && s.component.GetComponentInParent<Door>() != null);
             result.DoorPiecesDropped = doorGeometryDropped;
+            result.DoorsBlocked = 0;
 
-            // Add phantom solid blockers for every Door in bounds. Doors are
-            // dynamic (rotate to open/close), but the bake snapshots one
-            // moment in time — if a door is open when CollectSources runs,
-            // the NavMesh will have a path through the doorway that persists
-            // in the cached graph even after the door closes. Phantom boxes
-            // sit in the doorway position regardless of the actual door's
-            // orientation, ensuring the bake always sees the doorway as
-            // solid. area=1 (NotWalkable) prevents the bake from making the
-            // phantom's top face walkable.
-            var phantomDoors = AddDoorBlockers(pieceSources, bounds);
-            result.DoorsBlocked = phantomDoors;
+            // Drop bed geometry from the bake too. A bed's flat top is a
+            // walkable surface to the voxelizer, so it generates navmesh ON the
+            // bed — and because that walkable source sits at the SAME location
+            // as the bed NotWalkable blocker below, the walkable source wins and
+            // the blocker never carves (verified: navmesh persisted on the bed
+            // top at 37.81 even with a ModifierBox over it). Removing the bed
+            // collider eliminates the competing walkable source; the blocker
+            // then carves the bed-footprint column cleanly (same reason outside-
+            // cell ModifierBoxes work — nothing walkable layered on them).
+            pieceSources.RemoveAll(s =>
+                s.component != null && s.component.GetComponentInParent<Bed>() != null);
 
             var phantomBeds = AddBedBlockers(pieceSources, bounds);
             result.BedsBlocked = phantomBeds;
@@ -242,8 +312,10 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             s_pieceSources.Clear();
             s_pieceSources.AddRange(pieceSources);
-            s_piecePhantomCount = phantomDoors + phantomBeds + phantomOutside;
-            s_lastDoorPhantoms = phantomDoors;
+            // Doors are no longer phantom-blocked (doorways bake walkable); only
+            // bed + outside-cell phantoms remain at the tail of pieceSources.
+            s_piecePhantomCount = phantomBeds + phantomOutside;
+            s_lastDoorPhantoms = 0;
             s_lastBedPhantoms = phantomBeds;
             s_lastOutsidePhantoms = phantomOutside;
             result.PieceSourceCount = pieceSources.Count;
@@ -1243,15 +1315,46 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (bed == null || bed.transform == null) continue;
                 if (!bounds.Contains(bed.transform.position)) continue;
 
-                var transform = Matrix4x4.TRS(
-                    bed.transform.position + Vector3.up * 0.6f,
-                    bed.transform.rotation,
-                    Vector3.one);
+                // Size the phantom from the bed's ACTUAL collider footprint, not
+                // a hardcoded box. The old fixed (2.5,1.2,1.5) assumed a bed
+                // oriented length-along-local-X; real beds vary in size and
+                // orientation (e.g. a 2.8m bed whose long axis is the OTHER way),
+                // so the fixed box left ~0.65m of each bed end uncarved —
+                // walkable navmesh sitting on a solid bed collider, and the agent
+                // caught on the bed corner. Collider.bounds is the world AABB, so
+                // an axis-aligned phantom covering it carves the bed at ANY
+                // rotation (no rotation/size mismatch possible).
+                var bedCol = bed.GetComponentInChildren<Collider>();
+                if (bedCol == null) continue;
+                var bb = bedCol.bounds;
+                const float xzMargin = 0.2f; // cover the exact edge; agent-radius erosion adds the rest
+                // Vertical span: carve from BELOW the bed's base (down past the
+                // floor the bed rests on) up to above the bed top. The walkable
+                // navmesh under a bed is generated at FLOOR level (~bed base),
+                // not the bed-top — so a phantom that only covers the bed top
+                // leaves the floor-level navmesh under the bed footprint
+                // walkable, and the agent still walks into the bed. botPad
+                // reaches below the floor; topPad clears the bed top.
+                const float botPad = 0.6f;
+                const float topPad = 0.4f;
+                var botY = bb.min.y - botPad;
+                var topY = bb.max.y + topPad;
+                // ModifierBox, NOT Box: a regular Box source produces walkable
+                // surface on its own top and does NOT override the walkable
+                // navmesh already generated by the floor/bed-top colliders under
+                // it — so a Box phantom never actually carved the bed (verified:
+                // navmesh persisted on the bed top at 37.81). ModifierBox is a
+                // pure area-override volume that stamps area=1 (NotWalkable)
+                // across its column, removing the bed-footprint navmesh. Same
+                // approach AddOutsideCellBlockers uses.
                 sources.Add(new NavMeshBuildSource
                 {
-                    shape = NavMeshBuildSourceShape.Box,
-                    size = new Vector3(2.5f, 1.2f, 1.5f),
-                    transform = transform,
+                    shape = NavMeshBuildSourceShape.ModifierBox,
+                    size = new Vector3(bb.size.x + xzMargin, topY - botY, bb.size.z + xzMargin),
+                    transform = Matrix4x4.TRS(
+                        new Vector3(bb.center.x, (botY + topY) * 0.5f, bb.center.z),
+                        Quaternion.identity,
+                        Vector3.one),
                     area = 1, // NotWalkable
                 });
                 added++;

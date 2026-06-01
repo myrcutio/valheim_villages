@@ -54,8 +54,18 @@ namespace ValheimVillages.Behaviors.Tidy
             if (m_targetStation == null) return;
 
             m_active = true;
-            var pos = VillagerMovement.GetWalkableDestination(m_targetStation.transform.position);
-            m_ai.SetState(BehaviorState.Traveling, pos);
+            // Route through the single NavTo entry point so the target is
+            // snapped onto a reachable agent-navmesh cell. A cooking station's
+            // transform sits ON its non-walkable collider; a raw SetState target
+            // there lands off-mesh and the NavMeshAgent can't reach it — the
+            // villager never arrives, so OnArrival → CleanStation (which pops the
+            // finished item off the spit, then picks it up) never runs. NavTo
+            // also clears the prior path and re-plans the agent.
+            if (!m_ai.NavTo(m_targetStation.transform.position, BehaviorState.Traveling,
+                    "tidy cooking station"))
+                // No reachable approach to this station — release control instead
+                // of holding it forever and starving other behaviors.
+                Reset();
         }
 
         public void OnArrival(float dt)

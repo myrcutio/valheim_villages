@@ -47,9 +47,14 @@ namespace ValheimVillages.Behaviors.Farming
             }
 
             SubState = FarmSubState.GatheringSeeds;
-            var seedChestTarget = VillagerMovement.GetWalkableDestination(source.Container.transform.position);
-            m_ai.SetState(BehaviorState.Working,
-                new VillagerWaypoint(seedChestTarget, VillagerWaypoint.DefaultStrategyId));
+            // Single NavTo entry point: snaps to a reachable agent-navmesh cell,
+            // clears the prior path, resets the agent. (Was GetWalkableDestination
+            // + raw SetState, which could land off-mesh and strand the villager.)
+            if (!m_ai.NavTo(source.Container.transform.position, BehaviorState.Working, "seed chest"))
+            {
+                AbandonWork("no reachable approach to seed chest");
+                return;
+            }
             Plugin.Log?.LogDebug(
                 $"[Farming:{m_ai.NpcName}] Walking to seed chest for {source.PrefabName}");
         }
@@ -76,8 +81,11 @@ namespace ValheimVillages.Behaviors.Farming
         private void BeginTravelingToFarm()
         {
             SubState = FarmSubState.TravelingToFarm;
-            var farmTarget = VillagerMovement.GetWalkableDestination(m_context.FarmPosition);
-            m_ai.SetState(BehaviorState.Working, new VillagerWaypoint(farmTarget, VillagerWaypoint.DefaultStrategyId));
+            if (!m_ai.NavTo(m_context.FarmPosition, BehaviorState.Working, "farm"))
+            {
+                AbandonWork("no reachable approach to farm");
+                return;
+            }
             Plugin.Log?.LogInfo(
                 $"[Farming:{m_ai.NpcName}] Walking to farm at {m_context.FarmPosition}");
         }
@@ -121,9 +129,16 @@ namespace ValheimVillages.Behaviors.Farming
             m_context.NextPlantPosition = pos.Value;
             SubState = FarmSubState.WalkingToPlantSpot;
 
-            var target = VillagerMovement.GetWalkableDestination(pos.Value);
-            m_ai.SetState(BehaviorState.Working,
-                new VillagerWaypoint(target, VillagerWaypoint.DefaultStrategyId));
+            if (!m_ai.NavTo(pos.Value, BehaviorState.Working, "plant spot"))
+            {
+                // This spot isn't reachable on the agent navmesh; end planting
+                // gracefully rather than stranding (FinishWork is the same path
+                // used when no more positions are available).
+                Plugin.Log?.LogDebug(
+                    $"[Farming:{m_ai.NpcName}] Plant spot {pos.Value} unreachable; finishing.");
+                FinishWork();
+                return;
+            }
 
             DebugLog.Append("FarmingWorkflow.cs:TryFindAndWalkToNextPlantSpot", "Walking to plant spot",
                 new Dictionary<string, object>

@@ -92,40 +92,18 @@ namespace ValheimVillages.Villager.AI
                 sb.AppendLine("    target=<none>");
             }
 
-            // Read BaseAI.m_path (the list the movement loop actually follows)
-            // via s_pathField — NOT m_waypointPath, which is vestigial and never
-            // assigned (it always read as "<none>", masking real movement).
-            var followPath = s_pathField?.GetValue(this) as List<Vector3>;
-            var corners = followPath?.Count ?? 0;
-            if (corners > 0)
-            {
-                var next = followPath[0];
-                sb.AppendLine($"    path: {corners} corner(s), next=({next.x:F1},{next.y:F1},{next.z:F1})");
-            }
+            // Report the path state of the mover the villager ACTUALLY uses.
+            // With NavMeshAgentMover, movement is driven by the advisory
+            // NavMeshAgent's own internal path + desiredVelocity — BaseAI.m_path
+            // and the HNA corridor planner are NOT consulted, so reporting them
+            // is misleading (corridor_complete can read true while the agent is
+            // stuck on its own partial path). Surface the agent's real state;
+            // fall back to the m_path + corridor view only for the legacy custom
+            // corner-walker mover.
+            if (NavMeshAgentMover)
+                AppendAgentPathState(sb);
             else
-            {
-                sb.AppendLine("    path: <none>");
-
-                // Diagnose WHY there's no path to the current target: run the
-                // corridor planner's A* stage and report its result. cells>0
-                // means A* succeeded and the failure is in per-segment NavMesh
-                // validation (likely an off-graph corner); cells=0 names the
-                // A* failure mode (start/goal off-graph, no connection).
-                if (m_currentWaypoint != null)
-                {
-                    var g = RegionGraph.GetNearest(transform.position);
-                    if (g != null)
-                    {
-                        var planned = RegionGraphAStar.PlanCells(
-                            g, transform.position, m_currentWaypoint.Position, out var reason);
-                        var complete = VillagerMovement.TryFindCompletePath(
-                            transform.position, m_currentWaypoint.Position, null);
-                        sb.AppendLine(
-                            $"    pathplan: astar_cells={planned?.Count ?? 0} reason={reason} " +
-                            $"corridor_complete={complete}");
-                    }
-                }
-            }
+                AppendCustomMoverPathState(sb);
 
             if (m_recoveryAttempts > 0 || m_recoveryRetreating || m_consecutiveStucks > 0)
                 sb.AppendLine($"    recovery: attempts={m_recoveryAttempts} retreating={m_recoveryRetreating} " +
@@ -154,6 +132,86 @@ namespace ValheimVillages.Villager.AI
                         sb.AppendLine($"    note[{b.Tag}]: {cba.Crafting.LastWorkNote}");
                 }
             }
+        }
+
+        /// <summary>
+        ///     Report the advisory NavMeshAgent's real path state — the actual
+        ///     information UpdateAgentMovement steers on. Replaces the old
+        ///     corridor-planner readout, which described a planner the agent
+        ///     mover never consults.
+        /// </summary>
+        private void AppendAgentPathState(StringBuilder sb)
+        {
+            if (m_navAgent == null)
+            {
+                sb.AppendLine("    agent: <not created yet>");
+                return;
+            }
+
+            if (!m_navAgent.isOnNavMesh)
+            {
+                sb.AppendLine(
+                    "    agent: OFF-MESH — agent position not on the slot-31 navmesh; cannot path");
+                return;
+            }
+
+            var pending = m_navAgent.pathPending;
+            var rd = m_navAgent.remainingDistance;
+            var rdStr = pending ? "pending" : float.IsInfinity(rd) ? "∞" : $"{rd:F1}m";
+            var dv = m_navAgent.desiredVelocity.magnitude;
+            var dest = m_navAgent.destination;
+
+            sb.AppendLine(
+                $"    agent: status={m_navAgent.pathStatus} hasPath={m_navAgent.hasPath} " +
+                $"pending={pending} onLink={m_navAgent.isOnOffMeshLink} " +
+                $"corners={m_navAgent.path.corners.Length}");
+            sb.AppendLine(
+                $"    agent: remaining={rdStr} stop={m_navAgent.stoppingDistance:F1}m " +
+                $"desiredVel={dv:F2} dest=({dest.x:F1},{dest.y:F1},{dest.z:F1})");
+
+            // Silent-stall signature: a path the agent isn't moving along (zero
+            // desired velocity, not yet at target) — the exact case
+            // UpdateAgentMovement's bare StopMoving() otherwise hides.
+            if (m_navAgent.hasPath && !pending && dv < 0.01f
+                && !float.IsInfinity(rd) && rd > m_navAgent.stoppingDistance + 0.25f)
+                sb.AppendLine("    agent: ⚠ STALLED — has path, off target, zero desired velocity");
+
+            // Partial/invalid path = the agent can't actually reach the target on
+            // its navmesh (mover-relevant analogue of the old 'corridor incomplete').
+            if (!pending && m_navAgent.pathStatus != UnityEngine.AI.NavMeshPathStatus.PathComplete)
+                sb.AppendLine(
+                    $"    agent: ⚠ path {m_navAgent.pathStatus} — target not fully reachable on the agent navmesh");
+        }
+
+        /// <summary>
+        ///     Legacy custom corner-walker readout: it follows BaseAI.m_path
+        ///     (computed by TryFindCompletePath — corridor or unconstrained), so
+        ///     m_path + the corridor planner ARE the relevant state for that mover.
+        /// </summary>
+        private void AppendCustomMoverPathState(StringBuilder sb)
+        {
+            var followPath = s_pathField?.GetValue(this) as List<Vector3>;
+            var corners = followPath?.Count ?? 0;
+            if (corners > 0)
+            {
+                var next = followPath[0];
+                sb.AppendLine($"    path: {corners} corner(s), next=({next.x:F1},{next.y:F1},{next.z:F1})");
+                return;
+            }
+
+            sb.AppendLine("    path: <none>");
+            if (m_currentWaypoint == null) return;
+
+            var g = RegionGraph.GetNearest(transform.position);
+            if (g == null) return;
+
+            var planned = RegionGraphAStar.PlanCells(
+                g, transform.position, m_currentWaypoint.Position, out var reason);
+            var complete = VillagerMovement.TryFindCompletePath(
+                transform.position, m_currentWaypoint.Position, null);
+            sb.AppendLine(
+                $"    pathplan: astar_cells={planned?.Count ?? 0} reason={reason} " +
+                $"corridor_complete={complete}");
         }
     }
 }

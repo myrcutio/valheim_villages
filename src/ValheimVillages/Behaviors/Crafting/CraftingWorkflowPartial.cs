@@ -39,9 +39,11 @@ namespace ValheimVillages.Behaviors.Crafting
             }
 
             SubState = substate;
-            m_ai.SetState(BehaviorState.Working,
-                new VillagerWaypoint(approach, VillagerWaypoint.DefaultStrategyId));
-            return true;
+            // We already resolved a station-aware approach above (bed-anchored
+            // village + hull check), so skip NavTo's generic snap and route the
+            // state change + path/agent reset through the single entry point.
+            return m_ai.NavTo(approach, BehaviorState.Working, targetDescription,
+                snapToApproach: false);
         }
 
         private static readonly MethodInfo s_smelterGetProcessedQueueSize = typeof(Smelter)

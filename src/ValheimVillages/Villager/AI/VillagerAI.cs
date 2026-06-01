@@ -28,6 +28,14 @@ namespace ValheimVillages.Villager.AI
         private const float PathRetryInterval = 2f;
         private const float SaveInterval = 60f;
 
+        /// <summary>
+        ///     Vertical/spatial radius for snapping a NavTo destination onto the
+        ///     agent navmesh. Sized to catch approach points resolved up to ~2m
+        ///     above the walkable surface (chest/station Y over the floor)
+        ///     without mapping to a different level.
+        /// </summary>
+        private const float NavToSnapRadius = 2f;
+
         private static readonly FieldInfo s_pathField = typeof(BaseAI).GetField(
             "m_path", BindingFlags.NonPublic | BindingFlags.Instance);
 
@@ -77,6 +85,14 @@ namespace ValheimVillages.Villager.AI
 
         private Vector3 m_lastMovePos;
         private float m_lastRealMoveTime;
+
+        // True while a DIRECT ORDER (manual/scripted NavTo, e.g. the debug
+        // "Go to Bed" button) is in flight. Outranks autonomous behavior:
+        // behavior selection + the idle fallback are skipped so the order
+        // isn't reset back to Idle. Set by NavTo(directOrder:true); cleared on
+        // arrival (OnArrivedAtTarget), after which normal task-queue behavior
+        // resumes.
+        private bool m_directOrderActive;
 
         // Path-stall dedup: log "entered" once, "resolved" / "escalated" once,
         // instead of re-firing the diagnostic every PathStallEscapeSeconds.
@@ -284,7 +300,18 @@ namespace ValheimVillages.Villager.AI
                 // villager is already on the mesh (the common case);
                 // returns true and sets a movement target when a rescue
                 // was needed.
-                if (!TryRescueOffMesh())
+                // A direct order (manual/scripted NavTo, e.g. the debug "Go to
+                // Bed" button) outranks autonomous behavior: while one is in
+                // flight, skip behavior selection AND the idle fallback entirely
+                // so the order isn't clobbered back to Idle. The movement tick
+                // below still drives the directed move. The flag is cleared on
+                // arrival (OnArrivedAtTarget), after which normal task-queue
+                // behavior resumes on the next tick.
+                if (m_directOrderActive)
+                {
+                    // Hold the directed move — nothing to (re)select.
+                }
+                else if (!TryRescueOffMesh())
                 {
                     var ctx = new BehaviorContext();
                     var handled = false;
@@ -888,12 +915,72 @@ namespace ValheimVillages.Villager.AI
             return m_currentWaypoint;
         }
 
-        public bool FindPath(VillagerWaypoint destination)
+        /// <summary>
+        ///     THE single entry point for directing the villager to a world
+        ///     location. Wraps the full sequence every caller needs:
+        ///     <list type="number">
+        ///       <item>(optionally) snap the raw target to an HNA-valid,
+        ///         complete-path-reachable approach point,</item>
+        ///       <item>clear any in-flight path + reset recovery/stall timers
+        ///         (via <see cref="SetState"/>),</item>
+        ///       <item>set the behavior state + waypoint,</item>
+        ///       <item>reset the advisory NavMeshAgent so it re-plans from
+        ///         scratch instead of steering a stale internal path / leftover
+        ///         off-mesh link.</item>
+        ///     </list>
+        ///     Returns false (and changes nothing) when snapping is requested
+        ///     but no reachable approach exists — the caller decides whether to
+        ///     AbandonWork, message the player, etc.
+        ///     <para>Do NOT set <c>m_currentWaypoint</c> or call BaseAI.FindPath
+        ///     directly — those bypass path invalidation and the agent reset and
+        ///     strand the villager following a stale path. This method is the
+        ///     consolidation of the formerly divergent move entry points
+        ///     (native FindPath, raw SetState, TryWalkTo).</para>
+        /// </summary>
+        public bool NavTo(Vector3 target, BehaviorState state, string label,
+            bool snapToApproach = true, System.Func<Vector3, bool> hullPredicate = null,
+            bool directOrder = false)
         {
-            var hasPath = FindPath(destination.Position);
-            if (hasPath) m_currentWaypoint = destination;
+            var dest = target;
+            if (snapToApproach &&
+                !VillagerMovement.TryResolveApproach(target, transform.position, hullPredicate, out dest))
+            {
+                Plugin.Log?.LogWarning(
+                    $"[AI:{m_villagerName}] NavTo('{label}') found no reachable approach to " +
+                    $"({target.x:F1},{target.y:F1},{target.z:F1}); not moving.");
+                return false;
+            }
 
-            return hasPath;
+            // ALWAYS land the destination on the agent's navmesh surface, even
+            // when an approach was pre-resolved (snapToApproach=false). Approach
+            // resolvers can return a point ABOVE the walkable mesh (e.g. a
+            // chest's own Y, ~0.5m over the floor it sits on). The advisory
+            // NavMeshAgent then can neither arrive (its path to the off-mesh
+            // point is never PathComplete) nor move (it's already at the nearest
+            // mesh point, so desiredVelocity ≈ 0) — the villager strands a few
+            // tenths of a metre below the target. Snapping guarantees an on-mesh
+            // destination the agent can complete-path to and register arrival at.
+            if (VillagerAgentType.IsRegistered &&
+                NavMesh.SamplePosition(dest, out var meshHit, NavToSnapRadius, AgentFilter()))
+                dest = meshHit.position;
+
+            // SetState clears the stale path, resets recovery, resets stall
+            // timers, and records the target-set event — funnel through it so
+            // every move shares that invalidation.
+            SetState(state, new VillagerWaypoint(dest, VillagerWaypoint.DefaultStrategyId, label));
+
+            // Re-plan the advisory agent from scratch: drop any stale internal
+            // path / off-mesh-link state left over from the previous target.
+            if (m_navAgent != null && m_navAgent.isOnNavMesh)
+                m_navAgent.ResetPath();
+
+            // A direct order outranks autonomous behavior until the villager
+            // arrives (OnArrivedAtTarget clears it). Workflow-issued NavTo calls
+            // pass directOrder=false — they ARE the behavior and shouldn't lock
+            // out re-selection.
+            m_directOrderActive = directOrder;
+
+            return true;
         }
 
         /// <summary>
@@ -1289,6 +1376,18 @@ namespace ValheimVillages.Villager.AI
                 return;
             }
 
+            // Doorways bake as plain walkable navmesh (door colliders are
+            // excluded from the bake), so the agent routes straight through
+            // them — but the PHYSICAL door is still a solid collider. Open any
+            // closed player-built door ahead on the route so the character
+            // isn't stopped by it. Proximity + direction gated (GetBlockingDoor),
+            // link-free — replaces the old door-link + OpenDoorsAlongPath path.
+            if (DoorHandler != null)
+            {
+                var blockingDoor = DoorHandler.GetBlockingDoor(targetPos);
+                if (blockingDoor != null) DoorHandler.OpenDoor(blockingDoor);
+            }
+
             MoveTowards(dir.normalized, running);
         }
 
@@ -1432,6 +1531,9 @@ namespace ValheimVillages.Villager.AI
         {
             m_lastArrivalTime = Time.time;
             m_consecutiveStucks = 0;
+            // Direct order fulfilled — release the behavior lockout so normal
+            // task-queue behavior resumes on the next selection tick.
+            m_directOrderActive = false;
             // Successful arrival at the real target — wipe any recovery
             // bookkeeping. The next failed FindPath starts a fresh attempt
             // counter rather than inheriting prior unrelated failures.
