@@ -249,9 +249,6 @@ namespace ValheimVillages
                 // Restore NPC state: strips native components, adds mod components
                 VillagerRestoration.Restore(nview.gameObject, zdo);
 
-                // Register with Villager.AI manager (pending; active when VillagerAI component exists)
-                VillagerAIManager.Register(uniqueId, bedPos);
-
                 fixedCount++;
                 Plugin.Log?.LogDebug(
                     $"[HotReload] Fixed up NPC at {nview.transform.position}");

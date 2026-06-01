@@ -63,15 +63,6 @@ namespace ValheimVillages.Villages
         }
 
         /// <summary>
-        ///     Check if a Collider belongs to a wall or door piece.
-        /// </summary>
-        public static bool IsWallCollider(Collider collider)
-        {
-            if (collider == null) return false;
-            return IsWallPiece(collider.gameObject);
-        }
-
-        /// <summary>
         ///     Raycast to find the nearest wall piece in a given direction.
         ///     Returns true if a wall was found, with hit info.
         /// </summary>
@@ -91,35 +82,6 @@ namespace ValheimVillages.Villages
                 if (hit.distance < closestDist)
                 {
                     closestDist = hit.distance;
-                    wallHit = hit;
-                    found = true;
-                }
-            }
-
-            return found;
-        }
-
-        /// <summary>
-        ///     Raycast to find the farthest wall piece in a given direction (within maxDist).
-        ///     Used during scouting to find the outermost wall.
-        /// </summary>
-        public static bool RaycastForFarthestWall(Vector3 origin, Vector3 direction, float maxDist,
-            out RaycastHit wallHit)
-        {
-            wallHit = default;
-            var hits = Physics.RaycastAll(origin, direction.normalized, maxDist, PieceMask);
-
-            var farthestDist = -1f;
-            var found = false;
-
-            foreach (var hit in hits)
-            {
-                if (hit.collider == null) continue;
-                if (!IsWallPiece(hit.collider.gameObject)) continue;
-
-                if (hit.distance > farthestDist)
-                {
-                    farthestDist = hit.distance;
                     wallHit = hit;
                     found = true;
                 }

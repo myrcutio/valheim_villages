@@ -304,15 +304,6 @@ namespace ValheimVillages.Villager.AI.Navigation
             return false;
         }
 
-        public static bool GetSolidHeightNear(float worldX, float worldZ,
-            float referenceY, out float height)
-        {
-            height = 0f;
-            if (ZoneSystem.instance == null) return false;
-            return ZoneSystem.instance.GetSolidHeight(
-                new Vector3(worldX, referenceY + 3f, worldZ), out height, 10);
-        }
-
         public static int HeightBucket(float y)
         {
             return Mathf.FloorToInt(y / HeightBucketSize);
@@ -463,11 +454,6 @@ namespace ValheimVillages.Villager.AI.Navigation
             return SurfaceKind.Piece;
         }
 
-        public IReadOnlyDictionary<string, SurfaceKind> GetRegionKinds()
-        {
-            return m_regionKinds;
-        }
-
         public bool TryGetCellHeight(string cellId, out float height)
         {
             height = 0f;
@@ -557,19 +543,6 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             if (!m_initialized) return new List<RegionLink>();
             return m_links;
-        }
-
-        public List<Vector3> GetAllLinkPositions()
-        {
-            var list = new List<Vector3>();
-            if (!m_initialized) return list;
-            foreach (var link in m_links)
-            {
-                list.Add(link.PositionStart);
-                list.Add(link.PositionEnd);
-            }
-
-            return list;
         }
 
         /// <summary>

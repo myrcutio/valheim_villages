@@ -38,8 +38,6 @@ namespace ValheimVillages.Enums
         Patrolling, // Outdoor patrol route
         Exploring, // Searching for new location types
         Working, // Crafting: executing a work order
-        Scouting, // Patrol: walking out from bed to find walls
-        CircuitTracing, // Patrol: tracing circle around bed, building waypoints
         Alarmed, // Patrol: breach detected, waiting for player
     }
 }

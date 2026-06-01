@@ -277,10 +277,10 @@ namespace ValheimVillages.Diagnostics
         ///     a "blocked" result here doesn't change the path the AI is
         ///     trying to walk; it just tells the next investigation
         ///     <em>what is in the way</em> without needing a separate probe
-        ///     command. Capsule dimensions match
-        ///     <c>NavMeshLinkPlacer.IsAgentBodyClear</c>'s body model so the
-        ///     diagnostic agrees with the link-validation rejection log
-        ///     lines on the same geometry.
+        ///     command. Capsule dimensions approximate
+        ///     <c>NavMeshLinkPlacer.IsLinkGeometricallyTraversable</c>'s body
+        ///     model so the diagnostic roughly agrees with the link-validation
+        ///     rejection log lines on the same geometry.
         /// </summary>
         private static void AppendSegmentCasts(StringBuilder sb, Vector3 villagerPos, List<Vector3> corners)
         {

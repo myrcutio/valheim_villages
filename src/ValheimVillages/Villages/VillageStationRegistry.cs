@@ -15,7 +15,6 @@ namespace ValheimVillages.Villages
     public static class VillageStationRegistry
     {
         private static readonly Dictionary<string, List<Component>> s_stationsByVillage = new();
-        private static readonly Dictionary<string, HashSet<long>> s_outsideCellsByVillage = new();
 
         /// <summary>
         ///     (Re)scan stations inside the given VillageArea. Called from VillageAreaManager
@@ -88,7 +87,6 @@ namespace ValheimVillages.Villages
             }
 
             s_stationsByVillage[area.VillageKey] = found;
-            s_outsideCellsByVillage[area.VillageKey] = outsideCells;
 
             if (Plugin.Log != null)
             {
@@ -114,7 +112,6 @@ namespace ValheimVillages.Villages
         public static void RemoveFor(string villageKey)
         {
             s_stationsByVillage.Remove(villageKey);
-            s_outsideCellsByVillage.Remove(villageKey);
         }
 
         /// <summary>True if the registry has a village whose polygon contains the position.</summary>
@@ -471,7 +468,6 @@ namespace ValheimVillages.Villages
         public static void Clear()
         {
             s_stationsByVillage.Clear();
-            s_outsideCellsByVillage.Clear();
         }
 
         /// <summary>

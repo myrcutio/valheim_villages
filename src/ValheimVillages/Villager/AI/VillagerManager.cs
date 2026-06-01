@@ -17,13 +17,6 @@ namespace ValheimVillages.Villager.AI
         public static readonly Dictionary<string, VillagerAI> ActiveVillagers = new();
 
         /// <summary>
-        ///     Pending registrations (legacy): uniqueId -> bed position for villagers registered
-        ///     before their AI component exists. The primary path registers via RegisterActive
-        ///     from VillagerAI.Awake (component lifecycle).
-        /// </summary>
-        private static readonly Dictionary<string, Vector3> s_pendingRegistrations = new();
-
-        /// <summary>
         ///     Register an active VillagerAI instance. Called from VillagerAI.Awake when the
         ///     Villager component adds VillagerAI (component lifecycle; no MonsterAI).
         /// </summary>
@@ -35,24 +28,11 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        ///     Legacy: Register a villager by ID and bed position (e.g. before AI component exists).
-        ///     The primary path uses Villager + VillagerAI components and RegisterActive from Awake.
-        /// </summary>
-        public static void Register(string uniqueId, Vector3 bedPosition)
-        {
-            if (string.IsNullOrEmpty(uniqueId)) return;
-
-            s_pendingRegistrations[uniqueId] = bedPosition;
-            Plugin.Log?.LogInfo($"[VillagerAIManager] Registered villager {uniqueId} (pending)");
-        }
-
-        /// <summary>
         ///     Unregister a villager.
         /// </summary>
         public static void Unregister(string uniqueId)
         {
             ActiveVillagers.Remove(uniqueId);
-            s_pendingRegistrations.Remove(uniqueId);
         }
 
         /// <summary>
@@ -62,15 +42,6 @@ namespace ValheimVillages.Villager.AI
         {
             if (ai != null)
                 Unregister(ai.UniqueId);
-        }
-
-        /// <summary>
-        ///     Check if a unique ID is registered (either pending or active).
-        /// </summary>
-        public static bool IsRegistered(string uniqueId)
-        {
-            if (string.IsNullOrEmpty(uniqueId)) return false;
-            return ActiveVillagers.ContainsKey(uniqueId) || s_pendingRegistrations.ContainsKey(uniqueId);
         }
 
         /// <summary>
@@ -142,7 +113,6 @@ namespace ValheimVillages.Villager.AI
         public static void Clear()
         {
             ActiveVillagers.Clear();
-            s_pendingRegistrations.Clear();
         }
     }
 }

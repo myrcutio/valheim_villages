@@ -99,21 +99,6 @@ namespace ValheimVillages.Villages
         }
 
         /// <summary>
-        ///     Check if a position is INSIDE any registered village area AND at
-        ///     least <paramref name="shrinkMargin" /> meters away from the polygon
-        ///     boundary. Used to virtually shrink the polygon inward without
-        ///     modifying its vertices, e.g. to exclude positions where the patrol
-        ///     path wrapped slightly outside the actual wall line.
-        /// </summary>
-        public static bool IsInsideDeepAnyVillage(Vector3 position, float shrinkMargin)
-        {
-            foreach (var area in s_areas.Values)
-                if (area.IsInsideArea(position) && !area.IsNearBoundary(position, shrinkMargin))
-                    return true;
-            return false;
-        }
-
-        /// <summary>
         ///     Get the combined axis-aligned XZ bounds of all registered village areas.
         ///     Returns false if there are no areas.
         /// </summary>

@@ -11,15 +11,6 @@ namespace ValheimVillages.Villager.AI.Work
     public static class StationMatcher
     {
         /// <summary>
-        ///     Returns true if this villager type can execute work orders.
-        /// </summary>
-        public static bool IsWorkerType(string villagerType)
-        {
-            var def = VillagerRegistry.Get(villagerType);
-            return def?.workStations != null && def.workStations.Count > 0;
-        }
-
-        /// <summary>
         ///     Returns the station name strings this villager type can work at.
         /// </summary>
         public static string[] GetStationNames(string villagerType)

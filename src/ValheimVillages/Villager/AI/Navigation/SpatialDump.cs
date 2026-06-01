@@ -173,8 +173,8 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.Append("}\n");
 
             var path = Path.Combine(
-                "/home/benny/Projects/valheim_villages",
-                ".cursor", "hna_spatial_dump.json");
+                Paths.ConfigPath, "vv_dumps", "hna_spatial_dump.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
             File.WriteAllText(path, sb.ToString());
             Console.instance?.Print(
                 $"HNA spatial dump written to {path} ({beds.Count} beds, {cellCountX}x{cellCountZ} grid, {doorIdx} doors, {pieceIdx} pieces)");
