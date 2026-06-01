@@ -305,11 +305,9 @@ namespace ValheimVillages.Villages
             }
 
             var minStandoffSq = MinApproachStandoffXZ * MinApproachStandoffXZ;
-            var pathBuffer = new List<Vector3>();
             var considered = 0;
             var levelPass = 0;
             var standoffPass = 0;
-            var pathPass = 0;
             var losPass = 0;
             var ok = graph.TryFindNearestLookupCell(
                 target,
@@ -328,35 +326,25 @@ namespace ValheimVillages.Villages
                     var dz = candidate.z - target.z;
                     if (dx * dx + dz * dz < minStandoffSq) return false;
                     standoffPass++;
-                    // Require BOTH a complete NavMesh corridor AND a path the
-                    // agent capsule can physically sweep. NavMesh-complete alone
-                    // accepts approaches that hug a chest/wall, where the agent
-                    // then stalls a few metres short. Capsule-clear rejects
-                    // those so we keep walking outward to a reachable cell.
-                    if (!Villager.AI.Navigation.VillagerMovement.TryFindCompletePath(
-                            pathStart, candidate, pathBuffer))
-                        return false;
-                    pathPass++;
-                    // Require a clear physical line-of-sight from the approach
-                    // point to the station. A complete NavMesh path can still
-                    // end at a cell on the WRONG SIDE of a wall or on a different
-                    // floor — the villager then "uses" the station through the
-                    // collider (the interaction is an RPC that ignores geometry).
-                    // The LOS ray at interaction height also rejects different-
-                    // floor approaches: a ceiling/floor between the approach and
-                    // the station blocks the diagonal ray, so we keep searching
-                    // outward for a same-level, unobstructed cell.
+                    // No per-source path check. A same-level standoff cell with
+                    // a clear line of sight to the station IS a valid approach
+                    // position — and a valid approach position means the station
+                    // is reachable. Whether THIS villager can route to it from
+                    // where it currently stands is decided at execution time by
+                    // NavTo (snap onto the navmesh + let the agent path, abandon
+                    // if genuinely blocked), NOT pre-validated here with a
+                    // complete-path-from-bed query. That pre-check produced false
+                    // "unreachable" (e.g. blacksmith → smelter) whenever the bed
+                    // had no precomputed corridor to the station, even though the
+                    // station was right there with a perfectly good approach.
+                    //
+                    // LOS still matters: it rejects cells on the wrong side of a
+                    // wall or a different floor (a ceiling/floor blocks the
+                    // diagonal ray), so the resolved approach is genuinely next
+                    // to and on the same level as the station.
                     if (!HasClearLineToStation(candidate, target)) return false;
                     losPass++;
-                    // The capsule gate exists to catch the HNA corridor planner
-                    // routing straight through obstacles. On the raw NavMesh a
-                    // complete path is already physically traversable (the bake
-                    // carves obstacles by agent-radius), so the gate is redundant
-                    // and over-rejects the weaving raw paths — skip it there.
-                    if (Villager.AI.Navigation.VillagerMovement.RawNavMeshPathing)
-                        return true;
-                    return Villager.AI.Navigation.VillagerMovement.IsPathCapsuleClear(
-                        pathStart, pathBuffer);
+                    return true;
                 },
                 out approach,
                 out _,
@@ -366,7 +354,7 @@ namespace ValheimVillages.Villages
                 $"src=({pathSource.x:F1},{pathSource.y:F1},{pathSource.z:F1}) snap={(snapped ? "y" : "fallback")} " +
                 $"pathStart=({pathStart.x:F1},{pathStart.y:F1},{pathStart.z:F1}) " +
                 $"tgt=({target.x:F1},{target.y:F1},{target.z:F1}) " +
-                $"considered={considered} levelPass={levelPass} standoffPass={standoffPass} pathPass={pathPass} losPass={losPass} " +
+                $"considered={considered} levelPass={levelPass} standoffPass={standoffPass} losPass={losPass} " +
                 $"result={(ok ? $"({approach.x:F1},{approach.y:F1},{approach.z:F1})" : "FAIL")}";
             return ok;
         }
