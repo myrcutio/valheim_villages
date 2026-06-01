@@ -36,6 +36,7 @@ namespace ValheimVillages.Villages
                 $"[VillageArea] Registered area for {area.VillageKey} with {area.Waypoints.Count} waypoints");
             VillageStationRegistry.RefreshFor(area);
             VillagePoiRegistry.RefreshFor(area);
+            VillageRoomCatalog.RefreshFor(area);
         }
 
         /// <summary>
@@ -48,6 +49,7 @@ namespace ValheimVillages.Villages
                 Plugin.Log?.LogInfo($"[VillageArea] Unregistered area for {villageKey}");
                 VillageStationRegistry.RemoveFor(villageKey);
                 VillagePoiRegistry.RemoveFor(villageKey);
+                VillageRoomCatalog.RemoveFor(villageKey);
             }
         }
 
