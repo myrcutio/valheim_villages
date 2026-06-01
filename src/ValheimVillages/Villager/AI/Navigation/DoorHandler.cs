@@ -105,65 +105,6 @@ namespace ValheimVillages.Villager.AI.Navigation
             return null;
         }
 
-        /// <summary>
-        ///     Proactively opens doors that lie along the NPC's current path.
-        ///     A door is opened only when at least one path segment (from the
-        ///     NPC's current position through the next few waypoints)
-        ///     actually crosses the door's perpendicular plane within the
-        ///     doorway opening. The old "any waypoint near door midpoint"
-        ///     check opened doors that the path merely passed near but
-        ///     didn't go through — visible as villagers opening doors as
-        ///     they walked parallel to a wall.
-        /// </summary>
-        public void OpenDoorsAlongPath(List<Vector3> path)
-        {
-            var doorLinks = NavMeshLinkPlacer.DoorLinks;
-            if (doorLinks.Count == 0 || path == null || path.Count == 0) return;
-
-            var npcPos = transform.position;
-            // Only consider doors the NPC is close enough to interact with;
-            // far-away doors would be opened way ahead of time.
-            const float approachRadius = 2.5f;
-            // Half-width of the doorway opening — the crossing point must
-            // fall within this radius of the door's center to count as
-            // "through the door" rather than "near the door".
-            const float doorwayHalfWidth = 0.8f;
-            // Number of upcoming path segments to test. Includes the
-            // current-position -> path[0] segment.
-            const int maxSegmentsToTest = 4;
-
-            foreach (var (midpoint, door) in doorLinks)
-            {
-                if (door == null) continue;
-                if (!IsDoorClosed(door)) continue;
-
-                var distToNpc = Vector3.Distance(npcPos, midpoint);
-                if (distToNpc > approachRadius) continue;
-
-                var doorFwd = door.transform.forward;
-                doorFwd.y = 0f;
-                if (doorFwd.sqrMagnitude < 0.01f) continue;
-                doorFwd.Normalize();
-
-                var pathCrossesDoor = false;
-                var segStart = npcPos;
-                for (var i = 0; i < path.Count && i < maxSegmentsToTest; i++)
-                {
-                    var segEnd = path[i];
-                    if (SegmentCrossesDoor(segStart, segEnd, midpoint, doorFwd, doorwayHalfWidth))
-                    {
-                        pathCrossesDoor = true;
-                        break;
-                    }
-
-                    segStart = segEnd;
-                }
-
-                if (!pathCrossesDoor) continue;
-
-                OpenDoor(door);
-            }
-        }
 
         /// <summary>
         ///     True iff the line segment from <paramref name="a" /> to

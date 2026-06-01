@@ -501,16 +501,6 @@ namespace ValheimVillages.TaskQueue.Handlers
             // rebake is gone; the single bake produces a NavMesh that
             // already excludes outside surfaces and carves obstacles.)
 
-            // Clear stale NavMeshLinks from the previous partition's
-            // RegionGraph — region IDs renumber on every rebuild, so
-            // links pointing at the old centroids are no longer valid
-            // anchors. RemoveAllLinks also resets the PlaceLinks
-            // cooldown so the next PlaceLinks call (triggered by the
-            // first villager that needs pathing) repopulates from this
-            // fresh RegionGraph immediately. Without this cleanup,
-            // links accumulated across repartitions and pointed at
-            // stale positions — masking the new graph's connectivity.
-            NavMeshLinkPlacer.RemoveAllLinks();
 
 
             // Invalidate every active villager's cached BaseAI path.

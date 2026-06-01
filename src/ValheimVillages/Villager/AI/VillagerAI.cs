@@ -488,7 +488,6 @@ namespace ValheimVillages.Villager.AI
 
                         if (path != null && path.Count > 0)
                         {
-                            DoorHandler?.OpenDoorsAlongPath(path);
 
                             var diff = path[0] - transform.position;
                             var dir = diff.normalized;

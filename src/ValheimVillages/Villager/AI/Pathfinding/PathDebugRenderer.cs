@@ -103,8 +103,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
                     DrawVillagerPath(ai);
                 }
 
-                DrawNavMeshLinks();
-                DrawHnaCandidates();
             }
 
             if (s_showTriangulation)
@@ -227,18 +225,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             Plugin.Log?.LogInfo($"[vv_agentmover] villager mover = {mode}");
         }
 
-        [DevCommand("Toggle NavMeshLink placement. on = skip all links (pure navmesh); off = place links normally.",
-            Name = "vv_skiplinks")]
-        public static void ToggleSkipLinks(Terminal.ConsoleEventArgs args)
-        {
-            NavMeshLinkPlacer.SkipLinkPlacement = !NavMeshLinkPlacer.SkipLinkPlacement;
-            if (NavMeshLinkPlacer.SkipLinkPlacement)
-                NavMeshLinkPlacer.RemoveAllLinks();
-            VillagerAIManager.InvalidatePathsAfterRebake();
-            var mode = NavMeshLinkPlacer.SkipLinkPlacement ? "SKIP (pure navmesh)" : "PLACE links";
-            Console.instance?.Print($"[vv_skiplinks] link placement = {mode}");
-            Plugin.Log?.LogInfo($"[vv_skiplinks] link placement = {mode}");
-        }
 
         [DevCommand("Toggle villager pathing between raw slot-31 NavMesh (on) and the HNA corridor planner (off).",
             Name = "vv_rawpathing")]
@@ -438,62 +424,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             GL.End();
         }
 
-        private void DrawNavMeshLinks()
-        {
-            var endpoints = NavMeshLinkPlacer.LinkEndpoints;
-            if (endpoints.Count == 0) return;
-
-            var yOff = Vector3.up * LineYOffset;
-
-            foreach (var (start, end) in endpoints)
-            {
-                // Dashed line connecting the two link endpoints
-                GL.Begin(GL.LINES);
-                GL.Color(ColorNavLink);
-                GL.Vertex(start + yOff);
-                GL.Vertex(end + yOff);
-                GL.End();
-
-                DrawWirePyramid(start + yOff, NavLinkPyramidSize, ColorNavLink);
-                DrawWirePyramid(end + yOff, NavLinkPyramidSize, ColorNavLink);
-            }
-        }
-
-        private void DrawHnaCandidates()
-        {
-            if (!NavMeshLinkPlacer.LinkCandidatesReady) return;
-
-            var candidates = NavMeshLinkPlacer.HnaCandidates;
-            if (candidates.Count == 0) return;
-
-            var yOff = Vector3.up * LineYOffset;
-
-            foreach (var c in candidates)
-            {
-                Color color;
-                switch (c.Status)
-                {
-                    case NavMeshLinkPlacer.HnaCandidateStatus.NeedsLink:
-                        color = ColorHnaNeedsLink;
-                        break;
-                    case NavMeshLinkPlacer.HnaCandidateStatus.AlreadyConnected:
-                        color = ColorHnaConnected;
-                        break;
-                    default:
-                        color = ColorHnaRejected;
-                        break;
-                }
-
-                GL.Begin(GL.LINES);
-                GL.Color(color);
-                GL.Vertex(c.Start + yOff);
-                GL.Vertex(c.End + yOff);
-                GL.End();
-
-                DrawWireOctahedron(c.Start + yOff, HnaCandidateMarkerSize, color);
-                DrawWireOctahedron(c.End + yOff, HnaCandidateMarkerSize, color);
-            }
-        }
 
         /// <summary>
         ///     Wire pyramid (tetrahedron) — 4 vertices, 6 edges. Pointy top, triangular base.

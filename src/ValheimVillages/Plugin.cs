@@ -208,12 +208,6 @@ namespace ValheimVillages
 
             PathDebugRenderer.AutoEnable();
 
-            if (RegionGraph.IsAnyAvailable && !NavMeshLinkPlacer.LinkCandidatesReady)
-                NavMeshLinkPlacer.ComputeLinkCandidates();
-
-            if (RegionGraph.IsAnyAvailable && !NavMeshLinkPlacer.HasLinks)
-                NavMeshLinkPlacer.PlaceLinks();
-
             // Keep a non-carving NavMeshObstacle on the local player so villager
             // RVO steers around the player too (the player isn't a NavMeshAgent,
             // so it's otherwise invisible to their avoidance).
