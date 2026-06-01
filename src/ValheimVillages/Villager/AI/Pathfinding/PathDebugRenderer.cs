@@ -205,17 +205,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         }
 
 
-        [DevCommand("Toggle villager mover between Unity NavMeshAgent (advisory) and the hand-rolled corner-walker.",
-            Name = "vv_agentmover")]
-        public static void ToggleAgentMover(Terminal.ConsoleEventArgs args)
-        {
-            VillagerAI.NavMeshAgentMover = !VillagerAI.NavMeshAgentMover;
-            VillagerAIManager.InvalidatePathsAfterRebake();
-            var mode = VillagerAI.NavMeshAgentMover ? "NavMeshAgent (advisory)" : "hand-rolled corner-walker";
-            Console.instance?.Print($"[vv_agentmover] villager mover = {mode}");
-            Plugin.Log?.LogInfo($"[vv_agentmover] villager mover = {mode}");
-        }
-
 
 
         [DevCommand("Toggle NavMesh triangulation wireframe. Optional cam=<cameraName> restricts the overlay to that camera (cam=off clears).", Name = "vv_tri_debug")]

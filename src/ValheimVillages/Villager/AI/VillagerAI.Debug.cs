@@ -100,14 +100,8 @@ namespace ValheimVillages.Villager.AI
             // stuck on its own partial path). Surface the agent's real state;
             // fall back to the m_path + corridor view only for the legacy custom
             // corner-walker mover.
-            if (NavMeshAgentMover)
-                AppendAgentPathState(sb);
-            else
-                AppendCustomMoverPathState(sb);
+            AppendAgentPathState(sb);
 
-            if (m_recoveryAttempts > 0 || m_recoveryRetreating || m_consecutiveStucks > 0)
-                sb.AppendLine($"    recovery: attempts={m_recoveryAttempts} retreating={m_recoveryRetreating} " +
-                              $"consecutiveStucks={m_consecutiveStucks}");
 
             if (m_behaviors != null && m_behaviors.Count > 0)
             {
@@ -203,29 +197,6 @@ namespace ValheimVillages.Villager.AI
             status = UnityEngine.AI.NavMeshPathStatus.PathInvalid;
             return false;
         }
-
-        /// <summary>
-        ///     Legacy custom corner-walker readout: it follows BaseAI.m_path
-        ///     (computed by TryFindCompletePath — corridor or unconstrained), so
-        ///     m_path + the corridor planner ARE the relevant state for that mover.
-        /// </summary>
-        private void AppendCustomMoverPathState(StringBuilder sb)
-        {
-            var followPath = s_pathField?.GetValue(this) as List<Vector3>;
-            var corners = followPath?.Count ?? 0;
-            if (corners > 0)
-            {
-                var next = followPath[0];
-                sb.AppendLine($"    path: {corners} corner(s), next=({next.x:F1},{next.y:F1},{next.z:F1})");
-                return;
-            }
-
-            sb.AppendLine("    path: <none>");
-            if (m_currentWaypoint == null) return;
-
-            var complete = VillagerMovement.TryFindCompletePath(
-                transform.position, m_currentWaypoint.Position, null);
-            sb.AppendLine($"    pathplan: complete={complete}");
-        }
     }
 }
+
