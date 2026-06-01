@@ -214,6 +214,11 @@ namespace ValheimVillages
             if (RegionGraph.IsAnyAvailable && !NavMeshLinkPlacer.HasLinks)
                 NavMeshLinkPlacer.PlaceLinks();
 
+            // Keep a non-carving NavMeshObstacle on the local player so villager
+            // RVO steers around the player too (the player isn't a NavMeshAgent,
+            // so it's otherwise invisible to their avoidance).
+            Villager.AI.Navigation.PlayerAvoidanceObstacle.Tick();
+
             // Tick Villager.AI.VillagerAI instances (BaseAI path; no MonsterAI)
             foreach (var ai in VillagerAIManager.ActiveVillagers.Values)
                 if (ai != null)

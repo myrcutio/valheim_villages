@@ -1258,6 +1258,21 @@ namespace ValheimVillages.Villager.AI
             m_navAgent.angularSpeed = 1080f;
             m_navAgent.stoppingDistance = 0.3f;
 
+            // Local avoidance (RVO) so villagers steer around each other instead
+            // of jamming in hallways/corners. desiredVelocity already folds in
+            // the avoidance contribution, so reading it (UpdateAgentMovement)
+            // picks this up — PROVIDED the sim knows each agent's real motion,
+            // which is why UpdateAgentMovement also feeds m_navAgent.velocity
+            // back from the character each frame (advisory mode otherwise leaves
+            // neighbours looking stationary, so RVO can't predict collisions).
+            m_navAgent.obstacleAvoidanceType = ObstacleAvoidanceType.GoodQualityObstacleAvoidance;
+            // Per-villager priority so head-on encounters resolve ASYMMETRICALLY
+            // (one pushes through, the other yields) instead of both side-
+            // stepping into a mutual deadlock. Lower value = higher priority.
+            // Derive a stable 20..80 spread from the villager id so the same
+            // villager always keeps the same priority across rebakes/reloads.
+            m_navAgent.avoidancePriority = 20 + (Mathf.Abs(UniqueId?.GetHashCode() ?? 0) % 61);
+
             if (NavMesh.SamplePosition(transform.position, out var hit, 3f, AgentFilter()))
                 m_navAgent.Warp(hit.position);
         }
@@ -1323,6 +1338,19 @@ namespace ValheimVillages.Villager.AI
             if (m_navAgent.isOnNavMesh)
             {
                 m_navAgent.nextPosition = transform.position;
+                // Feed the character's REAL horizontal velocity to the agent so
+                // local avoidance (RVO) can predict collisions with neighbouring
+                // villagers. In advisory mode the agent doesn't move itself, so
+                // without this every villager looks stationary to the avoidance
+                // sim and it barely steers around them — the hallway/corner
+                // jamming. With true velocities, desiredVelocity (read below)
+                // reflects the avoidance contribution.
+                if (m_character != null)
+                {
+                    var charVel = m_character.GetVelocity();
+                    charVel.y = 0f;
+                    m_navAgent.velocity = charVel;
+                }
             }
             else
             {

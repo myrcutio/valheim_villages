@@ -374,18 +374,33 @@ namespace ValheimVillages.Villages
         private static bool HasClearLineToStation(Vector3 approach, Vector3 station)
         {
             const float eyeHeight = 1.2f;   // villager/station interaction height
-            const float stationPad = 1.5f;  // don't probe the station's own volume
 
             var from = approach + Vector3.up * eyeHeight;
             var to = station + Vector3.up * eyeHeight;
             var delta = to - from;
             var dist = delta.magnitude;
-            if (dist <= stationPad) return true; // adjacent — trivially usable
-
+            if (dist < 0.01f) return true; // adjacent — trivially usable
             var dir = delta / dist;
-            var probe = dist - stationPad;
-            return !Physics.Raycast(from, dir, probe, s_losMask,
+
+            // RaycastAll the FULL segment and ignore the station's OWN collider.
+            // A fixed stand-off pad can't clear a large station: the charcoal
+            // kiln's collider is ~5-6m wide, so a ray toward its centre stopped
+            // 1.5m short still dead-ends inside the kiln's own body and reads as
+            // "blocked" from every approach (losPass=0). Instead, a hit whose
+            // bounds contain the target IS the station itself (the thing we're
+            // walking to) — not an obstruction between us and it — so skip it.
+            // Any OTHER solid hit along the segment is a real wall / floor /
+            // different piece and genuinely blocks the sightline.
+            var hits = Physics.RaycastAll(from, dir, dist, s_losMask,
                 QueryTriggerInteraction.Ignore);
+            foreach (var h in hits)
+            {
+                if (h.collider == null) continue;
+                if (h.collider.bounds.Contains(station)) continue; // the station's own body
+                return false; // a real obstruction between approach and station
+            }
+
+            return true;
         }
 
         [DevCommand("Diagnose HNA approach resolution to a target from a source (default player). " +
