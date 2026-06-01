@@ -22,8 +22,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         private const float NodeMarkerSize = 0.15f;
         private const float LineYOffset = 0.1f;
 
-        private const float NavLinkPyramidSize = 0.3f;
-        private const float HnaCandidateMarkerSize = 0.25f;
         private static PathDebugRenderer s_instance;
         private static bool s_enabled = true;
         private static bool s_showTriangulation = true;
@@ -55,10 +53,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         private static readonly Color ColorPartial = Color.yellow;
         private static readonly Color ColorNoPath = Color.red;
         private static readonly Color ColorTarget = new(1f, 0.4f, 0f); // orange
-        private static readonly Color ColorNavLink = new(0.7f, 0.3f, 1f); // purple
-        private static readonly Color ColorHnaNeedsLink = Color.cyan;
-        private static readonly Color ColorHnaConnected = new(0.5f, 0.5f, 0.5f, 0.4f); // dim gray
-        private static readonly Color ColorHnaRejected = new(1f, 0.3f, 0.2f, 0.6f); // dim red
 
         private Material m_lineMaterial;
 
@@ -394,40 +388,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         }
 
 
-        /// <summary>
-        ///     Wire pyramid (tetrahedron) — 4 vertices, 6 edges. Pointy top, triangular base.
-        /// </summary>
-        private static void DrawWirePyramid(Vector3 center, float size, Color color)
-        {
-            var halfBase = size * 0.7f;
-            var apex = center + Vector3.up * size;
-
-            // Equilateral triangle base offset downward
-            var b0 = center + new Vector3(0f, -size * 0.3f, halfBase);
-            var b1 = center + new Vector3(-halfBase * 0.866f, -size * 0.3f, -halfBase * 0.5f);
-            var b2 = center + new Vector3(halfBase * 0.866f, -size * 0.3f, -halfBase * 0.5f);
-
-            GL.Begin(GL.LINES);
-            GL.Color(color);
-
-            // Base triangle
-            GL.Vertex(b0);
-            GL.Vertex(b1);
-            GL.Vertex(b1);
-            GL.Vertex(b2);
-            GL.Vertex(b2);
-            GL.Vertex(b0);
-
-            // Apex edges
-            GL.Vertex(apex);
-            GL.Vertex(b0);
-            GL.Vertex(apex);
-            GL.Vertex(b1);
-            GL.Vertex(apex);
-            GL.Vertex(b2);
-
-            GL.End();
-        }
 
         private void DrawTriangulation()
         {

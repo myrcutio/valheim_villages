@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using UnityEngine;
 using UnityEngine.AI;
 using ValheimVillages.Behaviors;
@@ -15,17 +14,13 @@ using ValheimVillages.Villager.AI.Memory;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
 using ValheimVillages.Villager.Registry;
-using ValheimVillages.Villages;
 using Random = UnityEngine.Random;
 
 namespace ValheimVillages.Villager.AI
 {
     public partial class VillagerAI : BaseAI, IVillagerWorkContext
     {
-        private const float StuckBackoffBase = 10f;
-        private const float StuckBackoffMax = 600f;
 
-        private const float PathRetryInterval = 2f;
         private const float SaveInterval = 60f;
 
         /// <summary>
@@ -45,8 +40,6 @@ namespace ValheimVillages.Villager.AI
         // Composable behaviors (populated by BehaviorFactory from NPC definition)
         private List<IBehavior> m_behaviors = new();
 
-        // Hard-stuck backoff
-        private int m_consecutiveStucks;
         private VillagerWaypoint m_currentWaypoint;
         private DoorHandler m_doorHandler;
 
@@ -54,8 +47,6 @@ namespace ValheimVillages.Villager.AI
         private float m_explorationStartTime;
         private Vector3? m_explorationTarget;
 
-        /// <summary>Time.time when the guard last arrived at a waypoint. Used for hard stuck timeout.</summary>
-        private float m_lastArrivalTime;
 
         private float m_lastBehaviorUpdateTime;
 
@@ -63,8 +54,6 @@ namespace ValheimVillages.Villager.AI
         private float m_lastDiscoveryTime;
         private float m_lastMemorySaveTime;
 
-        private Vector3 m_lastMovePos;
-        private float m_lastRealMoveTime;
 
         // True while a DIRECT ORDER (manual/scripted NavTo, e.g. the debug
         // "Go to Bed" button) is in flight. Outranks autonomous behavior:
@@ -127,8 +116,6 @@ namespace ValheimVillages.Villager.AI
 
         private float m_stuckBackoffUntil;
 
-        /// <summary>When the current movement target was set (for stuck timeout).</summary>
-        private float m_targetSetTime;
 
 
         private string m_villagerName;
@@ -190,7 +177,6 @@ namespace ValheimVillages.Villager.AI
             RegisterOwnedBed();
             RegisterBehaviors();
 
-            m_lastArrivalTime = Time.time;
 
             // Stagger behavior ticks so NPCs spawned together don't all evaluate at the same time.
             // This is a countdown timer: 0 means "ready to run", positive means "wait this many more seconds".
@@ -523,24 +509,10 @@ namespace ValheimVillages.Villager.AI
             {
                 var prevTarget = m_currentWaypoint != null ? m_currentWaypoint.Position : Vector3.zero;
                 m_currentWaypoint = waypoint;
-                m_targetSetTime = Time.time;
-                m_lastMovePos = transform.position;
-                m_lastRealMoveTime = Time.time;
                 // Clear casual-travel marker by default. Behaviors that
                 // WANT casual travel (Explore wandering to a known
                 // location) set it back to true AFTER this returns.
                 IsCasualTravel = false;
-                // Invalidate any in-flight path: it was computed against the
-                // previous target and would otherwise keep being followed
-                // until the villager arrived at its old destination (and
-                // only THEN recomputed against the new one). The Update
-                // path-follow code branches on path.Count==0 to trigger a
-                // fresh TryFindPathCustom against m_currentWaypoint, so
-                // clearing here is the minimum surgery that produces the
-                // expected "new target, new path" semantics on the next
-                // tick. Confirmed by incident bundle 001_Farmer (May 2026):
-                // three TargetSet events in 60ms left only the first one's
-                // path live, villager stalled following stale corners.
                 EventRing.RecordTargetSet(waypoint.Position, prevTarget, $"SetState({newState})");
             }
 
@@ -568,10 +540,6 @@ namespace ValheimVillages.Villager.AI
             var prevTarget = m_currentWaypoint != null ? m_currentWaypoint.Position : Vector3.zero;
             CurrentState = BehaviorState.Patrolling;
             m_currentWaypoint = finalTarget;
-            m_targetSetTime = Time.time;
-            m_lastMovePos = transform.position;
-            m_lastRealMoveTime = Time.time;
-            m_lastArrivalTime = Time.time;
             EventRing.RecordTargetSet(finalTarget.Position, prevTarget, "SetPatrolCircuit");
             if (prevState != BehaviorState.Patrolling)
                 EventRing.RecordStateChange(prevState.ToString(), "Patrolling", "SetPatrolCircuit");
@@ -877,8 +845,6 @@ namespace ValheimVillages.Villager.AI
 
         private void OnArrivedAtTarget(float dt)
         {
-            m_lastArrivalTime = Time.time;
-            m_consecutiveStucks = 0;
             // Direct order fulfilled — release the behavior lockout so normal
             // task-queue behavior resumes on the next selection tick.
             m_directOrderActive = false;
