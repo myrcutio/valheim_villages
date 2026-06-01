@@ -217,17 +217,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         }
 
 
-        [DevCommand("Toggle villager pathing between raw slot-31 NavMesh (on) and the HNA corridor planner (off).",
-            Name = "vv_rawpathing")]
-        public static void ToggleRawPathing(Terminal.ConsoleEventArgs args)
-        {
-            VillagerMovement.RawNavMeshPathing = !VillagerMovement.RawNavMeshPathing;
-            // Clear cached paths so every villager re-plans under the new mode.
-            VillagerAIManager.InvalidatePathsAfterRebake();
-            var mode = VillagerMovement.RawNavMeshPathing ? "RAW slot-31 NavMesh" : "HNA corridor planner";
-            Console.instance?.Print($"[vv_rawpathing] villager pathing = {mode}");
-            Plugin.Log?.LogInfo($"[vv_rawpathing] villager pathing = {mode}");
-        }
 
         [DevCommand("Toggle NavMesh triangulation wireframe. Optional cam=<cameraName> restricts the overlay to that camera (cam=off clears).", Name = "vv_tri_debug")]
         public static void ToggleTriangulation(Terminal.ConsoleEventArgs args)

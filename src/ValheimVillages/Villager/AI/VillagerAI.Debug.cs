@@ -223,16 +223,9 @@ namespace ValheimVillages.Villager.AI
             sb.AppendLine("    path: <none>");
             if (m_currentWaypoint == null) return;
 
-            var g = RegionGraph.GetNearest(transform.position);
-            if (g == null) return;
-
-            var planned = RegionGraphAStar.PlanCells(
-                g, transform.position, m_currentWaypoint.Position, out var reason);
             var complete = VillagerMovement.TryFindCompletePath(
                 transform.position, m_currentWaypoint.Position, null);
-            sb.AppendLine(
-                $"    pathplan: astar_cells={planned?.Count ?? 0} reason={reason} " +
-                $"corridor_complete={complete}");
+            sb.AppendLine($"    pathplan: complete={complete}");
         }
     }
 }
