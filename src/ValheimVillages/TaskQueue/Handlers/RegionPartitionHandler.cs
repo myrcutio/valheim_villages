@@ -414,9 +414,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                 minX, minZ, maxX, maxZ,
                 out var droppedRubberBand,
                 out var pass3DiscoveredEdges,
-                out var bedReachableCells,
-                out var pruneOutsideCells,
-                out var prunedPieceKeys);
+                out _,
+                out _,
+                out _);
 
             // Merge Pass 3 discovered edges into the cross-kind adjacency
             // (if it was built) and publish the merged graph to
@@ -512,72 +512,6 @@ namespace ValheimVillages.TaskQueue.Handlers
             // stale positions — masking the new graph's connectivity.
             NavMeshLinkPlacer.RemoveAllLinks();
 
-            // Second bake: cells HNA dropped but the first bake left
-            // walkable get masked with ModifierBox NotWalkable volumes
-            // and the piece NavMesh re-baked. The first bake's outside-
-            // cell carve handled the perimeter flood; this handles the
-            // Pass-2 prune residue (cliffs, locked rooms, anything inside
-            // the perimeter but not reachable from a bed). Greedy
-            // rectangle decomposition keeps the source-count tiny —
-            // ~tens of rectangles instead of thousands of per-cell boxes.
-            if (!NavMeshBakeManager.EnableGraphPrunePasses)
-            {
-                NavMeshBakeManager.LastPrunePassSummary =
-                    "(graph-prune passes disabled — single combined bake; Unity erosion + " +
-                    "perimeter phantoms handle obstacles/confinement)";
-            }
-            else
-            {
-            var pruneRebake = NavMeshBakeManager.RebakeWithPruneComplement(
-                bedReachableCells, pruneOutsideCells, prunedPieceKeys, bakeBounds);
-            DebugLog.Event("NavMeshBake", "prune_complement_rebake",
-                ("success", pruneRebake.Success),
-                ("prune_complement_cells", pruneRebake.PruneComplementCells),
-                ("prune_complement_rects", pruneRebake.PruneComplementRectangles),
-                ("pruned_piece_cells", pruneRebake.PrunedPieceCells),
-                ("pruned_piece_buckets", pruneRebake.PrunedPieceBuckets),
-                ("pruned_piece_rects", pruneRebake.PrunedPieceRectangles),
-                ("total_sources", pruneRebake.TotalSources),
-                ("duration_ms", pruneRebake.DurationMs),
-                ("reason", pruneRebake.FailureReason ?? ""));
-            if (!pruneRebake.Success)
-                Plugin.Log?.LogWarning(
-                    $"[Region] Prune-complement rebake failed ({pruneRebake.FailureReason}); " +
-                    "slot-31 NavMesh may still cover cells HNA pruning marked unreachable.");
-
-            // Third pass: query the live NavMesh triangulation and block any
-            // walkable polygon whose centroid the HNA graph does not recognize.
-            // Unity's voxelizer can produce sliver triangles / edge artifacts
-            // the region builder never tracked; the two prior prunes only
-            // cover cells HNA explicitly rejected. Iterate up to 3 times —
-            // each ModifierBox rebake can expose a smaller residual fringe.
-            const int maxOrphanIterations = 3;
-            var pruneSummary = new System.Text.StringBuilder();
-            pruneSummary.Append(
-                $"prune-complement: success={pruneRebake.Success} " +
-                $"complement_cells={pruneRebake.PruneComplementCells} " +
-                $"complement_rects={pruneRebake.PruneComplementRectangles} " +
-                $"pruned_piece_cells={pruneRebake.PrunedPieceCells} " +
-                $"pruned_piece_rects={pruneRebake.PrunedPieceRectangles}");
-            for (var iter = 0; iter < maxOrphanIterations; iter++)
-            {
-                var orphanResult = NavMeshBakeManager.PruneOrphanTriangles(graph, bakeBounds);
-                pruneSummary.Append(
-                    $"\norphan[{iter}]: orphan_hits={orphanResult.OrphanTriangles} " +
-                    $"cells={orphanResult.OrphanCellsBlocked} buckets={orphanResult.HeightBuckets} " +
-                    $"rects={orphanResult.Rectangles} did_rebake={orphanResult.DidRebake}");
-                NavMeshBakeManager.LastPrunePassSummary = pruneSummary.ToString();
-                DebugLog.Event("NavMeshBake", "orphan_prune",
-                    ("iter", iter),
-                    ("orphan_triangles", orphanResult.OrphanTriangles),
-                    ("orphan_cells", orphanResult.OrphanCellsBlocked),
-                    ("buckets", orphanResult.HeightBuckets),
-                    ("rects", orphanResult.Rectangles),
-                    ("did_rebake", orphanResult.DidRebake),
-                    ("duration_ms", orphanResult.DurationMs));
-                if (!orphanResult.DidRebake) break;
-            }
-            }
 
             // Invalidate every active villager's cached BaseAI path.
             // The rebake replaced slot-31 NavMesh data and the link

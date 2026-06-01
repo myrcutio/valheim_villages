@@ -38,7 +38,6 @@ namespace ValheimVillages.Villager.AI.Navigation
                 $"[BakeAudit] pos=({pos.x:F2}, {pos.y:F2}, {pos.z:F2}) source={source} radius={Radius:F1}m");
 
             sb.AppendLine($"--- agent-body waist probe ---\n  IsAgentBodyBlocked(pos)={NavMeshBakeManager.IsAgentBodyBlocked(pos)}");
-            ReportOrphanProbe(sb, pos);
             ReportNavMeshSample(sb, pos);
             ReportRuntimePhysics(sb, pos, out var runtimeHits);
             ReportBakeSources(sb, pos, out var sourceMatches, out var phantomMatches);
@@ -51,61 +50,6 @@ namespace ValheimVillages.Villager.AI.Navigation
             Plugin.Log?.LogInfo(output);
         }
 
-        /// <summary>
-        ///     Replicate PruneOrphanTriangles' per-cell decision at the cell
-        ///     containing <paramref name="pos" />: for each height bucket, probe
-        ///     the cell CENTER, report whether the sample lands in-cell, and
-        ///     whether IsAgentBodyBlocked fires there. Shows why a cell is (or
-        ///     isn't) carved by the orphan pass.
-        /// </summary>
-        private static void ReportOrphanProbe(StringBuilder sb, Vector3 pos)
-        {
-            var cell = RegionGraph.LookupCellSize;
-            var hbSize = RegionGraph.HeightBucketSize;
-            var gx = Mathf.FloorToInt(pos.x / cell);
-            var gz = Mathf.FloorToInt(pos.z / cell);
-            var px = gx * cell + cell * 0.5f;
-            var pz = gz * cell + cell * 0.5f;
-            var sampleRadius = hbSize * 0.5f;
-            var filter = new NavMeshQueryFilter
-            {
-                agentTypeID = VillagerAgentType.UnityAgentTypeID,
-                areaMask = NavMesh.AllAreas,
-            };
-            var groundY = ZoneSystem.instance != null
-                ? ZoneSystem.instance.GetGroundHeight(new Vector3(pos.x, pos.y, pos.z))
-                : float.NaN;
-            sb.AppendLine(
-                $"--- orphan-loop probe @ cell ({gx},{gz}) center=({px:F2},{pz:F2}) sampleR={sampleRadius:F1} " +
-                $"terrainGroundY={groundY:F2} ---");
-            var hbCenter = RegionGraph.HeightBucket(pos.y);
-            for (var hb = hbCenter - 1; hb <= hbCenter + 1; hb++)
-            {
-                var py = (hb + 0.5f) * hbSize;
-                if (!NavMesh.SamplePosition(new Vector3(px, py, pz), out var hit, sampleRadius, filter))
-                {
-                    sb.AppendLine($"  hb={hb} py={py:F1}: SamplePosition MISS (r={sampleRadius:F1})");
-                    continue;
-                }
-                var hitGx = Mathf.FloorToInt(hit.position.x / cell);
-                var hitGz = Mathf.FloorToInt(hit.position.z / cell);
-                var inCell = hitGx == gx && hitGz == gz;
-                var blocked = NavMeshBakeManager.IsAgentBodyBlocked(hit.position);
-                sb.AppendLine(
-                    $"  hb={hb} py={py:F1}: HIT ({hit.position.x:F2},{hit.position.y:F2},{hit.position.z:F2}) " +
-                    $"hitCell=({hitGx},{hitGz}) inCell={inCell} blocked={blocked} " +
-                    $"=> {(inCell ? (blocked ? "CARVE" : "keep") : "skip(out-of-cell)")}");
-            }
-        }
-
-        [DevCommand("Print the most recent partition's bake prune-pass summary (carve counts).",
-            Name = "vv_orphan_status")]
-        public static void OrphanStatus(Terminal.ConsoleEventArgs args)
-        {
-            var output = "[OrphanStatus]\n" + NavMeshBakeManager.LastPrunePassSummary;
-            Console.instance?.Print(output);
-            Plugin.Log?.LogInfo(output);
-        }
 
         [DevCommand("Compare a NavMesh path on the villager (slot 31) bake vs Valheim's Humanoid agent. " +
                     "Usage: vv_pathcompare <fromX> <fromZ> <toX> <toZ>",
