@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Reflection;
 using System.Text;
 using UnityEngine;
 using UnityEngine.AI;
@@ -51,12 +50,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         /// </summary>
         public static readonly List<Vector3> DebugPolyline = new();
         private static readonly Color ColorDebugPolyline = Color.magenta;
-
-        private static readonly FieldInfo s_pathField = typeof(BaseAI).GetField(
-            "m_path", BindingFlags.NonPublic | BindingFlags.Instance);
-
-        private static readonly FieldInfo s_lastFindPathResultField = typeof(BaseAI).GetField(
-            "m_lastFindPathResult", BindingFlags.NonPublic | BindingFlags.Instance);
 
         private static readonly Color ColorComplete = Color.green;
         private static readonly Color ColorPartial = Color.yellow;
@@ -335,16 +328,16 @@ namespace ValheimVillages.Villager.AI.Pathfinding
 
         private void DrawVillagerPath(VillagerAI ai)
         {
-            var path = s_pathField?.GetValue(ai) as List<Vector3>;
-            var lastResult = s_lastFindPathResultField != null
-                             && (bool)s_lastFindPathResultField.GetValue(ai);
-
             var npcPos = ai.transform.position;
             var yOff = Vector3.up * LineYOffset;
 
-            if (path == null || path.Count == 0)
+            // Read the live NavMeshAgent route the mover actually follows.
+            var hasPath = ai.TryGetAgentPath(out var corners, out var status);
+
+            if (!hasPath || corners.Length == 0)
             {
-                // No path at all — draw red line from NPC to target if we have one
+                // No active route — draw a red line from the villager to its
+                // destination target (if any) so the intent is still visible.
                 if (ai.CurrentTarget.HasValue)
                 {
                     GL.Begin(GL.LINES);
@@ -358,37 +351,37 @@ namespace ValheimVillages.Villager.AI.Pathfinding
                 return;
             }
 
-            var lineColor = lastResult ? ColorComplete : ColorPartial;
+            // Green = the agent can reach the target; yellow = partial/invalid path.
+            var lineColor = status == NavMeshPathStatus.PathComplete ? ColorComplete : ColorPartial;
 
-            // NPC position to first path node
+            // Villager position to first corner, then corner-to-corner.
             GL.Begin(GL.LINES);
             GL.Color(lineColor);
             GL.Vertex(npcPos + yOff);
-            GL.Vertex(path[0] + yOff);
-
-            // Path segments
-            for (var i = 0; i < path.Count - 1; i++)
+            GL.Vertex(corners[0] + yOff);
+            for (var i = 0; i < corners.Length - 1; i++)
             {
-                GL.Vertex(path[i] + yOff);
-                GL.Vertex(path[i + 1] + yOff);
+                GL.Vertex(corners[i] + yOff);
+                GL.Vertex(corners[i + 1] + yOff);
             }
 
             GL.End();
 
-            // Corner markers at each path node
-            for (var i = 0; i < path.Count; i++)
-                DrawWireOctahedron(path[i] + yOff, NodeMarkerSize, lineColor);
+            // Corner markers along the agent path.
+            for (var i = 0; i < corners.Length; i++)
+                DrawWireOctahedron(corners[i] + yOff, NodeMarkerSize, lineColor);
 
-            // Draw final target with orange marker if different from last path node
+            // Destination target (orange), with a connector if the agent's last
+            // corner doesn't already coincide with it.
             if (ai.CurrentTarget.HasValue)
             {
                 var target = ai.CurrentTarget.Value;
-                var distToLast = Vector3.Distance(target, path[path.Count - 1]);
-                if (distToLast > 0.5f)
+                var lastCorner = corners[corners.Length - 1];
+                if (Vector3.Distance(target, lastCorner) > 0.5f)
                 {
                     GL.Begin(GL.LINES);
                     GL.Color(ColorTarget);
-                    GL.Vertex(path[path.Count - 1] + yOff);
+                    GL.Vertex(lastCorner + yOff);
                     GL.Vertex(target + yOff);
                     GL.End();
                 }

@@ -184,6 +184,27 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
+        ///     Read the villager's live NavMeshAgent route for debug visualization
+        ///     (<see cref="Pathfinding.PathDebugRenderer" />). Corners come straight
+        ///     from the agent the mover actually follows — NOT the legacy
+        ///     <c>BaseAI.m_path</c>. Returns false when the agent isn't created,
+        ///     is off-mesh, or has no path.
+        /// </summary>
+        public bool TryGetAgentPath(out Vector3[] corners, out UnityEngine.AI.NavMeshPathStatus status)
+        {
+            if (m_navAgent != null && m_navAgent.isOnNavMesh && m_navAgent.hasPath)
+            {
+                corners = m_navAgent.path.corners;
+                status = m_navAgent.pathStatus;
+                return true;
+            }
+
+            corners = System.Array.Empty<Vector3>();
+            status = UnityEngine.AI.NavMeshPathStatus.PathInvalid;
+            return false;
+        }
+
+        /// <summary>
         ///     Legacy custom corner-walker readout: it follows BaseAI.m_path
         ///     (computed by TryFindCompletePath — corridor or unconstrained), so
         ///     m_path + the corridor planner ARE the relevant state for that mover.
