@@ -270,6 +270,10 @@ namespace ValheimVillages.Settings
         /// <summary>Radius to scan for chests containing work orders (meters).</summary>
         public const float ChestScanRadius = 20f;
 
+        /// <summary>Radius (from a villager's bed) to scan for stray ground
+        /// drops to haul into chests (meters).</summary>
+        public const float HaulScanRadius = 32f;
+
         /// <summary>Time spent at crafting station per craft cycle (seconds).</summary>
         public const float CraftDuration = 5f;
 

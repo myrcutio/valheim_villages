@@ -20,6 +20,7 @@ namespace ValheimVillages.Behaviors
             { "craft", ai => new CraftingBehaviorAdapter(ai) },
             { "farming", ai => new FarmBehaviorAdapter(ai) },
             { "tidy", ai => new TidyBehavior(ai) },
+            { "haul", ai => new HaulBehavior(ai) },
         };
 
         /// <summary>

@@ -3,6 +3,7 @@ using System.Globalization;
 using UnityEngine;
 using UnityEngine.UI;
 using ValheimVillages.Attributes;
+using ValheimVillages.Items.WorkOrders;
 using ValheimVillages.UI.Core;
 
 namespace ValheimVillages.UI.ContextMenus
@@ -38,6 +39,8 @@ namespace ValheimVillages.UI.ContextMenus
         private GameObject m_panelRoot;
         private string m_stationDisplay = "";
         private GameObject m_stationLabel;
+        private GameObject m_currentLabel;
+        private GameObject m_statusLabel;
 
         // Prevents circular updates between slider <-> input field
         private bool m_updatingUI;
@@ -229,6 +232,8 @@ namespace ValheimVillages.UI.ContextMenus
             m_maxInput = el.MaxInput;
             m_stationLabel = el.StationLabel;
             m_itemLabel = el.ItemLabel;
+            m_currentLabel = el.CurrentLabel;
+            m_statusLabel = el.StatusLabel;
         }
 
         /// <summary>
@@ -295,7 +300,38 @@ namespace ValheimVillages.UI.ContextMenus
             if (m_maxInput != null) m_maxInput.text = m_maximum.ToString();
 
             RefreshDynamicLabels();
+            UpdateStatusAndCurrent();
             m_updatingUI = false;
+        }
+
+        /// <summary>
+        ///     Scan the village once to show the current stored quantity and a
+        ///     status line (out of materials, storage full, quota met, ...) in the
+        ///     otherwise-empty bottom of the panel.
+        /// </summary>
+        private void UpdateStatusAndCurrent()
+        {
+            var pos = Player.m_localPlayer != null
+                ? Player.m_localPlayer.transform.position
+                : Vector3.zero;
+            var status = WorkOrderDiagnostics.Describe(m_currentItem, pos);
+
+            SetLabel(m_currentLabel,
+                $"Current Quantity: <color={ValueColor}>{status.CurrentCount}</color>");
+
+            if (string.IsNullOrEmpty(status.Message))
+            {
+                SetLabel(m_statusLabel, "");
+                return;
+            }
+
+            var color = status.Severity switch
+            {
+                WorkOrderDiagnostics.Severity.Warning => "#E8643C",
+                WorkOrderDiagnostics.Severity.Good => "#6FCF6F",
+                _ => "#FFFFFF",
+            };
+            SetLabel(m_statusLabel, $"<color={color}>{status.Message}</color>");
         }
 
         // Item-detail theme: white label, orange value, yellow parenthetical.

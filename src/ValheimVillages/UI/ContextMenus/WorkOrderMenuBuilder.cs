@@ -18,6 +18,8 @@ namespace ValheimVillages.UI.ContextMenus
         public InputField MaxInput;
         public GameObject StationLabel;
         public GameObject ItemLabel;
+        public GameObject CurrentLabel;
+        public GameObject StatusLabel;
     }
 
     /// <summary>
@@ -106,6 +108,18 @@ namespace ValheimVillages.UI.ContextMenus
                 maxRow.transform, MinQuota, SliderMax, true, onMaxSlider);
             elements.MaxInput = VillagerUIFactory.CreateInputField(
                 maxRow.transform, "10", onMaxInput);
+
+            // Current (read-only) quantity, so the left column reads
+            // minimum / maximum / current at a glance.
+            VillagerUIFactory.CreateSpacer(content, 4f);
+            elements.CurrentLabel = VillagerUIFactory.CreateLabel(
+                content, "Current Quantity:", LabelSize, HeaderText);
+
+            // Status line pinned to the empty space at the bottom of the panel.
+            VillagerUIFactory.CreateFlexibleSpacer(content);
+            VillagerUIFactory.CreateDivider(content);
+            elements.StatusLabel = VillagerUIFactory.CreateLabel(
+                content, "", LabelSize, HeaderText);
 
             return elements;
         }

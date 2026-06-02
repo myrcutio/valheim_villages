@@ -228,6 +228,27 @@ namespace ValheimVillages.Villager.AI.Work
             return inv.AddItem(newItem);
         }
 
+        /// <summary>
+        ///     Whether a container has room for the given (actual) item stack.
+        ///     Unlike <see cref="CanAcceptItem" /> this checks the real item data
+        ///     (stack, quality), so it's correct for hauling picked-up drops.
+        /// </summary>
+        public static bool CanAcceptItemData(Container container, ItemDrop.ItemData item)
+        {
+            var inv = container?.GetInventory();
+            return inv != null && item != null && inv.CanAddItem(item, item.m_stack);
+        }
+
+        /// <summary>
+        ///     Deposit an actual item stack (preserving stack/quality/custom data)
+        ///     into a container. Returns false if the container can't fit it.
+        /// </summary>
+        public static bool TryDepositItemData(Container container, ItemDrop.ItemData item)
+        {
+            if (!CanAcceptItemData(container, item)) return false;
+            return container.GetInventory().AddItem(item);
+        }
+
         private static bool IsWorkOrderItem(ItemDrop.ItemData item)
         {
             var prefabName = item?.m_dropPrefab?.name;

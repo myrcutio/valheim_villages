@@ -165,6 +165,19 @@ namespace ValheimVillages.UI.Core
             return go;
         }
 
+        /// <summary>Create a spacer that expands to fill leftover vertical space,
+        /// pushing subsequent siblings to the bottom of a vertical layout.</summary>
+        public static GameObject CreateFlexibleSpacer(Transform parent)
+        {
+            var go = new GameObject("FlexSpacer", typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+
+            var le = go.AddComponent<LayoutElement>();
+            le.flexibleHeight = 1f;
+            le.flexibleWidth = 1f;
+            return go;
+        }
+
         /// <summary>Create an empty spacer of a given height.</summary>
         public static GameObject CreateSpacer(
             Transform parent, float height = 8f)
