@@ -10,40 +10,45 @@ namespace ValheimVillages.Items.Icons
     ///     so players can tell at a glance which item the work order produces.
     ///     The item is drawn large and centered on the parchment. A status badge
     ///     (completed, in-progress, unworkable) is drawn in the top-right corner.
-    ///     Uses a two-tier cache to avoid recompositing on every UI open:
+    ///
+    ///     The item icon is downscaled on the GPU (bilinear, sampling only the
+    ///     sprite's sub-rect) into a small render texture, so the only CPU readback
+    ///     is the 42×42 overlay — never the item's full source atlas. All
+    ///     compositing then runs as Color32[] array math, avoiding per-pixel
+    ///     Texture2D.GetPixel/SetPixel calls.
+    ///
+    ///     Two-tier cache avoids recompositing on every UI open:
     ///     Tier 1 (base): parchment + item overlay — expensive, cached permanently.
     ///     Tier 2 (final): base + status badge — cheap to stamp, keyed by status.
     /// </summary>
     public static class WorkOrderIconCompositor
     {
-        // Item overlay centered on the 64×64 parchment, large enough to
-        // recognize the item at a glance.
+        // Parchment icons are authored at 64×64.
+        private const int IconSize = 64;
+
+        // Item overlay centered on the parchment, large enough to recognize
+        // the item at a glance.
         private const int OverlaySize = 42;
-        private const int OverlayX = 11; // (64 - 42) / 2
-        private const int OverlayY = 11;
+        private const int OverlayX = (IconSize - OverlaySize) / 2; // 11
+        private const int OverlayY = (IconSize - OverlaySize) / 2; // 11
 
         /// <summary>
         ///     Tier 1: base composite pixels (parchment + item, no status).
         ///     Key: "{workOrderPrefab}_{itemPrefab}"
-        ///     Value: RGBA32 pixel array + dimensions. Never cleared during play.
         /// </summary>
         private static readonly Dictionary<string, CachedBase> _baseCache = new();
 
         /// <summary>
         ///     Tier 2: final sprites with status badge stamped on.
         ///     Key: "{workOrderPrefab}_{itemPrefab}_{status}"
-        ///     All status variants coexist; no need to clear on status change.
         /// </summary>
         private static readonly Dictionary<string, Sprite> _spriteCache = new();
 
         /// <summary>
-        ///     Clear both cache tiers (hot reload / world unload).
+        ///     Parchment pixel cache, keyed by sprite instance id. The parchment
+        ///     PNGs are already readable RGBA32, so their pixels are read once.
         /// </summary>
-        public static void ClearCache()
-        {
-            _baseCache.Clear();
-            _spriteCache.Clear();
-        }
+        private static readonly Dictionary<int, Color32[]> _parchmentCache = new();
 
         /// <summary>
         ///     If the item is a configured work order (has wo_item custom data),
@@ -60,8 +65,11 @@ namespace ValheimVillages.Items.Icons
                 return;
             if (string.IsNullOrEmpty(itemPrefab)) return;
 
-            var baseIcons = itemData.m_shared.m_icons;
-            if (baseIcons == null || baseIcons.Length == 0) return;
+            // Always composite onto the clean parchment from the prefab, never
+            // the instance's current icon (which may already be a stale composite,
+            // or the clone base prefab's icon if the parchment failed to load).
+            var parchment = ResolveParchment(itemData);
+            if (parchment == null) return;
 
             var woPrefab = itemData.m_dropPrefab?.name ?? "wo";
             var spriteKey = $"{woPrefab}_{itemPrefab}_{status}";
@@ -78,7 +86,7 @@ namespace ValheimVillages.Items.Icons
             var baseKey = $"{woPrefab}_{itemPrefab}";
             if (!_baseCache.TryGetValue(baseKey, out var baseCached))
             {
-                baseCached = BuildBaseComposite(baseIcons[0], itemPrefab);
+                baseCached = BuildBaseComposite(parchment, itemPrefab);
                 if (baseCached == null) return;
                 _baseCache[baseKey] = baseCached;
             }
@@ -124,23 +132,28 @@ namespace ValheimVillages.Items.Icons
 
             try
             {
-                var baseTex = MakeReadable(parchment.texture);
-                var itemTex = MakeReadable(prodSprite);
+                // Parchment is a readable PNG: read its pixels directly (cached).
+                var basePixels = GetParchmentPixels(parchment);
+                if (basePixels == null) return null;
 
-                BlitScaled(baseTex, itemTex, prodSprite.rect,
-                    OverlayX, OverlayY, OverlaySize);
+                // GPU-scale only the item's sprite rect down to the overlay size.
+                var itemPixels = ScaleSpriteToBuffer(prodSprite, OverlaySize);
+                if (itemPixels == null) return null;
 
-                var pixels = baseTex.GetPixels32();
-                var result = new CachedBase
+                // Composite the item over a fresh copy of the parchment pixels,
+                // clipped to the parchment's opaque (scroll) area.
+                var pixels = (Color32[])basePixels.Clone();
+                CompositeOver(
+                    pixels, IconSize, IconSize,
+                    itemPixels, OverlaySize, OverlaySize,
+                    OverlayX, OverlayY, clipToDstAlpha: true);
+
+                return new CachedBase
                 {
                     Pixels = pixels,
-                    Width = baseTex.width,
-                    Height = baseTex.height,
+                    Width = IconSize,
+                    Height = IconSize,
                 };
-
-                Object.Destroy(baseTex);
-                Object.Destroy(itemTex);
-                return result;
             }
             catch (Exception ex)
             {
@@ -159,17 +172,16 @@ namespace ValheimVillages.Items.Icons
         {
             try
             {
+                var pixels = (Color32[])baseCached.Pixels.Clone();
+                WorkOrderStatusOverlay.Draw(
+                    pixels, baseCached.Width, baseCached.Height, status);
+
                 var tex = new Texture2D(
                     baseCached.Width, baseCached.Height,
                     TextureFormat.RGBA32, false);
-
-                // Bulk-copy base pixels (fast array copy, no GPU involved)
-                tex.SetPixels32(baseCached.Pixels);
-
-                // Draw the lightweight status badge on top
-                WorkOrderStatusOverlay.Draw(tex, status);
-
+                tex.SetPixels32(pixels);
                 tex.Apply();
+
                 return Sprite.Create(tex,
                     new Rect(0, 0, tex.width, tex.height),
                     new Vector2(0.5f, 0.5f));
@@ -210,6 +222,25 @@ namespace ValheimVillages.Items.Icons
                     JsonUtility.ToJson(item.m_shared));
         }
 
+        /// <summary>
+        ///     Resolve the clean parchment scroll to composite onto. Prefers the
+        ///     work order prefab's icon (always the raw station scroll, set at
+        ///     registration and never mutated) over the instance icon, which may
+        ///     already carry a stale composite.
+        /// </summary>
+        private static Sprite ResolveParchment(ItemDrop.ItemData itemData)
+        {
+            var prefabDrop = itemData.m_dropPrefab != null
+                ? itemData.m_dropPrefab.GetComponent<ItemDrop>()
+                : null;
+            var prefabIcons = prefabDrop?.m_itemData?.m_shared?.m_icons;
+            if (prefabIcons != null && prefabIcons.Length > 0 && prefabIcons[0] != null)
+                return prefabIcons[0];
+
+            var icons = itemData.m_shared?.m_icons;
+            return icons != null && icons.Length > 0 ? icons[0] : null;
+        }
+
         private static Sprite GetItemSprite(string prefabName)
         {
             var prefab = ZNetScene.instance?.GetPrefab(prefabName);
@@ -220,69 +251,110 @@ namespace ValheimVillages.Items.Icons
         }
 
         /// <summary>
-        ///     Blit a sprite region onto a destination texture with alpha blending.
-        ///     Only draws on pixels where the destination already has alpha.
+        ///     Read (and cache) the parchment sprite's pixels. Parchment icons
+        ///     come from embedded PNGs decoded as readable RGBA32, so a direct
+        ///     GetPixels32 works without a GPU roundtrip.
         /// </summary>
-        private static void BlitScaled(
-            Texture2D dst, Texture2D src, Rect srcRect,
-            int dstX, int dstY, int dstSize)
+        private static Color32[] GetParchmentPixels(Sprite parchment)
         {
-            for (var dy = 0; dy < dstSize; dy++)
-            for (var dx = 0; dx < dstSize; dx++)
+            if (!(parchment?.texture is Texture2D tex)) return null;
+
+            var id = tex.GetInstanceID();
+            if (_parchmentCache.TryGetValue(id, out var cached))
+                return cached;
+
+            var pixels = tex.GetPixels32();
+            _parchmentCache[id] = pixels;
+            return pixels;
+        }
+
+        /// <summary>
+        ///     Downscale a sprite's sub-rect to a square buffer on the GPU using
+        ///     bilinear filtering, then read back only that small buffer. Works
+        ///     for compressed / non-readable source textures (atlases included)
+        ///     and never reads back the full source.
+        /// </summary>
+        private static Color32[] ScaleSpriteToBuffer(Sprite sprite, int size)
+        {
+            var src = sprite.texture;
+            if (src == null) return null;
+
+            // textureRect is the sprite's region in its (possibly atlased) texture.
+            var rect = sprite.textureRect;
+            if (rect.width < 1 || rect.height < 1) rect = sprite.rect;
+
+            float tw = src.width;
+            float th = src.height;
+            var scale = new Vector2(rect.width / tw, rect.height / th);
+            var offset = new Vector2(rect.x / tw, rect.y / th);
+
+            // Ensure the source samples bilinearly for a smooth downscale.
+            var prevFilter = src.filterMode;
+            src.filterMode = FilterMode.Bilinear;
+
+            var rt = RenderTexture.GetTemporary(
+                size, size, 0, RenderTextureFormat.ARGB32);
+            rt.filterMode = FilterMode.Bilinear;
+
+            var prevActive = RenderTexture.active;
+            try
             {
-                var srcPx = (int)srcRect.x +
-                            (int)(dx * srcRect.width / dstSize);
-                var srcPy = (int)srcRect.y +
-                            (int)(dy * srcRect.height / dstSize);
-                srcPx = Mathf.Clamp(srcPx, 0, src.width - 1);
-                srcPy = Mathf.Clamp(srcPy, 0, src.height - 1);
+                Graphics.Blit(src, rt, scale, offset);
+                RenderTexture.active = rt;
 
-                var ic = src.GetPixel(srcPx, srcPy);
-                if (ic.a < 0.1f) continue;
-
-                var px = dstX + dx;
-                var py = dstY + dy;
-                if (px >= dst.width || py >= dst.height) continue;
-
-                var bc = dst.GetPixel(px, py);
-                if (bc.a < 0.1f) continue;
-
-                var a = ic.a;
-                dst.SetPixel(px, py, new Color(
-                    bc.r * (1 - a) + ic.r * a,
-                    bc.g * (1 - a) + ic.g * a,
-                    bc.b * (1 - a) + ic.b * a,
-                    Mathf.Max(bc.a, ic.a)));
+                var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+                tex.ReadPixels(new Rect(0, 0, size, size), 0, 0);
+                tex.Apply();
+                var pixels = tex.GetPixels32();
+                Object.Destroy(tex);
+                return pixels;
+            }
+            finally
+            {
+                RenderTexture.active = prevActive;
+                RenderTexture.ReleaseTemporary(rt);
+                src.filterMode = prevFilter;
             }
         }
 
         /// <summary>
-        ///     GPU-copy a texture to a new readable Texture2D (works even if
-        ///     the source is compressed / non-readable).
+        ///     Alpha-blend a source buffer over a destination buffer at (dstX, dstY)
+        ///     using straight src-over compositing. Both buffers are RGBA32 with a
+        ///     bottom-left origin (GetPixels32 layout). When clipToDstAlpha is set,
+        ///     source pixels are only drawn where the destination is already opaque
+        ///     (keeps the item within the parchment silhouette).
         /// </summary>
-        private static Texture2D MakeReadable(Texture source)
+        private static void CompositeOver(
+            Color32[] dst, int dstW, int dstH,
+            Color32[] src, int srcW, int srcH,
+            int dstX, int dstY, bool clipToDstAlpha)
         {
-            var rt = RenderTexture.GetTemporary(
-                source.width, source.height, 0, RenderTextureFormat.ARGB32);
-            Graphics.Blit(source, rt);
+            for (var sy = 0; sy < srcH; sy++)
+            {
+                var py = dstY + sy;
+                if (py < 0 || py >= dstH) continue;
 
-            var prev = RenderTexture.active;
-            RenderTexture.active = rt;
+                for (var sx = 0; sx < srcW; sx++)
+                {
+                    var px = dstX + sx;
+                    if (px < 0 || px >= dstW) continue;
 
-            var tex = new Texture2D(
-                source.width, source.height, TextureFormat.RGBA32, false);
-            tex.ReadPixels(
-                new Rect(0, 0, source.width, source.height), 0, 0);
-            tex.Apply();
+                    var ic = src[sy * srcW + sx];
+                    if (ic.a == 0) continue;
 
-            RenderTexture.active = prev;
-            RenderTexture.ReleaseTemporary(rt);
-            return tex;
-        }
+                    var di = py * dstW + px;
+                    var bc = dst[di];
+                    if (clipToDstAlpha && bc.a < 26) continue;
 
-        private static Texture2D MakeReadable(Sprite itemIcon)
-        {
-            return MakeReadable(itemIcon.texture);
+                    int a = ic.a;
+                    int inv = 255 - a;
+                    dst[di] = new Color32(
+                        (byte)((bc.r * inv + ic.r * a) / 255),
+                        (byte)((bc.g * inv + ic.g * a) / 255),
+                        (byte)((bc.b * inv + ic.b * a) / 255),
+                        Math.Max(bc.a, ic.a));
+                }
+            }
         }
 
         #endregion

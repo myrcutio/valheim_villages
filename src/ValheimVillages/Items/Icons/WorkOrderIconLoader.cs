@@ -12,12 +12,17 @@ namespace ValheimVillages.Items.Icons
     /// </summary>
     public static class WorkOrderIconLoader
     {
+        // Generic scroll used when a station has no bespoke parchment, so work
+        // orders never fall back to the base clone prefab's icon (e.g. DragonEgg).
+        private const string DefaultStation = "workbench";
+
         private static readonly Dictionary<string, Sprite> _cache = new();
         private static MethodInfo _loadImageMethod;
 
         /// <summary>
         ///     Load (or return cached) the work order icon for a given station type.
-        ///     Station type maps to embedded resource: workorder_{type_lower}.png
+        ///     Station type maps to embedded resource: workorder_{type_lower}.png.
+        ///     Falls back to a generic scroll when no bespoke parchment exists.
         /// </summary>
         public static Sprite Load(string stationType)
         {
@@ -31,6 +36,17 @@ namespace ValheimVillages.Items.Icons
             using var stream = assembly.GetManifestResourceStream(resName);
             if (stream == null)
             {
+                // Degrade to the default scroll rather than the clone prefab icon.
+                if (!key.Equals(DefaultStation, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    Plugin.Log?.LogWarning(
+                        $"Work order icon resource not found: {resName} — " +
+                        $"using '{DefaultStation}' scroll.");
+                    var fallback = Load(DefaultStation);
+                    _cache[key] = fallback;
+                    return fallback;
+                }
+
                 Plugin.Log?.LogWarning($"Work order icon resource not found: {resName}");
                 return null;
             }
