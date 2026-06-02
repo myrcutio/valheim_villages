@@ -34,8 +34,8 @@ namespace ValheimVillages.Items.WorkOrders
     }
 
     /// <summary>
-    ///     Integrates WorkOrderMenu visibility with Valheim's UI systems
-    ///     so the camera and input don't conflict when the menu is open.
+    ///     While a quota input field is focused, report text input as active so
+    ///     Valheim's own key polling (hotbar, movement) is suppressed during typing.
     /// </summary>
     [HarmonyPatch(typeof(TextInput), "IsVisible")]
     public static class WorkOrderTextInputPatch
@@ -43,22 +43,23 @@ namespace ValheimVillages.Items.WorkOrders
         [HarmonyPostfix]
         public static void Postfix(ref bool __result)
         {
-            if (WorkOrderMenu.IsVisible)
+            if (WorkOrderMenu.IsEditingText)
                 __result = true;
         }
     }
 
     /// <summary>
-    ///     Integrates WorkOrderMenu visibility with Valheim's menu system.
+    ///     Close the docked work order editor whenever the inventory/chest UI
+    ///     closes, so it never lingers over the world.
     /// </summary>
-    [HarmonyPatch(typeof(Menu), "IsVisible")]
-    public static class WorkOrderMenuVisiblePatch
+    [HarmonyPatch(typeof(InventoryGui), nameof(InventoryGui.Hide))]
+    public static class WorkOrderInventoryHidePatch
     {
         [HarmonyPostfix]
-        public static void Postfix(ref bool __result)
+        public static void Postfix()
         {
             if (WorkOrderMenu.IsVisible)
-                __result = true;
+                WorkOrderMenu.Hide();
         }
     }
 }

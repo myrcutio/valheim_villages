@@ -22,6 +22,7 @@ namespace ValheimVillages.UI.ContextMenus
 
         private static WorkOrderMenu s_instance;
         private ItemDrop.ItemData m_currentItem;
+        private Image m_iconImage;
         private string m_itemDisplay = "";
         private GameObject m_itemLabel;
         private InputField m_maxInput;
@@ -35,7 +36,6 @@ namespace ValheimVillages.UI.ContextMenus
         // Backing data
         private int m_minimum = 1;
         private GameObject m_panelRoot;
-        private GameObject m_rangeLabel;
         private string m_stationDisplay = "";
         private GameObject m_stationLabel;
 
@@ -48,10 +48,32 @@ namespace ValheimVillages.UI.ContextMenus
         public static bool IsVisible =>
             s_instance != null && s_instance.m_visible;
 
-        /// <summary>Opens the work order menu for the given item.</summary>
+        /// <summary>
+        ///     True while one of the quota input fields has keyboard focus, so
+        ///     Valheim's own input polling can be suppressed during typing.
+        /// </summary>
+        public static bool IsEditingText =>
+            s_instance != null && s_instance.m_visible &&
+            ((s_instance.m_minInput != null && s_instance.m_minInput.isFocused) ||
+             (s_instance.m_maxInput != null && s_instance.m_maxInput.isFocused));
+
+        /// <summary>
+        ///     Opens the work order editor docked inside the open inventory/chest
+        ///     UI. Work orders are only functional inside a chest, so the editor
+        ///     lives within that context rather than as a standalone popup.
+        /// </summary>
         public static void Show(ItemDrop.ItemData item)
         {
             if (item == null) return;
+
+            var gui = InventoryGui.instance;
+            if (gui == null || !InventoryGui.IsVisible())
+            {
+                Player.m_localPlayer?.Message(
+                    MessageHud.MessageType.Center,
+                    "Open a chest to configure this work order");
+                return;
+            }
 
             CleanupStaleInstances();
 
@@ -61,37 +83,29 @@ namespace ValheimVillages.UI.ContextMenus
                 s_instance = go.AddComponent<WorkOrderMenu>();
             }
 
-            // Close the inventory/crafting UI so it doesn't block
-            // interaction with the work order panel
-            InventoryGui.instance?.Hide();
-
             s_instance.m_currentItem = item;
             s_instance.LoadFromItem(item);
-            s_instance.EnsurePanel();
+            s_instance.EnsurePanel(gui);
             s_instance.SyncUIFromData();
+            s_instance.PositionPanel(gui);
             s_instance.m_panelRoot.SetActive(true);
             s_instance.m_visible = true;
-
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-            Input.ResetInputAxes();
-
-            Plugin.Log?.LogInfo("Opened work order menu");
         }
 
-        /// <summary>Hides the work order menu.</summary>
+        /// <summary>
+        ///     Commits the current settings and hides the editor. The inventory
+        ///     stays open. With a single "Back" button (no separate Save/Cancel),
+        ///     closing always applies the changes.
+        /// </summary>
         public static void Hide()
         {
-            if (s_instance != null)
-            {
-                s_instance.m_visible = false;
-                s_instance.m_currentItem = null;
-                if (s_instance.m_panelRoot != null)
-                    s_instance.m_panelRoot.SetActive(false);
-            }
+            if (s_instance == null) return;
 
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
+            s_instance.SaveToItem();
+            s_instance.m_visible = false;
+            s_instance.m_currentItem = null;
+            if (s_instance.m_panelRoot != null)
+                s_instance.m_panelRoot.SetActive(false);
         }
 
         #region Lifecycle
@@ -188,45 +202,112 @@ namespace ValheimVillages.UI.ContextMenus
 
         #region Panel Setup
 
-        private void EnsurePanel()
+        // Minimum editor size, so it stays usable even over a small chest.
+        private const float MinWidth = 340f;
+        private const float MinHeight = 320f;
+
+        private void EnsurePanel(InventoryGui gui)
         {
             if (m_panelRoot != null) return;
 
+            // Built under the canvas; PositionPanel re-parents it to the chest
+            // window each time it's shown.
+            var canvas = gui.GetComponentInParent<Canvas>();
+            var parent = canvas != null ? canvas.transform : gui.transform;
+
             var el = WorkOrderMenuBuilder.Build(
-                OnSave, OnCancel,
+                parent,
+                Hide, // single "Back" button — commits and closes
                 OnMinSliderChanged, OnMaxSliderChanged,
                 OnMinInputEnd, OnMaxInputEnd);
 
             m_panelRoot = el.Root;
+            m_iconImage = el.IconImage;
             m_minSlider = el.MinSlider;
             m_minInput = el.MinInput;
             m_maxSlider = el.MaxSlider;
             m_maxInput = el.MaxInput;
             m_stationLabel = el.StationLabel;
             m_itemLabel = el.ItemLabel;
-            m_rangeLabel = el.RangeLabel;
+        }
+
+        /// <summary>
+        ///     Overlay the editor on top of the chest (container) window, covering
+        ///     its grid. The editor inherits the window's footprint — so it always
+        ///     fits and scales with the UI regardless of resolution — and only
+        ///     grows past it if the chest is smaller than the editor's minimum.
+        ///     Falls back to the player inventory window if no container is open.
+        /// </summary>
+        private void PositionPanel(InventoryGui gui)
+        {
+            if (m_panelRoot == null) return;
+
+            var window = gui.m_container != null &&
+                         gui.m_container.gameObject.activeInHierarchy
+                ? gui.m_container
+                : gui.m_player;
+            if (window == null) return;
+
+            var rt = m_panelRoot.GetComponent<RectTransform>();
+            rt.SetParent(window, false);
+
+            // Ignore any layout group on the window so we control the size.
+            var le = m_panelRoot.GetComponent<LayoutElement>()
+                     ?? m_panelRoot.AddComponent<LayoutElement>();
+            le.ignoreLayout = true;
+
+            // Centre on the window and size to match its wood frame (the native
+            // "Bkg" sprite is ~20px larger than the window's content rect), so our
+            // cloned frame aligns exactly with the chest's and the title/back
+            // button land where "Chest"/"Place stacks" do.
+            const float frameMargin = 20f;
+            var winSize = window.rect.size;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = new Vector2(
+                Mathf.Max(winSize.x, MinWidth) + frameMargin,
+                Mathf.Max(winSize.y, MinHeight) + frameMargin);
+
+            // Draw on top of the grid.
+            rt.SetAsLastSibling();
         }
 
         private void SyncUIFromData()
         {
             m_updatingUI = true;
 
-            SetLabel(m_stationLabel, $"Station: {m_stationDisplay}");
-            SetLabel(m_itemLabel, $"Item: {m_itemDisplay}");
+            SetLabel(m_stationLabel,
+                $"Station: <color={ValueColor}>{m_stationDisplay}</color>");
+
+            // The work order's composited parchment+item icon.
+            if (m_iconImage != null)
+            {
+                var icons = m_currentItem?.m_shared?.m_icons;
+                var sprite = icons != null && icons.Length > 0 ? icons[0] : null;
+                m_iconImage.sprite = sprite;
+                m_iconImage.enabled = sprite != null;
+            }
 
             if (m_minSlider != null) m_minSlider.value = m_minimum;
             if (m_minInput != null) m_minInput.text = m_minimum.ToString();
             if (m_maxSlider != null) m_maxSlider.value = m_maximum;
             if (m_maxInput != null) m_maxInput.text = m_maximum.ToString();
 
-            UpdateRangeLabel();
+            RefreshDynamicLabels();
             m_updatingUI = false;
         }
 
-        private void UpdateRangeLabel()
+        // Item-detail theme: white label, orange value, yellow parenthetical.
+        private const string ValueColor = "#FFA13C"; // Valheim orange
+        private const string NoteColor = "#FFE300"; // Valheim yellow
+
+        private void RefreshDynamicLabels()
         {
-            SetLabel(m_rangeLabel,
-                $"Production Range: {m_minimum} - {m_maximum}");
+            // White label, orange value, white "Quota:" sub-label, yellow numbers.
+            SetLabel(m_itemLabel,
+                $"Item: <color={ValueColor}>{m_itemDisplay}</color> " +
+                $"(Quota: <color={NoteColor}>{m_minimum}-{m_maximum}</color>)");
         }
 
         /// <summary>
@@ -253,7 +334,7 @@ namespace ValheimVillages.UI.ContextMenus
             if (m_minInput != null) m_minInput.text = m_minimum.ToString();
             if (m_maxSlider != null) m_maxSlider.value = m_maximum;
             if (m_maxInput != null) m_maxInput.text = m_maximum.ToString();
-            UpdateRangeLabel();
+            RefreshDynamicLabels();
             m_updatingUI = false;
         }
 
@@ -267,7 +348,7 @@ namespace ValheimVillages.UI.ContextMenus
             if (m_maxInput != null) m_maxInput.text = m_maximum.ToString();
             if (m_minSlider != null) m_minSlider.value = m_minimum;
             if (m_minInput != null) m_minInput.text = m_minimum.ToString();
-            UpdateRangeLabel();
+            RefreshDynamicLabels();
             m_updatingUI = false;
         }
 
@@ -283,7 +364,7 @@ namespace ValheimVillages.UI.ContextMenus
             if (m_minInput != null) m_minInput.text = m_minimum.ToString();
             if (m_maxSlider != null) m_maxSlider.value = m_maximum;
             if (m_maxInput != null) m_maxInput.text = m_maximum.ToString();
-            UpdateRangeLabel();
+            RefreshDynamicLabels();
             m_updatingUI = false;
         }
 
@@ -299,22 +380,8 @@ namespace ValheimVillages.UI.ContextMenus
             if (m_maxInput != null) m_maxInput.text = m_maximum.ToString();
             if (m_minSlider != null) m_minSlider.value = m_minimum;
             if (m_minInput != null) m_minInput.text = m_minimum.ToString();
-            UpdateRangeLabel();
+            RefreshDynamicLabels();
             m_updatingUI = false;
-        }
-
-        private void OnSave()
-        {
-            SaveToItem();
-            Player.m_localPlayer?.Message(
-                MessageHud.MessageType.Center,
-                $"Work order set: {m_minimum}-{m_maximum}");
-            Hide();
-        }
-
-        private void OnCancel()
-        {
-            Hide();
         }
 
         #endregion

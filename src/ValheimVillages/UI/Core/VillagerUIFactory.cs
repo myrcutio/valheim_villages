@@ -87,7 +87,8 @@ namespace ValheimVillages.UI.Core
 
         /// <summary>Create a horizontal layout group container.</summary>
         public static GameObject CreateHorizontalGroup(
-            Transform parent, float spacing = 4f, float height = 36f)
+            Transform parent, float spacing = 4f, float height = 36f,
+            bool forceExpandWidth = true)
         {
             var go = new GameObject("HGroup",
                 typeof(RectTransform), typeof(HorizontalLayoutGroup));
@@ -98,7 +99,7 @@ namespace ValheimVillages.UI.Core
             hlg.childAlignment = TextAnchor.MiddleLeft;
             hlg.childControlWidth = true;
             hlg.childControlHeight = true;
-            hlg.childForceExpandWidth = true;
+            hlg.childForceExpandWidth = forceExpandWidth;
             hlg.childForceExpandHeight = false;
 
             var le = go.AddComponent<LayoutElement>();
@@ -106,6 +107,45 @@ namespace ValheimVillages.UI.Core
             le.flexibleWidth = 1f;
 
             return go;
+        }
+
+        /// <summary>Create a vertical layout group container.</summary>
+        public static GameObject CreateVerticalGroup(
+            Transform parent, float spacing = 2f)
+        {
+            var go = new GameObject("VGroup",
+                typeof(RectTransform), typeof(VerticalLayoutGroup));
+            go.transform.SetParent(parent, false);
+
+            var vlg = go.GetComponent<VerticalLayoutGroup>();
+            vlg.spacing = spacing;
+            vlg.childAlignment = TextAnchor.MiddleLeft;
+            vlg.childControlWidth = true;
+            vlg.childControlHeight = true;
+            vlg.childForceExpandWidth = true;
+            vlg.childForceExpandHeight = false;
+
+            var le = go.AddComponent<LayoutElement>();
+            le.flexibleWidth = 1f;
+
+            return go;
+        }
+
+        /// <summary>Create a fixed-size square icon image.</summary>
+        public static Image CreateIcon(Transform parent, float size)
+        {
+            var go = new GameObject("VV_Icon",
+                typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(parent, false);
+
+            var le = go.AddComponent<LayoutElement>();
+            le.preferredWidth = size;
+            le.preferredHeight = size;
+            le.flexibleWidth = 0f;
+
+            var img = go.GetComponent<Image>();
+            img.preserveAspect = true;
+            return img;
         }
 
         /// <summary>Create a thin horizontal divider line.</summary>

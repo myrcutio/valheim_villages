@@ -12,6 +12,14 @@ namespace ValheimVillages.UI.Core
     {
         private static readonly Color ValheimOrange = new(1f, 0.631f, 0.235f, 1f);
 
+        // Native window header style (matches the chest's "Chest" title).
+        private static readonly Color NativeHeaderColor = new(1f, 0.718f, 0.36f, 1f);
+        private const float NativeHeaderSize = 32f;
+
+        // Cached native window-background GameObject (the chest's "Bkg"), looked
+        // up once from the InventoryGui and cloned for an exact frame match.
+        private static GameObject s_windowBg;
+
         /// <summary>
         ///     Create a centered popup panel with a dark Valheim-style background,
         ///     title, and vertical content area. Returns the root GO and content transform.
@@ -69,6 +77,116 @@ namespace ValheimVillages.UI.Core
             CreateDivider(panelGO.transform);
 
             return (rootGO, panelGO.transform);
+        }
+
+        /// <summary>
+        ///     Create a panel docked inside an existing UI (e.g. the InventoryGui
+        ///     canvas) rather than a standalone overlay. No canvas or backdrop of
+        ///     its own, so it z-orders with — and is hidden alongside — its parent.
+        ///     Uses Valheim's native wood-panel sprite when available.
+        ///     Returns the root GO and the vertical content area.
+        /// </summary>
+        public static (GameObject root, Transform content) CreateDockedPanel(
+            Transform parent, string title, float width, float height)
+        {
+            var panelGO = new GameObject("VV_Docked_" + title,
+                typeof(RectTransform), typeof(VerticalLayoutGroup));
+            panelGO.transform.SetParent(parent, false);
+
+            var panelRT = panelGO.GetComponent<RectTransform>();
+            panelRT.sizeDelta = new Vector2(width, height);
+
+            // Background: clone the chest window's actual "Bkg" object so the
+            // frame texture and border shape are pixel-for-pixel identical.
+            var bgSource = GetWindowBackgroundObject();
+            if (bgSource != null)
+            {
+                var bgClone = Object.Instantiate(bgSource, panelGO.transform);
+                bgClone.name = "VV_Bkg";
+                bgClone.transform.SetAsFirstSibling();
+
+                // Keep it out of the layout and stretched to fill the panel.
+                var le = bgClone.GetComponent<LayoutElement>()
+                         ?? bgClone.AddComponent<LayoutElement>();
+                le.ignoreLayout = true;
+
+                var brt = bgClone.GetComponent<RectTransform>();
+                brt.anchorMin = Vector2.zero;
+                brt.anchorMax = Vector2.one;
+                brt.pivot = new Vector2(0.5f, 0.5f);
+                brt.offsetMin = Vector2.zero;
+                brt.offsetMax = Vector2.zero;
+                brt.localScale = Vector3.one;
+            }
+            else
+            {
+                // Fallback to a dark panel + outline if the frame isn't found.
+                var img = panelGO.AddComponent<Image>();
+                img.color = new Color(0.12f, 0.09f, 0.06f, 0.97f);
+                var outline = panelGO.AddComponent<Outline>();
+                outline.effectColor = new Color(0.45f, 0.35f, 0.25f, 1f);
+                outline.effectDistance = new Vector2(2, -2);
+            }
+
+            // Title styled like the native window header (e.g. "Chest"):
+            // absolutely positioned top-centre, large peach font.
+            var titleGO = CreateLabel(
+                panelGO.transform, title, NativeHeaderSize, NativeHeaderColor);
+            SetTMPProperties(titleGO, NativeHeaderSize, NativeHeaderColor, 514);
+            var tle = titleGO.GetComponent<LayoutElement>()
+                      ?? titleGO.AddComponent<LayoutElement>();
+            tle.ignoreLayout = true;
+            var trt = titleGO.GetComponent<RectTransform>();
+            trt.anchorMin = trt.anchorMax = new Vector2(0.5f, 1f);
+            trt.pivot = new Vector2(0.5f, 1f);
+            trt.anchoredPosition = new Vector2(0f, -16f);
+
+            // Content flows below the title.
+            var vlg = panelGO.GetComponent<VerticalLayoutGroup>();
+            vlg.childAlignment = TextAnchor.UpperCenter;
+            vlg.childControlWidth = true;
+            vlg.childControlHeight = true;
+            vlg.childForceExpandWidth = true;
+            vlg.childForceExpandHeight = false;
+            vlg.spacing = 7f;
+            vlg.padding = new RectOffset(24, 24, 56, 20);
+
+            return (panelGO, panelGO.transform);
+        }
+
+        /// <summary>
+        ///     Find the native window-background GameObject from the live
+        ///     InventoryGui so docked panels can clone the chest window's exact
+        ///     frame. Valheim names each window's background child "Bkg"; that's
+        ///     the wood panel the inventory/crafting/villager-tab UIs all sit on.
+        ///     Prefers the container (chest) window. Returns null if not found,
+        ///     so the caller falls back to a plain dark panel.
+        /// </summary>
+        private static GameObject GetWindowBackgroundObject()
+        {
+            if (s_windowBg != null) return s_windowBg;
+
+            var gui = InventoryGui.instance;
+            if (gui == null) return null;
+
+            foreach (var win in new[] { gui.m_container, gui.m_player })
+            {
+                if (win == null) continue;
+                foreach (var img in win.GetComponentsInChildren<Image>(true))
+                {
+                    if (img.sprite == null) continue;
+                    // Exact "Bkg" is the window's wood frame (woodpanel_container /
+                    // woodpanel_playerinventory). Avoid the lowercase "bkg" child of
+                    // the weight indicator (the small woodpanel_flik panel).
+                    if (img.gameObject.name == "Bkg")
+                    {
+                        s_windowBg = img.gameObject;
+                        return s_windowBg;
+                    }
+                }
+            }
+
+            return s_windowBg;
         }
 
         /// <summary>
