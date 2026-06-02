@@ -505,7 +505,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             // Piece scoping is deliberately patrol-independent:
             // VillageAreaManager polygons are derived from the previous
-            // region graph via BoundaryMapper + patrol circuits, so feeding
+            // region graph via PatrolRouteBuilder, so feeding
             // them back into piece scoping is circular and self-reinforces
             // outside-wall leaks. Pieces rely on the bake-bounds reject +
             // the agent NavMesh sample below.
@@ -877,7 +877,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             // --- Boundary detection ---
-            DetectBoundary(edgeToTris, triToRegion, result);
+            DetectBoundary(edgeToTris, triToRegion, idx, verts, result);
 
             // --- Rasterized lookup grid ---
             BuildLookupGrid(accepted, idx, verts, triToRegion, result);
@@ -1593,41 +1593,58 @@ namespace ValheimVillages.Villager.AI.Navigation
         private static void DetectBoundary(
             Dictionary<long, List<int>> edgeToTris,
             Dictionary<int, string> triToRegion,
+            int[] idx,
+            Vector3[] verts,
             BuildResult result)
         {
-            var boundaryDirs = new Dictionary<string, Vector3>();
+            // Emit one boundary cell per boundary edge (an edge with exactly one
+            // adjacent in-region triangle — the region's outer perimeter), anchored
+            // at the EDGE MIDPOINT. Edge midpoints sit on the actual wall and carry
+            // a real per-edge Y, unlike region centroids, which can float in mid-air
+            // or even land OUTSIDE the walkable area (e.g. a C-shaped wall whose
+            // region centroid is in the courtyard or beyond the village) — a useless
+            // patrol anchor.
+            //
+            // The outward normal is the edge's XZ-perpendicular, oriented away from
+            // the edge's single adjacent triangle centroid. That triangle is the
+            // walkable (interior) side by construction, so it is a guaranteed-correct
+            // LOCAL interior reference — no global village centroid is needed, which
+            // is what makes this robust on concave / C-shaped perimeters where no
+            // single global "inside" point exists.
             foreach (var kv in edgeToTris)
             {
                 var tris = kv.Value;
                 var valid = 0;
-                string lastR = null;
+                var validTri = -1;
+                string region = null;
                 foreach (var t in tris)
                     if (triToRegion.TryGetValue(t, out var r))
                     {
                         valid++;
-                        lastR = r;
+                        validTri = t;
+                        region = r;
                     }
 
-                if (valid != 1 || lastR == null) continue;
+                if (valid != 1 || region == null || validTri < 0) continue;
 
-                if (!boundaryDirs.TryGetValue(lastR, out var dir))
-                    dir = Vector3.zero;
-                if (result.Centroids.TryGetValue(lastR, out var centroid))
-                {
-                    int v1 = (int)(kv.Key >> 32), v2 = (int)(kv.Key & 0xFFFFFFFFL);
-                    // This edge only appears on the boundary, but we don't have direct
-                    // access to verts here, so we skip outward dir refinement.
-                    // A zero dir defaults to Vector3.forward in the consumer.
-                }
+                int v1 = (int)(kv.Key >> 32), v2 = (int)(kv.Key & 0xFFFFFFFFL);
+                if (v1 < 0 || v2 < 0 || v1 >= verts.Length || v2 >= verts.Length) continue;
 
-                boundaryDirs[lastR] = dir;
-            }
+                var a = verts[v1];
+                var b = verts[v2];
+                var mid = (a + b) * 0.5f;
 
-            foreach (var kv in boundaryDirs)
-            {
-                if (!result.Centroids.TryGetValue(kv.Key, out var c)) continue;
-                var dir = kv.Value.sqrMagnitude > 0.01f ? kv.Value.normalized : Vector3.forward;
-                result.BoundaryCells.Add((kv.Key, c, dir));
+                // Local interior reference: the one adjacent triangle's centroid.
+                var triCentroid = (verts[idx[validTri * 3]]
+                                   + verts[idx[validTri * 3 + 1]]
+                                   + verts[idx[validTri * 3 + 2]]) / 3f;
+
+                var perp = new Vector3(-(b.z - a.z), 0f, b.x - a.x);
+                if (perp.x * (mid.x - triCentroid.x) + perp.z * (mid.z - triCentroid.z) < 0f)
+                    perp = -perp;
+                var dir = perp.sqrMagnitude > 1e-6f ? perp.normalized : Vector3.forward;
+
+                result.BoundaryCells.Add((region, mid, dir));
             }
         }
 

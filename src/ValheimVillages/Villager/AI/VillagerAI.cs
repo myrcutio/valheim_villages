@@ -75,8 +75,8 @@ namespace ValheimVillages.Villager.AI
         ///     "TargetSet fired but PathRecompute never followed" (the path-
         ///     invalidation bug shape) from "PathRecompute returned Empty"
         ///     and similar runtime distinctions log-grepping can't easily
-        ///     produce. Populated inline at SetState/SetPatrolCircuit/
-        ///     TryFindPathCustom/EnterRecovery; consumed by IncidentRecorder.
+        ///     produce. Populated inline at SetState; consumed by
+        ///     IncidentRecorder.
         /// </summary>
         internal readonly Diagnostics.AiEventRing EventRing = new Diagnostics.AiEventRing();
 
@@ -222,6 +222,25 @@ namespace ValheimVillages.Villager.AI
             }
 
             if (IsPaused) return true;
+
+            // Hold movement across a navmesh / region-graph rebuild. The bake is
+            // synchronous, so the hazard is the frames right after it: a path
+            // computed on the OLD mesh can steer the villager off a ledge before
+            // autoRepath corrects it. Stop and drop the stale path while held;
+            // CurrentState + m_currentWaypoint are untouched, so the villager
+            // resumes its prior task on the fresh mesh when the hold expires.
+            if (Navigation.VillageNavLock.IsHeld)
+            {
+                StopMoving();
+                if (m_navAgent != null && m_navAgent.isOnNavMesh)
+                    m_navAgent.ResetPath();
+                return true;
+            }
+
+            // Off-mesh rescue runs ahead of behavior selection and the agent mover:
+            // a villager stranded off the village mesh walks itself back over
+            // terrain before anything else gets to act on the un-pathable position.
+            if (TryOffMeshRescue(dt)) return true;
 
             // Shared PoIs are discovered at the village level now; the only
             // per-villager thing left to sample is the comfort the villager
@@ -520,33 +539,13 @@ namespace ValheimVillages.Villager.AI
                 EventRing.RecordStateChange(prevState.ToString(), newState.ToString(),
                     waypoint != null ? "with_waypoint" : "no_waypoint");
 
-            if (newState == BehaviorState.Idle)
+            if (newState == BehaviorState.Idle || newState == BehaviorState.NeedsHelp)
                 StopMoving();
             if (waypoint != null)
                 Plugin.Log?.LogDebug(
                     $"[AI:{m_villagerName}] State -> {newState}, target=({waypoint.Position.x:F1},{waypoint.Position.y:F1},{waypoint.Position.z:F1})");
             else
                 Plugin.Log?.LogDebug($"[AI:{m_villagerName}] State -> {newState}");
-        }
-
-        /// <summary>
-        ///     Inject a pre-computed patrol circuit path. The guard follows the full path
-        ///     and only triggers OnArrival when reaching the final waypoint.
-        ///     Falls back to single-waypoint FindPath if the path is empty.
-        /// </summary>
-        public void SetPatrolCircuit(VillagerWaypoint finalTarget, List<Vector3> circuitPath)
-        {
-            var prevState = CurrentState;
-            var prevTarget = m_currentWaypoint != null ? m_currentWaypoint.Position : Vector3.zero;
-            CurrentState = BehaviorState.Patrolling;
-            m_currentWaypoint = finalTarget;
-            EventRing.RecordTargetSet(finalTarget.Position, prevTarget, "SetPatrolCircuit");
-            if (prevState != BehaviorState.Patrolling)
-                EventRing.RecordStateChange(prevState.ToString(), "Patrolling", "SetPatrolCircuit");
-
-
-            Plugin.Log?.LogDebug(
-                $"[AI:{m_villagerName}] State -> Patrolling (circuit: {circuitPath.Count} path nodes)");
         }
 
         public void SetPaused(bool paused)
@@ -722,6 +721,152 @@ namespace ValheimVillages.Villager.AI
             if ((m_navAgent.destination - targetPos).sqrMagnitude > 0.25f) return false;
             if (m_navAgent.pathStatus != NavMeshPathStatus.PathComplete) return false;
             return m_navAgent.remainingDistance <= m_navAgent.stoppingDistance + 0.25f;
+        }
+
+        // Off-mesh rescue --------------------------------------------------
+
+        private bool m_rescuing;
+        private float m_nextRescueCheck;
+        private float m_strandedSince;
+        private Vector3 m_rescueLastPos;
+        private float m_rescueProgressTime;
+
+        /// <summary>How often (s) to run the CalculatePath-backed stranded check.</summary>
+        private const float RescueCheckInterval = 1f;
+
+        /// <summary>Strand must persist this long (s) before a rescue starts — debounces transient mid-rebuild blips.</summary>
+        private const float StrandConfirmSeconds = 2f;
+
+        /// <summary>If a walking rescue makes no progress for this long (s), teleport home (disconnected island).</summary>
+        private const float RescueStuckSeconds = 3f;
+
+        /// <summary>Minimum movement (m) per check to count the walking rescue as making progress.</summary>
+        private const float RescueProgressEps = 0.5f;
+
+        /// <summary>
+        ///     Recover a STRANDED villager. "Stranded" = its position doesn't
+        ///     resolve to a village region AND the agent can't path home (see
+        ///     <see cref="IsStranded" />) — a disconnected scrap of navmesh: a
+        ///     leaked exterior island, or a wall-base limbo cell. First tries to
+        ///     WALK home over the terrain (<see cref="BaseAI.MoveTo" />, Valheim's
+        ///     humanoid pathing, which routes around walls to a gate). If walking
+        ///     makes no progress for <see cref="RescueStuckSeconds" /> — pathfinding
+        ///     genuinely can't escape the island — it TELEPORTS home as a last
+        ///     resort. The strand is debounced (<see cref="StrandConfirmSeconds" />)
+        ///     so a transient blip during a navmesh rebuild never yanks a healthy
+        ///     villager. Runs ahead of behavior selection; returns true while a
+        ///     rescue is in progress.
+        /// </summary>
+        private bool TryOffMeshRescue(float dt)
+        {
+            if (!VillagerAgentType.IsRegistered) return false;
+
+            var due = Time.time >= m_nextRescueCheck;
+            if (m_rescuing)
+            {
+                if (due)
+                {
+                    m_nextRescueCheck = Time.time + RescueCheckInterval;
+                    if (!IsStranded())
+                    {
+                        m_rescuing = false;
+                        m_strandedSince = 0f;
+                        Plugin.Log?.LogInfo(
+                            $"[AI:{m_villagerName}] Rescue complete — back on the village graph.");
+                        if (CurrentState == BehaviorState.NeedsHelp)
+                            SetState(BehaviorState.Idle);
+                        ClearCachedPath();
+                        return false;
+                    }
+                }
+
+                // Escalate to a teleport when walking can't free it (the navmesh
+                // island has no path off, so MoveTo never moves us).
+                if ((transform.position - m_rescueLastPos).sqrMagnitude >
+                    RescueProgressEps * RescueProgressEps)
+                {
+                    m_rescueLastPos = transform.position;
+                    m_rescueProgressTime = Time.time;
+                }
+                else if (Time.time - m_rescueProgressTime > RescueStuckSeconds)
+                {
+                    TeleportHome();
+                    m_rescueLastPos = transform.position;
+                    m_rescueProgressTime = Time.time;
+                    return true;
+                }
+            }
+            else
+            {
+                if (!due) return false;
+                m_nextRescueCheck = Time.time + RescueCheckInterval;
+                if (!IsStranded())
+                {
+                    m_strandedSince = 0f;
+                    return false;
+                }
+
+                // Debounce: require the strand to persist so a transient blip while
+                // a navmesh rebuild settles doesn't rescue a healthy villager.
+                if (m_strandedSince <= 0f) m_strandedSince = Time.time;
+                if (Time.time - m_strandedSince < StrandConfirmSeconds) return false;
+
+                m_rescuing = true;
+                m_rescueLastPos = transform.position;
+                m_rescueProgressTime = Time.time;
+                Plugin.Log?.LogWarning(
+                    $"[AI:{m_villagerName}] Stranded off the village graph at " +
+                    $"({transform.position.x:F1},{transform.position.z:F1}); recovering to bed " +
+                    $"({m_bedPosition.x:F1},{m_bedPosition.z:F1}).");
+            }
+
+            // Walk home over the terrain (base-game pathing, NOT the village agent).
+            MoveTo(dt, m_bedPosition, 1f, true);
+            return true;
+        }
+
+        /// <summary>
+        ///     Last-resort teleport for a villager on a disconnected navmesh island
+        ///     that no path can free. Snaps to the agent mesh nearest the bed and
+        ///     moves the character (and its advisory agent) there.
+        /// </summary>
+        private void TeleportHome()
+        {
+            var dest = m_bedPosition;
+            if (NavMesh.SamplePosition(m_bedPosition, out var hit, 5f, AgentFilter()))
+                dest = hit.position;
+            transform.position = dest;
+            if (m_navAgent != null && m_navAgent.isOnNavMesh)
+                m_navAgent.Warp(dest);
+            Plugin.Log?.LogWarning(
+                $"[AI:{m_villagerName}] Rescue: pathing couldn't free it; teleported home to " +
+                $"({dest.x:F1},{dest.y:F1},{dest.z:F1}).");
+        }
+
+        /// <summary>
+        ///     True when the villager can't be reached by the village region graph
+        ///     AND the agent NavMesh can't path it home — "genuinely stranded". A
+        ///     region-unresolved villager that CAN still agent-path to its bed (an
+        ///     interior lookup-grid hole) is NOT stranded, so healthy interior
+        ///     villagers are never rescued.
+        /// </summary>
+        private bool IsStranded()
+        {
+            var graph = Navigation.RegionGraph.GetNearest(m_bedPosition);
+            if (graph != null && graph.PointToRegionId(transform.position) != null)
+                return false; // resolves to a region — on the graph, fine
+
+            var filter = AgentFilter();
+            // Off the agent mesh entirely (can't even snap nearby) → stranded.
+            if (!NavMesh.SamplePosition(transform.position, out var from, 3f, filter))
+                return true;
+            // Can't locate the bed on the mesh — don't start a rescue we can't finish.
+            if (!NavMesh.SamplePosition(m_bedPosition, out var to, 5f, filter))
+                return false;
+            var path = new NavMeshPath();
+            NavMesh.CalculatePath(from.position, to.position, filter, path);
+            // A complete agent path home means it can recover on its own.
+            return path.status != NavMeshPathStatus.PathComplete;
         }
 
         private void UpdateAgentMovement(Vector3 targetPos, bool running)

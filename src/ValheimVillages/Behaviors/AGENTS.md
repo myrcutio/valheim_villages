@@ -26,12 +26,9 @@ Behaviors/
     BreachDetection.cs                 -- Raycast-based breach detection at patrol waypoints
   Patrol/
     PerimeterPatrolBehavior.cs         -- [RegisterBehavior("patrol")] wraps PatrolStateMachine
-    PatrolStateMachine.cs              -- State machine: Scouting -> CircuitTracing -> Patrolling <-> Alarmed
+    PatrolStateMachine.cs              -- Derives a route from the region graph, then steps waypoints one at a time (agent routes each leg)
+    PatrolRouteBuilder.cs              -- Geometric builder: boundary cells -> dedup -> NN+2-opt -> RDP -> inset loop
     PatrolPersistence.cs               -- ZDO save/load for waypoints, breach state, region graph
-    PatrolDiscovery.cs                 -- Scouting and circuit-tracing algorithms for patrol route
-    PatrolRefiner.cs                   -- Smoothing, simplification, and refinement of patrol paths
-    BoundaryMapper.cs              -- Maps region boundaries to patrol-compatible waypoints
-    BoundaryGeometry.cs               -- Geometric utilities for patrol boundary calculations
 ```
 
 ## Key Types
@@ -39,12 +36,12 @@ Behaviors/
 | Type                      | Role                                                                                |
 |---------------------------|-------------------------------------------------------------------------------------|
 | `BehaviorFactory`         | Maps tag strings to `IBehavior` creator functions; returns sorted list by priority  |
-| `PatrolStateMachine`      | Patrol state machine with scouting, circuit tracing, patrolling, and alarm states   |
+| `PatrolStateMachine`      | Derives a route from the region graph, then advances waypoints one at a time        |
 | `PerimeterPatrolBehavior` | Registered adapter that wraps `PatrolStateMachine`; exposes patrol state to UI      |
 | `TidyBehavior`            | Mid-priority (60) behavior that removes done/burnt items from cooking station spits |
 | `BreachAlarmBehavior`     | High-priority (100) behavior that activates on wall breaches                        |
 | `PatrolPersistence`       | Persists patrol state (waypoints, breach, region data) to ZDO                       |
-| `PatrolDiscovery`         | Discovers patrol routes by scouting walls and tracing circuits                      |
+| `PatrolRouteBuilder`      | Geometric builder: region-graph boundary cells -> ordered, simplified, inset loop   |
 
 ## Entry Points and Registration
 

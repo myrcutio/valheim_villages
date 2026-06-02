@@ -20,7 +20,10 @@ namespace ValheimVillages.Villager.AI
         {
             var villagers = VillagerAIManager.ActiveVillagers;
             var sb = new StringBuilder();
-            sb.AppendLine($"[vv_get_villagers] {villagers.Count} active villager(s):");
+            var navHold = Navigation.VillageNavLock.IsHeld
+                ? $" [nav hold {Navigation.VillageNavLock.SecondsRemaining:F1}s — rebuild settle]"
+                : "";
+            sb.AppendLine($"[vv_get_villagers] {villagers.Count} active villager(s):{navHold}");
             foreach (var kv in villagers)
             {
                 if (kv.Value == null)
@@ -34,6 +37,24 @@ namespace ValheimVillages.Villager.AI
 
             Console.instance?.Print(sb.ToString());
             Plugin.Log?.LogInfo(sb.ToString());
+        }
+
+        [DevCommand("Reset patrol discovery for all patrollers, forcing a fresh route rebuild from the region graph",
+            Name = "vv_patrol_reset")]
+        public static void ResetPatrols()
+        {
+            var count = 0;
+            foreach (var kv in VillagerAIManager.ActiveVillagers)
+            {
+                var patrol = kv.Value?.GetBehavior<Behaviors.Patrol.PerimeterPatrolBehavior>();
+                if (patrol == null) continue;
+                patrol.ResetDiscovery();
+                count++;
+            }
+
+            var msg = $"[vv_patrol_reset] Reset discovery for {count} patroller(s)";
+            Console.instance?.Print(msg);
+            Plugin.Log?.LogInfo(msg);
         }
 
         [DevCommand("List work orders in chests near each villager + how many outputs exist in chests (the real completion metric)",

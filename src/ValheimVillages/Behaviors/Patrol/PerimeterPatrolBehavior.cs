@@ -47,6 +47,13 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             if (m_patrol == null) return "";
             var state = m_ai.CurrentState;
+            if (state == BehaviorState.NeedsHelp)
+            {
+                var p = m_patrol.HelpPosition;
+                return $"NEEDS HELP: no reachable approach to W{m_patrol.HelpWaypointIndex} " +
+                       $"({p.x:F1},{p.y:F1},{p.z:F1})";
+            }
+
             if (state == BehaviorState.Patrolling)
                 return $"Patrolling ({m_patrol.ActiveWaypointCount} waypoints)";
             return m_patrol.IsDiscoveryComplete ? "On patrol" : "Mapping village";

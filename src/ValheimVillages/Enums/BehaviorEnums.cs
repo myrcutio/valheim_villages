@@ -39,5 +39,6 @@ namespace ValheimVillages.Enums
         Exploring, // Searching for new location types
         Working, // Crafting: executing a work order
         Alarmed, // Patrol: breach detected, waiting for player
+        NeedsHelp, // Stuck: couldn't resolve a reachable target — parks here as an operator signal
     }
 }

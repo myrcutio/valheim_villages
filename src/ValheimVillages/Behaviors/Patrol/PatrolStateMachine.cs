@@ -24,6 +24,10 @@ namespace ValheimVillages.Behaviors.Patrol
         private bool m_hnaPartitionRequested;
         private List<VillagerWaypoint> m_patrolWaypoints;
 
+        // Set when the patrol parks in NeedsHelp: the waypoint it couldn't reach.
+        private int m_helpWaypointIndex = -1;
+        private Vector3 m_helpPosition;
+
         public PatrolStateMachine(Villager.Villager villager)
         {
             m_villager = villager;
@@ -39,6 +43,12 @@ namespace ValheimVillages.Behaviors.Patrol
         public int ActiveWaypointCount => m_patrolWaypoints?.Count(w => w.Active) ?? 0;
         public IReadOnlyList<VillagerWaypoint> PatrolWaypoints => m_patrolWaypoints;
         public bool IsHnaRoute { get; private set; }
+
+        /// <summary>Index of the waypoint the patrol parked at in NeedsHelp, or -1.</summary>
+        public int HelpWaypointIndex => m_helpWaypointIndex;
+
+        /// <summary>World position of the unreachable waypoint when in NeedsHelp.</summary>
+        public Vector3 HelpPosition => m_helpPosition;
 
         /// <summary>Returns the persistent state for saving to ZDO.</summary>
         public (List<VillagerWaypoint> waypoints, int wpIndex, bool complete, bool isHna) GetPersistentState()
@@ -59,6 +69,7 @@ namespace ValheimVillages.Behaviors.Patrol
             IsDiscoveryComplete = false;
             IsHnaRoute = false;
             m_hnaPartitionRequested = false;
+            m_helpWaypointIndex = -1;
             VillageAreaManager.UnregisterArea(GetVillageKey());
             SaveState();
             m_ai.SetState(BehaviorState.Idle);
@@ -131,10 +142,12 @@ namespace ValheimVillages.Behaviors.Patrol
                 }
             }
 
-            var hnaWaypoints = BoundaryMapper.ComputeBoundaryWaypoints(m_ai.Memory.BedPosition);
-            if (hnaWaypoints.Count >= 3)
+            var routePoints = graph != null && graph.IsAvailable
+                ? PatrolRouteBuilder.Build(graph.GetBoundaryCells())
+                : new List<Vector3>();
+            if (routePoints.Count >= 3)
             {
-                m_patrolWaypoints = hnaWaypoints
+                m_patrolWaypoints = routePoints
                     .Select(p => new VillagerWaypoint(p, VillagerWaypoint.DefaultStrategyId))
                     .ToList();
                 IsHnaRoute = true;
@@ -206,92 +219,45 @@ namespace ValheimVillages.Behaviors.Patrol
 
             var total = m_patrolWaypoints.Count;
 
-            // Advance to the next active waypoint — this is where the circuit starts
-            var firstIdx = m_currentWaypointIndex;
+            // Step to the next ACTIVE waypoint in ring order. The NavMeshAgent
+            // routes between waypoints itself, so patrol just feeds one target at
+            // a time and re-advances on arrival — no pre-stitched corridor path.
+            var idx = m_currentWaypointIndex;
             for (var i = 0; i < total; i++)
             {
-                firstIdx = (firstIdx + 1) % total;
-                if (m_patrolWaypoints[firstIdx].Active)
-                    break;
+                idx = (idx + 1) % total;
+                if (m_patrolWaypoints[idx].Active) break;
             }
 
-            // Collect all active waypoints in circuit order starting from firstIdx
-            var circuitWps = new List<(int index, VillagerWaypoint wp)>();
-            for (var i = 0; i < total; i++)
-            {
-                var idx = (firstIdx + i) % total;
-                if (m_patrolWaypoints[idx].Active)
-                    circuitWps.Add((idx, m_patrolWaypoints[idx]));
-            }
-
-            if (circuitWps.Count == 0)
+            if (!m_patrolWaypoints[idx].Active)
             {
                 m_ai.SetState(BehaviorState.Idle);
                 return;
             }
 
-            var fullPath = BuildCircuitPath(m_ai.Position, circuitWps);
-            if (fullPath != null && fullPath.Count > 0)
-            {
-                var lastEntry = circuitWps[circuitWps.Count - 1];
-                m_currentWaypointIndex = lastEntry.index;
-                m_ai.SetPatrolCircuit(lastEntry.wp, fullPath);
-                Plugin.Log?.LogDebug(
-                    $"[Patrol:{m_ai.NpcName}] Circuit built: {circuitWps.Count} waypoints, " +
-                    $"{fullPath.Count} path nodes, final=W{lastEntry.index}");
-            }
-            else
-            {
-                Plugin.Log?.LogWarning(
-                    $"[Patrol:{m_ai.NpcName}] Circuit build failed for {circuitWps.Count} waypoints. Going idle.");
-                m_ai.SetState(BehaviorState.Idle);
-            }
-        }
+            m_currentWaypointIndex = idx;
+            var wp = m_patrolWaypoints[idx];
 
-        /// <summary>
-        ///     Build a concatenated path through all circuit waypoints using Valheim's Pathfinding.
-        ///     Returns null if any segment fails to path.
-        /// </summary>
-        private List<Vector3> BuildCircuitPath(
-            Vector3 startPos, List<(int index, VillagerWaypoint wp)> circuitWps)
-        {
-            var pf = Pathfinding.instance;
-            if (pf == null) return null;
+            // snapToApproach=true: a boundary waypoint can land on or just inside
+            // an obstacle near the wall (the inward inset nudges it off the
+            // walkable frontier cell — e.g. into a charcoal kiln). NavTo's approach
+            // resolver probes outward to the nearest standable, reachable point.
+            if (m_ai.NavTo(wp.Position, BehaviorState.Patrolling, $"patrol:W{idx}",
+                    snapToApproach: true))
+                return;
 
-            var agentType = m_ai.Instance.m_pathAgentType;
-            var fullPath = new List<Vector3>();
-            var segment = new List<Vector3>();
-            var from = startPos;
-
-            for (var i = 0; i < circuitWps.Count; i++)
-            {
-                segment.Clear();
-                var to = circuitWps[i].wp.Position;
-
-                if (!pf.GetPath(from, to, segment, agentType))
-                {
-                    Plugin.Log?.LogInfo(
-                        $"[Patrol:{m_ai.NpcName}] Circuit segment {i}/{circuitWps.Count} FAILED: " +
-                        $"from ({from.x:F1},{from.y:F1},{from.z:F1}) -> " +
-                        $"to ({to.x:F1},{to.y:F1},{to.z:F1})");
-                    return null;
-                }
-
-                if (segment.Count == 0)
-                    return null;
-
-                // Flag path points with anomalous Y
-                foreach (var pt in segment)
-                    if (pt.y < 1f || pt.y > 500f)
-                        Plugin.Log?.LogWarning(
-                            $"[Patrol:{m_ai.NpcName}] Anomalous path point Y={pt.y:F1} " +
-                            $"at ({pt.x:F1},{pt.y:F1},{pt.z:F1}) in segment {i}");
-
-                fullPath.AddRange(segment);
-                from = to;
-            }
-
-            return fullPath;
+            // No reachable approach exists. Do NOT skip the waypoint — that would
+            // silently paper over a broken route or genuinely impassable geometry.
+            // Park in NeedsHelp as an operator signal: inspect the spot, then
+            // either fix the route algorithm or the physical geometry and run
+            // vv_patrol_reset.
+            m_helpWaypointIndex = idx;
+            m_helpPosition = wp.Position;
+            m_ai.SetState(BehaviorState.NeedsHelp);
+            Plugin.Log?.LogError(
+                $"[Patrol:{m_ai.NpcName}] NeedsHelp: no reachable approach to W{idx} " +
+                $"({wp.Position.x:F1},{wp.Position.y:F1},{wp.Position.z:F1}). " +
+                "Patrol parked — fix route/geometry then vv_patrol_reset.");
         }
     }
 }

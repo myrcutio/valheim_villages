@@ -31,10 +31,24 @@ namespace ValheimVillages.TaskQueue.Handlers
 
         private const float VillageClusterRadius = 50f;
 
+        /// <summary>
+        ///     Seconds to hold villager movement after a partition runs, while the
+        ///     freshly-baked navmesh settles and agents re-plan. Covers this
+        ///     synchronous rebuild plus a margin; villagers stop and drop stale
+        ///     paths for the window (see <see cref="VillageNavLock" />).
+        /// </summary>
+        private const float NavRebuildSettleSeconds = 3f;
+
         public string TaskName => RegionPartitionTaskName;
 
         public TaskResult Handle(VillagerTask task, VillagerActivityLog activityLog)
         {
+            // Freeze villager movement across the rebuild + settle so a path
+            // computed on the old navmesh can't run a villager off a ledge before
+            // autoRepath catches up. Set here (the rebuild moment) rather than at
+            // enqueue — the graph is stable while the task waits in the queue.
+            VillageNavLock.RequestHold(NavRebuildSettleSeconds);
+
             var allBeds = VillagerAIManager.GetAllBedPositions();
             var beds = FilterBedsByAnchor(allBeds, task);
             var hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(

@@ -65,7 +65,7 @@ namespace ValheimVillages.Villages
             var key = graph.RegisteredVillageKey;
             if (string.IsNullOrEmpty(key)) return;
 
-            var waypoints = BoundaryMapper.ComputeBoundaryWaypoints(graph);
+            var waypoints = PatrolRouteBuilder.Build(graph.GetBoundaryCells());
             if (waypoints == null || waypoints.Count < 3)
             {
                 Plugin.Log?.LogInfo(

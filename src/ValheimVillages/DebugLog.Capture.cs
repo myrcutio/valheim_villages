@@ -371,48 +371,10 @@ namespace ValheimVillages
         {
             sb.Append(",\"diagnostics\":{");
 
-            // Last WaypointRelaxation.Refine pass stats.
-            var stats = WaypointRelaxation.LastStats;
-            sb.Append("\"lastRelaxation\":{");
-            if (stats == null)
-            {
-                sb.Append("\"available\":false");
-            }
-            else
-            {
-                sb.Append("\"available\":true,");
-                sb.Append("\"totalRetentions\":").Append(stats.TotalRetentions).Append(',');
-                sb.Append("\"bfsMisses\":").Append(stats.BfsMisses).Append(',');
-                sb.Append("\"navmeshFailures\":").Append(stats.NavMeshSampleFailures).Append(',');
-                sb.Append("\"yDisagreements\":").Append(stats.YDisagreements).Append(',');
-                sb.Append("\"bakeYNaNs\":").Append(stats.BakeYNaNs).Append(',');
-                sb.Append("\"worstYDelta\":").Append(stats.WorstYDelta.ToString("R", CultureInfo.InvariantCulture)).Append(',');
-                sb.Append("\"worstYDeltaXZ\":[")
-                    .Append(stats.WorstYDeltaXZ.x.ToString("R", CultureInfo.InvariantCulture)).Append(',')
-                    .Append(stats.WorstYDeltaXZ.y.ToString("R", CultureInfo.InvariantCulture)).Append("],");
-                sb.Append("\"retentions\":[");
-                // Cap the per-waypoint list so a runaway pass can't blow up the
-                // sidecar file. The summary counts above are the authoritative total.
-                // Each entry is a single iteration where the waypoint kept its
-                // previous position — NOT a dropped waypoint.
-                const int MaxRetentions = 500;
-                var n = Mathf.Min(stats.Retentions.Count, MaxRetentions);
-                for (var i = 0; i < n; i++)
-                {
-                    var d = stats.Retentions[i];
-                    if (i > 0) sb.Append(',');
-                    sb.Append("{\"x\":").Append(d.X.ToString("R", CultureInfo.InvariantCulture))
-                      .Append(",\"z\":").Append(d.Z.ToString("R", CultureInfo.InvariantCulture))
-                      .Append(",\"reason\":\"").Append(JsonEscape(d.Reason)).Append('"')
-                      .Append(",\"bakeY\":").Append(JsonFloat(d.BakeY))
-                      .Append(",\"delta\":").Append(d.Delta.ToString("R", CultureInfo.InvariantCulture))
-                      .Append('}');
-                }
-                sb.Append(']');
-                if (stats.Retentions.Count > MaxRetentions)
-                    sb.Append(",\"retentionsTruncatedAt\":").Append(MaxRetentions);
-            }
-            sb.Append("},");
+            // Legacy WaypointRelaxation diagnostics were removed with the old
+            // patrol boundary pipeline; the geometric PatrolRouteBuilder has no
+            // relaxation pass. Stub kept so sidecar consumers keep parsing.
+            sb.Append("\"lastRelaxation\":{\"available\":false},");
 
             // Per-village bounds. Iterates RegionGraph.GetAll() so multi-village
             // worlds emit one entry per village; the diff between BFS and bake

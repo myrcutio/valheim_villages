@@ -747,6 +747,14 @@ namespace ValheimVillages.Villager.AI.Navigation
             var ySize = bounds.size.y + 4f;
             var yCenter = bounds.center.y;
 
+            // Grow each blocker rectangle by this much per XZ side so the carve
+            // overlaps the cell boundary instead of ending exactly on it — keeps a
+            // thin sliver of walkable navmesh from surviving along the seam between
+            // an outside blocker and an adjacent kept cell. Small relative to the
+            // 1m cell and the agent-radius erosion, so it only tightens the navmesh
+            // against the wall.
+            const float padXZ = 0.2f;
+
             // Greedy-decompose contiguous outside-cell blocks into rectangles.
             // For a village with ~3000 outside cells this typically drops to
             // tens of ModifierBox sources — ~50x fewer voxelizer inputs. We
@@ -767,7 +775,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 sources.Add(new NavMeshBuildSource
                 {
                     shape = NavMeshBuildSourceShape.ModifierBox,
-                    size = new Vector3(w, ySize, d),
+                    size = new Vector3(w + 2f * padXZ, ySize, d + 2f * padXZ),
                     transform = Matrix4x4.TRS(
                         new Vector3(cx, yCenter, cz),
                         Quaternion.identity, Vector3.one),

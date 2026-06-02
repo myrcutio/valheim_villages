@@ -846,6 +846,79 @@ namespace ValheimVillages.Villager.AI.Navigation
             LastPieceMask = pieceMask;
             HasSnapshot = true;
 
+            // --- Boundary cells from the perimeter-flood frontier ---
+            // The region-edge boundary cells produced upstream (DetectBoundary)
+            // include EVERY interior obstacle's perimeter — buildings, internal
+            // walls, props — roughly half of which sit deep inside the village and
+            // make any patrol-loop ordering weave between the outer wall and the
+            // interior rings. The outside-in flood already separates the two: an
+            // interior obstacle is enclosed by walkable cells, so it is never
+            // 4-adjacent to outsideCells. Rebuild boundaryCells as the OUTER
+            // frontier — bed-reachable cells with at least one 4-neighbour in
+            // outsideCells — with the outward normal pointing toward the outside
+            // neighbour(s). That is the clean, outer-only ring the patrol route
+            // builder orders. Falls back to the upstream cells if the frontier is
+            // degenerate (e.g. no beds, so no bed-reachable flood).
+            if (bedReachableCells.Count > 0)
+            {
+                // March outward up to MaxWallSpan cells per direction. The wall
+                // occupies cells that are neither walkable (bed-reachable) nor
+                // outside, so inside and outside aren't directly 4-adjacent — we
+                // step ACROSS the wall to find the outside. Hitting another
+                // walkable cell first means walkable area continues that way (an
+                // interior obstacle edge, not the outer wall), so that direction
+                // is rejected. Only directions that reach outsideCells across the
+                // wall contribute to the outward normal.
+                const int MaxWallSpan = 4;
+                int[] fdx = { 1, -1, 0, 0 };
+                int[] fdz = { 0, 0, 1, -1 };
+                var frontier = new List<(string id, Vector3 center, Vector3 outwardDir)>();
+                for (var gx = gxMin; gx <= gxMax; gx++)
+                for (var gz = gzMin; gz <= gzMax; gz++)
+                {
+                    var key = XzKey(gx, gz);
+                    if (!bedReachableCells.Contains(key)) continue;
+
+                    var outward = Vector3.zero;
+                    for (var i = 0; i < 4; i++)
+                        for (var step = 1; step <= MaxWallSpan; step++)
+                        {
+                            var nk = XzKey(gx + fdx[i] * step, gz + fdz[i] * step);
+                            if (bedReachableCells.Contains(nk)) break; // walkable beyond → interior
+                            if (outsideCells.Contains(nk))
+                            {
+                                outward += new Vector3(fdx[i], 0f, fdz[i]);
+                                break;
+                            }
+                            // else wall/blocked cell — keep marching across it
+                        }
+
+                    if (outward.sqrMagnitude < 1e-6f) continue; // interior cell
+
+                    var y = SurfaceY(key, gx, gz, out _);
+                    var center = new Vector3(gx * cell + cell * 0.5f, y, gz * cell + cell * 0.5f);
+                    var hb = RegionGraph.HeightBucket(y);
+                    var rid = lookupGrid.TryGetValue(RegionGraph.PackLookup(gx, gz, hb), out var r)
+                        ? r
+                        : "frontier";
+                    frontier.Add((rid, center, outward.normalized));
+                }
+
+                if (frontier.Count >= 3)
+                {
+                    boundaryCells.Clear();
+                    boundaryCells.AddRange(frontier);
+                    Plugin.Log?.LogInfo(
+                        $"[RubberBand] Boundary cells from flood frontier: {frontier.Count} outer cells");
+                }
+                else
+                {
+                    Plugin.Log?.LogWarning(
+                        $"[RubberBand] Flood frontier degenerate ({frontier.Count} cells); " +
+                        "keeping upstream region-edge boundary cells");
+                }
+            }
+
             // Publish authoritative HNA reachability sets to the caller so
             // the second NavMesh bake can carve cells the prune dropped but
             // the first bake's voxelizer left walkable. bedReachableCells is
