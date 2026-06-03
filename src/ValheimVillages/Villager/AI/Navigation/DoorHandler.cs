@@ -56,53 +56,67 @@ namespace ValheimVillages.Villager.AI.Navigation
             m_pendingCloseDoors.Clear();
         }
 
-        /// <summary>
-        ///     Check for a closed door blocking the path to the target position.
-        ///     Returns the blocking door if found, null otherwise.
-        /// </summary>
-        public Door GetBlockingDoor(Vector3 targetPosition)
-        {
-            DebugLog.Append("DoorHandler.cs:entry", "GetBlockingDoor_called", new Dictionary<string, object>
-            {
-                { "nearbyCount", m_nearbyDoors.Count },
-                { "npcPos", transform.position.ToString("F2") },
-                { "targetPos", targetPosition.ToString("F2") },
-            }, "H3H4", "run1");
-            if (m_nearbyDoors.Count == 0)
-                return null;
+        // How far ahead along the current heading to look for a doorway the
+        // villager is about to walk THROUGH. >= DoorDetectionRadius so the
+        // door opens a step before the character reaches the panel.
+        private const float DoorCrossLookahead = 3f;
 
-            var npcPosition = transform.position;
-            var directionToTarget = (targetPosition - npcPosition).normalized;
+        /// <summary>
+        ///     Returns a closed, player-built door the villager is about to walk
+        ///     THROUGH given its current <paramref name="moveDirection" />, or
+        ///     null. Gated on an actual doorway crossing (segment vs door plane
+        ///     within the doorway width) — NOT mere proximity/heading — so
+        ///     villagers no longer fling open every door they stroll past.
+        /// </summary>
+        public Door GetBlockingDoor(Vector3 moveDirection)
+        {
+            if (m_nearbyDoors.Count == 0) return null;
+
+            var from = transform.position;
+            var dir = moveDirection;
+            dir.y = 0f;
+            if (dir.sqrMagnitude < 1e-4f) return null;
+            var to = from + dir.normalized * DoorCrossLookahead;
 
             foreach (var door in m_nearbyDoors)
             {
                 if (door == null) continue;
+                if (!IsDoorClosed(door)) continue;
+                if (!IsPlayerBuiltDoor(door)) continue;
 
-                var closed = IsDoorClosed(door);
-                var playerBuilt = IsPlayerBuiltDoor(door);
-                var doorPosition = door.transform.position;
-                var npcToDoor = doorPosition - npcPosition;
-                var distanceToDoor = npcToDoor.magnitude;
-                var dotProduct = Vector3.Dot(directionToTarget, npcToDoor.normalized);
+                var doorPos = door.transform.position;
+                if ((doorPos - from).sqrMagnitude >
+                    DoorSettings.DoorDetectionRadius * DoorSettings.DoorDetectionRadius)
+                    continue;
 
-                DebugLog.Append("DoorHandler.cs:eval", "door_eval", new Dictionary<string, object>
-                {
-                    { "doorPos", doorPosition.ToString("F2") },
-                    { "closed", closed },
-                    { "playerBuilt", playerBuilt },
-                    { "distance", distanceToDoor },
-                    { "dotProduct", dotProduct },
-                    { "detectionRadius", DoorSettings.DoorDetectionRadius },
-                }, "H3H4", "run1");
-
-                if (!closed) continue;
-                if (!playerBuilt) continue;
-                if (distanceToDoor > DoorSettings.DoorDetectionRadius) continue;
-
-                if (dotProduct > 0.3f) return door;
+                if (SegmentCrossesDoor(from, to, doorPos, door.transform.forward,
+                        DoorwayHalfWidth(door)))
+                    return door;
             }
 
             return null;
+        }
+
+        // Half the doorway span, from the door's widest horizontal collider
+        // extent (rotation-independent: local size x lossyScale, never the
+        // world bounds, which rotate with an open panel) plus a small margin.
+        // Covers single doors (~1.2m) and wide gates (~2m).
+        private static float DoorwayHalfWidth(Door door)
+        {
+            var widest = 0f;
+            foreach (var c in door.GetComponentsInChildren<Collider>(true))
+            {
+                if (c == null || c.isTrigger) continue;
+                if (c is BoxCollider bc)
+                {
+                    var ls = bc.transform.lossyScale;
+                    widest = Mathf.Max(widest,
+                        Mathf.Max(Mathf.Abs(bc.size.x * ls.x), Mathf.Abs(bc.size.z * ls.z)));
+                }
+            }
+
+            if (widest <= 0f) widest = 1.2f;
+            return widest * 0.5f + 0.3f;
         }
 
 

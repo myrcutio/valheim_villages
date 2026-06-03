@@ -974,7 +974,7 @@ namespace ValheimVillages.Villager.AI
             // link-free — replaces the old door-link + OpenDoorsAlongPath path.
             if (DoorHandler != null)
             {
-                var blockingDoor = DoorHandler.GetBlockingDoor(targetPos);
+                var blockingDoor = DoorHandler.GetBlockingDoor(dir);
                 if (blockingDoor != null) DoorHandler.OpenDoor(blockingDoor);
             }
 

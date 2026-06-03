@@ -45,6 +45,11 @@ namespace ValheimVillages.Villager
                 return false;
             }
 
+            // Re-assert world-save persistence. Legacy villagers spawned before the spawn-time
+            // fix (or any whose prefab default was non-persistent) would otherwise be dropped from
+            // the .db on the next save; setting it on every restore heals them in place.
+            zdo.Persistent = true;
+
             StripNativeComponents(go);
             RestoreIdentity(go, def);
             RestoreComponents(go, uniqueId, typeStr);

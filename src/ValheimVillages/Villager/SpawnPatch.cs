@@ -196,6 +196,11 @@ namespace ValheimVillages.Villager
             npcZnetView.GetZDO().Set("vv_villager_name", villagerDef.displayName);
             npcZnetView.GetZDO().Set("vv_bed_position", bed.transform.position);
 
+            // Persist to the world save, not just this session. ZDOMan only writes ZDOs whose
+            // Persistent flag is set; relying on the prefab default leaves villagers liable to be
+            // orphaned (never written to the .db) on reload. Assert it explicitly, like Tameable.
+            npcZnetView.GetZDO().Persistent = true;
+
             if (ZNet.instance != null && ZNet.instance.IsDedicated())
                 npcZnetView.GetZDO().SetOwner(ZNet.GetUID());
 
