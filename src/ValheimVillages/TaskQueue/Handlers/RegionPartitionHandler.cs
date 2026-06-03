@@ -190,9 +190,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                 minX, minZ, maxX, maxZ,
                 out var droppedRubberBand,
                 out var pass3DiscoveredEdges,
-                out _,
-                out _,
-                out _,
+                out var bedReachableCells,
+                out var outsideCells,
+                out var prunedPieceKeys,
                 out var gateMarkers);
 
             // Merge Pass 3 discovered edges into the cross-kind adjacency
@@ -271,6 +271,11 @@ namespace ValheimVillages.TaskQueue.Handlers
             graph.SetGraph(combinedRegionIds, combinedLinks,
                 combinedCentroids, combinedLookup, combinedBoundary, kindMap);
             graph.SetGates(gateMarkers);
+            // Promote the perimeter classification to committed graph state so it
+            // persists (v4 ZDO) and gives the incremental reconcilers a baseline
+            // to diff against. Must run after SetGraph so HasClassification flips
+            // only on a populated graph.
+            graph.SetClassification(outsideCells, bedReachableCells, prunedPieceKeys);
             if (gateMarkers.Count > 0)
                 Plugin.Log?.LogInfo(
                     $"[Region] Sealed {gateMarkers.Count} gate(s) into the village boundary");

@@ -2009,18 +2009,17 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         // --- Encoding helpers ---
 
-        // 2D XZ key — independent of RegionGraph's 3D lookup key. Symmetric
-        // sign handling: arithmetic right shift preserves sign for the high
-        // half; int cast on the low half truncates uint→int with wrap.
+        // 2D XZ key — delegates to RegionGraph.PackXz, the single source of
+        // truth for the cell key space shared by the partition classification,
+        // v4 persistence, and the incremental reconcilers.
         private static long XzKey(int gx, int gz)
         {
-            return ((long)(uint)gx << 32) | (uint)gz;
+            return RegionGraph.PackXz(gx, gz);
         }
 
         private static void UnpackXz(long key, out int gx, out int gz)
         {
-            gx = (int)(key >> 32);
-            gz = (int)(key & 0xFFFFFFFFL);
+            RegionGraph.UnpackXz(key, out gx, out gz);
         }
 
         // Inverse of RegionGraph.PackLookup. Uses symmetric mod centred on

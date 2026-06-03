@@ -17,7 +17,14 @@ namespace ValheimVillages.Villager.AI.Navigation
     internal static class RegionGraphPersistence
     {
         private const string LinkSectionDelimiter = "||";
-        private const string V3Header = "v3";
+        private const string ClassSectionDelimiter = "|#|";
+        private const string V4Header = "v4";
+
+        // Classification bitmask geometry: 16x16 = 256 cells per tile, 32 bytes.
+        private const int ClassTile = 16;
+        private const int ClassTileCells = ClassTile * ClassTile;
+        private const int ClassMaskBytes = ClassTileCells / 8;
+
         internal static Action<string> LogAction;
 
         private static char KindToChar(SurfaceKind k)
@@ -54,14 +61,14 @@ namespace ValheimVillages.Villager.AI.Navigation
         internal static string Serialize(RegionGraph graph)
         {
             if (graph == null || !graph.IsAvailable) return "";
-            return SerializeV3(graph);
+            return SerializeV4(graph);
         }
 
-        private static string SerializeV3(RegionGraph graph)
+        private static string SerializeV4(RegionGraph graph)
         {
             var inv = CultureInfo.InvariantCulture;
             var sb = new StringBuilder();
-            sb.Append(V3Header);
+            sb.Append(V4Header);
 
             foreach (var id in graph.GetRegionIds())
             {
@@ -76,6 +83,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             AppendLinks(sb, graph);
+            AppendClassification(sb, graph);
             return sb.ToString();
         }
 
@@ -106,29 +114,42 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             if (graph == null || string.IsNullOrEmpty(data)) return false;
 
-            // v1 and v2 payloads are no longer supported. v3 adds per-region
-            // SurfaceKind, which is load-bearing for the two-pass partition
-            // pipeline — default-filling would silently mis-tag every legacy
-            // region. Reject so the caller wipes the ZDO entry and re-triggers
-            // an hna_partition build.
-            if (!data.StartsWith(V3Header))
+            // v1/v2/v3 payloads are no longer supported. v4 adds the committed
+            // perimeter classification section, which is load-bearing for the
+            // incremental reconcilers — a v3 graph has no classification, so we
+            // reject it and let the caller wipe the ZDO entry and re-trigger a
+            // full hna_partition build (which writes v4). Same precedent as the
+            // earlier v1/v2 -> v3 rejection.
+            if (!data.StartsWith(V4Header))
             {
-                LogInfo("[Region] Legacy non-v3 graph in ZDO; purging (caller will wipe + rebuild)");
+                LogInfo("[Region] Legacy non-v4 graph in ZDO; purging (caller will wipe + rebuild)");
                 return false;
             }
 
-            return RestoreV3(graph, data);
+            return RestoreV4(graph, data);
         }
 
-        private static bool RestoreV3(RegionGraph graph, string data)
+        private static bool RestoreV4(RegionGraph graph, string data)
         {
-            var regionSection = data;
+            // Split off the classification section first (delimiter "|#|") so the
+            // region/link parsing below operates only on the "regions||links"
+            // prefix. "|#|" does not contain "||", so the link split is safe.
+            var mainSection = data;
+            string classSection = null;
+            var classDelim = data.IndexOf(ClassSectionDelimiter, StringComparison.Ordinal);
+            if (classDelim >= 0)
+            {
+                mainSection = data.Substring(0, classDelim);
+                classSection = data.Substring(classDelim + ClassSectionDelimiter.Length);
+            }
+
+            var regionSection = mainSection;
             string linkSection = null;
-            var linkDelim = data.IndexOf(LinkSectionDelimiter);
+            var linkDelim = mainSection.IndexOf(LinkSectionDelimiter, StringComparison.Ordinal);
             if (linkDelim >= 0)
             {
-                regionSection = data.Substring(0, linkDelim);
-                linkSection = data.Substring(linkDelim + LinkSectionDelimiter.Length);
+                regionSection = mainSection.Substring(0, linkDelim);
+                linkSection = mainSection.Substring(linkDelim + LinkSectionDelimiter.Length);
             }
 
             var segments = regionSection.Split(';');
@@ -184,14 +205,142 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             graph.SetGraph(regionIds, links, centroids, lookupGrid,
                 null, kinds);
+            if (!string.IsNullOrEmpty(classSection))
+                RestoreClassification(graph, classSection);
             LogInfo(
-                $"[Region] Restored v3 graph from ZDO: {regionIds.Count} regions, {links.Count} links, {kinds.Count} kinded");
+                $"[Region] Restored v4 graph from ZDO: {regionIds.Count} regions, {links.Count} links, " +
+                $"{kinds.Count} kinded, classification={(graph.HasClassification ? "yes" : "no")}");
             return true;
         }
 
         private static void LogInfo(string message)
         {
             LogAction?.Invoke(message);
+        }
+
+        // --- Classification (v4) ---
+        // Layout in the |#| section: <outsideBitmask>~<bedReachableBitmask>~<pieceTriples>
+        // Each terrain bitmask: tiles joined by '!', each "tileGx,tileGz,<base64 32B>"
+        // (256-bit mask, bit = bx*16+bz). Piece set: "gx,gz,hb" triples joined by '!'.
+
+        private static void AppendClassification(StringBuilder sb, RegionGraph graph)
+        {
+            if (!graph.HasClassification) return;
+            sb.Append(ClassSectionDelimiter);
+            AppendXzBitmask(sb, graph.OutsideCellsXz);
+            sb.Append('~');
+            AppendXzBitmask(sb, graph.BedReachableCellsXz);
+            sb.Append('~');
+            AppendPieceKeys(sb, graph.PrunedPieceKeys);
+        }
+
+        private static void RestoreClassification(RegionGraph graph, string classSection)
+        {
+            var subs = classSection.Split('~');
+            var outside = new HashSet<long>();
+            var bedReachable = new HashSet<long>();
+            var pieces = new HashSet<long>();
+            if (subs.Length > 0) ParseXzBitmask(subs[0], outside);
+            if (subs.Length > 1) ParseXzBitmask(subs[1], bedReachable);
+            if (subs.Length > 2) ParsePieceKeys(subs[2], pieces);
+            graph.SetClassification(outside, bedReachable, pieces);
+        }
+
+        private static void AppendXzBitmask(StringBuilder sb, IReadOnlyCollection<long> cells)
+        {
+            if (cells == null || cells.Count == 0) return;
+            var tiles = new Dictionary<long, byte[]>();
+            foreach (var key in cells)
+            {
+                RegionGraph.UnpackXz(key, out var gx, out var gz);
+                var tgx = FloorDiv(gx, ClassTile);
+                var tgz = FloorDiv(gz, ClassTile);
+                var tileKey = RegionGraph.PackXz(tgx, tgz);
+                if (!tiles.TryGetValue(tileKey, out var mask))
+                {
+                    mask = new byte[ClassMaskBytes];
+                    tiles[tileKey] = mask;
+                }
+
+                var bx = gx - tgx * ClassTile; // 0..15
+                var bz = gz - tgz * ClassTile; // 0..15
+                var bit = bx * ClassTile + bz; // 0..255
+                mask[bit >> 3] |= (byte)(1 << (bit & 7));
+            }
+
+            var inv = CultureInfo.InvariantCulture;
+            var first = true;
+            foreach (var kv in tiles)
+            {
+                RegionGraph.UnpackXz(kv.Key, out var tgx, out var tgz);
+                if (!first) sb.Append('!');
+                first = false;
+                sb.Append(tgx.ToString(inv)).Append(',')
+                    .Append(tgz.ToString(inv)).Append(',')
+                    .Append(Convert.ToBase64String(kv.Value));
+            }
+        }
+
+        private static void ParseXzBitmask(string section, HashSet<long> outSet)
+        {
+            if (string.IsNullOrEmpty(section)) return;
+            foreach (var tile in section.Split('!'))
+            {
+                if (string.IsNullOrEmpty(tile)) continue;
+                var parts = tile.Split(',');
+                if (parts.Length < 3) continue;
+                if (!int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tgx)) continue;
+                if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tgz)) continue;
+                byte[] mask;
+                try { mask = Convert.FromBase64String(parts[2]); }
+                catch { continue; }
+                for (var bit = 0; bit < ClassTileCells && (bit >> 3) < mask.Length; bit++)
+                {
+                    if ((mask[bit >> 3] & (1 << (bit & 7))) == 0) continue;
+                    var gx = tgx * ClassTile + bit / ClassTile;
+                    var gz = tgz * ClassTile + bit % ClassTile;
+                    outSet.Add(RegionGraph.PackXz(gx, gz));
+                }
+            }
+        }
+
+        private static void AppendPieceKeys(StringBuilder sb, IReadOnlyCollection<long> keys)
+        {
+            if (keys == null || keys.Count == 0) return;
+            var inv = CultureInfo.InvariantCulture;
+            var first = true;
+            foreach (var key in keys)
+            {
+                RegionGraph.UnpackLookup(key, out var gx, out var gz, out var hb);
+                if (!first) sb.Append('!');
+                first = false;
+                sb.Append(gx.ToString(inv)).Append(',')
+                    .Append(gz.ToString(inv)).Append(',')
+                    .Append(hb.ToString(inv));
+            }
+        }
+
+        private static void ParsePieceKeys(string section, HashSet<long> outSet)
+        {
+            if (string.IsNullOrEmpty(section)) return;
+            foreach (var e in section.Split('!'))
+            {
+                if (string.IsNullOrEmpty(e)) continue;
+                var p = e.Split(',');
+                if (p.Length < 3) continue;
+                if (int.TryParse(p[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var gx) &&
+                    int.TryParse(p[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var gz) &&
+                    int.TryParse(p[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var hb))
+                    outSet.Add(RegionGraph.PackLookup(gx, gz, hb));
+            }
+        }
+
+        // Negative-correct integer floor division (world coords are signed).
+        private static int FloorDiv(int a, int b)
+        {
+            var q = a / b;
+            if (a % b != 0 && (a < 0) != (b < 0)) q--;
+            return q;
         }
 
         private static List<RegionLink> DeserializeLinks(string linkSection)

@@ -113,6 +113,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             m_boundaryCells.Clear();
             m_regionKinds.Clear();
             m_gates.Clear();
+            m_outsideCellsXz.Clear();
+            m_bedReachableCellsXz.Clear();
+            m_prunedPieceKeys.Clear();
+            m_hasClassification = false;
             m_initialized = false;
         }
 
@@ -272,6 +276,50 @@ namespace ValheimVillages.Villager.AI.Navigation
             s_registry.Clear();
         }
 
+        /// <summary>
+        ///     Atomically swap the graph registered for <paramref name="villageKey" />
+        ///     with <paramref name="next" />. This is the transactional commit used
+        ///     by the incremental reconcilers: a valid graph is only ever replaced
+        ///     by another valid graph. The swap is a single reference assignment —
+        ///     observationally atomic on the single task thread, so no reader can
+        ///     observe a half-built candidate. Resolves to the canonical registered
+        ///     key via the same adjacent-bucket snap <see cref="GetOrCreate" /> uses
+        ///     so the candidate replaces the village's actual entry instead of
+        ///     inserting a bucket-adjacent duplicate.
+        /// </summary>
+        public static RegionGraph Replace(string villageKey, RegionGraph next)
+        {
+            if (next == null) return Get(villageKey);
+            if (string.IsNullOrEmpty(villageKey)) villageKey = "_default";
+            var key = villageKey;
+            if (!s_registry.ContainsKey(key) &&
+                TryFindAdjacentRegisteredKey(key, out var adjacent))
+                key = adjacent;
+            s_registry[key] = next;
+            next.RegisteredVillageKey = key;
+            return next;
+        }
+
+        /// <summary>
+        ///     Remove a single village's graph from the registry entirely (the
+        ///     reset path: last bed destroyed AND perimeter breached). A bare
+        ///     instance <see cref="Clear" /> would leave a stale, non-IsAvailable
+        ///     entry that <see cref="GetOrCreate" />'s adjacent-bucket snap could
+        ///     later resurrect, so we remove the key.
+        /// </summary>
+        public static bool Unregister(string villageKey)
+        {
+            if (string.IsNullOrEmpty(villageKey)) return false;
+            var key = villageKey;
+            if (!s_registry.ContainsKey(key) &&
+                TryFindAdjacentRegisteredKey(key, out var adjacent))
+                key = adjacent;
+            if (!s_registry.TryGetValue(key, out var graph)) return false;
+            graph.Clear();
+            s_registry.Remove(key);
+            return true;
+        }
+
         #endregion
 
         #region Static utilities
@@ -316,6 +364,27 @@ namespace ValheimVillages.Villager.AI.Navigation
             return gx * 1_000_003L * 1_000_003L + gz * 1_000_003L + hb;
         }
 
+        /// <summary>
+        ///     Pack a 2D XZ grid cell into a long key (no height bucket). This is
+        ///     the single source of truth for the 2D cell key space used by the
+        ///     perimeter classification (outside / bed-reachable terrain cells);
+        ///     <see cref="RubberBandPrune" />'s internal <c>XzKey</c> delegates
+        ///     here so the partition, persistence, and incremental reconcilers all
+        ///     agree on the encoding. Symmetric sign handling: high half via
+        ///     uint→long, low half truncates uint→int with wrap on unpack.
+        /// </summary>
+        internal static long PackXz(int gx, int gz)
+        {
+            return ((long)(uint)gx << 32) | (uint)gz;
+        }
+
+        /// <summary>Inverse of <see cref="PackXz" />.</summary>
+        internal static void UnpackXz(long key, out int gx, out int gz)
+        {
+            gx = (int)(key >> 32);
+            gz = (int)(key & 0xFFFFFFFFL);
+        }
+
         #endregion
 
         #region Instance fields
@@ -340,6 +409,18 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     each rebuild; not persisted.
         /// </summary>
         private readonly List<Vector3> m_gates = new();
+
+        // --- Committed perimeter classification (promoted from RubberBandPrune
+        // diagnostics; persisted in the v4 ZDO format). The two terrain sets are
+        // 2D PackXz-keyed at LookupCellSize; the piece set is 3D PackLookup-keyed
+        // (includes height bucket). These are the baseline the incremental
+        // reconcilers diff against. HasClassification == false means "no committed
+        // classification" → callers must fall back to a full repartition, NOT
+        // treat everything as outside.
+        private readonly HashSet<long> m_outsideCellsXz = new();
+        private readonly HashSet<long> m_bedReachableCellsXz = new();
+        private readonly HashSet<long> m_prunedPieceKeys = new();
+        private bool m_hasClassification;
 
         #endregion
 
@@ -683,6 +764,58 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             return new List<Vector3>(m_gates);
         }
+
+        /// <summary>
+        ///     Commit the perimeter classification produced by
+        ///     <see cref="RubberBandPrune.Apply" />. <paramref name="outsideXz" />
+        ///     and <paramref name="bedReachableXz" /> are 2D <see cref="PackXz" />
+        ///     keys at <see cref="LookupCellSize" />; <paramref name="prunedPieceKeys" />
+        ///     are 3D <see cref="PackLookup" /> keys (include height bucket). Stored
+        ///     verbatim and persisted in the v4 ZDO section so loads reproduce the
+        ///     committed inside/outside/piece-reachable state without re-flooding.
+        /// </summary>
+        public void SetClassification(
+            HashSet<long> outsideXz,
+            HashSet<long> bedReachableXz,
+            HashSet<long> prunedPieceKeys)
+        {
+            m_outsideCellsXz.Clear();
+            m_bedReachableCellsXz.Clear();
+            m_prunedPieceKeys.Clear();
+            if (outsideXz != null)
+                foreach (var k in outsideXz) m_outsideCellsXz.Add(k);
+            if (bedReachableXz != null)
+                foreach (var k in bedReachableXz) m_bedReachableCellsXz.Add(k);
+            if (prunedPieceKeys != null)
+                foreach (var k in prunedPieceKeys) m_prunedPieceKeys.Add(k);
+            m_hasClassification = m_outsideCellsXz.Count > 0
+                                  || m_bedReachableCellsXz.Count > 0
+                                  || m_prunedPieceKeys.Count > 0;
+        }
+
+        /// <summary>
+        ///     True once a committed classification has been stored. False means
+        ///     "unknown" — incremental reconcilers must fall back to a full
+        ///     repartition rather than assume everything is outside.
+        /// </summary>
+        public bool HasClassification => m_initialized && m_hasClassification;
+
+        /// <summary>Is the terrain cell (gx,gz) classified outside the village hull?</summary>
+        public bool IsOutsideCell(int gx, int gz) =>
+            m_outsideCellsXz.Contains(PackXz(gx, gz));
+
+        /// <summary>Is the terrain cell (gx,gz) reachable from a bed (inside)?</summary>
+        public bool IsBedReachableCell(int gx, int gz) =>
+            m_bedReachableCellsXz.Contains(PackXz(gx, gz));
+
+        /// <summary>Was this 3D piece lookup key pruned (not piece-reachable)?</summary>
+        public bool IsPieceKeyPruned(long lookupKey) =>
+            m_prunedPieceKeys.Contains(lookupKey);
+
+        // Raw set access for the persistence layer (v4 serialization).
+        internal IReadOnlyCollection<long> OutsideCellsXz => m_outsideCellsXz;
+        internal IReadOnlyCollection<long> BedReachableCellsXz => m_bedReachableCellsXz;
+        internal IReadOnlyCollection<long> PrunedPieceKeys => m_prunedPieceKeys;
 
         #endregion
     }
