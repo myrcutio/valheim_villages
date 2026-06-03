@@ -334,8 +334,12 @@ namespace ValheimVillages.Attributes
                 tabTypes.Add((type, attr));
             }
 
-            foreach (var (type, _) in tabTypes.OrderBy(t => t.attr.Order))
+            foreach (var (type, attr) in tabTypes.OrderBy(t => t.attr.Order))
             {
+                // Debug tab is dev-only — hidden in test/player builds.
+                if (attr.Id == "debug" && !Settings.DevSettings.ShowDebugTools)
+                    continue;
+
                 var tab = (IVillagerTab)Activator.CreateInstance(type);
                 s_tabs.Add(tab);
                 VillagerTabManager.RegisterTab(tab);

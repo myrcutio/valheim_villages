@@ -23,8 +23,11 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         private const float LineYOffset = 0.1f;
 
         private static PathDebugRenderer s_instance;
-        private static bool s_enabled = true;
-        private static bool s_showTriangulation = true;
+
+        // Off by default for test builds; toggle live with vv_path_debug /
+        // vv_tri_debug, or flip DevSettings.ShowDebugTools to default them on.
+        private static bool s_enabled = Settings.DevSettings.ShowDebugTools;
+        private static bool s_showTriangulation = Settings.DevSettings.ShowDebugTools;
 
         /// <summary>
         ///     When set, debug overlays render ONLY for the camera with this name
