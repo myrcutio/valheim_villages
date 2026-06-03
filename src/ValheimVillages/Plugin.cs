@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -55,12 +56,25 @@ namespace ValheimVillages
 
         public static Plugin Instance { get; private set; }
 
+        /// <summary>
+        ///     Wall-clock time this assembly's <see cref="Plugin" /> type was first
+        ///     touched (≈ when ScriptEngine loaded this assembly). Because a hot
+        ///     reload loads a brand-new assembly, this field is re-initialized on
+        ///     every reload — so a dev command that prints it advancing confirms
+        ///     the reload pipeline fired. See <c>vv_reloadinfo</c>.
+        /// </summary>
+        public static readonly DateTime AssemblyLoadedAt = DateTime.Now;
+
+        /// <summary>True if the most recent load was a hot reload (world already up).</summary>
+        public static bool LastLoadWasHotReload { get; private set; }
+
         private void Awake()
         {
             Instance = this;
             Log = Logger;
             var isHotReload = ObjectDB.instance != null &&
                               ObjectDB.instance.m_items.Count > 0;
+            LastLoadWasHotReload = isHotReload;
             DebugLog.BeginCycle(isHotReload);
             RegionGraphPersistence.LogAction = msg => Log.LogInfo(msg);
             Log.LogInfo($"{PluginName} v{PluginVersion} loading...");
