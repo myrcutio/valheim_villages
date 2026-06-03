@@ -194,6 +194,18 @@ namespace ValheimVillages.Settings
         /// </summary>
         public const bool AutoPathRecoveryEnabled = false;
 
+        /// <summary>
+        ///     Master switch for AUTOMATIC diagnostic captures — the orchestrated
+        ///     screenshot + sidecar JSON taken on every repartition and by the
+        ///     stuck-villager incident recorder. Disabled by default: the
+        ///     orchestration teleports the player to a top-down anchor to snap
+        ///     the frame and restores afterward, and a frame/restore hiccup can
+        ///     leave the character stranded in the sky. With this off, the
+        ///     player is never moved for a capture. The explicit <c>vv_capture</c>
+        ///     console command is unaffected — it still captures on demand.
+        /// </summary>
+        public const bool AutoDiagnosticCaptureEnabled = false;
+
         // Time boundaries as day fraction (0-1 where 0.5 = noon)
         // Valheim: 0.25 = 6am, 0.5 = noon, 0.75 = 6pm
         public const float NightStart = 0.875f; // ~9pm

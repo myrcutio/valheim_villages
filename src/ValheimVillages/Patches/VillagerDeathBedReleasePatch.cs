@@ -59,18 +59,20 @@ namespace ValheimVillages.Patches
                 if (zdo == null) continue;
 
                 var priorOwner = zdo.GetLong("owner", 0L);
-                if (priorOwner == 0L)
+                var priorVillagerOwner = zdo.GetString("vv_bed_owner", "");
+                if (priorOwner == 0L && string.IsNullOrEmpty(priorVillagerOwner))
                 {
                     Plugin.Log?.LogDebug(
                         $"[Bed] Bed at {bed.transform.position} already unclaimed; '{villagerName}' death no-op");
                     return;
                 }
 
+                zdo.Set("vv_bed_owner", "");
                 zdo.Set("owner", 0L);
                 zdo.Set("ownerName", "");
                 Plugin.Log?.LogInfo(
                     $"[Bed] Released owner on bed at {bed.transform.position} after '{villagerName}' died " +
-                    $"(prior owner ZDOID={priorOwner})");
+                    $"(prior owner ZDOID={priorOwner}, villager='{priorVillagerOwner}')");
                 return;
             }
 

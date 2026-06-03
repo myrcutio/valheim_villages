@@ -88,9 +88,13 @@ namespace ValheimVillages.Villager
             if (bed == null)
                 return true;
 
-            // Check if the bed is unclaimed (owner stored in ZDO)
-            var bedZdoId = bed.GetComponent<ZNetView>()?.GetZDO()?.GetLong("owner") ?? 0L;
-            if (bedZdoId != 0L)
+            // Check if the bed is unclaimed. The authoritative claim is our own player-independent
+            // vv_bed_owner key; vanilla "owner" is also honored so a bed a real player has set their
+            // spawn at can't be hijacked by a villager.
+            var existingBedZdo = bed.GetComponent<ZNetView>()?.GetZDO();
+            var vanillaOwner = existingBedZdo?.GetLong("owner") ?? 0L;
+            var villagerOwner = existingBedZdo?.GetString("vv_bed_owner") ?? "";
+            if (vanillaOwner != 0L || !string.IsNullOrEmpty(villagerOwner))
             {
                 player.Message(MessageHud.MessageType.Center, "This bed is already claimed");
                 return false;
@@ -208,7 +212,14 @@ namespace ValheimVillages.Villager
             if (bedZnetView != null && bedZnetView.GetZDO() != null)
             {
                 var bedZdoId = bedZnetView.GetZDO().m_uid;
-                npcZnetView.GetZDO().Set("vv_assigned_bed", bedZdoId != ZDOID.None ? bedZdoId.ID : 0L);
+                // Reverse link: store the full bed ZDOID, not the truncated .ID (which dropped the
+                // userId half and could collide across sessions).
+                npcZnetView.GetZDO().Set("vv_assigned_bed", bedZdoId);
+                // Authoritative, player-independent claim under our own namespace. Valheim's spawn-point
+                // system only writes the vanilla "owner" key, so it can never silently clobber this.
+                bedZnetView.GetZDO().Set("vv_bed_owner", uniqueId);
+                // Mirror vanilla owner/ownerName so the bed still reads as claimed in vanilla UI and
+                // resists casual deconstruction. This mirror is cosmetic; vv_bed_owner is the truth.
                 bedZnetView.GetZDO().Set("owner", npcZdoId != ZDOID.None ? npcZdoId.ID : 0L);
                 bedZnetView.GetZDO().Set("ownerName", villagerDef.displayName);
                 Plugin.Log?.LogInfo($"Assigned bed to villager '{villagerDef.displayName}' with ZDO ID: {npcZdoId}");

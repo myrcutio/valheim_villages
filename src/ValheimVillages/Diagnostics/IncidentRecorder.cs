@@ -75,6 +75,12 @@ namespace ValheimVillages.Diagnostics
         public static void Record(VillagerAI ai, Vector3 destPos, string failureKind)
         {
             if (ai == null) return;
+            // Off by default: this dumps incident.json AND enqueues orchestrated
+            // screenshots that teleport the player to the villager/destination
+            // for a top-down snap — a frame/restore hiccup can leave the
+            // character stranded in the sky. Gated behind the same switch as the
+            // repartition auto-capture. See AutoDiagnosticCaptureEnabled.
+            if (!Settings.VillagerSettings.AutoDiagnosticCaptureEnabled) return;
             try
             {
                 var key = ComputeKey(ai, destPos, failureKind);

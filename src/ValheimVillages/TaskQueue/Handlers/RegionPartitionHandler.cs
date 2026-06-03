@@ -299,7 +299,11 @@ namespace ValheimVillages.TaskQueue.Handlers
                 Plugin.Log?.LogInfo(
                     $"[Region] Invalidated cached paths for {pathsInvalidated} villager(s) after rebake");
 
-            DebugLog.Capture("repartition");
+            // Auto-capture is opt-in: the orchestrated screenshot teleports the
+            // player to a top-down anchor and can strand them in the sky if the
+            // restore hiccups. Off by default (vv_capture still works on demand).
+            if (Settings.VillagerSettings.AutoDiagnosticCaptureEnabled)
+                DebugLog.Capture("repartition");
 
             // TODO: re-enable door links once the region graph is validated
             // RegionBuilder.CollectDoorLinks(graph, minX, minZ, maxX, maxZ, doorLinks);
