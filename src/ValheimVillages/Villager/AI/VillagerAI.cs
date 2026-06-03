@@ -285,6 +285,7 @@ namespace ValheimVillages.Villager.AI
                     foreach (var b in m_behaviors)
                         if (b.WantsControl(ctx))
                         {
+                            ActiveBehavior = b;
                             b.Update(dt);
                             handled = true;
                             break;
@@ -297,6 +298,7 @@ namespace ValheimVillages.Villager.AI
                     // result flips the state to Working.
                     if (!handled)
                     {
+                        ActiveBehavior = null;
                         if (CurrentState != BehaviorState.Working)
                             GetWorkScanner()?.TryScanForWork();
                         if (CurrentState != BehaviorState.Idle)
@@ -491,6 +493,12 @@ namespace ValheimVillages.Villager.AI
         #region State Management
 
         public BehaviorState CurrentState { get; private set; } = BehaviorState.Idle;
+
+        /// <summary>
+        ///     The behavior currently in control (highest-priority one that wanted
+        ///     control on the last selection), or null when idle. For UI/status.
+        /// </summary>
+        public Interfaces.IBehavior ActiveBehavior { get; private set; }
 
         /// <summary>True while the AI is in a hard-stuck backoff cooldown and should not start new tasks.</summary>
         public bool IsInBackoff => Time.time < m_stuckBackoffUntil;

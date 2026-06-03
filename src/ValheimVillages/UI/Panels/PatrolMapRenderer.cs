@@ -25,9 +25,14 @@ namespace ValheimVillages.UI.Panels
         private static readonly Color InactivePathColor = new(0.5f, 0.35f, 0.15f, 0.4f);
         private static readonly Color BedColor = new(1f, 0.9f, 0.3f, 1f);
         private static readonly Color PatrollerColor = new(0.3f, 0.6f, 1f, 1f);
-        private static readonly Color FloodFillColor = new(0.3f, 0.3f, 0.7f, 0.7f);
+        private static readonly Color FloodFillColor = new(0.45f, 0.45f, 0.45f, 0.95f);
         private static readonly Color GroundTruthColor = new(1f, 0.4f, 0.9f, 1f);
         private static readonly Color GroundTruthDotColor = new(1f, 0.5f, 0.95f, 0.8f);
+
+        // Minimal (player-facing Tasks tab) palette. Transparent background so the
+        // map sits directly on the wood panel.
+        private static readonly Color MinimalPerimeter = new(0.92f, 0.85f, 0.6f, 1f);
+        private static readonly Color PinOutline = new(0.05f, 0.05f, 0.05f, 1f);
 
         /// <summary>
         ///     Render the patrol map with optional debug overlay layers.
@@ -97,6 +102,83 @@ namespace ValheimVillages.UI.Panels
             return tex;
         }
 
+        /// <summary>
+        ///     Minimal, player-facing map: a neutral background, the village
+        ///     perimeter as a single outline, and labeled pins. No wild/region
+        ///     debug layers.
+        /// </summary>
+        public static Texture2D RenderMinimal(
+            IReadOnlyList<Vector3> perimeter,
+            IReadOnlyList<(Vector3 position, Color color)> pins)
+        {
+            var pts = new List<Vector2>();
+            if (perimeter != null)
+                foreach (var p in perimeter) pts.Add(new Vector2(p.x, p.z));
+            if (pins != null)
+                foreach (var p in pins) pts.Add(new Vector2(p.position.x, p.position.z));
+
+            var tex = new Texture2D(MapSize, MapSize, TextureFormat.RGBA32, false)
+                { filterMode = FilterMode.Point };
+            var bg = new Color[MapSize * MapSize];
+            for (var i = 0; i < bg.Length; i++) bg[i] = Color.clear;
+            tex.SetPixels(bg);
+
+            if (pts.Count == 0)
+            {
+                tex.Apply();
+                return tex;
+            }
+
+            float minX = pts[0].x, maxX = pts[0].x, minZ = pts[0].y, maxZ = pts[0].y;
+            foreach (var p in pts)
+            {
+                minX = Mathf.Min(minX, p.x);
+                maxX = Mathf.Max(maxX, p.x);
+                minZ = Mathf.Min(minZ, p.y);
+                maxZ = Mathf.Max(maxZ, p.y);
+            }
+
+            var min = new Vector2(minX - Padding, minZ - Padding);
+            var max = new Vector2(maxX + Padding, maxZ + Padding);
+            var w = max.x - min.x;
+            var h = max.y - min.y;
+            if (w > h)
+            {
+                var pad = (w - h) * 0.5f;
+                min.y -= pad;
+                max.y += pad;
+            }
+            else if (h > w)
+            {
+                var pad = (h - w) * 0.5f;
+                min.x -= pad;
+                max.x += pad;
+            }
+
+            var worldW = Mathf.Max(max.x - min.x, 1f);
+            var worldH = Mathf.Max(max.y - min.y, 1f);
+
+            if (perimeter != null && perimeter.Count >= 2)
+                for (var i = 0; i < perimeter.Count; i++)
+                {
+                    var a = WorldToPixel(perimeter[i], min, worldW, worldH);
+                    var b = WorldToPixel(
+                        perimeter[(i + 1) % perimeter.Count], min, worldW, worldH);
+                    DrawLine(tex, a, b, MinimalPerimeter, 3);
+                }
+
+            if (pins != null)
+                foreach (var pin in pins)
+                {
+                    var p = WorldToPixel(pin.position, min, worldW, worldH);
+                    DrawCircle(tex, p, 7, PinOutline);
+                    DrawCircle(tex, p, 5, pin.color);
+                }
+
+            tex.Apply();
+            return tex;
+        }
+
         private static Texture2D RenderEmpty()
         {
             var tex = new Texture2D(MapSize, MapSize, TextureFormat.RGBA32, false);
@@ -159,6 +241,23 @@ namespace ValheimVillages.UI.Panels
 
             min = new Vector2(minX - Padding, minZ - Padding);
             max = new Vector2(maxX + Padding, maxZ + Padding);
+
+            // Preserve aspect ratio: the map texture is square, so expand the
+            // shorter world axis (centered) instead of stretching the village.
+            var w = max.x - min.x;
+            var h = max.y - min.y;
+            if (w > h)
+            {
+                var pad = (w - h) * 0.5f;
+                min.y -= pad;
+                max.y += pad;
+            }
+            else if (h > w)
+            {
+                var pad = (h - w) * 0.5f;
+                min.x -= pad;
+                max.x += pad;
+            }
         }
 
         private static List<Vector2> BuildActivePolygon2D(
@@ -199,7 +298,9 @@ namespace ValheimVillages.UI.Panels
             Texture2D tex, List<Vector3> cells, float cellSize,
             Vector2 min, float worldW, float worldH)
         {
-            var halfCell = cellSize * 0.5f;
+            // Enlarge each region cell so neighbours overlap and the walkable
+            // area reads as one solid village floor instead of scattered blocks.
+            var halfCell = cellSize * 0.85f;
             foreach (var cell in cells)
             {
                 var cornerA = WorldToPixel(new Vector3(cell.x - halfCell, 0, cell.z - halfCell), min, worldW, worldH);

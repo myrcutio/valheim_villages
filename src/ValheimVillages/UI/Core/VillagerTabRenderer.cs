@@ -186,16 +186,19 @@ namespace ValheimVillages.UI.Core
                 m_mapImageObject = new GameObject("VV_MapImage",
                     typeof(RectTransform), typeof(RawImage));
                 m_mapImageObject.transform.SetParent(descPanel, false);
-
-                var rt = m_mapImageObject.GetComponent<RectTransform>();
-                rt.anchorMin = new Vector2(0.05f, 0.15f);
-                rt.anchorMax = new Vector2(0.95f, 0.85f);
-                rt.offsetMin = Vector2.zero;
-                rt.offsetMax = Vector2.zero;
             }
 
             if (m_mapImageObject != null)
             {
+                // Anchored to the lower portion of the description panel, below
+                // the title/station/legend text. Re-applied each time so a tweak
+                // takes effect without recreating the object.
+                var rt = m_mapImageObject.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(0.05f, 0.04f);
+                rt.anchorMax = new Vector2(0.95f, 0.70f);
+                rt.offsetMin = Vector2.zero;
+                rt.offsetMax = Vector2.zero;
+
                 m_mapImageObject.SetActive(true);
                 var rawImage = m_mapImageObject.GetComponent<RawImage>();
                 if (rawImage != null)

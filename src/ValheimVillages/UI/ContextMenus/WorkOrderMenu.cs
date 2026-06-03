@@ -193,12 +193,7 @@ namespace ValheimVillages.UI.ContextMenus
 
         private static string FormatStationName(string raw)
         {
-            var clean = raw
-                .Replace("$piece_", "")
-                .Replace("$vv_", "")
-                .Replace("_", " ");
-            return CultureInfo.CurrentCulture
-                .TextInfo.ToTitleCase(clean);
+            return StationDisplay.Pretty(raw);
         }
 
         #endregion
