@@ -192,7 +192,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                 out var pass3DiscoveredEdges,
                 out _,
                 out _,
-                out _);
+                out _,
+                out var gateMarkers);
 
             // Merge Pass 3 discovered edges into the cross-kind adjacency
             // (if it was built) and publish the merged graph to
@@ -269,6 +270,10 @@ namespace ValheimVillages.TaskQueue.Handlers
             var graph = RegionGraph.GetOrCreate(villageKey);
             graph.SetGraph(combinedRegionIds, combinedLinks,
                 combinedCentroids, combinedLookup, combinedBoundary, kindMap);
+            graph.SetGates(gateMarkers);
+            if (gateMarkers.Count > 0)
+                Plugin.Log?.LogInfo(
+                    $"[Region] Sealed {gateMarkers.Count} gate(s) into the village boundary");
 
             // (NavMesh carving for outside-the-wall cells is now done at
             // bake time by NavMeshBakeManager.BakeVillage via phantom

@@ -132,7 +132,8 @@ namespace ValheimVillages.Villager.AI.Navigation
                       Vector3 startPos, Vector3 endPos)> pass3DiscoveredEdgeList,
             out HashSet<long> bedReachableCellsOut,
             out HashSet<long> outsideCellsOut,
-            out HashSet<long> prunedPieceKeysOut)
+            out HashSet<long> prunedPieceKeysOut,
+            out List<Vector3> gateMarkersOut)
         {
             var dropped = new HashSet<string>();
             droppedRegionIds = dropped;
@@ -143,6 +144,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             bedReachableCellsOut = new HashSet<long>();
             outsideCellsOut = new HashSet<long>();
             prunedPieceKeysOut = new HashSet<long>();
+            gateMarkersOut = new List<Vector3>();
             var stats = new Stats();
             if (regionIds == null || regionIds.Count == 0) return stats;
             if (lookupGrid == null || lookupGrid.Count == 0) return stats;
@@ -241,6 +243,18 @@ namespace ValheimVillages.Villager.AI.Navigation
                 }
             }
 
+            // Gather door/gate seals so the Pass 1 outside flood treats an
+            // OPEN gate as a sealed boundary. WallBlocks probes physical piece
+            // colliders at waist height, but an open gate's leaf has swung out
+            // of the doorway, so the flood would pour through the gap — the
+            // whole village then floods "outside" and the region graph
+            // collapses (3 regions -> 1, village deregistered). A Door's
+            // transform.position/forward stay fixed at the closed reference
+            // frame regardless of open state, so we seal the doorway plane
+            // geometrically. Published to the caller for the village map.
+            var gateSeals = GatherGateSeals(minX, minZ, maxX, maxZ);
+            foreach (var g in gateSeals) gateMarkersOut.Add(g.Mid);
+
             // --- Pass 1: outside-in terrain flood ---
             // Floods inward from every perimeter cell on the terrain layer.
             // Pieces don't participate as cells or stepping stones — a wall
@@ -248,10 +262,13 @@ namespace ValheimVillages.Villager.AI.Navigation
             // outsideCells contains every cell (populated or not) the flood
             // could reach without tripping WallBlocks on the piece layer.
             // Pass 1 flood now lives in the pure PerimeterOutsideFlood helper;
-            // here we inject terrain cell heights and the piece-layer wall gate.
+            // here we inject terrain cell heights and the piece-layer wall gate
+            // (augmented with the geometric gate seal above).
             var outsideCells = PerimeterOutsideFlood(gxMin, gzMin, gxMax, gzMax,
                 (gx, gz) => GetCellY(gx, gz, xzMaxYTerrain, cell),
-                (ax, az, bx, bz, ya, yb) => WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask),
+                (ax, az, bx, bz, ya, yb) =>
+                    WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
+                    || GateBlocksStep(ax, az, bx, bz, cell, gateSeals),
                 out var perimeterSeeds);
             stats.PerimeterSeeds = perimeterSeeds;
 
@@ -1131,11 +1148,17 @@ namespace ValheimVillages.Villager.AI.Navigation
             var half = cell * 0.5f;
 
             // Same perimeter flood as Apply's Pass 1, but cell heights come from
-            // the ZoneSystem heightmap (no baked centroids exist yet at bake time).
+            // the ZoneSystem heightmap (no baked centroids exist yet at bake
+            // time). Seal gates the same way so the bake's outside-cell phantom
+            // blockers and the HNA partition agree on the village hull.
+            var gateSeals = GatherGateSeals(
+                bounds.min.x, bounds.min.z, bounds.max.x, bounds.max.z);
             return PerimeterOutsideFlood(gxMin, gzMin, gxMax, gzMax,
                 (gx, gz) => ZoneSystem.instance.GetGroundHeight(
                     new Vector3(gx * cell + half, 0f, gz * cell + half)),
-                (ax, az, bx, bz, ya, yb) => WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask),
+                (ax, az, bx, bz, ya, yb) =>
+                    WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
+                    || GateBlocksStep(ax, az, bx, bz, cell, gateSeals),
                 out _);
         }
 
@@ -1309,6 +1332,127 @@ namespace ValheimVillages.Villager.AI.Navigation
         private static bool IsBedCollider(Collider col)
         {
             return col.GetComponentInParent<Bed>() != null;
+        }
+
+        // --- Gate / door sealing for the Pass 1 outside flood --------------
+        // A wall's collider sits in the waist band, so WallBlocks catches it.
+        // A gate does too — but only while CLOSED. Open it and the leaf swings
+        // clear of the doorway, the waist probe finds nothing, and the outside
+        // flood pours through the gap, flooding the whole village "outside" and
+        // collapsing the region graph. We seal the doorway geometrically from
+        // the Door's fixed transform (position + forward are the closed
+        // reference frame, unchanged by open state — DoorHandler.OpenDoor
+        // relies on the same invariant), so a gate bounds the village whether
+        // it is open or shut. Applied to Pass 1 (and the bake's outside-cell
+        // flood) only; Pass 2's bed flood is left ungated so the gate cell
+        // itself stays inside and walkable.
+
+        internal readonly struct GateSeal
+        {
+            public readonly Vector3 Mid;     // door pivot / panel centre (XZ used)
+            public readonly Vector3 Forward; // through-axis, horizontal, normalized
+            public readonly float HalfWidth; // half doorway span + cell margin
+
+            public GateSeal(Vector3 mid, Vector3 forward, float halfWidth)
+            {
+                Mid = mid;
+                Forward = forward;
+                HalfWidth = halfWidth;
+            }
+        }
+
+        /// <summary>
+        ///     Collect a sealing segment for every <see cref="Door" /> whose
+        ///     pivot lies in [minX..maxX] x [minZ..maxZ]. Mirrors
+        ///     NavMeshBakeManager.AddDoorBlockers' detection so the partition
+        ///     flood and the bake agree on where the gates are.
+        /// </summary>
+        internal static List<GateSeal> GatherGateSeals(
+            float minX, float minZ, float maxX, float maxZ)
+        {
+            var seals = new List<GateSeal>();
+            var doors = UnityEngine.Object.FindObjectsByType<Door>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var door in doors)
+            {
+                if (door == null || door.transform == null) continue;
+                var p = door.transform.position;
+                if (p.x < minX || p.x > maxX || p.z < minZ || p.z > maxZ) continue;
+                var fwd = door.transform.forward;
+                fwd.y = 0f;
+                if (fwd.sqrMagnitude < 1e-4f) continue;
+                fwd.Normalize();
+                seals.Add(new GateSeal(p, fwd, GateHalfWidth(door)));
+            }
+
+            return seals;
+        }
+
+        // Half the doorway span the seal must cover. Derived from the door's
+        // widest horizontal collider extent — rotation-independent (local size
+        // x lossyScale, never world bounds, which rotate with an open leaf) —
+        // plus half a lookup cell so a 4-connected step whose crossing point
+        // lands at the cell boundary is still caught. Falls back to a standard
+        // 1.2m door panel when no box collider is found.
+        private static float GateHalfWidth(Door door)
+        {
+            var widest = 0f;
+            var cols = door.GetComponentsInChildren<Collider>(true);
+            foreach (var c in cols)
+            {
+                if (c == null || c.isTrigger) continue;
+                if (c is BoxCollider bc)
+                {
+                    var ls = bc.transform.lossyScale;
+                    widest = Mathf.Max(widest,
+                        Mathf.Max(Mathf.Abs(bc.size.x * ls.x),
+                            Mathf.Abs(bc.size.z * ls.z)));
+                }
+            }
+
+            if (widest <= 0f) widest = 1.2f;
+            return widest * 0.5f + RegionGraph.LookupCellSize * 0.5f;
+        }
+
+        /// <summary>
+        ///     True iff the cell-centre step A→B passes through any gathered
+        ///     gate's doorway (crosses the door plane within its half-width).
+        /// </summary>
+        private static bool GateBlocksStep(
+            int gxA, int gzA, int gxB, int gzB, float cell, List<GateSeal> seals)
+        {
+            if (seals == null || seals.Count == 0) return false;
+            var half = cell * 0.5f;
+            var ax = gxA * cell + half;
+            var az = gzA * cell + half;
+            var bx = gxB * cell + half;
+            var bz = gzB * cell + half;
+            foreach (var s in seals)
+                if (SegmentCrossesGateXz(ax, az, bx, bz, s))
+                    return true;
+            return false;
+        }
+
+        // XZ-only port of DoorHandler.SegmentCrossesDoor: the segment must
+        // straddle the door plane (sign change of the forward-axis projection)
+        // and the crossing point must lie within HalfWidth of the door midpoint.
+        private static bool SegmentCrossesGateXz(
+            float ax, float az, float bx, float bz, GateSeal s)
+        {
+            var aDot = (ax - s.Mid.x) * s.Forward.x + (az - s.Mid.z) * s.Forward.z;
+            var bDot = (bx - s.Mid.x) * s.Forward.x + (bz - s.Mid.z) * s.Forward.z;
+
+            // Same sign => both endpoints on the same side of the door plane.
+            if (aDot >= 0f == bDot >= 0f) return false;
+
+            var denom = aDot - bDot;
+            if (Mathf.Abs(denom) < 1e-5f) return false;
+            var t = aDot / denom;
+            var cx = ax + (bx - ax) * t;
+            var cz = az + (bz - az) * t;
+            var dx = cx - s.Mid.x;
+            var dz = cz - s.Mid.z;
+            return dx * dx + dz * dz <= s.HalfWidth * s.HalfWidth;
         }
 
         /// <summary>

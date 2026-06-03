@@ -112,6 +112,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             m_lookupGrid.Clear();
             m_boundaryCells.Clear();
             m_regionKinds.Clear();
+            m_gates.Clear();
             m_initialized = false;
         }
 
@@ -332,6 +333,13 @@ namespace ValheimVillages.Villager.AI.Navigation
         private readonly List<(string id, Vector3 center, Vector3 outDir)> m_boundaryCells = new();
 
         private readonly Dictionary<string, SurfaceKind> m_regionKinds = new();
+
+        /// <summary>
+        ///     World positions of detected gate/door pivots inside the village,
+        ///     set by the partition (see <see cref="SetGates" />). Recomputed
+        ///     each rebuild; not persisted.
+        /// </summary>
+        private readonly List<Vector3> m_gates = new();
 
         #endregion
 
@@ -659,6 +667,21 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             if (!m_initialized) return new List<(string, Vector3, Vector3)>();
             return new List<(string, Vector3, Vector3)>(m_boundaryCells);
+        }
+
+        /// <summary>
+        ///     Record the gate/door pivots detected for this village. Drives the
+        ///     Pass-1 outside-flood seal and the gate markers on the village map.
+        /// </summary>
+        public void SetGates(IEnumerable<Vector3> gates)
+        {
+            m_gates.Clear();
+            if (gates != null) m_gates.AddRange(gates);
+        }
+
+        public List<Vector3> GetGates()
+        {
+            return new List<Vector3>(m_gates);
         }
 
         #endregion
