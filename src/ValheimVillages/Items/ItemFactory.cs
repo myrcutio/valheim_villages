@@ -184,7 +184,7 @@ namespace ValheimVillages.Items
                     {
                         name = $"vv_workorder_{typeKey}",
                         source = "clone",
-                        basePrefab = "DragonEgg",
+                        basePrefab = "Wood",
                         displayName = $"{def.displayName} Work Order",
                         description =
                             $"A work order scroll for {def.displayName.ToLower()} tasks. Right-click to set production quotas.",
@@ -201,7 +201,7 @@ namespace ValheimVillages.Items
                 {
                     name = $"vv_workorder_{key}",
                     source = "clone",
-                    basePrefab = "DragonEgg",
+                    basePrefab = "Wood",
                     displayName = $"{displayName} Work Order",
                     description =
                         $"A work order scroll for {displayName.ToLower()} tasks. Right-click to set production quotas.",
@@ -320,12 +320,17 @@ namespace ValheimVillages.Items
             newShared.m_weight = def.weight;
             newShared.m_variants = def.variants;
 
-            // Apply custom icon for work orders from embedded PNG resources
+            // Apply custom icon for work orders from embedded PNG resources, and
+            // reskin the world model into a flat parchment sheet matching the icon.
             if (def.itemType == "workorder" && !string.IsNullOrEmpty(def.stationType))
             {
                 var icon = WorkOrderIconLoader.Load(def.stationType);
                 if (icon != null)
                     newShared.m_icons = new[] { icon };
+
+                var tex = WorkOrderIconLoader.LoadTexture(def.stationType);
+                if (tex != null)
+                    ParchmentModel.Apply(prefab, tex);
             }
 
             itemDrop.m_itemData.m_shared = newShared;

@@ -131,6 +131,16 @@ namespace ValheimVillages.Items.WorkOrders
             BringGlyphToFront(gui.m_craftButton.gameObject);
             BringGlyphToFront(_workOrderButton);
 
+            // Render the Order button beneath the Craft button so it can't occlude
+            // the Craft glyph. They don't overlap (Order is stacked above Craft with
+            // a gap), and both glyphs stay children of their buttons — so they still
+            // hide with their button (e.g. the Craft glyph during a craft).
+            var craftT = gui.m_craftButton.transform;
+            var orderT = _workOrderButton.transform;
+            if (craftT.parent == orderT.parent
+                && orderT.GetSiblingIndex() > craftT.GetSiblingIndex())
+                orderT.SetSiblingIndex(craftT.GetSiblingIndex());
+
             // The recipe list's scroll viewport (parent of the scrolling content).
             var listViewport = gui.m_recipeListRoot != null ? gui.m_recipeListRoot.parent : null;
             if (listViewport != null) s_listFrame = CreateFocusFrame(listViewport);

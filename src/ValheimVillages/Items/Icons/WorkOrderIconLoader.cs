@@ -17,6 +17,7 @@ namespace ValheimVillages.Items.Icons
         private const string DefaultStation = "workbench";
 
         private static readonly Dictionary<string, Sprite> _cache = new();
+        private static readonly Dictionary<string, Texture2D> _texCache = new();
         private static MethodInfo _loadImageMethod;
 
         /// <summary>
@@ -30,20 +31,45 @@ namespace ValheimVillages.Items.Icons
             if (_cache.TryGetValue(key, out var cached))
                 return cached;
 
+            var tex = LoadTexture(key);
+            if (tex == null)
+                return null;
+
+            var sprite = Sprite.Create(
+                tex,
+                new Rect(0, 0, tex.width, tex.height),
+                new Vector2(0.5f, 0.5f));
+
+            _cache[key] = sprite;
+            return sprite;
+        }
+
+        /// <summary>
+        ///     Load (or return cached) the raw parchment <see cref="Texture2D" /> for a
+        ///     station type. Shared by the inventory icon (<see cref="Load" />) and the
+        ///     world-model reskin (<see cref="ParchmentModel" />). Same resource lookup
+        ///     and generic-scroll fallback as the icon.
+        /// </summary>
+        public static Texture2D LoadTexture(string stationType)
+        {
+            var key = stationType ?? "";
+            if (_texCache.TryGetValue(key, out var cached))
+                return cached;
+
             var resName = $"ValheimVillages.Items.Icons.WorkOrders.workorder_{key.ToLowerInvariant()}.png";
             var assembly = Assembly.GetExecutingAssembly();
 
             using var stream = assembly.GetManifestResourceStream(resName);
             if (stream == null)
             {
-                // Degrade to the default scroll rather than the clone prefab icon.
+                // Degrade to the default scroll rather than the clone prefab model.
                 if (!key.Equals(DefaultStation, System.StringComparison.OrdinalIgnoreCase))
                 {
                     Plugin.Log?.LogWarning(
                         $"Work order icon resource not found: {resName} — " +
                         $"using '{DefaultStation}' scroll.");
-                    var fallback = Load(DefaultStation);
-                    _cache[key] = fallback;
+                    var fallback = LoadTexture(DefaultStation);
+                    _texCache[key] = fallback;
                     return fallback;
                 }
 
@@ -63,14 +89,9 @@ namespace ValheimVillages.Items.Icons
                 return null;
             }
 
-            var sprite = Sprite.Create(
-                tex,
-                new Rect(0, 0, tex.width, tex.height),
-                new Vector2(0.5f, 0.5f));
-
-            _cache[key] = sprite;
+            _texCache[key] = tex;
             Plugin.Log?.LogInfo($"Loaded work order icon: {stationType} ({tex.width}x{tex.height})");
-            return sprite;
+            return tex;
         }
 
         /// <summary>
