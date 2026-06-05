@@ -29,7 +29,7 @@ namespace ValheimVillages.Diagnostics
         /// </summary>
         private const float DefaultFrozenTime = 0.5f;
 
-        public static bool AutoFreezeOnLoad => true; // TODO: false before release
+        public static bool AutoFreezeOnLoad => false; // disabled: was interfering with live MCP-driven iteration
 
         /// <summary>
         ///     Apply <see cref="DefaultFrozenTime"/> to EnvMan on plugin load.
@@ -39,19 +39,23 @@ namespace ValheimVillages.Diagnostics
         /// </summary>
         public static void ApplyAutoFreeze()
         {
-            if (!AutoFreezeOnLoad) return;
             if (EnvMan.instance == null)
             {
-                Plugin.Log?.LogInfo(
-                    "[FreezeTime] Auto-freeze deferred: EnvMan not yet alive. " +
-                    "Run vv_freezetime once in-world to apply.");
+                if (AutoFreezeOnLoad)
+                    Plugin.Log?.LogInfo(
+                        "[FreezeTime] Auto-freeze deferred: EnvMan not yet alive. " +
+                        "Run vv_freezetime once in-world to apply.");
                 return;
             }
 
-            SetFrozen(true, DefaultFrozenTime);
-            Plugin.Log?.LogInfo(
-                $"[FreezeTime] Auto-frozen at time={DefaultFrozenTime:F2} on load. " +
-                "TODO: disable AutoFreezeOnLoad before release.");
+            // Normalise the freeze state to match AutoFreezeOnLoad on every (re)load.
+            // EnvMan persists across hot reloads, so a freeze applied by an earlier
+            // assembly would otherwise linger even after disabling auto-freeze — this
+            // actively clears it.
+            SetFrozen(AutoFreezeOnLoad, DefaultFrozenTime);
+            Plugin.Log?.LogInfo(AutoFreezeOnLoad
+                ? $"[FreezeTime] Auto-frozen at time={DefaultFrozenTime:F2} on load."
+                : "[FreezeTime] Day/night cycle left running (auto-freeze disabled).");
         }
 
         [DevCommand("Freeze the day/night cycle (no arg=unfreeze; or pass a time 0..1)",

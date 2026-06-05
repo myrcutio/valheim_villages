@@ -123,6 +123,7 @@ namespace ValheimVillages
             {
                 Log.LogInfo("Hot reload — re-registering prefabs in ZNetScene");
                 ItemFactory.RegisterAllInZNetScene(ZNetScene.instance);
+                PieceFactory.RegisterAllInZNetScene(ZNetScene.instance);
 
                 Log.LogInfo("Hot reload — fixing up existing NPC components");
                 HotReloadHelper.FixupExistingNPCs();

@@ -40,6 +40,7 @@ namespace ValheimVillages.Patches
         public static void Postfix(ZNetScene __instance)
         {
             ItemFactory.RegisterAllInZNetScene(__instance);
+            PieceFactory.RegisterAllInZNetScene(__instance);
             VirtualRecipeLoader.RegisterCookingRecipesIfNeeded(ObjectDB.instance);
             // Log available Dvergr prefabs for debugging (single spawn path: Villager)
             VillagerPawnPatch.LogAvailableDvergrPrefabs();
