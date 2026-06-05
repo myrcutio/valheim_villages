@@ -59,6 +59,62 @@ namespace ValheimVillages
         }
 
         /// <summary>
+        ///     On-demand purge of stale (old-assembly) mod COMPONENTS — the actual
+        ///     "zombies" that keep running Update/LateUpdate and pollute live tests.
+        ///     Deliberately does NOT touch orphaned GameObjects: a VV_-prefixed
+        ///     object with no mod MonoBehaviour is indistinguishable from a LIVE UI
+        ///     element (recipe rows, map, tab buttons) mid-session, so destroying
+        ///     them would break an open panel. Orphan-object cleanup is left to the
+        ///     hot-reload path (<see cref="DestroyOrphanedModObjects" />), where
+        ///     recreating UI is expected. Also does NOT reset current-assembly
+        ///     static state (unlike <see cref="FullCleanup" />), so it is safe to
+        ///     call any time for a clean test. Returns a human-readable summary.
+        /// </summary>
+        public static string PurgeStaleObjects()
+        {
+            var report = ReportModInstances();
+            var staleComponents = DestroyStaleComponents();
+            return $"{report}\n[HotReload] Purged {staleComponents} stale component(s).";
+        }
+
+        /// <summary>
+        ///     Diagnostic: count every ValheimVillages MonoBehaviour in the scene
+        ///     (including inactive), split into current-assembly instances and
+        ///     stale (old-assembly) zombies. Returns a multi-line summary.
+        /// </summary>
+        public static string ReportModInstances()
+        {
+            var current = new Dictionary<string, int>();
+            var stale = new Dictionary<string, int>();
+
+            var all = Object.FindObjectsByType<MonoBehaviour>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var mb in all)
+            {
+                if (mb == null) continue;
+                var type = mb.GetType();
+                if (type.FullName == null ||
+                    !type.FullName.StartsWith("ValheimVillages.")) continue;
+
+                var bucket = type.Assembly == CurrentAssembly ? current : stale;
+                bucket.TryGetValue(type.Name, out var n);
+                bucket[type.Name] = n + 1;
+            }
+
+            var staleTotal = 0;
+            var lines = new List<string>();
+            foreach (var kv in stale)
+            {
+                staleTotal += kv.Value;
+                lines.Add($"  STALE {kv.Key} x{kv.Value}");
+            }
+
+            var header = $"[HotReload] Mod MonoBehaviours: {current.Count} current type(s), " +
+                         $"{staleTotal} stale instance(s)";
+            return lines.Count > 0 ? header + "\n" + string.Join("\n", lines) : header;
+        }
+
+        /// <summary>
         ///     d
         ///     Clear all static registries that hold per-session state.
         ///     Called before any object scanning so callbacks don't fire
@@ -80,9 +136,12 @@ namespace ValheimVillages
         {
             var destroyed = 0;
 
-#pragma warning disable CS0618
-            var allBehaviours = Object.FindObjectsOfType<MonoBehaviour>();
-#pragma warning restore CS0618
+            // FindObjectsInactive.Include is essential: a stale instance may be on
+            // an inactive GameObject (or be a disabled component) at cleanup time —
+            // the legacy FindObjectsOfType() skipped those, leaving zombies that
+            // keep running once re-activated.
+            var allBehaviours = Object.FindObjectsByType<MonoBehaviour>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
 
             foreach (var mb in allBehaviours)
             {
@@ -128,9 +187,8 @@ namespace ValheimVillages
         {
             var destroyed = 0;
 
-#pragma warning disable CS0618
-            var allTransforms = Object.FindObjectsOfType<Transform>();
-#pragma warning restore CS0618
+            var allTransforms = Object.FindObjectsByType<Transform>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
 
             // Collect candidates first to avoid mutating during iteration
             var toDestroy = new List<GameObject>();

@@ -3,12 +3,14 @@ using System.Globalization;
 using System.Linq;
 using UnityEngine;
 using ValheimVillages.Enums;
+using ValheimVillages.Interfaces;
 using ValheimVillages.Schemas;
 using ValheimVillages.TaskQueue;
+using ValheimVillages.TaskQueue.ActivityLog;
+using ValheimVillages.Villager;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
-using ValheimVillages.Villages;
 
 namespace ValheimVillages.Behaviors.Patrol
 {
@@ -19,7 +21,7 @@ namespace ValheimVillages.Behaviors.Patrol
     public class PatrolStateMachine
     {
         private readonly VillagerAI m_ai;
-        private readonly Villager.Villager m_villager;
+        private readonly IVillager m_villager;
         private int m_currentWaypointIndex;
         private bool m_hnaPartitionRequested;
         private List<VillagerWaypoint> m_patrolWaypoints;
@@ -28,10 +30,15 @@ namespace ValheimVillages.Behaviors.Patrol
         private int m_helpWaypointIndex = -1;
         private Vector3 m_helpPosition;
 
-        public PatrolStateMachine(Villager.Villager villager)
+        public PatrolStateMachine(IVillager villager)
         {
             m_villager = villager;
-            m_ai = villager.villagerAI != null ? villager.villagerAI : villager.GetComponent<VillagerAI>();
+        }
+
+        public PatrolStateMachine(VillagerAI ai)
+        {
+            m_ai = ai;
+            m_villager = new VillagerAdapter(ai.Villager);
         }
 
         public bool IsDiscoveryComplete { get; private set; }
@@ -63,15 +70,13 @@ namespace ValheimVillages.Behaviors.Patrol
         /// </summary>
         public void ResetDiscovery()
         {
-            Plugin.Log?.LogWarning($"[Patrol:{m_ai.NpcName}] Discovery reset requested (debug)");
+            Plugin.Log?.LogWarning($"[Patrol:{m_villager.VillagerName}] Discovery reset requested (debug)");
             m_patrolWaypoints?.Clear();
             m_currentWaypointIndex = 0;
             IsDiscoveryComplete = false;
             IsHnaRoute = false;
             m_hnaPartitionRequested = false;
             m_helpWaypointIndex = -1;
-            VillageAreaManager.UnregisterArea(GetVillageKey());
-            SaveState();
             m_ai.SetState(BehaviorState.Idle);
             StartDiscovery();
         }
@@ -84,7 +89,7 @@ namespace ValheimVillages.Behaviors.Patrol
             IsDiscoveryComplete = true;
             IsHnaRoute = isHna;
             Plugin.Log?.LogInfo(
-                $"[Patrol:{m_ai.NpcName}] Restored {m_patrolWaypoints.Count} waypoints" +
+                $"[Patrol:{m_villager.VillagerName}] Restored {m_patrolWaypoints.Count} waypoints" +
                 $" (hna={isHna}), index={m_currentWaypointIndex}");
         }
 
@@ -94,10 +99,11 @@ namespace ValheimVillages.Behaviors.Patrol
             if (m_ai.IsInBackoff) return;
 
             var state = m_ai.CurrentState;
-            var context = VillagerBehaviorLogic.GetCurrentContext(m_ai);
 
             switch (state)
             {
+                case BehaviorState.NeedsHelp:
+                    break;
                 case BehaviorState.Idle:
                     if (!IsDiscoveryComplete) StartDiscovery();
                     else AdvanceToNextWaypoint();
@@ -138,7 +144,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 if (zdo != null && PatrolPersistence.TryRestoreHnaGraph(zdo, villageKey))
                 {
                     graph = RegionGraph.Get(villageKey);
-                    Plugin.Log?.LogInfo($"[Patrol:{m_ai.NpcName}] Restored HNA graph from ZDO (key={villageKey})");
+                    Plugin.Log?.LogInfo($"[Patrol:{m_villager.VillagerName}] Restored region graph from ZDO (key={villageKey})");
                 }
             }
 
@@ -161,7 +167,7 @@ namespace ValheimVillages.Behaviors.Patrol
             {
                 m_hnaPartitionRequested = true;
                 var bedPos = m_ai.Memory.BedPosition;
-                Plugin.Log?.LogInfo($"[Patrol:{m_ai.NpcName}] HNA graph unavailable, requesting hna_partition build");
+                Plugin.Log?.LogInfo($"[Patrol:{m_villager.VillagerName}] HNA graph unavailable, requesting hna_partition build");
                 GlobalTaskQueue.Enqueue(new VillagerTask
                 {
                     Name = "hna_partition",
@@ -195,7 +201,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 : Vector3.zero;
 
             Plugin.Log?.LogInfo(
-                $"[Patrol:{m_ai.NpcName}] HNA boundary discovery complete, {m_patrolWaypoints.Count} waypoints. " +
+                $"[Patrol:{m_villager.VillagerName}] HNA boundary discovery complete, {m_patrolWaypoints.Count} waypoints. " +
                 $"First=({first.x:F1},{first.y:F1},{first.z:F1}) " +
                 $"Last=({last.x:F1},{last.y:F1},{last.z:F1}) " +
                 $"Player=({playerPos.x:F1},{playerPos.y:F1},{playerPos.z:F1})");
@@ -253,11 +259,18 @@ namespace ValheimVillages.Behaviors.Patrol
             // vv_patrol_reset.
             m_helpWaypointIndex = idx;
             m_helpPosition = wp.Position;
-            m_ai.SetState(BehaviorState.NeedsHelp);
+
+            var reason = $"No reachable approach to waypoint {idx}.";
             Plugin.Log?.LogError(
-                $"[Patrol:{m_ai.NpcName}] NeedsHelp: no reachable approach to W{idx} " +
-                $"({wp.Position.x:F1},{wp.Position.y:F1},{wp.Position.z:F1}). " +
-                "Patrol parked — fix route/geometry then vv_patrol_reset.");
+                $"[Patrol:{m_villager.VillagerName}] NeedsHelp: {reason} " +
+                $"({wp.Position.x:F1},{wp.Position.y:F1},{wp.Position.z:F1}) — " +
+                "patrol parked, fix route/geometry then vv_patrol_reset.");
+            // Surface as a structured "blocked" issue (deduped, with a map pin to
+            // the unreachable waypoint) so it renders in the Info tab the same way
+            // a blocked work order does.
+            VillagerActivityLog.Instance.RecordBlocked(
+                m_villager.UniqueID, "Patrol", null, null, reason, wp.Position);
+            m_ai.SetState(BehaviorState.NeedsHelp);
         }
     }
 }

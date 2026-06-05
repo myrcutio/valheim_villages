@@ -22,7 +22,7 @@ namespace ValheimVillages.Behaviors.Patrol
         public PerimeterPatrolBehavior(VillagerAI ai)
         {
             m_ai = ai;
-            m_patrol = new PatrolStateMachine(ai.Villager);
+            m_patrol = new PatrolStateMachine(ai);
         }
 
         public string Tag => "patrol";
@@ -47,12 +47,11 @@ namespace ValheimVillages.Behaviors.Patrol
         {
             if (m_patrol == null) return "";
             var state = m_ai.CurrentState;
+            // Keep this a short label (it's the list-row title). The full reason +
+            // a map pin to the unreachable waypoint are surfaced as a "blocked"
+            // activity-log entry, which renders in the detail panel.
             if (state == BehaviorState.NeedsHelp)
-            {
-                var p = m_patrol.HelpPosition;
-                return $"NEEDS HELP: no reachable approach to W{m_patrol.HelpWaypointIndex} " +
-                       $"({p.x:F1},{p.y:F1},{p.z:F1})";
-            }
+                return $"Needs help: waypoint {m_patrol.HelpWaypointIndex}";
 
             if (state == BehaviorState.Patrolling)
                 return $"Patrolling ({m_patrol.ActiveWaypointCount} waypoints)";

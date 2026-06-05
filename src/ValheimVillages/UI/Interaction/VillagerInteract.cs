@@ -66,11 +66,6 @@ namespace ValheimVillages.UI.Interaction
 
             var stateInfo = GetStateInfo();
 
-            // Guard breach alert
-            if (IsGuardAlarmed())
-                return
-                    $"{name}\n<color=red><b>There is a breach in the walls!</b></color>\n{stateInfo}\n[<color=yellow><b>E</b></color>] Talk";
-
             return $"{name}\n{stateInfo}\n[<color=yellow><b>E</b></color>] Talk";
         }
 
@@ -126,11 +121,6 @@ namespace ValheimVillages.UI.Interaction
             };
 
             return $"<color=grey>{label}</color>";
-        }
-
-        private bool IsGuardAlarmed()
-        {
-            return false;
         }
 
         /// <summary>

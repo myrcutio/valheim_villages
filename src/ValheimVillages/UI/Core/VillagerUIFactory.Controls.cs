@@ -10,8 +10,6 @@ namespace ValheimVillages.UI.Core
     /// </summary>
     public static partial class VillagerUIFactory
     {
-        private static readonly Color ValheimOrange = new(1f, 0.631f, 0.235f, 1f);
-
         // Native window header style (matches the chest's "Chest" title).
         private static readonly Color NativeHeaderColor = new(1f, 0.718f, 0.36f, 1f);
         private const float NativeHeaderSize = 32f;
@@ -19,65 +17,6 @@ namespace ValheimVillages.UI.Core
         // Cached native window-background GameObject (the chest's "Bkg"), looked
         // up once from the InventoryGui and cloned for an exact frame match.
         private static GameObject s_windowBg;
-
-        /// <summary>
-        ///     Create a centered popup panel with a dark Valheim-style background,
-        ///     title, and vertical content area. Returns the root GO and content transform.
-        /// </summary>
-        public static (GameObject root, Transform content) CreatePopupPanel(
-            string title, float width, float height)
-        {
-            // Root canvas (overlay, renders on top of everything)
-            var rootGO = new GameObject("VV_Popup_" + title);
-            var canvas = rootGO.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 100;
-            rootGO.AddComponent<GraphicRaycaster>();
-
-            var scaler = rootGO.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1920, 1080);
-
-            // Semi-transparent backdrop
-            var backdropGO = new GameObject("Backdrop",
-                typeof(RectTransform), typeof(Image));
-            backdropGO.transform.SetParent(rootGO.transform, false);
-            StretchFill(backdropGO);
-            backdropGO.GetComponent<Image>().color = new Color(0, 0, 0, 0.5f);
-
-            // Main panel
-            var panelGO = new GameObject("Panel",
-                typeof(RectTransform), typeof(Image),
-                typeof(VerticalLayoutGroup));
-            panelGO.transform.SetParent(rootGO.transform, false);
-
-            var panelRT = panelGO.GetComponent<RectTransform>();
-            panelRT.anchorMin = panelRT.anchorMax = new Vector2(0.5f, 0.5f);
-            panelRT.pivot = new Vector2(0.5f, 0.5f);
-            panelRT.sizeDelta = new Vector2(width, height);
-
-            panelGO.GetComponent<Image>().color =
-                new Color(0.12f, 0.09f, 0.06f, 0.95f);
-
-            var outline = panelGO.AddComponent<Outline>();
-            outline.effectColor = new Color(0.45f, 0.35f, 0.25f, 1f);
-            outline.effectDistance = new Vector2(2, -2);
-
-            var vlg = panelGO.GetComponent<VerticalLayoutGroup>();
-            vlg.childAlignment = TextAnchor.UpperCenter;
-            vlg.childControlWidth = true;
-            vlg.childControlHeight = true;
-            vlg.childForceExpandWidth = true;
-            vlg.childForceExpandHeight = false;
-            vlg.spacing = 6f;
-            vlg.padding = new RectOffset(16, 16, 12, 12);
-
-            // Title and divider
-            CreateTitle(panelGO.transform, title);
-            CreateDivider(panelGO.transform);
-
-            return (rootGO, panelGO.transform);
-        }
 
         /// <summary>
         ///     Create a panel docked inside an existing UI (e.g. the InventoryGui

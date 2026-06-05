@@ -85,7 +85,15 @@ namespace ValheimVillages.TaskQueue.ActivityLog
             if (entries.Count >= TaskSettings.MaxActivityLogEntriesPerVillager)
                 TrimOldest(entries);
 
-            var description = $"{itemPrefab} [{stationName}] — {reason}";
+            // Build the audit description from only the parts that are present, so
+            // non-work-order blockers (e.g. patrol, which has no item/station) read
+            // cleanly. Output is identical to "{item} [{station}] — {reason}" when
+            // both item and station are set.
+            var prefix = string.Empty;
+            if (!string.IsNullOrEmpty(itemPrefab)) prefix = itemPrefab;
+            if (!string.IsNullOrEmpty(stationName)) prefix += $" [{stationName}]";
+            prefix = prefix.Trim();
+            var description = string.IsNullOrEmpty(prefix) ? reason : $"{prefix} — {reason}";
             entries.Add(new ActivityLogEntry
             {
                 Timestamp = Time.time,

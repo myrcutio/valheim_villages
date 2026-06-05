@@ -47,12 +47,6 @@ namespace ValheimVillages.UI.Core
             return labelGO;
         }
 
-        /// <summary>Create a section title in Valheim yellow.</summary>
-        public static GameObject CreateTitle(Transform parent, string text)
-        {
-            return CreateLabel(parent, text, 18f, ValheimYellow);
-        }
-
         /// <summary>Create a button cloned from the Craft button.</summary>
         public static Button CreateButton(
             Transform parent, string text, UnityAction onClick)
@@ -149,7 +143,7 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>Create a thin horizontal divider line.</summary>
-        public static GameObject CreateDivider(Transform parent)
+        public static void CreateDivider(Transform parent)
         {
             var go = new GameObject("Divider",
                 typeof(RectTransform), typeof(Image));
@@ -161,13 +155,11 @@ namespace ValheimVillages.UI.Core
             var le = go.AddComponent<LayoutElement>();
             le.preferredHeight = 2f;
             le.flexibleWidth = 1f;
-
-            return go;
         }
 
         /// <summary>Create a spacer that expands to fill leftover vertical space,
         /// pushing subsequent siblings to the bottom of a vertical layout.</summary>
-        public static GameObject CreateFlexibleSpacer(Transform parent)
+        public static void CreateFlexibleSpacer(Transform parent)
         {
             var go = new GameObject("FlexSpacer", typeof(RectTransform));
             go.transform.SetParent(parent, false);
@@ -175,12 +167,10 @@ namespace ValheimVillages.UI.Core
             var le = go.AddComponent<LayoutElement>();
             le.flexibleHeight = 1f;
             le.flexibleWidth = 1f;
-            return go;
         }
 
         /// <summary>Create an empty spacer of a given height.</summary>
-        public static GameObject CreateSpacer(
-            Transform parent, float height = 8f)
+        public static void CreateSpacer(Transform parent, float height = 8f)
         {
             var go = new GameObject("Spacer", typeof(RectTransform));
             go.transform.SetParent(parent, false);
@@ -188,59 +178,6 @@ namespace ValheimVillages.UI.Core
             var le = go.AddComponent<LayoutElement>();
             le.preferredHeight = height;
             le.flexibleWidth = 1f;
-
-            return go;
-        }
-
-        /// <summary>Create a ScrollView that fills its parent.</summary>
-        public static (ScrollRect scroll, Transform content)
-            CreateScrollView(Transform parent)
-        {
-            var scrollGO = new GameObject("ScrollView",
-                typeof(RectTransform), typeof(ScrollRect));
-            scrollGO.transform.SetParent(parent, false);
-            StretchFill(scrollGO);
-
-            var viewportGO = new GameObject("Viewport",
-                typeof(RectTransform), typeof(Mask), typeof(Image));
-            viewportGO.transform.SetParent(scrollGO.transform, false);
-            StretchFill(viewportGO);
-            viewportGO.GetComponent<Image>().color = new Color(0, 0, 0, 0.01f);
-
-            var contentGO = new GameObject("Content",
-                typeof(RectTransform),
-                typeof(VerticalLayoutGroup),
-                typeof(ContentSizeFitter));
-            contentGO.transform.SetParent(viewportGO.transform, false);
-
-            var crt = contentGO.GetComponent<RectTransform>();
-            crt.anchorMin = new Vector2(0, 1);
-            crt.anchorMax = new Vector2(1, 1);
-            crt.pivot = new Vector2(0.5f, 1);
-            crt.offsetMin = Vector2.zero;
-            crt.offsetMax = Vector2.zero;
-
-            var vlg = contentGO.GetComponent<VerticalLayoutGroup>();
-            vlg.childAlignment = TextAnchor.UpperLeft;
-            vlg.childControlWidth = true;
-            vlg.childControlHeight = true;
-            vlg.childForceExpandWidth = true;
-            vlg.childForceExpandHeight = false;
-            vlg.spacing = 4f;
-            vlg.padding = new RectOffset(10, 10, 10, 10);
-
-            var csf = contentGO.GetComponent<ContentSizeFitter>();
-            csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-            var scroll = scrollGO.GetComponent<ScrollRect>();
-            scroll.viewport = viewportGO.GetComponent<RectTransform>();
-            scroll.content = crt;
-            scroll.horizontal = false;
-            scroll.vertical = true;
-            scroll.scrollSensitivity = 30f;
-            scroll.movementType = ScrollRect.MovementType.Clamped;
-
-            return (scroll, contentGO.transform);
         }
 
         #region Template & TMPro Reflection Helpers
@@ -267,10 +204,53 @@ namespace ValheimVillages.UI.Core
                 s_textTemplate = tmpText.gameObject;
         }
 
+        /// <summary>
+        ///     Override the crafting-panel header (Valheim's station-name label) with
+        ///     <paramref name="text" />. The villager's virtual station keeps its
+        ///     internal "$vv_..." m_name (needed for matching/cleanup); this only
+        ///     changes what the player sees. Call each frame (LateUpdate) — Valheim
+        ///     rewrites the label from the station name in UpdateCraftingPanel.
+        /// </summary>
+        public static void SetCraftingStationName(InventoryGui gui, string text)
+        {
+            if (gui == null) return;
+            var field = typeof(InventoryGui).GetField("m_craftingStationName",
+                BindingFlags.Public | BindingFlags.Instance);
+            var comp = field?.GetValue(gui) as Component;
+            if (comp != null) SetTMPText(comp.gameObject, text);
+        }
+
         public static void SetTMPText(GameObject go, string text)
         {
+            if (go == null)
+            {
+                Plugin.Log?.LogWarning("[UIFactory] SetTMPText called with null GameObject");
+                return;
+            }
+
             var comp = FindTMP(go);
-            comp?.GetType().GetProperty("text")?.SetValue(comp, text);
+            if (comp == null)
+            {
+                Plugin.Log?.LogWarning(
+                    $"[UIFactory] SetTMPText: no TextMeshPro component under '{go.name}'");
+                return;
+            }
+
+            var prop = comp.GetType().GetProperty("text");
+            if (prop == null)
+            {
+                Plugin.Log?.LogWarning(
+                    $"[UIFactory] SetTMPText: '{comp.GetType().Name}' has no 'text' property");
+                return;
+            }
+
+            // Valheim disables these TMP components (Behaviour.enabled = false) when
+            // no recipe is selected — leaving the GameObject active but the text
+            // un-rendered. Re-enable so our text actually shows.
+            if (comp is Behaviour behaviour && !behaviour.enabled)
+                behaviour.enabled = true;
+
+            prop.SetValue(comp, text);
         }
 
         public static void SetTMPProperties(

@@ -58,7 +58,7 @@ namespace ValheimVillages.UI.Tabs
             foreach (var issue in m_issues)
                 items.Add(new TabListItemUI
                 {
-                    TabName = AttentionPrefix + (issue.ItemPrefab ?? "(blocked)"),
+                    TabName = AttentionPrefix + (issue.ItemPrefab ?? issue.TaskName ?? "(blocked)"),
                     Icon = ResolveItemIcon(issue.ItemPrefab),
                 });
 
@@ -66,6 +66,12 @@ namespace ValheimVillages.UI.Tabs
             return items;
         }
 
+        /// <summary>
+        ///     Short label for the current-activity row. Prefers the active
+        ///     behavior's own status text (e.g. "Farming: Planting",
+        ///     "Patrolling (8 waypoints)") and falls back to the raw behavior
+        ///     state when no behavior is active or it reports nothing.
+        /// </summary>
         private static string CurrentActivityLabel(VillagerBehaviorBridge villager)
         {
             var status = villager?.AI?.ActiveBehavior?.GetStatusText();
@@ -85,18 +91,27 @@ namespace ValheimVillages.UI.Tabs
                 var issue = m_issues[issueIdx];
 
                 var pins = new List<(Vector3 position, Color color)>();
-                Vector3? chest = null;
+                Vector3? focus = null;
                 if (issue.WorkOrderPosX.HasValue && issue.WorkOrderPosY.HasValue && issue.WorkOrderPosZ.HasValue)
-                    chest = new Vector3(issue.WorkOrderPosX.Value, issue.WorkOrderPosY.Value, issue.WorkOrderPosZ.Value);
+                    focus = new Vector3(issue.WorkOrderPosX.Value, issue.WorkOrderPosY.Value, issue.WorkOrderPosZ.Value);
 
-                var legend = BuildPins(pins, chest, "Chest", ChestPinColor);
+                // Work-order blockers pin a chest; behavior blockers (e.g. patrol)
+                // pin the spot that's the problem — label/colour it accordingly.
+                var isStationBlocker = !string.IsNullOrEmpty(issue.StationName);
+                var focusLabel = isStationBlocker ? "Chest" : "Problem";
+                var focusColor = isStationBlocker ? ChestPinColor : ProblemPinColor;
+                var legend = BuildPins(pins, focus, focusLabel, focusColor);
                 var reason = issue.Reason ?? issue.Description ?? "";
-                var description = $"Station: {StationDisplay.Pretty(issue.StationName)}\n{reason}";
+                // Station line only when this blocker is tied to one (work orders);
+                // behavior blockers like patrol have no station.
+                var description = string.IsNullOrEmpty(issue.StationName)
+                    ? reason
+                    : $"Station: {StationDisplay.Pretty(issue.StationName)}\n{reason}";
                 if (legend.Length > 0) description += $"\n\n{legend}";
 
                 return new TabDetailDataUI
                 {
-                    Title = issue.ItemPrefab ?? "Blocked",
+                    Title = issue.ItemPrefab ?? issue.TaskName ?? "Blocked",
                     Icon = ResolveItemIcon(issue.ItemPrefab),
                     Description = description,
                     MapTexture = VillageMapPanel.RenderForTask(villager, pins),
@@ -113,16 +128,16 @@ namespace ValheimVillages.UI.Tabs
             var state = villager != null
                 ? villager.CurrentState.ToString()
                 : "Idle";
-            var status = villager?.AI?.ActiveBehavior?.GetStatusText();
+            var status = CurrentActivityLabel(villager);
 
             var pins = new List<(Vector3 position, Color color)>();
             var waypoint = villager?.CurrentWaypoint;
             var target = waypoint != null ? waypoint.Position : (Vector3?)null;
             var legend = BuildPins(pins, target, "Target", TargetPinColor);
 
-            var description = string.IsNullOrEmpty(status) || status == state
-                ? $"State: {state}"
-                : $"{status}\nState: {state}";
+            // Show the behavior status; append the raw state only when it adds
+            // information (the status fell back to the state otherwise).
+            var description = status == state ? $"State: {state}" : $"{status}\nState: {state}";
             if (legend.Length > 0) description += $"\n\n{legend}";
 
             // The native description layout collapses (and the map covers the
@@ -200,6 +215,7 @@ namespace ValheimVillages.UI.Tabs
         private static readonly Color ChestPinColor = new(1f, 0.55f, 0.15f);
         private static readonly Color TargetPinColor = new(0.3f, 0.9f, 0.3f);
         private static readonly Color PlayerPinColor = new(0.35f, 0.8f, 1f);
+        private static readonly Color ProblemPinColor = new(0.95f, 0.25f, 0.2f);
 
         /// <summary>
         ///     Add the focus pin (chest/target) and the player's pin, returning a

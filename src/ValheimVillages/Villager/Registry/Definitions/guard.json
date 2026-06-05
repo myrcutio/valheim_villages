@@ -68,8 +68,7 @@
   "tags": [
     "passive:spawnblock",
     "tab:info",
-    "tab:debug",
-    "listpanel:patrolstatus"
+    "tab:debug"
   ],
   "randomTalk": [
     "All quiet on the wall... mostly.",

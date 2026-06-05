@@ -134,9 +134,17 @@ namespace ValheimVillages.UI.Core
                 if (detail?.Icon != null) gui.m_recipeIcon.sprite = detail.Icon;
             }
 
+            // "Decription" is Valheim's actual (misspelled) child object name — do
+            // NOT "correct" it to "Description" or the lookup returns null and the
+            // whole detail panel (title/body/map) stops rendering. The inner body
+            // text child below IS spelled "Description".
             var descPanel = gui.m_crafting?.Find("Decription");
             if (descPanel != null)
             {
+                // SetTMPText also re-enables the TMP component: Valheim disables the
+                // Name/Description text components when no recipe is selected (our
+                // custom tabs never select one), which leaves the GameObject active
+                // but the text un-rendered.
                 var nameChild = descPanel.Find("Name");
                 if (nameChild != null)
                     VillagerUIFactory.SetTMPText(
@@ -236,6 +244,7 @@ namespace ValheimVillages.UI.Core
 
         /// <summary>
         ///     Hide crafting-specific children inside the Decription panel.
+        ///     ("Decription" is Valheim's actual misspelled object name.)
         /// </summary>
         private static void HideDescriptionSubElements(InventoryGui gui)
         {

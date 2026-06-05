@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using ValheimVillages.Attributes;
 using ValheimVillages.Items.WorkOrders;
 using ValheimVillages.UI.Interaction;
+using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.UI.Core
 {
@@ -34,6 +35,7 @@ namespace ValheimVillages.UI.Core
         private int m_firstCustomTabIndex;
         private bool m_hasCraftingRecipes;
         private float m_lastUpdateTime;
+        private string m_headerName;
 
         /// <summary>Injected RawImage for displaying a map texture in the description panel.</summary>
         private GameObject m_mapImageObject;
@@ -63,6 +65,12 @@ namespace ValheimVillages.UI.Core
             s_instance.m_active = true;
             s_instance.m_hasCraftingRecipes = hasCraftingRecipes;
             s_instance.m_lastUpdateTime = Time.time;
+            // Header shows the villager's type (e.g. "Guard"), not the generic
+            // station-name fallback ("Villager").
+            var type = villager?.VillagerType;
+            s_instance.m_headerName = !string.IsNullOrEmpty(type)
+                ? VillagerRegistry.Get(type)?.displayName ?? type
+                : "Villager";
             s_instance.SetupTabHandler();
         }
 
@@ -122,6 +130,8 @@ namespace ValheimVillages.UI.Core
             CraftingStationPatch.HideWorkOrderButton();
             PopulateDescription(gui, m_tabs[ci]);
             ReapplyChildHiding(gui);
+            if (!string.IsNullOrEmpty(m_headerName))
+                VillagerUIFactory.SetCraftingStationName(gui, m_headerName);
         }
 
         private void OnDestroy()
@@ -180,9 +190,14 @@ namespace ValheimVillages.UI.Core
 
             var gui = InventoryGui.instance;
             if (gui == null) return;
+            // Restore the player's native tabs to their normal clickable state.
+            // We hid them (SetActive(false)) and drove clones instead; leaving them
+            // non-interactable here leaks into the player's own crafting menu (the
+            // Upgrade tab goes dead until a relog). Valheim re-derives the correct
+            // per-recipe interactability when the player next opens a station.
             gui.m_tabCraft?.gameObject.SetActive(true);
             gui.m_tabUpgrade?.gameObject.SetActive(true);
-            if (gui.m_tabCraft != null) gui.m_tabCraft.interactable = false;
+            if (gui.m_tabCraft != null) gui.m_tabCraft.interactable = true;
             if (gui.m_tabUpgrade != null) gui.m_tabUpgrade.interactable = true;
         }
 
