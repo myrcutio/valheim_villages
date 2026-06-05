@@ -40,6 +40,16 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         public static int UnityAgentTypeID { get; private set; }
 
         /// <summary>
+        ///     The agent's actual build settings — the Humanoid clone stored in
+        ///     Valheim's Pathfinding (radius 0.40, etc.), carrying our agentTypeID.
+        ///     This is the authoritative source for baking: <see cref="NavMesh.GetSettingsByID" />
+        ///     returns Unity's DEFAULT dimensions (radius 0.50), which Valheim never
+        ///     syncs — baking with those over-widens the agent and over-erodes the
+        ///     walkable surface. Only valid after <see cref="IsRegistered" /> is true.
+        /// </summary>
+        public static NavMeshBuildSettings BuildSettings { get; private set; }
+
+        /// <summary>
         ///     Maximum walkable slope in degrees, read live from the registered
         ///     agent settings. Returns false if the villager agent slot has not
         ///     been registered yet (Pathfinding singleton not alive) — callers
@@ -183,6 +193,7 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             if (buildField == null) return;
             var build = (NavMeshBuildSettings)buildField.GetValue(agentSettings);
             UnityAgentTypeID = build.agentTypeID;
+            BuildSettings = build;
         }
 
         /// <summary>

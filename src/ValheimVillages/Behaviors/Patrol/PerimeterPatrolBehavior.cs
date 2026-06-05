@@ -79,6 +79,12 @@ namespace ValheimVillages.Behaviors.Patrol
 
         public bool IsDiscoveryComplete => m_patrol?.IsDiscoveryComplete ?? false;
         public Vector3 BedPosition => m_patrol?.BedPosition ?? Vector3.zero;
+
+        /// <summary>Index of the waypoint the patrol parked at in NeedsHelp, or -1.</summary>
+        public int HelpWaypointIndex => m_patrol?.HelpWaypointIndex ?? -1;
+
+        /// <summary>World position of the unreachable waypoint when in NeedsHelp.</summary>
+        public Vector3 HelpPosition => m_patrol?.HelpPosition ?? Vector3.zero;
         public int WaypointCount => m_patrol?.WaypointCount ?? 0;
         public int ActiveWaypointCount => m_patrol?.ActiveWaypointCount ?? 0;
         public IReadOnlyList<VillagerWaypoint> PatrolWaypoints => m_patrol?.PatrolWaypoints;

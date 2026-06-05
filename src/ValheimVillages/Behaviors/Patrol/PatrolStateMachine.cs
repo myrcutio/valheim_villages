@@ -149,7 +149,7 @@ namespace ValheimVillages.Behaviors.Patrol
             }
 
             var routePoints = graph != null && graph.IsAvailable
-                ? PatrolRouteBuilder.Build(graph.GetBoundaryCells())
+                ? PatrolRouteBuilder.Build(graph.GetBoundaryCells(), m_ai.Memory.BedPosition)
                 : new List<Vector3>();
             if (routePoints.Count >= 3)
             {

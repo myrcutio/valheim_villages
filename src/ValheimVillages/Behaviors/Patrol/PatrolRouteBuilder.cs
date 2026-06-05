@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
+using ValheimVillages.Villager.AI.Pathfinding;
 
 namespace ValheimVillages.Behaviors.Patrol
 {
@@ -53,6 +55,15 @@ namespace ValheimVillages.Behaviors.Patrol
         /// <summary>Distance (m) to shift each vertex inward along its (negated) outward normal.</summary>
         private const float InsetDistance = 0.7f;
 
+        /// <summary>Max inward shift (m) when relocating a vertex off un-walkable wall geometry.</summary>
+        private const float MaxInsetDistance = 3.0f;
+
+        /// <summary>Step (m) to escalate the inward shift while searching for reachable ground.</summary>
+        private const float InsetStep = 0.5f;
+
+        /// <summary>NavMesh.SamplePosition search radius (m) when snapping a candidate vertex.</summary>
+        private const float SampleRadius = 1.0f;
+
         private struct Node
         {
             public Vector3 Pos;
@@ -64,7 +75,8 @@ namespace ValheimVillages.Behaviors.Patrol
         ///     Returns fewer than 3 points only when the input can't form a loop.
         /// </summary>
         public static List<Vector3> Build(
-            List<(string cellId, Vector3 worldCenter, Vector3 outwardDir)> boundaryCells)
+            List<(string cellId, Vector3 worldCenter, Vector3 outwardDir)> boundaryCells,
+            Vector3? navAnchor = null)
         {
             var result = new List<Vector3>();
             if (boundaryCells == null || boundaryCells.Count < 3) return result;
@@ -79,8 +91,31 @@ namespace ValheimVillages.Behaviors.Patrol
             var simplified = NormalDecimate(ring, NormalDecimateDeg);
             if (simplified.Count < 3) simplified = ring;
 
-            foreach (var n in simplified)
-                result.Add(Inset(n, InsetDistance));
+            // Final stage: resolve each vertex to reachable walkable ground. With a
+            // nav anchor (the bed) and a live agent navmesh, escalate the inward
+            // inset until the vertex snaps onto the navmesh AND is reachable from
+            // the anchor — dropping vertices stuck on un-walkable wall junctions
+            // (the failure that parked patrols in NeedsHelp). Without an anchor, or
+            // before the navmesh is baked, fall back to the pure-geometry inset.
+            if (navAnchor.HasValue &&
+                TrySampleAnchor(navAnchor.Value, out var anchor, out var filter))
+            {
+                var dropped = 0;
+                foreach (var n in simplified)
+                    if (TryResolveReachable(n, anchor, filter, out var wp))
+                        result.Add(wp);
+                    else
+                        dropped++;
+                if (dropped > 0)
+                    Plugin.Log?.LogWarning(
+                        $"[PatrolRoute] Dropped {dropped} vertex/vertices with no reachable " +
+                        $"approach within {MaxInsetDistance:F1}m inset (wall-blocked geometry)");
+            }
+            else
+            {
+                foreach (var n in simplified)
+                    result.Add(Inset(n, InsetDistance));
+            }
 
             return result;
         }
@@ -215,6 +250,59 @@ namespace ValheimVillages.Behaviors.Patrol
             if (dir.sqrMagnitude < 1e-4f) return n.Pos;
             dir.Normalize();
             return n.Pos - dir * distance;
+        }
+
+        /// <summary>
+        ///     Build the villager-agent query filter and snap the anchor (bed) onto
+        ///     the agent navmesh. Returns false when the agent isn't registered or
+        ///     the navmesh isn't baked yet — callers then skip reachability checks.
+        /// </summary>
+        private static bool TrySampleAnchor(
+            Vector3 anchor, out Vector3 onMesh, out NavMeshQueryFilter filter)
+        {
+            filter = new NavMeshQueryFilter
+            {
+                agentTypeID = VillagerAgentType.UnityAgentTypeID,
+                areaMask = NavMesh.AllAreas,
+            };
+
+            if (VillagerAgentType.IsRegistered &&
+                NavMesh.SamplePosition(anchor, out var hit, 3f, filter))
+            {
+                onMesh = hit.position;
+                return true;
+            }
+
+            onMesh = anchor;
+            return false;
+        }
+
+        /// <summary>
+        ///     Find the smallest inward inset (from <see cref="InsetDistance" /> up
+        ///     to <see cref="MaxInsetDistance" />) whose snapped position is on the
+        ///     agent navmesh AND reachable from <paramref name="anchor" /> by a
+        ///     complete path. The reachability check is what rejects on-mesh-but-
+        ///     disconnected slivers at wall junctions (where SamplePosition alone
+        ///     would falsely succeed). Returns false if nothing qualifies.
+        /// </summary>
+        private static bool TryResolveReachable(
+            Node n, Vector3 anchor, NavMeshQueryFilter filter, out Vector3 result)
+        {
+            var path = new NavMeshPath();
+            for (var d = InsetDistance; d <= MaxInsetDistance + 1e-3f; d += InsetStep)
+            {
+                var cand = Inset(n, d);
+                if (!NavMesh.SamplePosition(cand, out var hit, SampleRadius, filter)) continue;
+                if (NavMesh.CalculatePath(anchor, hit.position, filter, path) &&
+                    path.status == NavMeshPathStatus.PathComplete)
+                {
+                    result = hit.position;
+                    return true;
+                }
+            }
+
+            result = default;
+            return false;
         }
 
         #endregion

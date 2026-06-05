@@ -145,6 +145,14 @@ namespace ValheimVillages.Villager.AI
                     if (b is ValheimVillages.Behaviors.Work.CraftingBehaviorAdapter cba
                         && cba.Crafting != null)
                         sb.AppendLine($"    note[{b.Tag}]: {cba.Crafting.LastWorkNote}");
+                    if (b is ValheimVillages.Behaviors.Patrol.PerimeterPatrolBehavior patrol
+                        && patrol.HelpWaypointIndex >= 0)
+                    {
+                        var hp = patrol.HelpPosition;
+                        sb.AppendLine(
+                            $"    patrol-help: W{patrol.HelpWaypointIndex} @ " +
+                            $"({hp.x:F1},{hp.y:F1},{hp.z:F1})");
+                    }
                 }
             }
         }

@@ -84,32 +84,6 @@ namespace ValheimVillages.Villager.AI.Navigation
         private static readonly int s_pieceMask =
             LayerMask.GetMask("Default", "static_solid", "piece");
 
-        private static readonly List<NavMeshBuildMarkup> s_emptyMarkups = new();
-
-        // --- Tile grid (WI-2 incremental bake) ---
-        // 16m tiles, zone-aligned: Valheim's zone grid is 64m and both grids
-        // share world origin 0, so 64 = 4x16 makes every 16m tile nest exactly
-        // inside one zone (see VillageZoneLoadingPatch.ZoneSize).
-        internal const float TileSize = 16f;
-
-        // Per-tile bakes are separate NavMeshData; Unity neither stitches them
-        // nor avoids eroding the walkable surface by ~agentRadius at each
-        // bake-bounds edge. Baking each tile over its rect + this skirt makes
-        // adjacent tiles overlap across the seam (skirt must exceed the erosion
-        // distance = agentRadius + NavMeshBakeRadiusBuffer + a margin). TUNABLE:
-        // validate in-game (vv_bake_audit / render_view) that open floors show
-        // no 16m-grid gutters before trusting this value.
-        internal const float TileSeamSkirt = 4f;
-
-        // Cached by the last full BakeVillage so RebakeTiles can re-bake a
-        // subset using the same village bounds / outside-cell flood / agent
-        // settings. s_hasTileCache gates RebakeTiles (false → caller must run a
-        // full BakeVillage first). Reset on Clear (hot reload / unload).
-        private static Bounds s_lastVillageBounds;
-        private static HashSet<long> s_lastOutsideCells;
-        private static NavMeshBuildSettings s_lastSettings;
-        private static bool s_hasTileCache;
-
         private static NavMeshBakeHolder Holder
         {
             get
@@ -220,8 +194,11 @@ namespace ValheimVillages.Villager.AI.Navigation
             // Settings is a local struct copy; modifying it here shapes the
             // baked topology without affecting slot 31's registered agent
             // settings (NavMesh queries, SamplePosition etc. still use the
-            // originals).
-            var settings = NavMesh.GetSettingsByID(VillagerAgentType.UnityAgentTypeID);
+            // originals). Source from VillagerAgentType.BuildSettings (the actual
+            // Humanoid clone, radius 0.40) — NOT NavMesh.GetSettingsByID, which
+            // returns Unity's DEFAULT radius (0.50) and baked the agent ~0.1m too
+            // wide, over-eroding walkable surface against walls.
+            var settings = VillagerAgentType.BuildSettings;
             settings.agentRadius += VillagerSettings.NavMeshBakeRadiusBuffer;
 
             // Enforce the SAME max walkable slope the HNA region builder uses
@@ -338,36 +315,29 @@ namespace ValheimVillages.Villager.AI.Navigation
             s_lastOutsidePhantoms = phantomOutside;
             result.PieceSourceCount = pieceSources.Count;
 
-            // Tiled bake: instead of one monolithic NavMeshData over the whole
-            // village, bake a per-16m-tile NavMeshData so a single tile can be
-            // re-baked incrementally (see RebakeTiles). The village-wide source
-            // lists above remain the authority for triangle EXTRACTION
-            // (RegionBuilder) — only the agent NavMesh is tiled, so region
-            // building is byte-identical to the monolithic design.
+            // Single combined bake: ONE connected NavMeshData over the whole
+            // village (terrain + piece geometry + phantom blockers).
             //
-            // The outside-cell set was flooded ONCE over the village bounds
-            // above (ComputeOutsideCellsForBake). Each tile carves only the
-            // outside cells in its own area (filtered in BakeOneTile); a
-            // per-tile flood would mis-classify an interior tile's whole
-            // interior as outside (the tile edge is not the village hull).
-            //
-            // Tiles bake over their rect + TileSeamSkirt so adjacent tiles'
-            // walkable areas OVERLAP across the shared seam: Unity does not
-            // stitch separate NavMeshData instances and erodes the walkable
-            // surface by ~agentRadius at every bake-bounds edge, so without the
-            // skirt every internal seam would carve a false gutter.
-            s_lastVillageBounds = bounds;
-            s_lastOutsideCells = outsideCells;
-            s_lastSettings = settings;
-            s_hasTileCache = true;
-            var candidateTiles = TilesOverlapping(bounds);
-            var tilesBaked = 0;
-            foreach (var tile in candidateTiles)
-                if (BakeOneTile(tile, settings, bounds.center.y, bounds.size.y, outsideCells))
-                    tilesBaked++;
-            Plugin.Log?.LogInfo(
-                $"[NavMeshBake] Tiled bake: {tilesBaked}/{candidateTiles.Count} tile(s) baked " +
-                $"(tile={TileSize:F0}m, skirt={TileSeamSkirt:F0}m)");
+            // A prior design baked a separate NavMeshData per 16m tile (rect +
+            // skirt) intended for incremental per-tile rebakes. But Unity does NOT
+            // connect overlapping SEPARATE NavMeshData instances — adjacent tiles
+            // became disconnected surfaces, so the agent landed on one tile's
+            // surface and couldn't path onto an overlapping neighbour's (villagers
+            // stalled with PathPartial crossing seams). The incremental path was
+            // never wired up, so the tiling delivered no benefit. One combined bake
+            // keeps the surface fully connected. (A future incremental update
+            // should use NavMeshBuilder.UpdateNavMeshData on this single data,
+            // which preserves connectivity, rather than separate per-tile data.)
+            var combinedSources = new List<NavMeshBuildSource>(
+                terrainSources.Count + pieceSources.Count);
+            combinedSources.AddRange(terrainSources);
+            combinedSources.AddRange(pieceSources);
+            if (combinedSources.Count > 0)
+            {
+                var data = NavMeshBuilder.BuildNavMeshData(
+                    settings, combinedSources, bounds, Vector3.zero, Quaternion.identity);
+                if (data != null) Holder.SetCombined(NavMesh.AddNavMeshData(data));
+            }
 
             pieceSw.Stop();
             result.PieceDurationMs = (float)pieceSw.Elapsed.TotalMilliseconds;
@@ -386,152 +356,6 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (!result.Success) result.FailureReason = "build_returned_null";
             sw.Stop();
             result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
-            return result;
-        }
-
-        /// <summary>
-        ///     A 16m bake tile (grid coords, zone-aligned). The incremental
-        ///     reconcilers (WI-4/WI-5) pass these to <see cref="RebakeTiles" />.
-        /// </summary>
-        public readonly struct TileId : IEquatable<TileId>
-        {
-            public readonly int Tx, Tz;
-            public TileId(int tx, int tz) { Tx = tx; Tz = tz; }
-            public bool Equals(TileId o) => Tx == o.Tx && Tz == o.Tz;
-            public override bool Equals(object o) => o is TileId t && Equals(t);
-            public override int GetHashCode() => unchecked(Tx * 73856093 ^ Tz * 19349663);
-            public override string ToString() => $"({Tx},{Tz})";
-        }
-
-        /// <summary>Tile containing a world position (XZ).</summary>
-        public static TileId TileOf(Vector3 worldPos) => new(
-            Mathf.FloorToInt(worldPos.x / TileSize),
-            Mathf.FloorToInt(worldPos.z / TileSize));
-
-        /// <summary>Every tile whose 16m rect overlaps <paramref name="b" />'s XZ extent.</summary>
-        public static List<TileId> TilesOverlapping(Bounds b)
-        {
-            var txMin = Mathf.FloorToInt(b.min.x / TileSize);
-            var txMax = Mathf.FloorToInt(b.max.x / TileSize);
-            var tzMin = Mathf.FloorToInt(b.min.z / TileSize);
-            var tzMax = Mathf.FloorToInt(b.max.z / TileSize);
-            var list = new List<TileId>((txMax - txMin + 1) * (tzMax - tzMin + 1));
-            for (var tx = txMin; tx <= txMax; tx++)
-            for (var tz = tzMin; tz <= tzMax; tz++)
-                list.Add(new TileId(tx, tz));
-            return list;
-        }
-
-        /// <summary>
-        ///     Re-bake only <paramref name="tiles" /> (incremental path), reusing
-        ///     the village bounds / outside-cell flood / agent settings cached by
-        ///     the last full <see cref="BakeVillage" />. Returns the number of
-        ///     tiles that produced NavMesh data. No-op (returns 0) if no full bake
-        ///     has run yet — the caller must fall back to a full BakeVillage.
-        ///     Does NOT update the extraction source caches
-        ///     (<see cref="s_terrainSources" />/<see cref="s_pieceSources" />); the
-        ///     incremental reconciler owns region re-extraction over the changed
-        ///     window.
-        /// </summary>
-        public static int RebakeTiles(IEnumerable<TileId> tiles)
-        {
-            if (!s_hasTileCache || tiles == null) return 0;
-            if (!VillagerAgentType.IsRegistered) return 0;
-            var rebaked = 0;
-            foreach (var tile in tiles)
-                if (BakeOneTile(tile, s_lastSettings,
-                        s_lastVillageBounds.center.y, s_lastVillageBounds.size.y,
-                        s_lastOutsideCells))
-                    rebaked++;
-            return rebaked;
-        }
-
-        /// <summary>
-        ///     Bake one tile's NavMeshData over its rect + <see cref="TileSeamSkirt" />.
-        ///     Collects terrain + piece sources locally, drops Door/Bed geometry,
-        ///     re-adds bed + outside-cell phantom blockers scoped to the tile, and
-        ///     installs the instance on the Holder (replacing any prior instance
-        ///     for the tile). Removes the tile's instance and returns false when
-        ///     the tile has no sources / the build fails.
-        /// </summary>
-        private static bool BakeOneTile(TileId tile, NavMeshBuildSettings settings,
-            float bakeYCenter, float bakeYSize, HashSet<long> villageOutsideCells)
-        {
-            var tileBounds = TileSkirtBounds(tile, bakeYCenter, bakeYSize);
-
-            var terrain = new List<NavMeshBuildSource>();
-            NavMeshBuilder.CollectSources(tileBounds, s_terrainMask,
-                NavMeshCollectGeometry.PhysicsColliders, 0, s_emptyMarkups, terrain);
-
-            var piece = new List<NavMeshBuildSource>();
-            NavMeshBuilder.CollectSources(tileBounds, s_pieceMask,
-                NavMeshCollectGeometry.PhysicsColliders, 0, s_emptyMarkups, piece);
-
-            // Same filtering as the village-wide pass: doorways bake walkable
-            // (drop the Door hierarchy), bed tops are carved by a phantom (drop
-            // the Bed collider so the blocker wins).
-            piece.RemoveAll(s =>
-                s.component != null && s.component.GetComponentInParent<Door>() != null);
-            piece.RemoveAll(s =>
-                s.component != null && s.component.GetComponentInParent<Bed>() != null);
-            AddBedBlockers(piece, tileBounds);
-
-            // Carve only the outside cells inside this tile's (skirted) bounds.
-            var tileOutside = FilterOutsideCellsToBounds(villageOutsideCells, tileBounds);
-            AddOutsideCellBlockers(piece, tileOutside, tileBounds);
-
-            var combined = new List<NavMeshBuildSource>(terrain.Count + piece.Count);
-            combined.AddRange(terrain);
-            combined.AddRange(piece);
-            if (combined.Count == 0)
-            {
-                Holder.RemoveTile(tile);
-                return false;
-            }
-
-            var data = NavMeshBuilder.BuildNavMeshData(
-                settings, combined, tileBounds, Vector3.zero, Quaternion.identity);
-            if (data == null)
-            {
-                Holder.RemoveTile(tile);
-                return false;
-            }
-
-            Holder.SetTile(tile, NavMesh.AddNavMeshData(data));
-            return true;
-        }
-
-        /// <summary>Tile rect expanded by <see cref="TileSeamSkirt" /> on each XZ side,
-        ///     spanning the village bake Y band.</summary>
-        private static Bounds TileSkirtBounds(TileId t, float yCenter, float ySize)
-        {
-            var minX = t.Tx * TileSize - TileSeamSkirt;
-            var minZ = t.Tz * TileSize - TileSeamSkirt;
-            var maxX = (t.Tx + 1) * TileSize + TileSeamSkirt;
-            var maxZ = (t.Tz + 1) * TileSize + TileSeamSkirt;
-            var b = new Bounds();
-            b.SetMinMax(
-                new Vector3(minX, yCenter - ySize * 0.5f, minZ),
-                new Vector3(maxX, yCenter + ySize * 0.5f, maxZ));
-            return b;
-        }
-
-        /// <summary>Subset of <paramref name="cells" /> (XZ keys) whose cell centre
-        ///     falls within <paramref name="b" />'s XZ extent.</summary>
-        private static HashSet<long> FilterOutsideCellsToBounds(HashSet<long> cells, Bounds b)
-        {
-            var result = new HashSet<long>();
-            if (cells == null) return result;
-            var cell = RegionGraph.LookupCellSize;
-            foreach (var key in cells)
-            {
-                RegionGraph.UnpackXz(key, out var gx, out var gz);
-                var wx = (gx + 0.5f) * cell;
-                var wz = (gz + 0.5f) * cell;
-                if (wx >= b.min.x && wx <= b.max.x && wz >= b.min.z && wz <= b.max.z)
-                    result.Add(key);
-            }
-
             return result;
         }
 
@@ -1165,8 +989,6 @@ namespace ValheimVillages.Villager.AI.Navigation
             s_lastDoorPhantoms = 0;
             s_lastBedPhantoms = 0;
             s_lastOutsidePhantoms = 0;
-            s_lastOutsideCells = null;
-            s_hasTileCache = false;
         }
 
         public struct BakeResult
@@ -1200,61 +1022,37 @@ namespace ValheimVillages.Villager.AI.Navigation
     /// </summary>
     internal class NavMeshBakeHolder : MonoBehaviour
     {
-        // One NavMeshDataInstance per 16m bake tile. Instances live here (on the
-        // DontDestroyOnLoad holder) rather than in NavMeshBakeManager's statics
-        // so a hot-reloaded assembly can find this holder by name and Remove the
-        // PRIOR assembly's instances (via OnDestroy) before installing fresh
-        // ones — otherwise stale NavMesh data stacks layer-on-layer across
-        // reloads. The dict is private to each holder, so the prior assembly's
-        // (different) TileId type is irrelevant to teardown.
-        private readonly Dictionary<NavMeshBakeManager.TileId, NavMeshDataInstance> m_tiles = new();
+        // The single combined villager NavMeshData instance. Lives here (on the
+        // DontDestroyOnLoad holder) rather than in NavMeshBakeManager's statics so
+        // a hot-reloaded assembly can find this holder by name and Remove the PRIOR
+        // assembly's instance (via OnDestroy) before installing a fresh one —
+        // otherwise stale NavMesh data stacks layer-on-layer across reloads.
+        private NavMeshDataInstance m_combined;
 
-        internal bool HasAny
-        {
-            get
-            {
-                foreach (var inst in m_tiles.Values)
-                    if (inst.valid)
-                        return true;
-                return false;
-            }
-        }
+        internal bool HasAny => m_combined.valid;
 
         private void OnDestroy()
         {
-            var removed = 0;
-            foreach (var inst in m_tiles.Values)
-                if (inst.valid)
-                {
-                    inst.Remove();
-                    removed++;
-                }
-
-            m_tiles.Clear();
-            if (removed > 0)
+            if (m_combined.valid)
+            {
+                m_combined.Remove();
                 Plugin.Log?.LogInfo(
-                    $"[NavMeshBakeHolder] OnDestroy: removed {removed} orphaned NavMesh tile instances");
+                    "[NavMeshBakeHolder] OnDestroy: removed orphaned NavMesh instance");
+            }
+
+            m_combined = default;
         }
 
-        internal void SetTile(NavMeshBakeManager.TileId tile, NavMeshDataInstance instance)
+        internal void SetCombined(NavMeshDataInstance instance)
         {
-            RemoveTile(tile);
-            m_tiles[tile] = instance;
-        }
-
-        internal void RemoveTile(NavMeshBakeManager.TileId tile)
-        {
-            if (!m_tiles.TryGetValue(tile, out var inst)) return;
-            if (inst.valid) inst.Remove();
-            m_tiles.Remove(tile);
+            RemoveAll();
+            m_combined = instance;
         }
 
         internal void RemoveAll()
         {
-            foreach (var inst in m_tiles.Values)
-                if (inst.valid)
-                    inst.Remove();
-            m_tiles.Clear();
+            if (m_combined.valid) m_combined.Remove();
+            m_combined = default;
         }
     }
 }
