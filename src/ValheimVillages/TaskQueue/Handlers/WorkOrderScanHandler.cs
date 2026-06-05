@@ -119,9 +119,17 @@ namespace ValheimVillages.TaskQueue.Handlers
                     continue;
                 }
 
-                // Check ingredients
+                // Find crafting station (check for physical station override from virtual recipes)
+                var physicalStation = VirtualRecipeLoader.GetPhysicalStation(recipe.name);
+
+                // Check ingredients. Farm orders are EXEMPT: a ready crop is
+                // harvested with no ingredients (BuildFarmingContext checks harvest
+                // before planting), and the planting fallback validates seeds
+                // itself. Gating here would block harvesting a grown crop just
+                // because no seeds are stocked (e.g. ready turnips with an empty
+                // TurnipSeeds shelf).
                 var ingredients = ContainerScanner.FindIngredients(containers, recipe);
-                if (ingredients == null)
+                if (ingredients == null && physicalStation != "farm")
                 {
                     rejections.Add(new RejectionRecord
                     {
@@ -135,8 +143,6 @@ namespace ValheimVillages.TaskQueue.Handlers
                     continue;
                 }
 
-                // Find crafting station (check for physical station override from virtual recipes)
-                var physicalStation = VirtualRecipeLoader.GetPhysicalStation(recipe.name);
                 Vector3? stationPos;
                 string stationDesc;
 

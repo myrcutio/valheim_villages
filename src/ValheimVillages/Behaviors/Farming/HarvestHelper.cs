@@ -65,9 +65,12 @@ namespace ValheimVillages.Behaviors.Farming
         }
 
         /// <summary>
-        ///     Find a harvestable Pickable near the Farm PoIs of the village that
-        ///     contains <paramref name="currentPosition" />. Farms come from the
-        ///     shared village registry, not per-villager memory.
+        ///     Find a harvestable Pickable near <paramref name="currentPosition" />.
+        ///     Scans directly around that position AND around the village's Farm
+        ///     PoIs. The direct scan is essential: a GROWN crop is a Pickable_X
+        ///     (e.g. Pickable_Onion) that no longer registers as a Farm PoI — only
+        ///     saplings / cultivated ground do — so a Farm-PoI-only search misses
+        ///     exactly the crops that are ready to harvest.
         /// </summary>
         public static Pickable FindNearestHarvestableCrop(
             Vector3 currentPosition, string outputItemName, float radius)
@@ -75,10 +78,12 @@ namespace ValheimVillages.Behaviors.Farming
             Pickable nearest = null;
             var nearestDist = float.MaxValue;
 
+            var anchors = new List<Vector3> { currentPosition };
             foreach (var loc in VillagePoiRegistry.GetPois(currentPosition, LocationType.Farm))
-            {
-                var crops = FindHarvestableCrops(loc.Position, radius, outputItemName);
-                foreach (var crop in crops)
+                anchors.Add(loc.Position);
+
+            foreach (var anchor in anchors)
+                foreach (var crop in FindHarvestableCrops(anchor, radius, outputItemName))
                 {
                     var dist = Vector3.Distance(currentPosition, crop.transform.position);
                     if (dist < nearestDist)
@@ -87,7 +92,6 @@ namespace ValheimVillages.Behaviors.Farming
                         nearest = crop;
                     }
                 }
-            }
 
             return nearest;
         }

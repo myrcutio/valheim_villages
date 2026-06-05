@@ -32,13 +32,40 @@ namespace ValheimVillages.TaskQueue.Handlers
             var outputItem = match.ItemPrefabName;
             var bedPos = ai.BedPosition;
 
-            // Find a farm location from the village registry, nearest the bed.
+            // HARVEST FIRST: a ready crop in the village is harvestable work on its
+            // own — it does NOT need a farm location. A grown crop is a Pickable_X
+            // that no longer registers as a Farm PoI, so gating harvest on farm
+            // detection (as planting does, below) would miss exactly the crops
+            // that are ready. Anchor the scan on the bed (village centre) so the
+            // farmer's wandering doesn't move it out of range.
+            var harvestTarget = HarvestHelper.FindNearestHarvestableCrop(
+                bedPos, outputItem, HarvestHelper.HarvestScanRadius);
+
+            if (harvestTarget != null)
+            {
+                Plugin.Log?.LogInfo(
+                    $"[FarmScan:{ai.NpcName}] Found harvestable {outputItem} at " +
+                    $"{harvestTarget.transform.position}");
+                return new FarmingContext
+                {
+                    WorkOrder = match,
+                    Recipe = recipe,
+                    SourceContainer = match.SourceContainer,
+                    IngredientSources = null, // Not planting
+                    FarmPosition = harvestTarget.transform.position,
+                    HarvestedCount = existingCount,
+                    IsHarvestingPass = true,
+                    CurrentHarvestTarget = harvestTarget,
+                };
+            }
+
+            // PLANTING needs a farm location. Find a Farm PoI nearest the bed, or
+            // fall back to cultivated ground (terrain Heightmap, not a discoverable
+            // object). No farm location and no ready crop -> nothing to do.
             var farmLoc = VillagePoiRegistry.GetPois(bedPos, LocationType.Farm)
                 .OrderBy(l => Vector3.Distance(bedPos, l.Position))
                 .FirstOrDefault();
 
-            // Fallback: cultivated ground is terrain (Heightmap), not a discoverable object.
-            // If no Farm POI exists, search for cultivated ground near the bed.
             Vector3 farmPosition;
             if (farmLoc != null)
             {
@@ -50,34 +77,13 @@ namespace ValheimVillages.TaskQueue.Handlers
                 if (!cultivatedPos.HasValue)
                 {
                     Plugin.Log?.LogDebug(
-                        $"[FarmScan:{ai.NpcName}] No farm location or cultivated ground found");
+                        $"[FarmScan:{ai.NpcName}] No ready crop, farm location, or cultivated ground found");
                     return null;
                 }
 
                 farmPosition = cultivatedPos.Value;
                 Plugin.Log?.LogInfo(
                     $"[FarmScan:{ai.NpcName}] Using cultivated ground at {farmPosition}");
-            }
-
-            // Check for harvestable crops first
-            var harvestTarget = HarvestHelper.FindNearestHarvestableCrop(
-                ai.Position, outputItem, HarvestHelper.HarvestScanRadius);
-
-            if (harvestTarget != null)
-            {
-                Plugin.Log?.LogInfo(
-                    $"[FarmScan:{ai.NpcName}] Found harvestable {outputItem}");
-                return new FarmingContext
-                {
-                    WorkOrder = match,
-                    Recipe = recipe,
-                    SourceContainer = match.SourceContainer,
-                    IngredientSources = null, // Not planting
-                    FarmPosition = farmPosition,
-                    HarvestedCount = existingCount,
-                    IsHarvestingPass = true,
-                    CurrentHarvestTarget = harvestTarget,
-                };
             }
 
             // No harvestable crops: check if we can plant
