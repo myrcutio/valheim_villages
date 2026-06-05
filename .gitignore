@@ -9,3 +9,5 @@ openspec
 debug.log
 .claude/scratch/
 screenshots
+# Decompiled Valheim engine sources (reference only, regenerate via scripts/decompile-refs.sh)
+decompiled-refs/

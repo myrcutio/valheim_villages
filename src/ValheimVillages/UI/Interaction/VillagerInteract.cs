@@ -66,7 +66,11 @@ namespace ValheimVillages.UI.Interaction
 
             var stateInfo = GetStateInfo();
 
-            return $"{name}\n{stateInfo}\n[<color=yellow><b>E</b></color>] Talk";
+            // $KEY_Use resolves to the bound Use key on keyboard (E) or the
+            // gamepad glyph (A) once run through Localize — same as native
+            // station hover prompts. A literal "E" never adapts to a controller.
+            return Localization.instance.Localize(
+                $"{name}\n{stateInfo}\n[<color=yellow><b>$KEY_Use</b></color>] Talk");
         }
 
         /// <summary>
