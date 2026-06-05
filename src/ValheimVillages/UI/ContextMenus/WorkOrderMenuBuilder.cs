@@ -11,6 +11,8 @@ namespace ValheimVillages.UI.ContextMenus
     public struct WorkOrderMenuElements
     {
         public GameObject Root;
+        public GameObject BackButton;
+        public GameObject DeleteButton;
         public Image IconImage;
         public Slider MinSlider;
         public InputField MinInput;
@@ -51,6 +53,7 @@ namespace ValheimVillages.UI.ContextMenus
         public static WorkOrderMenuElements Build(
             Transform parent,
             UnityAction onBack,
+            UnityAction onDelete,
             UnityAction<float> onMinSlider, UnityAction<float> onMaxSlider,
             UnityAction<string> onMinInput, UnityAction<string> onMaxInput)
         {
@@ -71,6 +74,22 @@ namespace ValheimVillages.UI.ContextMenus
                 brt.pivot = new Vector2(1f, 1f);
                 brt.sizeDelta = new Vector2(120f, 38f);
                 brt.anchoredPosition = new Vector2(-26f, -16f);
+                elements.BackButton = backBtn.gameObject;
+            }
+
+            // Delete button, top-left — mirror of Back, for removing the order.
+            var deleteBtn = VillagerUIFactory.CreateButton(root.transform, "Delete Order", onDelete);
+            if (deleteBtn != null)
+            {
+                var dle = deleteBtn.GetComponent<LayoutElement>()
+                          ?? deleteBtn.gameObject.AddComponent<LayoutElement>();
+                dle.ignoreLayout = true;
+                var drt = deleteBtn.GetComponent<RectTransform>();
+                drt.anchorMin = drt.anchorMax = new Vector2(0f, 1f);
+                drt.pivot = new Vector2(0f, 1f);
+                drt.sizeDelta = new Vector2(140f, 38f);
+                drt.anchoredPosition = new Vector2(26f, -16f);
+                elements.DeleteButton = deleteBtn.gameObject;
             }
 
             // Header: order icon on the left of the station/item info column.

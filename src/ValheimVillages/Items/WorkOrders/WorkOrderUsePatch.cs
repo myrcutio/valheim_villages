@@ -49,6 +49,21 @@ namespace ValheimVillages.Items.WorkOrders
     }
 
     /// <summary>
+    ///     While the work order editor is open, suppress the inventory grid's own
+    ///     gamepad handling (it reads ZInput directly each frame) so stick/X drive
+    ///     the editor instead of moving the grid selection or re-using items.
+    /// </summary>
+    [HarmonyPatch(typeof(InventoryGrid), "UpdateGamepad")]
+    public static class WorkOrderGridInputBlockPatch
+    {
+        [HarmonyPrefix]
+        public static bool Prefix()
+        {
+            return !WorkOrderMenu.IsVisible;
+        }
+    }
+
+    /// <summary>
     ///     Close the docked work order editor whenever the inventory/chest UI
     ///     closes, so it never lingers over the world.
     /// </summary>
