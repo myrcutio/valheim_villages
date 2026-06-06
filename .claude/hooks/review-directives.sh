@@ -105,7 +105,7 @@ EOF
 review_dir="$(mktemp -d 2>/dev/null || echo /tmp)"
 result="$(printf '%s\n%s' "$instructions" "$review_input" | ( cd "$review_dir" && VV_DIRECTIVE_REVIEW=1 "$CLAUDE_BIN" -p \
   --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
-  --settings '{"disableAllHooks":true}' \
+  --settings "$review_settings" \
   --model sonnet ) 2>/dev/null || true)"
 [ "$review_dir" != "/tmp" ] && rmdir "$review_dir" 2>/dev/null || true
 trimmed="$(printf '%s' "$result" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -114,6 +114,9 @@ if [ -z "$trimmed" ]; then
   printf '{"systemMessage":"directive-review hook: review produced no output; skipped"}\n'
   exit 0
 fi
+
+# A verdict completed — record this diff so an unchanged tree is not re-reviewed.
+printf '%s' "$diff_hash" > "$state_file"
 
 case "$trimmed" in
   COMPLIANT*) exit 0 ;;
