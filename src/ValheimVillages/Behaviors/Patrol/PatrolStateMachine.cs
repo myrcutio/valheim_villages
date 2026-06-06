@@ -167,9 +167,38 @@ namespace ValheimVillages.Behaviors.Patrol
             // village_index, rebuilt by the partition). No per-guard ZDO restore.
             var graph = VillageRegistry.FindById(villageId)?.Graph;
 
-            var routePoints = graph != null && graph.IsAvailable
-                ? PatrolRouteBuilder.Build(graph.GetBoundaryCells(), m_ai.Memory.BedPosition)
-                : new List<Vector3>();
+            // No graph yet: enqueue the partition task (once) and wait. This is the
+            // ONLY condition that warrants a partition — an available graph that
+            // can't yet yield a route is a transient navmesh state, not a missing
+            // graph, so it must not re-trigger partitions (which would loop with the
+            // post-partition patrol-route rebuild).
+            if (graph == null || !graph.IsAvailable)
+            {
+                if (!m_hnaPartitionRequested)
+                {
+                    m_hnaPartitionRequested = true;
+                    var bedPos = m_ai.Memory.BedPosition;
+                    Plugin.Log?.LogInfo($"[Patrol:{m_villager.VillagerName}] HNA graph unavailable, requesting hna_partition build");
+                    GlobalTaskQueue.Enqueue(new VillagerTask
+                    {
+                        Name = "hna_partition",
+                        SourceId = $"patrol:{m_ai.UniqueId}",
+                        Priority = TaskPriority.Medium,
+                        TimeoutSeconds = TaskSettings.DefaultTimeoutSeconds,
+                        Attributes = new Dictionary<string, string>
+                        {
+                            { "village_id", villageId },
+                            { "anchor_x", bedPos.x.ToString("F2", CultureInfo.InvariantCulture) },
+                            { "anchor_z", bedPos.z.ToString("F2", CultureInfo.InvariantCulture) },
+                        },
+                    });
+                }
+
+                return;
+            }
+
+            var routePoints = PatrolRouteBuilder.Build(
+                graph.GetBoundaryCells(), m_ai.Memory.BedPosition);
             if (routePoints.Count >= 3)
             {
                 m_patrolWaypoints = routePoints
@@ -181,26 +210,12 @@ namespace ValheimVillages.Behaviors.Patrol
                 return;
             }
 
-            // HNA graph unavailable: enqueue the partition task and wait
-            if (!m_hnaPartitionRequested)
-            {
-                m_hnaPartitionRequested = true;
-                var bedPos = m_ai.Memory.BedPosition;
-                Plugin.Log?.LogInfo($"[Patrol:{m_villager.VillagerName}] HNA graph unavailable, requesting hna_partition build");
-                GlobalTaskQueue.Enqueue(new VillagerTask
-                {
-                    Name = "hna_partition",
-                    SourceId = $"patrol:{m_ai.UniqueId}",
-                    Priority = TaskPriority.Medium,
-                    TimeoutSeconds = TaskSettings.DefaultTimeoutSeconds,
-                    Attributes = new Dictionary<string, string>
-                    {
-                        { "village_id", villageId },
-                        { "anchor_x", bedPos.x.ToString("F2", CultureInfo.InvariantCulture) },
-                        { "anchor_z", bedPos.z.ToString("F2", CultureInfo.InvariantCulture) },
-                    },
-                });
-            }
+            // Graph is available but Build returned no reachability-verified loop —
+            // the agent navmesh is still settling after a rebake (Build returns empty
+            // until it can be queried), or every boundary vertex currently resolves
+            // unreachable. Do NOT mark discovery complete with an unverified route and
+            // do NOT enqueue another partition. Stay in discovery; UpdatePatrolAI
+            // re-calls StartDiscovery each tick until a filtered route is produced.
         }
 
         private void CompleteHnaDiscovery()

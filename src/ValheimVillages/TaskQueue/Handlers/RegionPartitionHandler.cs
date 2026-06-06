@@ -377,6 +377,17 @@ namespace ValheimVillages.TaskQueue.Handlers
             village.SaveGraph();
             VillageAreaManager.RefreshFromVillage(village);
 
+            // The boundary may have grown or shrunk (e.g. the player walled off a
+            // section). InvalidatePathsAfterRebake above only cleared the low-level
+            // NavMeshAgent path; each patroller's cached waypoint list still traces
+            // the PRE-change boundary. Re-derive every patrol route from the fresh
+            // graph so a guard stops marching into a now-sealed area. (Done here,
+            // after SetGraph + SaveGraph, so StartDiscovery reads the committed graph.)
+            var routesRebuilt = VillagerAIManager.ResetPatrolRoutesAfterRepartition();
+            if (routesRebuilt > 0)
+                Plugin.Log?.LogInfo(
+                    $"[Region] Rebuilt patrol routes for {routesRebuilt} patroller(s) after repartition");
+
             return TaskResult.Ok(new Dictionary<string, string>
             {
                 { "regions", combinedRegionIds.Count.ToString() },

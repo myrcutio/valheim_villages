@@ -112,6 +112,33 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
+        ///     Rebuild every patroller's route from the freshly repartitioned region
+        ///     graph. Call after a partition completes: the boundary may have grown
+        ///     or shrunk (e.g. the player walled off a section), but the patrol
+        ///     waypoint list is cached at discovery time and is otherwise only
+        ///     re-derived by <c>vv_patrol_reset</c> or the one-shot stuck-waypoint
+        ///     auto-heal. Neither of those fires when the OLD waypoints stay
+        ///     individually reachable on the new NavMesh, so without this the guard
+        ///     keeps patrolling the pre-change route — straight into a now-sealed
+        ///     area. <see cref="InvalidatePathsAfterRebake" /> only clears the
+        ///     low-level NavMeshAgent path; it does not touch the waypoint list.
+        ///     Returns count for log.
+        /// </summary>
+        public static int ResetPatrolRoutesAfterRepartition()
+        {
+            var count = 0;
+            foreach (var ai in ActiveVillagers.Values)
+            {
+                var patrol = ai?.GetBehavior<Behaviors.Patrol.PerimeterPatrolBehavior>();
+                if (patrol == null) continue;
+                patrol.ResetDiscovery();
+                count++;
+            }
+
+            return count;
+        }
+
+        /// <summary>
         ///     Clear all registrations (e.g. on world unload).
         /// </summary>
         [RegisterCleanup]

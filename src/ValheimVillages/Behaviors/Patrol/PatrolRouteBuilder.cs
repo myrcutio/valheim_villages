@@ -91,15 +91,27 @@ namespace ValheimVillages.Behaviors.Patrol
             var simplified = NormalDecimate(ring, NormalDecimateDeg);
             if (simplified.Count < 3) simplified = ring;
 
-            // Final stage: resolve each vertex to reachable walkable ground. With a
-            // nav anchor (the bed) and a live agent navmesh, escalate the inward
-            // inset until the vertex snaps onto the navmesh AND is reachable from
-            // the anchor — dropping vertices stuck on un-walkable wall junctions
-            // (the failure that parked patrols in NeedsHelp). Without an anchor, or
-            // before the navmesh is baked, fall back to the pure-geometry inset.
-            if (navAnchor.HasValue &&
-                TrySampleAnchor(navAnchor.Value, out var anchor, out var filter))
+            // Final stage: resolve each vertex to reachable walkable ground.
+            if (navAnchor.HasValue)
             {
+                // A guard route (anchor supplied) MUST contain only cells the agent
+                // can actually reach from home — reachability is a hard gate, never
+                // best-effort. Two ways a boundary cell is unreachable: it sits on
+                // un-walkable wall-junction geometry, or it belongs to a region the
+                // region graph links in (e.g. a "Slope" link) but the baked agent
+                // navmesh doesn't actually connect (raised/walled-off ground). Both
+                // are rejected by the PathComplete check in TryResolveReachable.
+                //
+                // If the agent navmesh isn't queryable yet (just after a rebake the
+                // slot-31 agent briefly deregisters / the mesh is mid-heal), we
+                // CANNOT verify reachability — so return nothing rather than emit an
+                // unverified route. The caller (PatrolStateMachine) treats an empty
+                // result as "not ready" and retries on a later tick, once the mesh
+                // settles. This is the invariant: a COMPLETED patrol route never
+                // contains a vertex unreachable from the bed.
+                if (!TrySampleAnchor(navAnchor.Value, out var anchor, out var filter))
+                    return result; // empty — discovery retries when the navmesh is ready
+
                 var dropped = 0;
                 foreach (var n in simplified)
                     if (TryResolveReachable(n, anchor, filter, out var wp))
@@ -108,11 +120,13 @@ namespace ValheimVillages.Behaviors.Patrol
                         dropped++;
                 if (dropped > 0)
                     Plugin.Log?.LogWarning(
-                        $"[PatrolRoute] Dropped {dropped} vertex/vertices with no reachable " +
-                        $"approach within {MaxInsetDistance:F1}m inset (wall-blocked geometry)");
+                        $"[PatrolRoute] Dropped {dropped} vertex/vertices unreachable from the " +
+                        $"bed (wall-junction geometry or graph link the navmesh doesn't honor)");
             }
             else
             {
+                // No anchor: caller wants the pure-geometry perimeter for display
+                // (village map / area bounds), not a walkable guard route.
                 foreach (var n in simplified)
                     result.Add(Inset(n, InsetDistance));
             }
