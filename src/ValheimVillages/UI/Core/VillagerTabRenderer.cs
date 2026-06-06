@@ -159,23 +159,81 @@ namespace ValheimVillages.UI.Core
 
             UpdateMapImage(descPanel, detail?.MapTexture);
 
-            if (gui.m_craftButton != null)
-            {
-                var hasAction = detail?.OnAction != null;
-                gui.m_craftButton.interactable = hasAction;
-                gui.m_craftButton.gameObject.SetActive(hasAction);
-                if (hasAction)
-                {
-                    VillagerUIFactory.SetTMPText(
-                        gui.m_craftButton.gameObject,
-                        detail.ActionText ?? "Action");
-                    gui.m_craftButton.onClick.RemoveAllListeners();
-                    gui.m_craftButton.onClick.AddListener(() =>
-                        detail.OnAction?.Invoke());
-                }
-            }
+            ApplyTabAction(gui, detail);
 
             HideDescriptionSubElements(gui);
+        }
+
+        /// <summary>The per-host action button for custom tabs (cloned from Craft).</summary>
+        private GameObject m_actionButton;
+
+        /// <summary>
+        ///     Render the active tab's action on a dedicated cloned button rather than
+        ///     hijacking Valheim's native <see cref="InventoryGui.m_craftButton" />.
+        ///     The native button is shared by both tab hosts (villager + registry), the
+        ///     player's own crafting, and the Order-button swap — mutating its onClick
+        ///     leaked actions across sessions (e.g. a registry "Recruit" binding firing
+        ///     on the villager Orders tab). We only hide the native button while a custom
+        ///     tab is up; its listeners/text are never touched. Restored in
+        ///     <see cref="RestoreCraftingPanel" /> / <see cref="TeardownTabHandler" />.
+        /// </summary>
+        private void ApplyTabAction(InventoryGui gui, TabDetailDataUI detail)
+        {
+            #region deletewhendone
+            if (gui.m_craftButton == null) return;
+            #endregion
+            
+            var hasAction = detail?.OnAction != null;
+
+            // The native craft button is irrelevant on a custom tab — hide it (without
+            // touching its onClick/text). Its active state is restored on teardown.
+            gui.m_craftButton.gameObject.SetActive(false);
+
+            if (!hasAction)
+            {
+                if (m_actionButton != null) m_actionButton.SetActive(false);
+                return;
+            }
+
+            EnsureActionButton(gui);
+            if (m_actionButton == null) return;
+
+            VillagerUIFactory.SetTMPText(m_actionButton, detail.ActionText ?? "Action");
+
+            var btn = m_actionButton.GetComponent<Button>();
+            if (btn != null)
+            {
+                btn.interactable = true;
+                btn.onClick.RemoveAllListeners();
+                btn.onClick.AddListener(() => detail.OnAction?.Invoke());
+            }
+            
+            m_actionButton.SetActive(true);
+        }
+
+        /// <summary>Clone the action button once from the native Craft button.</summary>
+        private void EnsureActionButton(InventoryGui gui)
+        {   
+            if (m_actionButton != null) return;
+            if (gui.m_craftButton == null) return;
+            m_actionButton = Object.Instantiate(
+                gui.m_craftButton.gameObject, gui.m_craftButton.transform.parent);
+            m_actionButton.name = "VV_TabActionButton";
+            m_actionButton.SetActive(false);
+        }
+
+        /// <summary>Hide the cloned action button (e.g. when leaving a custom tab).</summary>
+        private void HideActionButton()
+        {
+            if (m_actionButton != null) m_actionButton.SetActive(false);
+        }
+
+        /// <summary>Destroy the cloned action button (host teardown).</summary>
+        private void DestroyActionButton()
+        {
+            if (m_actionButton == null) return;
+            Destroy(m_actionButton);
+            m_actionButton = null;
         }
 
         /// <summary>
@@ -254,7 +312,7 @@ namespace ValheimVillages.UI.Core
 
             string[] toHide =
             {
-                "SelectVariant", "CraftType", "UpgradePanel",
+                "SelectVariant", "CraftType", "UpgradePanel", "UpradePanel",
                 "OLD_QualityPanel", "requirements",
             };
             foreach (var name in toHide)
@@ -354,6 +412,11 @@ namespace ValheimVillages.UI.Core
                 if (kvp.Key != null)
                     kvp.Key.gameObject.SetActive(kvp.Value);
             m_childSnapshot.Clear();
+
+            // Our cloned action button is the custom-tab surface; hide it and hand the
+            // native craft button back. We never mutated the native button's listeners,
+            // so it returns to normal crafting untouched.
+            HideActionButton();
 
             if (gui?.m_craftButton != null)
                 gui.m_craftButton.gameObject.SetActive(true);

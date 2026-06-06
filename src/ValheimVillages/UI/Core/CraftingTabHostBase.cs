@@ -267,6 +267,8 @@ namespace ValheimVillages.UI.Core
             // Trigger-hint glyphs are children of the cloned buttons just
             // destroyed; just drop our references.
             m_triggerHints.Clear();
+            
+            DestroyActionButton();
 
             var gui = InventoryGui.instance;
             if (gui == null) return;
@@ -286,7 +288,7 @@ namespace ValheimVillages.UI.Core
             for (var i = tabParent.childCount - 1; i >= 0; i--)
             {
                 var child = tabParent.GetChild(i);
-                if (child.name.StartsWith("VV_Tab_"))
+                if (child.name.StartsWith("VV_"))
                     Destroy(child.gameObject);
             }
 

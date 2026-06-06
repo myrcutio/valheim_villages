@@ -131,16 +131,6 @@ namespace ValheimVillages.Items.WorkOrders
             BringGlyphToFront(gui.m_craftButton.gameObject);
             BringGlyphToFront(_workOrderButton);
 
-            // Render the Order button beneath the Craft button so it can't occlude
-            // the Craft glyph. They don't overlap (Order is stacked above Craft with
-            // a gap), and both glyphs stay children of their buttons — so they still
-            // hide with their button (e.g. the Craft glyph during a craft).
-            var craftT = gui.m_craftButton.transform;
-            var orderT = _workOrderButton.transform;
-            if (craftT.parent == orderT.parent
-                && orderT.GetSiblingIndex() > craftT.GetSiblingIndex())
-                orderT.SetSiblingIndex(craftT.GetSiblingIndex());
-
             // The recipe list's scroll viewport (parent of the scrolling content).
             var listViewport = gui.m_recipeListRoot != null ? gui.m_recipeListRoot.parent : null;
             if (listViewport != null) s_listFrame = CreateFocusFrame(listViewport);
@@ -504,9 +494,30 @@ namespace ValheimVillages.Items.WorkOrders
             }
         }
 
+        /// <summary>
+        ///     True while the Order button stands in for the Craft button (virtual
+        ///     villager/registry station). Native <see cref="InventoryGui" />.UpdateRecipe
+        ///     re-activates the Craft button every idle frame, so a per-frame postfix
+        ///     uses this to re-hide it (visibility itself is set on UpdateCraftingPanel
+        ///     events). False when Order is stacked above Craft (physical station).
+        /// </summary>
+        private static bool _orderReplacesCraft;
+
         private static void UpdateButtonVisibility(InventoryGui gui)
         {
+            _orderReplacesCraft = false;
+            
             if (_workOrderButton == null || gui.m_craftButton == null) return;
+
+            // The Village Registry shares this crafting panel but has no work orders
+            // (its "$vv_village_registry" station only hosts the Roster/Add/Revive
+            // tabs). Stand down entirely so the Order button never appears over the
+            // registry's own cloned action button.
+            if (UI.Core.RegistryTabManager.IsActive)
+            {
+                _workOrderButton.SetActive(false);
+                return;
+            }
 
             // Custom tabs (Info, Debug) manage the craft button area themselves;
             // hide the work order button so it doesn't cover the tab's action button.
@@ -517,8 +528,14 @@ namespace ValheimVillages.Items.WorkOrders
             }
 
             // No work orders on the Upgrade tab — you upgrade existing gear there,
-            // you don't queue production of it. (InUpradeTab is Valheim's typo.)
-            if (gui.InUpradeTab())
+            // you don't queue production of it. While the villager UI drives the
+            // panel, read the tab from its TabHandler: the native InUpradeTab() flag
+            // (m_tabUpgrade.interactable) desyncs from our cloned tabs and wrongly
+            // reports "upgrade" on the Orders tab. (InUpradeTab is Valheim's typo.)
+            var onUpgradeTab = VillagerTabManager.IsActive
+                ? VillagerTabManager.IsUpgradeTabActive
+                : gui.InUpradeTab();
+            if (onUpgradeTab)
             {
                 _workOrderButton.SetActive(false);
                 return;
@@ -538,7 +555,10 @@ namespace ValheimVillages.Items.WorkOrders
 
             if (isVirtual)
             {
-                // Virtual station: replace Craft with Order (same slot, native look)
+                // Virtual station: replace Craft with Order (same slot, native look).
+                // _orderReplacesCraft drives the per-frame re-hide of the Craft button
+                // (UpdateRecipe re-activates it every idle frame).
+                _orderReplacesCraft = true;
                 gui.m_craftButton.gameObject.SetActive(false);
                 _workOrderButton.SetActive(true);
                 PositionWorkOrderButtonAsCraftReplacement(gui);

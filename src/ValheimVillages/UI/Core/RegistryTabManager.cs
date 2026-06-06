@@ -20,6 +20,14 @@ namespace ValheimVillages.UI.Core
         protected override RegistryContext CurrentSubject => m_context;
         protected override bool HasSubject => m_context != null;
 
+        /// <summary>
+        ///     Whether the registry UI is currently driving the shared crafting panel.
+        ///     Lets <see cref="Items.WorkOrders.CraftingStationPatch" /> stand down (the
+        ///     registry station is "$vv_"-named but has no work orders, so the Order
+        ///     button must not appear over the registry's own action buttons).
+        /// </summary>
+        public static bool IsActive => s_instance != null && s_instance.m_active;
+
         public static void Activate(RegistryContext context)
         {
             EnsureInstance();

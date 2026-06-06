@@ -31,6 +31,23 @@ namespace ValheimVillages.UI.Core
             s_instance != null && s_instance.m_active &&
             !s_instance.m_hasCraftingRecipes;
 
+        /// <summary>Whether the villager crafting UI is currently driving the panel.</summary>
+        public static bool IsActive => s_instance != null && s_instance.m_active;
+
+        /// <summary>
+        ///     True when the active tab is the cloned native Upgrade tab (the slot just
+        ///     before the first custom tab). Callers must use this instead of
+        ///     <see cref="InventoryGui.InUpradeTab" />: that native flag tracks the
+        ///     craft/upgrade buttons' interactable state, which our TabHandler-driven
+        ///     clones never toggle — so it desyncs and wrongly reports "upgrade" while
+        ///     we sit on the Orders tab, suppressing the Order button.
+        /// </summary>
+        public static bool IsUpgradeTabActive =>
+            s_instance != null && s_instance.m_active &&
+            s_instance.m_hasCraftingRecipes &&
+            s_instance.m_tabHandler != null &&
+            s_instance.m_tabHandler.GetActiveTab() == s_instance.m_firstCustomTabIndex - 1;
+
         public static void Activate(
             VillagerBehaviorBridge villager, bool hasCraftingRecipes)
         {
