@@ -152,6 +152,19 @@ namespace ValheimVillages.Villager.AI
                 Plugin.Log?.LogWarning($"[VillagerAI] base.Awake() threw: {ex.GetType().Name}: {ex.Message}");
             }
 
+            // base.Awake() resolves m_character and registers the BaseAI RPCs. If it aborted
+            // (e.g. a duplicate RPC registration), m_character is null and every BaseAI tick
+            // — UpdateRegeneration, MoveTo — would NRE once per frame. Don't activate a
+            // half-initialised AI: fail loud and bail. With the native-component cleanup in
+            // NativeNpcStripper this should no longer trigger; it's a backstop, not the fix.
+            if (m_character == null)
+            {
+                Plugin.Log?.LogError(
+                    $"[VillagerAI] base.Awake() did not complete (m_character is null) on '{name}'; " +
+                    "AI will not activate. Indicates a native-component cleanup or double-init regression.");
+                return;
+            }
+
             if (VillagerAgentType.EnsureRegistered())
                 m_pathAgentType = VillagerAgentType.AgentType;
 

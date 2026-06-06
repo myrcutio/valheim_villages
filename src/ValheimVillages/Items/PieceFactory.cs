@@ -206,7 +206,7 @@ namespace ValheimVillages.Items
             AddCandleLight(prefab, new Vector3(0.84f, TopY + 0.28f, 0.34f));
             GraftMesh(prefab, candle, "full/stack", "vv_candle2",
                 new Vector3(0.99f, TopY, 0.20f), new Vector3(0f, 0f, 14f), new Vector3(1f, 1.6f, 1f));
-            AddCandleLight(prefab, new Vector3(0.99f, TopY + 0.45f, 0.20f));
+            AddCandleLight(prefab, new Vector3(0.99f, TopY + 0.65f, 0.20f));
             
             // Celestial feather quill laid flat across the papers.
             var feather = zNetScene.GetPrefab(FeatherSource);

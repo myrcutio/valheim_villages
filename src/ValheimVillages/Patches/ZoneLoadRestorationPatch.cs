@@ -21,6 +21,13 @@ namespace ValheimVillages.Patches
             var zdo = __instance.GetZDO();
             if (zdo == null) return;
 
+            // This postfix runs for EVERY ZNetView.Awake, so it must never act on the
+            // wrong object. Two exclusions before the (intentionally broad) key check:
+            //   - the record-carrier ZDO shares the vv_record_id key with real villagers;
+            //   - the player (or anything parented under it) must never be restored.
+            if (zdo.GetPrefab() == Villager.Records.RecordPrefabFactory.RecordPrefabHash) return;
+            if (Villager.NativeNpcStripper.IsPlayerOwned(__instance.gameObject)) return;
+
             // Detect our NPCs by the new record back-reference or legacy identity key
             // (legacy ones get migrated to a record inside Restore).
             var isVillager = !string.IsNullOrEmpty(zdo.GetString("vv_record_id"))

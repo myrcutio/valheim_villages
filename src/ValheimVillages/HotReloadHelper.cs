@@ -276,6 +276,11 @@ namespace ValheimVillages
                 var zdo = nview.GetZDO();
                 if (zdo == null) continue;
 
+                // Skip record-carrier ZDOs (they share the vv_record_id key with NPCs) and
+                // never touch the player or anything parented under it.
+                if (zdo.GetPrefab() == Villager.Records.RecordPrefabFactory.RecordPrefabHash) continue;
+                if (NativeNpcStripper.IsPlayerOwned(nview.gameObject)) continue;
+
                 // Check if this is one of our NPCs (new record back-reference or legacy tag).
                 var isVillager = !string.IsNullOrEmpty(zdo.GetString("vv_record_id"))
                                  || !string.IsNullOrEmpty(zdo.GetString("vv_villager_type"));

@@ -27,6 +27,18 @@ namespace ValheimVillages.Villager
         {
             if (go == null || zdo == null) return false;
 
+            // Never re-init the player (or anything parented under it), and never treat a
+            // record-carrier ZDO as an NPC — it shares the vv_record_id key with real
+            // villagers, so the broad "is this a villager?" checks would otherwise match it.
+            if (NativeNpcStripper.IsPlayerOwned(go))
+            {
+                Plugin.Log?.LogError(
+                    $"[VillagerRestoration] Refusing to restore player-owned object '{go.name}'.");
+                return false;
+            }
+
+            if (zdo.GetPrefab() == RecordPrefabFactory.RecordPrefabHash) return false;
+
             // Resolve the authoritative record. New villagers carry a vv_record_id
             // back-reference; legacy ones (saved before the record table) carry
             // vv_villager_id/type/name — migrate those into a fresh record.
@@ -110,20 +122,13 @@ namespace ValheimVillages.Villager
         /// <summary>
         ///     Remove native Dvergr prefab components that conflict with our AI/talk/interaction.
         ///     Safe to call even if they've already been destroyed (e.g. after initial spawn).
+        ///     Delegates to the shared, player-safe stripper, which also clears the native
+        ///     BaseAI RPC registrations and dangling damage/death handlers (see
+        ///     <see cref="NativeNpcStripper" />).
         /// </summary>
         private static void StripNativeComponents(GameObject go)
         {
-            var monsterAI = go.GetComponent<MonsterAI>();
-            if (monsterAI != null)
-                Object.DestroyImmediate(monsterAI);
-
-            var npcTalk = go.GetComponent<NpcTalk>();
-            if (npcTalk != null)
-                Object.DestroyImmediate(npcTalk);
-
-            var tameable = go.GetComponent<Tameable>();
-            if (tameable != null)
-                Object.DestroyImmediate(tameable);
+            NativeNpcStripper.Strip(go);
         }
 
         private static void RestoreIdentity(GameObject go, VillagerDef definition)
@@ -132,8 +137,9 @@ namespace ValheimVillages.Villager
             if (humanoid != null && !string.IsNullOrEmpty(definition?.displayName))
                 humanoid.m_name = definition.displayName;
 
+            // Only flip faction on a genuine villager — never on the player or its children.
             var character = go.GetComponent<Character>();
-            if (character != null)
+            if (character != null && !NativeNpcStripper.IsPlayerOwned(character))
                 character.m_faction = Character.Faction.Players;
         }
 

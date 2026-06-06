@@ -237,6 +237,17 @@ namespace ValheimVillages.Villager
                 return null;
             }
 
+            // Safety: a villager prefab lookup must never resolve to the player. If it
+            // somehow did (bad preferredPrefab, prefab-table corruption), abort rather
+            // than strip the player's components or flip its faction.
+            if (NativeNpcStripper.IsPlayerOwned(npcObject))
+            {
+                Plugin.Log?.LogError(
+                    $"[SpawnVillagerNpc] Prefab '{villagerPrefab}' resolved to a player-owned object; aborting spawn.");
+                Object.Destroy(npcObject);
+                return null;
+            }
+
             var humanoid = npcObject.GetComponent<Humanoid>();
             if (humanoid != null)
             {
@@ -291,13 +302,11 @@ namespace ValheimVillages.Villager
             if (ZNet.instance != null && ZNet.instance.IsDedicated())
                 npcZnetView.GetZDO().SetOwner(ZNet.GetUID());
 
-            // Strip native AI/interaction components; our VillagerAI/VillagerTalk/VillagerInteract replace them.
-            var monsterAI = npcObject.GetComponent<MonsterAI>();
-            if (monsterAI != null) Object.DestroyImmediate(monsterAI);
-            var npcTalk = npcObject.GetComponent<NpcTalk>();
-            if (npcTalk != null) Object.DestroyImmediate(npcTalk);
-            var tameable = npcObject.GetComponent<Tameable>();
-            if (tameable != null) Object.DestroyImmediate(tameable);
+            // Strip native AI/interaction components; our VillagerAI/VillagerTalk/VillagerInteract
+            // replace them. This also unregisters the native BaseAI RPCs ("Alert" etc.) and detaches
+            // its OnDamaged/OnDeath handlers, so the VillagerAI (also a BaseAI) can re-register without
+            // an "item with the same key has already been added" abort in BaseAI.Awake.
+            NativeNpcStripper.Strip(npcObject);
 
             // Add Villager (Awake reads identity from the record + registers VillagerAI),
             // then the bridge / interaction / virtual-station components.
