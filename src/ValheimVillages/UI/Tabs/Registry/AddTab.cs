@@ -101,7 +101,9 @@ namespace ValheimVillages.UI.Tabs.Registry
 
             VillagerRecord record = null;
             var prefab = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : "DvergerMage";
-            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, def.type, prefab, spawnPos, ref record);
+            // Recruited AT this registry → belongs to this registry's village (already
+            // minted at placement). Pass its id so the spawn resolves it without minting.
+            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, def.type, prefab, spawnPos, ref record, context.VillageId);
 
             Player.m_localPlayer?.Message(
                 MessageHud.MessageType.Center,

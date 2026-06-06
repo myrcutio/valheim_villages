@@ -5,6 +5,7 @@ using System.Text;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Villages
 {
@@ -48,7 +49,7 @@ namespace ValheimVillages.Villages
         public static void RefreshFor(VillageArea area)
         {
             if (area == null || area.Waypoints == null || area.Waypoints.Count < 3) return;
-            var graph = RegionGraph.Get(area.VillageKey);
+            var graph = VillageRegistry.FindById(area.VillageId)?.Graph;
             if (graph == null) return;
 
             float minX = float.MaxValue, minZ = float.MaxValue, minY = float.MaxValue;
@@ -97,9 +98,9 @@ namespace ValheimVillages.Villages
                 AssignRoles(room);
             }
 
-            s_roomsByVillage[area.VillageKey] = rooms;
+            s_roomsByVillage[area.VillageId] = rooms;
             Plugin.Log?.LogInfo(
-                $"[VillageRoomCatalog] {area.VillageKey}: {rooms.Count} furnished region(s)");
+                $"[VillageRoomCatalog] {area.VillageId}: {rooms.Count} furnished region(s)");
         }
 
         /// <summary>Remove a village's room cache (called on UnregisterArea).</summary>
@@ -108,9 +109,10 @@ namespace ValheimVillages.Villages
         /// <summary>Tagged rooms for the village containing the position (empty if none).</summary>
         public static IReadOnlyCollection<RegionRoom> GetRooms(Vector3 position)
         {
-            if (!VillageAreaManager.TryGetContainingVillageKey(position, out var key))
+            var village = VillageRegistry.GetVillageAt(position);
+            if (village == null)
                 return System.Array.Empty<RegionRoom>();
-            return s_roomsByVillage.TryGetValue(key, out var rooms)
+            return s_roomsByVillage.TryGetValue(village.VillageId, out var rooms)
                 ? rooms.Values
                 : (IReadOnlyCollection<RegionRoom>)System.Array.Empty<RegionRoom>();
         }
@@ -202,17 +204,17 @@ namespace ValheimVillages.Villages
             {
                 sb.AppendLine("[vv_rooms] No local player.");
             }
-            else if (!VillageAreaManager.TryGetContainingVillageKey(player.transform.position, out var key))
+            else if (VillageRegistry.GetVillageAt(player.transform.position) is not { } village)
             {
                 sb.AppendLine("[vv_rooms] player is not inside any registered village.");
             }
-            else if (!s_roomsByVillage.TryGetValue(key, out var rooms) || rooms.Count == 0)
+            else if (!s_roomsByVillage.TryGetValue(village.VillageId, out var rooms) || rooms.Count == 0)
             {
-                sb.AppendLine($"[vv_rooms] village {key}: no furnished regions cached.");
+                sb.AppendLine($"[vv_rooms] village {village.VillageId}: no furnished regions cached.");
             }
             else
             {
-                sb.AppendLine($"[vv_rooms] village {key}: {rooms.Count} furnished region(s)");
+                sb.AppendLine($"[vv_rooms] village {village.VillageId}: {rooms.Count} furnished region(s)");
                 foreach (var r in rooms.Values)
                 {
                     var roles = r.Roles.Count > 0 ? string.Join(", ", r.Roles) : "(unlabeled)";

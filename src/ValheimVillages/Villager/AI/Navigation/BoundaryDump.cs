@@ -23,7 +23,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             Name = "vv_hna_boundary_dump")]
         public static void Dump()
         {
-            if (!RegionGraph.IsAnyAvailable)
+            if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
             {
                 Console.instance?.Print("Region graph not available. Spawn a patroller or run vv_repartition first.");
                 return;
@@ -32,7 +32,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             var beds = VillagerAIManager.GetAllBedPositions();
             var bedPos = beds != null && beds.Count > 0 ? beds[0] : Vector3.zero;
 
-            var graph = RegionGraph.GetNearest(bedPos);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(bedPos);
             if (graph == null || !graph.IsAvailable)
             {
                 Console.instance?.Print("No graph near bed position.");

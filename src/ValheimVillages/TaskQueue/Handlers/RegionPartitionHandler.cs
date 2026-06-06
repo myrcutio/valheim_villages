@@ -10,6 +10,7 @@ using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
 using ValheimVillages.Villages;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
@@ -60,7 +61,19 @@ namespace ValheimVillages.TaskQueue.Handlers
             var hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(
                 out var patrolMinX, out var patrolMinZ, out var patrolMaxX, out var patrolMaxZ);
 
-            var villageKey = ExtractVillageKey(task);
+            var village = ResolveVillage(task, beds);
+            if (village == null)
+            {
+                Plugin.Log?.LogWarning(
+                    "[Region] Partition skipped: no existing village resolved for this task " +
+                    "(villages are created at registry placement; nothing to partition).");
+                return TaskResult.Ok(new Dictionary<string, string>
+                {
+                    { "regions", "0" }, { "links", "0" }, { "reason", "no_village" },
+                });
+            }
+
+            var villageKey = village.VillageId;
 
             float minX, minZ, maxX, maxZ;
             if (hasPatrolBounds && beds != null && beds.Count > 0)
@@ -301,7 +314,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
             }
 
-            var graph = RegionGraph.GetOrCreate(villageKey);
+            var graph = village.GetOrCreateGraph();
             graph.SetGraph(combinedRegionIds, combinedLinks,
                 combinedCentroids, combinedLookup, combinedBoundary, kindMap);
             graph.SetGates(gateMarkers);
@@ -358,7 +371,11 @@ namespace ValheimVillages.TaskQueue.Handlers
                 $"{combinedLinks.Count} links " +
                 $"(bounds {minX:F0},{minZ:F0} to {maxX:F0},{maxZ:F0}, key={villageKey})");
 
-            VillageAreaManager.RefreshFromRegionGraph(graph);
+            // Persist the freshly built graph onto the durable village ZDO (1-to-1),
+            // then publish the area/caches from the village. This replaces the old
+            // per-guard PatrolPersistence.SaveHnaGraph write.
+            village.SaveGraph();
+            VillageAreaManager.RefreshFromVillage(village);
 
             return TaskResult.Ok(new Dictionary<string, string>
             {
@@ -405,26 +422,39 @@ namespace ValheimVillages.TaskQueue.Handlers
             return sb.ToString();
         }
 
-        private static string ExtractVillageKey(VillagerTask task)
+        /// <summary>
+        ///     Resolve the EXISTING durable <see cref="Village" /> this partition builds
+        ///     for, by (1) an explicit <c>village_id</c> attribute, (2) an
+        ///     <c>anchor_x/anchor_z</c> pair, or (3) the first seed bed — by id, graph
+        ///     coverage, or registry-anchor proximity. NEVER mints: a partition runs for a
+        ///     village that already exists (created at registry placement). Returns null
+        ///     when none resolves, and the caller aborts rather than fabricating one.
+        /// </summary>
+        private static Village ResolveVillage(VillagerTask task, List<Vector3> beds)
         {
+            if (task?.Attributes != null &&
+                task.Attributes.TryGetValue("village_id", out var id) &&
+                !string.IsNullOrEmpty(id))
+            {
+                var byId = VillageRegistry.FindById(id);
+                if (byId != null) return byId;
+            }
+
             if (task?.Attributes != null &&
                 task.Attributes.TryGetValue("anchor_x", out var axStr) &&
                 task.Attributes.TryGetValue("anchor_z", out var azStr) &&
                 float.TryParse(axStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var ax) &&
                 float.TryParse(azStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var az))
-                return RegionGraph.VillageKey(ax, az);
-            // Anchor-less tasks (e.g. vv_repartition, post-hot-reload auto) used
-            // to fall through to "_default", which registered the rebuilt graph
-            // under a key distinct from the per-bed one — producing two graph
-            // instances representing the same village. Derive from the first
-            // available bed instead, so all callers converge on the same key.
-            // Genuinely no-bed case still falls through to "_default" — caller
-            // already early-exits on no_beds_or_areas at Handle(), so this
-            // branch is only hit in tests / boot races.
-            var beds = VillagerAIManager.GetAllBedPositions();
+            {
+                var y = beds != null && beds.Count > 0 ? beds[0].y : 0f;
+                var anchor = new Vector3(ax, y, az);
+                return VillageRegistry.GetVillageCovering(anchor) ?? VillageRegistry.FindNearAnchor(anchor);
+            }
+
             if (beds != null && beds.Count > 0)
-                return RegionGraph.VillageKey(beds[0].x, beds[0].z);
-            return "_default";
+                return VillageRegistry.GetVillageCovering(beds[0]) ?? VillageRegistry.FindNearAnchor(beds[0]);
+
+            return null;
         }
 
         /// <summary>
@@ -440,7 +470,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             if (seeds == null) return null;
             foreach (var seed in seeds)
             {
-                var g = RegionGraph.GetNearest(seed);
+                var g = VillageRegistry.GetVillageAt(seed)?.Graph;
                 if (g == null || g.RegionCount == 0) continue;
                 if (!string.IsNullOrEmpty(g.PointToRegionId(seed))) return g;
                 // The seed may sit on a bed/obstacle cell the prune carved out of an

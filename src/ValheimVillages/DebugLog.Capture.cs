@@ -376,14 +376,14 @@ namespace ValheimVillages
             // relaxation pass. Stub kept so sidecar consumers keep parsing.
             sb.Append("\"lastRelaxation\":{\"available\":false},");
 
-            // Per-village bounds. Iterates RegionGraph.GetAll() so multi-village
+            // Per-village bounds. Iterates Villages.Entity.VillageRegistry.AllGraphs() so multi-village
             // worlds emit one entry per village; the diff between BFS and bake
             // bounds per village is what the human or a downstream tool reads.
             sb.Append("\"villages\":[");
             var first = true;
             try
             {
-                foreach (var graph in RegionGraph.GetAll())
+                foreach (var graph in Villages.Entity.VillageRegistry.AllGraphs())
                 {
                     if (!first) sb.Append(',');
                     first = false;

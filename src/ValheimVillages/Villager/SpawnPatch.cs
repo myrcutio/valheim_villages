@@ -9,6 +9,7 @@ using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Records;
 using ValheimVillages.Villager.Registry;
 using ValheimVillages.Villager.Station;
+using ValheimVillages.Villages.Entity;
 using Object = UnityEngine.Object;
 using Random = UnityEngine.Random;
 
@@ -154,7 +155,11 @@ namespace ValheimVillages.Villager
             // null record makes SpawnVillagerNpc mint a fresh Alive one (the revive path
             // passes an existing record to re-activate instead).
             VillagerRecord record = null;
-            var npcObject = SpawnVillagerNpc(villagerDef, villagerType, villagerPrefab, bed.transform.position, ref record);
+            // Resolve (never mint) the village this bed sits in.
+            var bedVillageId = (VillageRegistry.GetVillageCovering(bed.transform.position)
+                                ?? VillageRegistry.FindNearAnchor(bed.transform.position))?.VillageId;
+            var npcObject = SpawnVillagerNpc(villagerDef, villagerType, villagerPrefab,
+                bed.transform.position, ref record, bedVillageId);
             if (npcObject == null)
             {
                 player.Message(MessageHud.MessageType.Center, "Failed to spawn villager");
@@ -221,7 +226,7 @@ namespace ValheimVillages.Villager
         /// </summary>
         internal static GameObject SpawnVillagerNpc(
             VillagerDef villagerDef, string villagerType, string villagerPrefab,
-            Vector3 bedPos, ref VillagerRecord record)
+            Vector3 bedPos, ref VillagerRecord record, string contextVillageId = null)
         {
             var prefab = ZNetScene.instance?.GetPrefab(villagerPrefab);
             if (prefab == null)
@@ -272,14 +277,31 @@ namespace ValheimVillages.Villager
 
             var npcZdoId = npcZnetView.GetZDO().m_uid;
 
+            // Resolve the durable village this villager belongs to — NEVER mint here.
+            // A revive reuses the record's village; a fresh spawn uses the village the
+            // caller resolved (the registry it was recruited from). Villages are created
+            // only at registry placement, so a villager with no resolvable village is an
+            // error, not a cue to fabricate one.
+            var villageId = record != null && !string.IsNullOrEmpty(record.Village)
+                ? record.Village
+                : contextVillageId;
+            if (string.IsNullOrEmpty(villageId))
+            {
+                Plugin.Log?.LogError(
+                    "[SpawnVillagerNpc] No village to spawn into (villages are created only at a " +
+                    "registry station). Aborting spawn.");
+                Object.Destroy(npcObject);
+                return null;
+            }
+
             // Resolve the authoritative record. The record owns identity
-            // (type/name/status/village); the NPC keeps only a vv_record_id back-reference,
-            // and its UniqueId IS the record id.
+            // (type/name/status/village); the NPC keeps only vv_record_id + vv_village_id
+            // back-references, and its UniqueId IS the record id.
             if (record == null)
             {
                 record = VillagerRecordTable.Create(
                     villagerType, villagerDef.displayName,
-                    RegionGraph.VillageKey(bedPos), bedPos, RecordStatus.Alive, npcZdoId);
+                    villageId, bedPos, RecordStatus.Alive, npcZdoId);
                 if (record == null)
                 {
                     Plugin.Log?.LogError("Failed to mint villager record; aborting spawn");
@@ -296,6 +318,7 @@ namespace ValheimVillages.Villager
             }
 
             npcZnetView.GetZDO().Set("vv_record_id", record.RecordId);
+            npcZnetView.GetZDO().Set(Village.IdKey, villageId);
             npcZnetView.GetZDO().Set("vv_bed_position", bedPos);
             // Persist to the world save (ZDOMan only writes Persistent ZDOs).
             npcZnetView.GetZDO().Persistent = true;

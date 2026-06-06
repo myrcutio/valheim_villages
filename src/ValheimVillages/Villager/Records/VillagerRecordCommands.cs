@@ -118,21 +118,6 @@ namespace ValheimVillages.Villager.Records
             Print($"[vv_set_record_status] {args[1]} -> {status}");
         }
 
-        [DevCommand("Delete a villager record by id: vv_delete_record <id>",
-            Name = "vv_delete_record")]
-        public static void DeleteRecord(Terminal.ConsoleEventArgs args)
-        {
-            if (args.Length < 2)
-            {
-                Print("usage: vv_delete_record <id>");
-                return;
-            }
-
-            Print(VillagerRecordTable.Delete(args[1])
-                ? $"[vv_delete_record] deleted {args[1]}"
-                : $"[vv_delete_record] not found: {args[1]}");
-        }
-
         [DevCommand("Recruit a villager of <type> at the player position (test): vv_recruit <type>",
             Name = "vv_recruit")]
         public static void Recruit(Terminal.ConsoleEventArgs args)
@@ -151,11 +136,21 @@ namespace ValheimVillages.Villager.Records
             }
 
             var pos = Player.m_localPlayer != null ? Player.m_localPlayer.transform.position : Vector3.zero;
+            // Resolve (never mint) an existing village at the player. Villages are created
+            // only by placing a registry station, so dev-recruit requires standing in one.
+            var villageId = (Villages.Entity.VillageRegistry.GetVillageCovering(pos)
+                             ?? Villages.Entity.VillageRegistry.FindNearAnchor(pos))?.VillageId;
+            if (string.IsNullOrEmpty(villageId))
+            {
+                Print("[vv_recruit] no village here — place a registry station first (villages are minted only there)");
+                return;
+            }
+
             var prefab = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : "DvergerMage";
             VillagerRecord rec = null;
-            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, def.type, prefab, pos, ref rec);
+            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, def.type, prefab, pos, ref rec, villageId);
             Print(npc != null
-                ? $"[vv_recruit] recruited {def.type} at {pos} (home=registry/standalone, no bed)"
+                ? $"[vv_recruit] recruited {def.type} at {pos} into village {villageId}"
                 : "[vv_recruit] failed");
         }
 
@@ -172,14 +167,6 @@ namespace ValheimVillages.Villager.Records
             Print(VillagerReviveService.Revive(rec, out var err)
                 ? $"[vv_revive] revived {args[1]}"
                 : $"[vv_revive] failed: {err}");
-        }
-
-        [DevCommand("Prune orphaned Alive records whose NPC is gone (hot-reload artifacts)",
-            Name = "vv_records_clean")]
-        public static void CleanRecords(Terminal.ConsoleEventArgs args)
-        {
-            var n = VillagerRecordTable.Reconcile();
-            Print($"[vv_records_clean] pruned {n} orphaned Alive record(s)");
         }
 
         private static List<VillagerRecord> Filter(RecordStatus status)

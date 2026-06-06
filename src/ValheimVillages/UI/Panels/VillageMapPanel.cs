@@ -40,7 +40,7 @@ namespace ValheimVillages.UI.Panels
             IReadOnlyList<(Vector3 position, Color color)> pins)
         {
             var bed = villager.AI?.BedPosition ?? Vector3.zero;
-            var graph = RegionGraph.GetNearest(bed);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(bed);
             var gates = graph?.GetGates();
             if (gates == null || gates.Count == 0) return pins;
 
@@ -75,7 +75,7 @@ namespace ValheimVillages.UI.Panels
             // adding gate pins at the wall ring blew the map bounds out and
             // left the outline as a tiny shape floating in the centre.
             var bed = villager.AI?.BedPosition ?? Vector3.zero;
-            var graph = RegionGraph.GetNearest(bed);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(bed);
             if (graph != null)
             {
                 var boundary = graph.GetBoundaryCells();
@@ -88,7 +88,7 @@ namespace ValheimVillages.UI.Panels
             }
 
             var cells = new List<Vector3>();
-            foreach (var g in RegionGraph.GetAll())
+            foreach (var g in Villages.Entity.VillageRegistry.AllGraphs())
                 cells.AddRange(g.Diagnostics.GetAllRegionCenters());
             return ConvexHull(cells);
         }

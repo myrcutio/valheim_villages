@@ -7,6 +7,7 @@ using ValheimVillages.Schemas;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Records;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
@@ -51,12 +52,27 @@ namespace ValheimVillages.TaskQueue.Handlers
                 var type = zdo.GetString("vv_villager_type");
                 var name = zdo.GetString("vv_villager_name");
                 var bedPos = zdo.GetVec3("vv_bed_position", Vector3.zero);
+                // Resolve (never mint) the village; skip migration if none resolves
+                // (villages are created only at a registry station).
+                var stamped = zdo.GetString(Village.IdKey);
+                var villageId = !string.IsNullOrEmpty(stamped)
+                    ? stamped
+                    : (VillageRegistry.GetVillageCovering(bedPos) ?? VillageRegistry.FindNearAnchor(bedPos))?.VillageId;
+                if (string.IsNullOrEmpty(villageId))
+                {
+                    Plugin.Log?.LogWarning(
+                        $"[villager_record_index] legacy villager '{name}' ({type}) at {bedPos} resolves to " +
+                        "no village; not migrating.");
+                    continue;
+                }
+
                 var record = VillagerRecordTable.Create(
                     type,
                     string.IsNullOrEmpty(name) ? type : name,
-                    RegionGraph.VillageKey(bedPos), bedPos, RecordStatus.Alive, zdo.m_uid);
+                    villageId, bedPos, RecordStatus.Alive, zdo.m_uid);
                 if (record == null) continue;
                 zdo.Set("vv_record_id", record.RecordId);
+                zdo.Set(Village.IdKey, villageId);
                 migrated++;
             }
 

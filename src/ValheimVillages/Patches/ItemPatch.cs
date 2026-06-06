@@ -42,6 +42,7 @@ namespace ValheimVillages.Patches
             ItemFactory.RegisterAllInZNetScene(__instance);
             PieceFactory.RegisterAllInZNetScene(__instance);
             ValheimVillages.Villager.Records.RecordPrefabFactory.RegisterInZNetScene(__instance);
+            ValheimVillages.Villages.Entity.VillagePrefabFactory.RegisterInZNetScene(__instance);
             VirtualRecipeLoader.RegisterCookingRecipesIfNeeded(ObjectDB.instance);
             // Log available Dvergr prefabs for debugging (single spawn path: Villager)
             VillagerPawnPatch.LogAvailableDvergrPrefabs();

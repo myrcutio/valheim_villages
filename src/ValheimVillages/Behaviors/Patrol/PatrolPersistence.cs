@@ -17,7 +17,6 @@ namespace ValheimVillages.Behaviors.Patrol
         private const string ZdoWpIndex = "vv_guard_wp_index";
         private const string ZdoDiscovery = "vv_guard_discovery";
         private const string ZdoHnaRoute = "vv_guard_hna_route";
-        private const string ZdoHnaGraph = "vv_hna_graph";
 
         /// <summary>Save current patrol state to ZDO.</summary>
         public static void Save(PatrolStateMachine patrol, ZDO zdo)
@@ -30,39 +29,6 @@ namespace ValheimVillages.Behaviors.Patrol
             zdo.Set(ZdoWpIndex, wpIndex);
             zdo.Set(ZdoWaypoints, SerializeWaypoints(waypoints));
             zdo.Set(ZdoHnaRoute, isHna ? 1 : 0);
-        }
-
-        /// <summary>Save the HNA region graph for a specific village to ZDO.</summary>
-        public static void SaveHnaGraph(ZDO zdo, string villageKey)
-        {
-            if (zdo == null) return;
-            var graph = RegionGraph.Get(villageKey);
-            if (graph == null || !graph.IsAvailable) return;
-            zdo.Set(ZdoHnaGraph, graph.Serialize());
-        }
-
-        /// <summary>
-        ///     Try to restore the HNA region graph from ZDO into the registry
-        ///     under the given village key. If the persisted payload is a legacy
-        ///     non-v2 format (or otherwise unparseable), the ZDO entry is wiped
-        ///     so the next access triggers a fresh hna_partition build.
-        /// </summary>
-        public static bool TryRestoreHnaGraph(ZDO zdo, string villageKey)
-        {
-            if (zdo == null) return false;
-            var data = zdo.GetString(ZdoHnaGraph);
-            if (string.IsNullOrEmpty(data)) return false;
-            var graph = RegionGraph.GetOrCreate(villageKey);
-            if (graph.Restore(data)) return true;
-
-            // Restore failed: data is present but the parser rejected it
-            // (most often a legacy v1 grid payload). Wipe so the patrol
-            // behavior falls through to its existing rebuild path.
-            Plugin.Log?.LogInfo(
-                "[Region] Wiping legacy/unparseable HNA graph from ZDO " +
-                $"(key={villageKey}, bytes={data.Length}); will rebuild on next request");
-            zdo.Set(ZdoHnaGraph, "");
-            return false;
         }
 
         /// <summary>Load patrol state from ZDO and restore it.</summary>

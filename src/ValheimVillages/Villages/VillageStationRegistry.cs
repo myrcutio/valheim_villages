@@ -4,6 +4,7 @@ using System.Reflection;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Villages
 {
@@ -92,10 +93,10 @@ namespace ValheimVillages.Villages
         {
             if (!TryClassifyStation(go, out var station)) return;
             var pos = station.transform.position;
-            foreach (var graph in RegionGraph.GetAll())
+            foreach (var village in VillageRegistry.EnumerateWithGraph())
             {
-                if (!BelongsToVillage(graph, pos)) continue;
-                var key = graph.RegisteredVillageKey;
+                if (!BelongsToVillage(village.Graph, pos)) continue;
+                var key = village.VillageId;
                 if (string.IsNullOrEmpty(key)) continue;
                 if (!s_stationsByVillage.TryGetValue(key, out var list))
                     s_stationsByVillage[key] = list = new List<Component>();
@@ -141,7 +142,7 @@ namespace ValheimVillages.Villages
             // too-tight polygon/AABB edge was silently dropping legitimate interior
             // stations (e.g. a south-wing oven/cauldron) whenever a build shifted the
             // computed boundary. The OverlapBox below is only a coarse prefilter now.
-            var graph = RegionGraph.Get(area.VillageKey);
+            var graph = VillageRegistry.FindById(area.VillageId)?.Graph;
 
             var found = new List<Component>();
             var seen = new HashSet<Component>();
@@ -162,12 +163,12 @@ namespace ValheimVillages.Villages
                 }
             }
 
-            s_stationsByVillage[area.VillageKey] = found;
+            s_stationsByVillage[area.VillageId] = found;
 
             if (Plugin.Log != null)
             {
                 Plugin.Log.LogInfo(
-                    $"[VillageStationRegistry] {area.VillageKey}: cached {found.Count} stations " +
+                    $"[VillageStationRegistry] {area.VillageId}: cached {found.Count} stations " +
                     $"(candidates {candidates} → kept {kept})");
                 foreach (var comp in found)
                 {
@@ -319,26 +320,10 @@ namespace ValheimVillages.Villages
         {
             approach = Vector3.zero;
             var anchor = villageAnchor ?? pathSource;
-            Villager.AI.Navigation.RegionGraph graph;
-            if (TryGetVillage(anchor, out var villageKey))
-            {
-                graph = Villager.AI.Navigation.RegionGraph.Get(villageKey);
-            }
-            else
-            {
-                // Anchor is outside every village AREA polygon — but the HNA
-                // graph (and navmesh) can still cover it. This happens when the
-                // anchor is a functional-but-not-polygon-enclosed spot, e.g. a
-                // smelter platform just outside the drawn boundary: the graph has
-                // regions there (PointToRegionId is non-null) yet TryGetVillage
-                // returns false. A hard fail here made the villager abandon ALL
-                // work the moment it stepped onto such a spot ("no HNA-valid
-                // approach"). Fall back to the nearest village graph so
-                // resolution proceeds — graph/navmesh coverage is the real "can I
-                // path from here" test, not polygon membership.
-                graph = Villager.AI.Navigation.RegionGraph.GetNearest(anchor);
-                villageKey = "(nearest)";
-            }
+            // GetVillageAt resolves by graph coverage first (PointToRegionId), then
+            // nearest — so it already handles the "anchor just outside the polygon but
+            // still on the navmesh" case the old polygon-membership lookup special-cased.
+            var graph = VillageRegistry.GetVillageAt(anchor)?.Graph;
             if (graph == null)
             {
                 LastApproachDiag = $"no graph for source ({pathSource.x:F1},{pathSource.y:F1},{pathSource.z:F1})";
@@ -544,35 +529,11 @@ namespace ValheimVillages.Villages
         ///     Pick the village whose polygon contains the position. If multiple match, take the smallest
         ///     polygon (most specific). Iterates VillageAreaManager's areas by reflection-free public API.
         /// </summary>
-        private static bool TryGetVillage(Vector3 position, out string villageKey)
+        private static bool TryGetVillage(Vector3 position, out string villageId)
         {
-            villageKey = null;
-            string best = null;
-            var bestSizeSq = float.MaxValue;
-
-            foreach (var area in VillageAreaManager.AllAreas)
-            {
-                if (area == null || !area.IsInsideArea(position)) continue;
-                // Smallest-area tiebreak: use the polygon bounding-box area as a proxy
-                float minX = float.MaxValue, minZ = float.MaxValue;
-                float maxX = float.MinValue, maxZ = float.MinValue;
-                foreach (var wp in area.Waypoints)
-                {
-                    if (wp.x < minX) minX = wp.x;
-                    if (wp.x > maxX) maxX = wp.x;
-                    if (wp.z < minZ) minZ = wp.z;
-                    if (wp.z > maxZ) maxZ = wp.z;
-                }
-                var sizeSq = (maxX - minX) * (maxZ - minZ);
-                if (sizeSq < bestSizeSq)
-                {
-                    bestSizeSq = sizeSq;
-                    best = area.VillageKey;
-                }
-            }
-
-            villageKey = best;
-            return best != null;
+            var village = VillageRegistry.GetVillageAt(position);
+            villageId = village?.VillageId;
+            return village != null;
         }
     }
 }

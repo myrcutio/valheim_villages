@@ -2,13 +2,13 @@ using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Behaviors.Patrol;
-using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Villages
 {
     /// <summary>
     ///     Static manager for all active village areas. Areas are published by
-    ///     <see cref="RefreshFromRegionGraph" /> the moment HNA partitioning completes,
+    ///     <see cref="RefreshFromVillage" /> the moment HNA partitioning completes,
     ///     independent of any patroller. Spawn protection and enemy avoidance patches
     ///     query this manager.
     /// </summary>
@@ -31,49 +31,47 @@ namespace ValheimVillages.Villages
         public static void RegisterArea(VillageArea area)
         {
             if (area == null) return;
-            s_areas[area.VillageKey] = area;
+            s_areas[area.VillageId] = area;
             Plugin.Log?.LogInfo(
-                $"[VillageArea] Registered area for {area.VillageKey} with {area.Waypoints.Count} waypoints");
+                $"[VillageArea] Registered area for {area.VillageId} with {area.Waypoints.Count} waypoints");
             VillageStationRegistry.RefreshFor(area);
             VillagePoiRegistry.RefreshFor(area);
             VillageRoomCatalog.RefreshFor(area);
         }
 
         /// <summary>
-        ///     Remove a village area by village key.
+        ///     Remove a village area by village id.
         /// </summary>
-        public static void UnregisterArea(string villageKey)
+        public static void UnregisterArea(string villageId)
         {
-            if (s_areas.Remove(villageKey))
+            if (s_areas.Remove(villageId))
             {
-                Plugin.Log?.LogInfo($"[VillageArea] Unregistered area for {villageKey}");
-                VillageStationRegistry.RemoveFor(villageKey);
-                VillagePoiRegistry.RemoveFor(villageKey);
-                VillageRoomCatalog.RemoveFor(villageKey);
+                Plugin.Log?.LogInfo($"[VillageArea] Unregistered area for {villageId}");
+                VillageStationRegistry.RemoveFor(villageId);
+                VillagePoiRegistry.RemoveFor(villageId);
+                VillageRoomCatalog.RemoveFor(villageId);
             }
         }
 
         /// <summary>
-        ///     Build (or replace) the VillageArea for the given region graph using its boundary cells.
-        ///     Called by RegionPartitionHandler after a partition completes — the village exists the moment
-        ///     HNA finishes, independent of any patroller.
+        ///     Build (or replace) the VillageArea for the given village using its graph's
+        ///     boundary cells. Called by RegionPartitionHandler after a partition completes —
+        ///     the area exists the moment HNA finishes, independent of any patroller.
         /// </summary>
-        public static void RefreshFromRegionGraph(RegionGraph graph)
+        public static void RefreshFromVillage(Village village)
         {
-            if (graph == null || !graph.IsAvailable) return;
+            if (village == null || !village.HasGraph) return;
 
-            var key = graph.RegisteredVillageKey;
-            if (string.IsNullOrEmpty(key)) return;
-
-            var waypoints = PatrolRouteBuilder.Build(graph.GetBoundaryCells());
+            var id = village.VillageId;
+            var waypoints = PatrolRouteBuilder.Build(village.Graph.GetBoundaryCells());
             if (waypoints == null || waypoints.Count < 3)
             {
                 Plugin.Log?.LogInfo(
-                    $"[VillageArea] Skipped registration for key={key}: insufficient boundary waypoints ({waypoints?.Count ?? 0})");
+                    $"[VillageArea] Skipped registration for village={id}: insufficient boundary waypoints ({waypoints?.Count ?? 0})");
                 return;
             }
 
-            RegisterArea(new VillageArea(key, waypoints));
+            RegisterArea(new VillageArea(id, waypoints));
         }
 
         /// <summary>
@@ -121,51 +119,13 @@ namespace ValheimVillages.Villages
             return minX <= maxX && minZ <= maxZ;
         }
 
-        /// <summary>
-        ///     Clear all registered areas (e.g. on world unload).
-        /// </summary>
-        /// <summary>
-        ///     Find the village whose polygon contains the position. When several
-        ///     overlap, return the smallest (most specific) polygon's key. Shared
-        ///     by the station and PoI registries so they agree on membership.
-        /// </summary>
-        public static bool TryGetContainingVillageKey(Vector3 position, out string villageKey)
-        {
-            villageKey = null;
-            string best = null;
-            var bestSizeSq = float.MaxValue;
-
-            foreach (var area in s_areas.Values)
-            {
-                if (area == null || !area.IsInsideArea(position)) continue;
-                float minX = float.MaxValue, minZ = float.MaxValue;
-                float maxX = float.MinValue, maxZ = float.MinValue;
-                foreach (var wp in area.Waypoints)
-                {
-                    if (wp.x < minX) minX = wp.x;
-                    if (wp.x > maxX) maxX = wp.x;
-                    if (wp.z < minZ) minZ = wp.z;
-                    if (wp.z > maxZ) maxZ = wp.z;
-                }
-
-                var sizeSq = (maxX - minX) * (maxZ - minZ);
-                if (sizeSq < bestSizeSq)
-                {
-                    bestSizeSq = sizeSq;
-                    best = area.VillageKey;
-                }
-            }
-
-            villageKey = best;
-            return best != null;
-        }
-
         [RegisterCleanup]
         public static void Clear()
         {
             s_areas.Clear();
             VillageStationRegistry.Clear();
             VillagePoiRegistry.Clear();
+            VillageRoomCatalog.Clear();
         }
     }
 }

@@ -1,5 +1,6 @@
 using UnityEngine;
 using ValheimVillages.UI.Core;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.UI.Interaction
 {
@@ -61,7 +62,7 @@ namespace ValheimVillages.UI.Interaction
             // Roster/Add/Revive tabs. activeGroup 3 is the crafting tab.
             player.SetCraftingStation(station);
             InventoryGui.instance.Show(null, 3);
-            RegistryTabManager.Activate(new RegistryContext(transform.position));
+            RegistryTabManager.Activate(new RegistryContext(transform.position, ResolveVillageId()));
             ActiveRegistry = this;
             return true;
         }
@@ -69,6 +70,23 @@ namespace ValheimVillages.UI.Interaction
         public bool UseItem(Humanoid user, ItemDrop.ItemData item)
         {
             return false;
+        }
+
+        /// <summary>
+        ///     The durable village id stamped on this registry's ZDO at placement
+        ///     (<see cref="Villages.StationBuildPatch" />). A missing id here is a true
+        ///     anomaly, not a migration path — log and return null (the UI opens with no
+        ///     village rather than minting one to paper over the inconsistency).
+        /// </summary>
+        private string ResolveVillageId()
+        {
+            var villageId = GetComponent<ZNetView>()?.GetZDO()?.GetString(Village.IdKey);
+            if (!string.IsNullOrEmpty(villageId)) return villageId;
+
+            Plugin.Log?.LogError(
+                "[RegistryInteract] registry piece has no vv_village_id (it should be stamped at " +
+                "placement); opening with no village. Village state is inconsistent — investigate.");
+            return null;
         }
 
         /// <summary>

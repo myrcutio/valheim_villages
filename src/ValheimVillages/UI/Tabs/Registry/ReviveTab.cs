@@ -37,7 +37,7 @@ namespace ValheimVillages.UI.Tabs.Registry
         {
             m_dead = context == null
                 ? new List<VillagerRecord>()
-                : VillagerRecordTable.QueryByStatus(context.VillageKey, RecordStatus.Dead).ToList();
+                : VillagerRecordTable.QueryByStatus(context.VillageId, RecordStatus.Dead).ToList();
         }
 
         public List<TabListItemUI> GetListItems(RegistryContext context)

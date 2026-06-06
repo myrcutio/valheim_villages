@@ -7,6 +7,7 @@ using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Records;
 using ValheimVillages.Villager.Registry;
 using ValheimVillages.Villager.Station;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Villager
 {
@@ -101,13 +102,29 @@ namespace ValheimVillages.Villager
 
             var legacyName = zdo.GetString("vv_villager_name");
             var bedPos = zdo.GetVec3("vv_bed_position", Vector3.zero);
+            // Resolve (never mint) the village: stamped id, else existing graph coverage,
+            // else registry-anchor proximity. A legacy villager that resolves to no village
+            // is NOT migrated (villages are created only at a registry station).
+            var stamped = zdo.GetString(Village.IdKey);
+            var villageId = !string.IsNullOrEmpty(stamped)
+                ? stamped
+                : (VillageRegistry.GetVillageCovering(bedPos) ?? VillageRegistry.FindNearAnchor(bedPos))?.VillageId;
+            if (string.IsNullOrEmpty(villageId))
+            {
+                Plugin.Log?.LogWarning(
+                    $"[VillagerRestoration] legacy villager '{legacyName}' ({legacyType}) at {bedPos} " +
+                    "resolves to no village; not migrating (villages are created only at a registry station).");
+                return null;
+            }
+
             var record = VillagerRecordTable.Create(
                 legacyType,
                 string.IsNullOrEmpty(legacyName) ? legacyType : legacyName,
-                RegionGraph.VillageKey(bedPos), bedPos, RecordStatus.Alive, zdo.m_uid);
+                villageId, bedPos, RecordStatus.Alive, zdo.m_uid);
             if (record == null) return null;
 
             zdo.Set("vv_record_id", record.RecordId);
+            zdo.Set(Village.IdKey, villageId);
             Plugin.Log?.LogInfo(
                 $"[VillagerRestoration] Migrated legacy villager '{legacyName}' ({legacyType}) -> record {record.RecordId}");
             return record;

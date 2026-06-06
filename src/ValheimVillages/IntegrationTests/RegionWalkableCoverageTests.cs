@@ -22,7 +22,7 @@ namespace ValheimVillages.IntegrationTests
         [ModTest(Name = "HNA_WalkableCoverage_AllPointsWithinCellSize", Order = 200)]
         public static void AllPointsWithinCellSize()
         {
-            if (!RegionGraph.IsAnyAvailable)
+            if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
             {
                 Plugin.Log?.LogInfo(
                     "[ModTest] skip name=walkable_coverage reason=hna_not_built");
@@ -93,7 +93,7 @@ namespace ValheimVillages.IntegrationTests
         [ModTest(Name = "HNA_WalkableCoverage_PointToRegionResolution", Order = 201)]
         public static void PointToRegionResolution()
         {
-            if (!RegionGraph.IsAnyAvailable)
+            if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
             {
                 Plugin.Log?.LogInfo(
                     "[ModTest] skip name=point_to_region reason=hna_not_built");
@@ -107,7 +107,7 @@ namespace ValheimVillages.IntegrationTests
             for (var i = 0; i < WalkablePositions.Length; i++)
             {
                 var pt = WalkablePositions[i];
-                var graph = RegionGraph.GetNearest(pt);
+                var graph = Villages.Entity.VillageRegistry.GraphAt(pt);
                 if (graph == null || !graph.IsAvailable)
                 {
                     unresolved++;
@@ -150,7 +150,7 @@ namespace ValheimVillages.IntegrationTests
         [ModTest(Name = "HNA_WalkableCoverage_GraphHasMinimumRegions", Order = 199)]
         public static void GraphHasMinimumRegions()
         {
-            if (!RegionGraph.IsAnyAvailable)
+            if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
             {
                 Plugin.Log?.LogInfo(
                     "[ModTest] skip name=minimum_regions reason=hna_not_built");
@@ -168,7 +168,7 @@ namespace ValheimVillages.IntegrationTests
         [ModTest(Name = "HNA_Pruning_AllRegionsHaveGroundBelow", Order = 202)]
         public static void AllRegionsHaveGroundBelow()
         {
-            if (!RegionGraph.IsAnyAvailable)
+            if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
             {
                 Plugin.Log?.LogInfo(
                     "[ModTest] skip name=ground_below reason=hna_not_built");
@@ -210,7 +210,7 @@ namespace ValheimVillages.IntegrationTests
         [ModTest(Name = "HNA_Pruning_AllRegionsHaveSufficientWidth", Order = 203)]
         public static void AllRegionsHaveSufficientWidth()
         {
-            if (!RegionGraph.IsAnyAvailable)
+            if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
             {
                 Plugin.Log?.LogInfo(
                     "[ModTest] skip name=surface_width reason=hna_not_built");
@@ -262,7 +262,7 @@ namespace ValheimVillages.IntegrationTests
         private static List<Vector3> CollectAllRegionCenters()
         {
             var all = new List<Vector3>();
-            foreach (var graph in RegionGraph.GetAll())
+            foreach (var graph in Villages.Entity.VillageRegistry.AllGraphs())
                 all.AddRange(graph.Diagnostics.GetAllRegionCenters());
             return all;
         }

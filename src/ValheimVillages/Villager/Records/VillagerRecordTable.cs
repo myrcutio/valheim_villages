@@ -174,28 +174,14 @@ namespace ValheimVillages.Villager.Records
         }
 
         /// <summary>
-        ///     Two village keys "match" if they are the same 30 m bucket or Manhattan-1
-        ///     neighbours. This tolerates the bucket-edge straddle documented on
-        ///     <c>RegionGraph.VillageKey</c> (a registry and its beds can land in adjacent
-        ///     buckets) without requiring the region graph to be built yet.
+        ///     A record belongs to a village when their ids are exactly equal. With
+        ///     durable, registry-anchored village ids (<c>vv_village_id</c>) there is no
+        ///     coordinate bucket to straddle, so the old Manhattan-1 neighbour tolerance
+        ///     is gone — an exact match is both necessary and sufficient.
         /// </summary>
         public static bool KeysMatch(string a, string b)
         {
-            if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return false;
-            if (a == b) return true;
-            if (!TryParseBucket(a, out var ax, out var az)) return false;
-            if (!TryParseBucket(b, out var bx, out var bz)) return false;
-            return Mathf.Abs(ax - bx) <= 1 && Mathf.Abs(az - bz) <= 1;
-        }
-
-        private static bool TryParseBucket(string key, out int x, out int z)
-        {
-            x = 0;
-            z = 0;
-            var parts = key.Split('_');
-            return parts.Length == 2
-                   && int.TryParse(parts[0], out x)
-                   && int.TryParse(parts[1], out z);
+            return !string.IsNullOrEmpty(a) && a == b;
         }
     }
 }

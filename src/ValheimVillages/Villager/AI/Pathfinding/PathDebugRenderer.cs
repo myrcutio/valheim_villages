@@ -500,7 +500,7 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             var totalLinks = 0;
             var summaryLines = new List<string>();
 
-            foreach (var graph in RegionGraph.GetAll())
+            foreach (var graph in Villages.Entity.VillageRegistry.AllGraphs())
             {
                 totalGraphs++;
                 totalRegions += graph.RegionCount;
@@ -582,7 +582,7 @@ namespace ValheimVillages.Villager.AI.Pathfinding
                 return;
             }
 
-            var graph = RegionGraph.GetNearest(pos);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(pos);
             var filter = new NavMeshQueryFilter
             {
                 agentTypeID = VillagerAgentType.ResolveValheimHumanoidAgentTypeID(),

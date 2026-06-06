@@ -6,6 +6,7 @@ using ValheimVillages.Enums;
 using ValheimVillages.Schemas;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Villages
 {
@@ -72,9 +73,9 @@ namespace ValheimVillages.Villages
                 TryAddDeduped(pois, pos, type.Value, comfort, hasShelter);
             }
 
-            s_poisByVillage[area.VillageKey] = pois;
+            s_poisByVillage[area.VillageId] = pois;
             Plugin.Log?.LogInfo(
-                $"[VillagePoiRegistry] {area.VillageKey}: cached {pois.Count} PoI(s) inside hull");
+                $"[VillagePoiRegistry] {area.VillageId}: cached {pois.Count} PoI(s) inside hull");
         }
 
         /// <summary>Remove a village's PoI cache (called on UnregisterArea).</summary>
@@ -89,9 +90,10 @@ namespace ValheimVillages.Villages
         /// </summary>
         public static IReadOnlyList<KnownLocation> GetPois(Vector3 position)
         {
-            if (!VillageAreaManager.TryGetContainingVillageKey(position, out var key))
+            var village = VillageRegistry.GetVillageAt(position);
+            if (village == null)
                 return Array.Empty<KnownLocation>();
-            return s_poisByVillage.TryGetValue(key, out var list)
+            return s_poisByVillage.TryGetValue(village.VillageId, out var list)
                 ? list
                 : (IReadOnlyList<KnownLocation>)Array.Empty<KnownLocation>();
         }
@@ -171,13 +173,15 @@ namespace ValheimVillages.Villages
             else
             {
                 var pos = player.transform.position;
-                if (!VillageAreaManager.TryGetContainingVillageKey(pos, out var key))
+                var village = VillageRegistry.GetVillageAt(pos);
+                if (village == null)
                 {
                     sb.AppendLine(
                         $"[vv_pois] player at ({pos.x:F1},{pos.z:F1}) is not inside any registered village.");
                 }
                 else
                 {
+                    var key = village.VillageId;
                     var list = s_poisByVillage.TryGetValue(key, out var pois) ? pois : null;
                     sb.AppendLine($"[vv_pois] village {key}: {(list?.Count ?? 0)} PoI(s)");
                     if (list != null)

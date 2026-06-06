@@ -193,7 +193,7 @@ namespace ValheimVillages.Diagnostics
             Directory.CreateDirectory(dir);
 
             var villagerPos = ai.transform != null ? ai.transform.position : Vector3.zero;
-            var graph = RegionGraph.GetNearest(villagerPos);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(villagerPos);
 
             var sb = new StringBuilder(4096);
             sb.Append('{');

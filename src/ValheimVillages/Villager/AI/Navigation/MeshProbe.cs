@@ -485,7 +485,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         private static void ReportRegionGraph(StringBuilder sb, Vector3 pos)
         {
-            var graph = RegionGraph.GetNearest(pos);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(pos);
             if (graph == null)
             {
                 sb.AppendLine("  No RegionGraph available (none built/restored yet)");

@@ -11,6 +11,7 @@ using ValheimVillages.Villager;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Behaviors.Patrol
 {
@@ -143,25 +144,28 @@ namespace ValheimVillages.Behaviors.Patrol
         }
 
 
-        private string GetVillageKey()
+        private string GetVillageId()
         {
-            return RegionGraph.VillageKey(m_ai.Memory.BedPosition);
+            var fromZdo = m_ai?.NView?.GetZDO()?.GetString(Village.IdKey);
+            if (!string.IsNullOrEmpty(fromZdo)) return fromZdo;
+            // No stamped id (legacy guard). Resolve by EXISTING graph coverage only —
+            // never mint here: a read/discovery path must not fabricate a village ZDO.
+            // If nothing covers the bed, return null so the caller's
+            // FindById(null)?.Graph yields null and patrol takes its no-graph branch.
+            var byPos = VillageRegistry.GetVillageAt(m_ai.Memory.BedPosition);
+            if (byPos != null) return byPos.VillageId;
+            Plugin.Log?.LogWarning(
+                $"[Patrol:{m_villager?.VillagerName}] guard has no vv_village_id and no village " +
+                $"covers its bed {m_ai.Memory.BedPosition}; waiting for a partition (not minting).");
+            return null;
         }
 
         private void StartDiscovery()
         {
-            var villageKey = GetVillageKey();
-            var graph = RegionGraph.Get(villageKey);
-
-            if (graph == null || !graph.IsAvailable)
-            {
-                var zdo = m_ai?.NView?.GetZDO();
-                if (zdo != null && PatrolPersistence.TryRestoreHnaGraph(zdo, villageKey))
-                {
-                    graph = RegionGraph.Get(villageKey);
-                    Plugin.Log?.LogInfo($"[Patrol:{m_villager.VillagerName}] Restored region graph from ZDO (key={villageKey})");
-                }
-            }
+            var villageId = GetVillageId();
+            // The graph is owned by the durable village (hydrated at load by
+            // village_index, rebuilt by the partition). No per-guard ZDO restore.
+            var graph = VillageRegistry.FindById(villageId)?.Graph;
 
             var routePoints = graph != null && graph.IsAvailable
                 ? PatrolRouteBuilder.Build(graph.GetBoundaryCells(), m_ai.Memory.BedPosition)
@@ -191,6 +195,7 @@ namespace ValheimVillages.Behaviors.Patrol
                     TimeoutSeconds = TaskSettings.DefaultTimeoutSeconds,
                     Attributes = new Dictionary<string, string>
                     {
+                        { "village_id", villageId },
                         { "anchor_x", bedPos.x.ToString("F2", CultureInfo.InvariantCulture) },
                         { "anchor_z", bedPos.z.ToString("F2", CultureInfo.InvariantCulture) },
                     },
@@ -205,9 +210,9 @@ namespace ValheimVillages.Behaviors.Patrol
 
             SaveState();
 
-            var zdo = m_ai?.NView?.GetZDO();
-            if (zdo != null)
-                PatrolPersistence.SaveHnaGraph(zdo, GetVillageKey());
+            // The region graph is persisted by the partition handler onto the durable
+            // village ZDO (1-to-1), not here on the guard. The guard only persists its
+            // own route via SaveState above.
 
             var first = m_patrolWaypoints[0].Position;
             var last = m_patrolWaypoints[m_patrolWaypoints.Count - 1].Position;

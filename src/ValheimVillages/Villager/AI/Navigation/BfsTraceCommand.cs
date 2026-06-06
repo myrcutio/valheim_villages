@@ -48,7 +48,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     return;
                 }
 
-                var graph = RegionGraph.GetNearest(player.transform.position);
+                var graph = Villages.Entity.VillageRegistry.GraphAt(player.transform.position);
                 if (graph == null)
                 {
                     Console.instance?.Print("[vv_bfs_trace] no RegionGraph available");

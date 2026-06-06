@@ -46,7 +46,7 @@ namespace ValheimVillages
             var px = (float)Math.Round(position.x, 2);
             var py = (float)Math.Round(position.y, 2);
             var pz = (float)Math.Round(position.z, 2);
-            var graph = RegionGraph.GetNearest(position);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(position);
             var regionId = graph?.PointToRegionId(position);
             var graphAvailable = graph != null && graph.GetOrigin(out _, out _);
             var regionValid = graph != null && !string.IsNullOrEmpty(regionId) && graph.IsValidRegion(regionId);

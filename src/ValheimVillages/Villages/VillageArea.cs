@@ -15,9 +15,9 @@ namespace ValheimVillages.Villages
 
         private readonly List<Vector3> m_waypoints;
 
-        public VillageArea(string villageKey, List<Vector3> waypoints)
+        public VillageArea(string villageId, List<Vector3> waypoints)
         {
-            VillageKey = villageKey;
+            VillageId = villageId;
             m_waypoints = new List<Vector3>(waypoints);
 
             // Pre-compute 2D polygon for efficient checks
@@ -25,7 +25,7 @@ namespace ValheimVillages.Villages
             foreach (var wp in waypoints) m_polygon2D.Add(new Vector2(wp.x, wp.z));
         }
 
-        public string VillageKey { get; }
+        public string VillageId { get; }
 
         public IReadOnlyList<Vector3> Waypoints => m_waypoints;
 

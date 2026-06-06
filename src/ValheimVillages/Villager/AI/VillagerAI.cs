@@ -892,7 +892,7 @@ namespace ValheimVillages.Villager.AI
         /// </summary>
         private bool IsStranded()
         {
-            var graph = Navigation.RegionGraph.GetNearest(m_bedPosition);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(m_bedPosition);
             if (graph != null && graph.PointToRegionId(transform.position) != null)
                 return false; // resolves to a region — on the graph, fine
 

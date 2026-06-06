@@ -124,208 +124,11 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         #region Static registry
 
-        private static readonly Dictionary<string, RegionGraph> s_registry = new();
-
-        /// <summary>
-        ///     Bucket size (m) for <see cref="VillageKey"/> coordinate snapping.
-        ///     Matches <see cref="RegionPartitionHandler"/>'s 30m
-        ///     <c>RegionBuildRadius</c> — beds within one village's region-build
-        ///     footprint should hash to the same key. Without this, the F0
-        ///     rounding used previously gave two beds 1m apart distinct integer
-        ///     keys, splitting one village's region graph across two entries
-        ///     in <see cref="s_registry"/>.
-        ///
-        ///     <para>Limitation: any bucket is a sharp boundary — two beds 30m
-        ///     apart that straddle a bucket edge still hash differently. The
-        ///     correct long-term fix is to merge keys whose village perimeter
-        ///     geometries intersect; that's a per-rebuild clustering step, not
-        ///     a coordinate hash. Switch to that when this heuristic fails.</para>
-        /// </summary>
-        public const float VillageKeyBucket = 30f;
-
-        public static string VillageKey(float anchorX, float anchorZ)
-        {
-            var bx = Mathf.RoundToInt(anchorX / VillageKeyBucket);
-            var bz = Mathf.RoundToInt(anchorZ / VillageKeyBucket);
-            return string.Format(CultureInfo.InvariantCulture, "{0}_{1}", bx, bz);
-        }
-
-        public static string VillageKey(Vector3 anchor)
-        {
-            return VillageKey(anchor.x, anchor.z);
-        }
-
-        public static RegionGraph GetOrCreate(string villageKey)
-        {
-            if (string.IsNullOrEmpty(villageKey)) villageKey = "_default";
-            if (!s_registry.TryGetValue(villageKey, out var graph))
-            {
-                // Bucket-boundary mitigation: if a requested key falls one
-                // bucket away from a key that already exists, treat them as
-                // the same village and reuse the existing entry. Two beds
-                // 30m apart straddling a bucket edge would otherwise hash
-                // distinctly even though they belong to one village (see
-                // VillageKeyBucket doc). First-come-first-served — the
-                // first villager to request the partition wins the canonical
-                // key. Real fix is perimeter-intersection clustering (TODO
-                // tracked separately); this snap-to-neighbor keeps the
-                // single-village invariant in the meantime.
-                if (TryFindAdjacentRegisteredKey(villageKey, out var adjacent))
-                {
-                    Plugin.Log?.LogInfo(
-                        $"[RegionGraph] Snapping new village key '{villageKey}' to adjacent " +
-                        $"existing key '{adjacent}' (within 1 bucket; treating as same village).");
-                    graph = s_registry[adjacent];
-                    graph.RegisteredVillageKey = adjacent;
-                    return graph;
-                }
-
-                graph = new RegionGraph();
-                s_registry[villageKey] = graph;
-            }
-
-            graph.RegisteredVillageKey = villageKey;
-            return graph;
-        }
-
-        /// <summary>
-        ///     Returns true if any registered key is within Manhattan-1 of the
-        ///     given bucket-encoded key (i.e. at most one bucket step away in
-        ///     X or Z). Out parameter is the matched existing key. Only
-        ///     supports the "<int>_<int>" key shape produced by
-        ///     <see cref="VillageKey(float,float)"/>; falls back to "no
-        ///     adjacent" for legacy "_default" or other non-bucketed keys.
-        /// </summary>
-        private static bool TryFindAdjacentRegisteredKey(string newKey, out string adjacent)
-        {
-            adjacent = null;
-            if (!TryParseBucketKey(newKey, out var nx, out var nz)) return false;
-            foreach (var existing in s_registry.Keys)
-            {
-                if (existing == newKey) continue;
-                if (!TryParseBucketKey(existing, out var ex, out var ez)) continue;
-                if (System.Math.Abs(ex - nx) <= 1 && System.Math.Abs(ez - nz) <= 1)
-                {
-                    adjacent = existing;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static bool TryParseBucketKey(string key, out int bx, out int bz)
-        {
-            bx = bz = 0;
-            if (string.IsNullOrEmpty(key)) return false;
-            var sep = key.IndexOf('_');
-            if (sep <= 0 || sep == key.Length - 1) return false;
-            return int.TryParse(key.Substring(0, sep), NumberStyles.Integer, CultureInfo.InvariantCulture, out bx)
-                   && int.TryParse(key.Substring(sep + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out bz);
-        }
-
-        public static RegionGraph Get(string villageKey)
-        {
-            if (string.IsNullOrEmpty(villageKey)) return null;
-            if (s_registry.TryGetValue(villageKey, out var graph)) return graph;
-            // Same bucket-straddle mitigation GetOrCreate uses on the write path: a
-            // reader (patrol discovery, station registry) can compute the OTHER straddle
-            // key for a village whose single graph is registered under an adjacent key.
-            // Resolving by adjacency here — not just exact match — keeps read and write
-            // symmetric, so the lookup can't miss the one graph that actually exists.
-            if (TryFindAdjacentRegisteredKey(villageKey, out var adjacent))
-                return s_registry[adjacent];
-            return null;
-        }
-
-        public static RegionGraph GetNearest(Vector3 worldPos)
-        {
-            RegionGraph best = null;
-            var bestDist = float.MaxValue;
-            foreach (var graph in s_registry.Values)
-            {
-                if (!graph.m_initialized) continue;
-                var dx = worldPos.x - graph.m_originX;
-                var dz = worldPos.z - graph.m_originZ;
-                var dist = dx * dx + dz * dz;
-                if (dist < bestDist)
-                {
-                    bestDist = dist;
-                    best = graph;
-                }
-            }
-
-            return best;
-        }
-
-        public static IEnumerable<RegionGraph> GetAll()
-        {
-            foreach (var graph in s_registry.Values)
-                if (graph.m_initialized)
-                    yield return graph;
-        }
-
-        public static bool IsAnyAvailable
-        {
-            get
-            {
-                foreach (var graph in s_registry.Values)
-                    if (graph.IsAvailable)
-                        return true;
-                return false;
-            }
-        }
-
-        [RegisterCleanup]
-        public static void ClearAll()
-        {
-            foreach (var graph in s_registry.Values) graph.Clear();
-            s_registry.Clear();
-        }
-
-        /// <summary>
-        ///     Atomically swap the graph registered for <paramref name="villageKey" />
-        ///     with <paramref name="next" />. This is the transactional commit used
-        ///     by the incremental reconcilers: a valid graph is only ever replaced
-        ///     by another valid graph. The swap is a single reference assignment —
-        ///     observationally atomic on the single task thread, so no reader can
-        ///     observe a half-built candidate. Resolves to the canonical registered
-        ///     key via the same adjacent-bucket snap <see cref="GetOrCreate" /> uses
-        ///     so the candidate replaces the village's actual entry instead of
-        ///     inserting a bucket-adjacent duplicate.
-        /// </summary>
-        public static RegionGraph Replace(string villageKey, RegionGraph next)
-        {
-            if (next == null) return Get(villageKey);
-            if (string.IsNullOrEmpty(villageKey)) villageKey = "_default";
-            var key = villageKey;
-            if (!s_registry.ContainsKey(key) &&
-                TryFindAdjacentRegisteredKey(key, out var adjacent))
-                key = adjacent;
-            s_registry[key] = next;
-            next.RegisteredVillageKey = key;
-            return next;
-        }
-
-        /// <summary>
-        ///     Remove a single village's graph from the registry entirely (the
-        ///     reset path: last bed destroyed AND perimeter breached). A bare
-        ///     instance <see cref="Clear" /> would leave a stale, non-IsAvailable
-        ///     entry that <see cref="GetOrCreate" />'s adjacent-bucket snap could
-        ///     later resurrect, so we remove the key.
-        /// </summary>
-        public static bool Unregister(string villageKey)
-        {
-            if (string.IsNullOrEmpty(villageKey)) return false;
-            var key = villageKey;
-            if (!s_registry.ContainsKey(key) &&
-                TryFindAdjacentRegisteredKey(key, out var adjacent))
-                key = adjacent;
-            if (!s_registry.TryGetValue(key, out var graph)) return false;
-            graph.Clear();
-            s_registry.Remove(key);
-            return true;
-        }
+        // The in-memory village→graph store moved to VillageRegistry (Villages/Entity).
+        // RegionGraph is now a pure instance type: each graph is owned by a Village and
+        // reached only through that Village — there is no static registry, no village-key
+        // bucket, and no public graph serialization seam here. This is the encapsulation
+        // the "full gateway" refactor enforces.
 
         #endregion
 
@@ -441,7 +244,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     The key this graph is registered under in <see cref="s_registry" />.
         ///     Set by <see cref="GetOrCreate" />.
         /// </summary>
-        public string RegisteredVillageKey { get; private set; }
+        public string RegisteredVillageKey { get; internal set; }
 
         #endregion
 
@@ -734,16 +537,6 @@ namespace ValheimVillages.Villager.AI.Navigation
         internal IEnumerable<string> GetRegionIds()
         {
             return m_regionIds;
-        }
-
-        public string Serialize()
-        {
-            return RegionGraphPersistence.Serialize(this);
-        }
-
-        public bool Restore(string data)
-        {
-            return RegionGraphPersistence.Restore(this, data);
         }
 
         public void Clear()

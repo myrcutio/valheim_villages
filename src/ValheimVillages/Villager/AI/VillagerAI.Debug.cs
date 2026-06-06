@@ -93,7 +93,7 @@ namespace ValheimVillages.Villager.AI
             var pos = transform != null ? transform.position : Vector3.zero;
 
             string region = null;
-            try { region = RegionGraph.GetNearest(pos)?.PointToRegionId(pos); }
+            try { region = Villages.Entity.VillageRegistry.GraphAt(pos)?.PointToRegionId(pos); }
             catch { /* graph not built / not ready */ }
 
             sb.AppendLine($"- {NpcName} [{VillagerType}] id={UniqueId}");

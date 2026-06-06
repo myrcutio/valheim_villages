@@ -23,7 +23,7 @@ namespace ValheimVillages.Villager.Records
         public const string TypeKey = "vv_record_type";
         public const string NameKey = "vv_record_name";
         public const string StatusKey = "vv_record_status"; // int (RecordStatus)
-        public const string VillageTag = "vv_record_village"; // RegionGraph.VillageKey bucket
+        public const string VillageTag = "vv_record_village"; // owning Village id (vv_village_id)
         public const string BedKey = "vv_record_bed"; // Vector3
         public const string EggPrefabKey = "vv_record_egg_prefab"; // string (empty until egg phase)
         public const string NpcKey = "vv_record_npc"; // ZDOID back-link to the live NPC (when alive)
