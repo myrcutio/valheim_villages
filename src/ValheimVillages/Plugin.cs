@@ -132,6 +132,12 @@ namespace ValheimVillages
                 Log.LogInfo("Hot reload — fixing up existing NPC components");
                 HotReloadHelper.FixupExistingNPCs();
 
+                // Placed registry pieces lose their mod-owned RegistryInteract to the
+                // stale-component sweep; re-attach it so E opens the tabbed registry UI
+                // again instead of the vanilla CraftingStation's tab-less menu.
+                Log.LogInfo("Hot reload — fixing up placed registry stations");
+                HotReloadHelper.FixupExistingRegistries();
+
                 // Hot-reload iteration QoL: arm the Update-loop's hna_partition
                 // auto-enqueue to fire again. The 5-second settling delay
                 // restarts from _hotReloadAt so prefab re-registration and

@@ -168,6 +168,35 @@ namespace ValheimVillages.Items
                 $"CraftingStation@{ComponentIndex(prefab, station)} (interact must precede station)");
         }
 
+        /// <summary>
+        ///     Re-attach interaction to an already-placed registry world instance after a
+        ///     hot reload. The stale-component sweep (<see cref="HotReloadHelper" />.
+        ///     DestroyStaleComponents) destroys the mod-owned <see cref="RegistryInteract" />
+        ///     on placed pieces, but — unlike villagers (FixupExistingNPCs) — nothing re-adds
+        ///     it. The vanilla <c>CraftingStation</c> survives (an engine type, so the sweep
+        ///     ignores it) and, being itself <c>Interactable</c>, takes over E-interaction:
+        ///     pressing E then opens the native, tab-less crafting menu (with only the
+        ///     work-order Order button), which looks like the registry "lost its tabs".
+        ///
+        ///     <para>We <see cref="Object.DestroyImmediate(Object)" /> any existing
+        ///     RegistryInteract / CraftingStation before rebuilding, rather than reusing
+        ///     <see cref="ConfigureInteraction" />'s <c>?? AddComponent</c> path: a component
+        ///     killed by deferred <c>Object.Destroy</c> is still a live managed reference until
+        ///     end-of-frame, and <c>??</c> does NOT honour Unity's lifetime-aware null — so it
+        ///     would latch onto the dying stale component and skip the re-add.</para>
+        /// </summary>
+        public static void ReapplyInteractionToInstance(GameObject instance)
+        {
+            if (instance == null) return;
+
+            foreach (var ri in instance.GetComponents<RegistryInteract>())
+                Object.DestroyImmediate(ri);
+            foreach (var cs in instance.GetComponents<CraftingStation>())
+                Object.DestroyImmediate(cs);
+
+            ConfigureInteraction(instance);
+        }
+
         private static int ComponentIndex(GameObject prefab, Component target)
         {
             var comps = prefab.GetComponents<Component>();

@@ -206,8 +206,15 @@ namespace ValheimVillages
 
                 if (!isModObject) continue;
 
-                // Skip NPC GameObjects — they're handled by FixupExistingNPCs
-                if (go.GetComponent<ZNetView>() != null) continue;
+                // Skip anything that belongs to a networked world object — its own
+                // ZNetView (NPCs, handled by FixupExistingNPCs) OR a parent's. Placed
+                // pieces like the village registry carry mod-named visual children
+                // (vv_candle, vv_paper_*, vv_curtain, the welded desk props) that have
+                // no mod component and no ZNetView of their own. A self-only check let
+                // this sweep destroy them off every placed instance on each hot reload,
+                // leaving a bare table (the prefab template gets re-grafted, but live
+                // world clones do not). The parent-chain check protects them.
+                if (go.GetComponentInParent<ZNetView>(true) != null) continue;
 
                 // Skip if any current-assembly component is present
                 // (means it was just created by new code)
@@ -315,6 +322,38 @@ namespace ValheimVillages
             if (fixedCount > 0)
                 Plugin.Log?.LogInfo(
                     $"[HotReload] Fixed up {fixedCount} existing NPC(s)");
+        }
+
+        /// <summary>
+        ///     Re-attach interaction to already-placed Village Registry pieces after a
+        ///     hot reload. Parallel to <see cref="FixupExistingNPCs" />: the stale-component
+        ///     sweep destroys each placed registry's mod-owned <c>RegistryInteract</c>, and
+        ///     (unlike villagers) nothing else rebuilds it — so the surviving vanilla
+        ///     <c>CraftingStation</c> hijacks E and opens the native tab-less menu. We find
+        ///     placed registries by prefab hash on their ZDO and rebuild interaction in place.
+        /// </summary>
+        public static void FixupExistingRegistries()
+        {
+            var registryHash = Items.PieceFactory.RegistryPrefabName.GetStableHashCode();
+            var fixedCount = 0;
+
+#pragma warning disable CS0618
+            var znetViews = Object.FindObjectsOfType<ZNetView>();
+#pragma warning restore CS0618
+
+            foreach (var nview in znetViews)
+            {
+                if (nview == null) continue;
+                var zdo = nview.GetZDO();
+                if (zdo == null || zdo.GetPrefab() != registryHash) continue;
+
+                Items.PieceFactory.ReapplyInteractionToInstance(nview.gameObject);
+                fixedCount++;
+            }
+
+            if (fixedCount > 0)
+                Plugin.Log?.LogInfo(
+                    $"[HotReload] Re-applied interaction to {fixedCount} placed registry station(s)");
         }
 
         /// <summary>
