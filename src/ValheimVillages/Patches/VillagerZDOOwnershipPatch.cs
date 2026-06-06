@@ -28,7 +28,9 @@ namespace ValheimVillages.Patches
             var serverUID = ZNet.GetUID();
             foreach (var zdo in nearObjects)
             {
-                var vid = zdo.GetString("vv_villager_id");
+                // Villager NPC ZDOs (back-reference) and record carrier ZDOs both carry
+                // vv_record_id; keep them server-owned so the server simulates/persists them.
+                var vid = zdo.GetString("vv_record_id");
                 if (!string.IsNullOrEmpty(vid) && zdo.GetOwner() != serverUID)
                     zdo.SetOwner(serverUID);
             }

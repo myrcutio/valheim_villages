@@ -46,6 +46,7 @@ namespace ValheimVillages.Attributes
             RegisterAbilities(assembly);
             RegisterPassives(assembly);
             RegisterTabs(assembly);
+            RegisterRegistryTabs(assembly);
             RegisterListPanels(assembly);
             RegisterContextMenus(assembly);
             RegisterBehaviors(assembly);
@@ -350,6 +351,42 @@ namespace ValheimVillages.Attributes
         public static IReadOnlyList<IVillagerTab> GetRegisteredTabs()
         {
             return s_tabs;
+        }
+
+        /// <summary>
+        ///     Discover [RegisterRegistryTab] classes and register them with
+        ///     RegistryTabManager. Parallel to RegisterTabs but for the Village
+        ///     Registry UI, keyed on IRegistryTabUI so the two tab populations
+        ///     never cross-contaminate.
+        /// </summary>
+        private static void RegisterRegistryTabs(Assembly assembly)
+        {
+            var tabTypes = new List<(Type type, RegisterRegistryTabAttribute attr)>();
+            foreach (var type in assembly.GetTypes())
+            {
+                var attr = type.GetCustomAttribute<RegisterRegistryTabAttribute>();
+                if (attr == null) continue;
+
+                if (!typeof(IRegistryTabUI).IsAssignableFrom(type))
+                {
+                    Plugin.Log?.LogWarning(
+                        $"[AttributeScanner] {type.Name} has [RegisterRegistryTab] " +
+                        "but does not implement IRegistryTabUI");
+                    continue;
+                }
+
+                tabTypes.Add((type, attr));
+            }
+
+            var count = 0;
+            foreach (var (type, _) in tabTypes.OrderBy(t => t.attr.Order))
+            {
+                var tab = (IRegistryTabUI)Activator.CreateInstance(type);
+                RegistryTabManager.RegisterTab(tab);
+                count++;
+            }
+
+            Plugin.Log?.LogDebug($"[AttributeScanner] Registered {count} registry tabs");
         }
 
         #endregion

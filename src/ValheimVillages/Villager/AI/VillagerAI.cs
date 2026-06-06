@@ -203,10 +203,29 @@ namespace ValheimVillages.Villager.AI
             Memory.BedPosition = m_bedPosition;
         }
 
+        private bool m_warnedNoBed;
+
         public override bool UpdateAI(float dt)
         {
             if (Villager == null) return false;
             if (!base.UpdateAI(dt)) return false;
+
+            // A villager whose home (bed) never resolved to a real position is broken
+            // (a half-initialised / zombie ZDO). Running its movement AI aims the
+            // off-mesh rescue at world origin, where BaseAI.MoveTo throws an NRE every
+            // frame — flooding the log and tanking the frame rate. Skip the tick
+            // (logged once) instead of spamming a per-frame crash.
+            if (m_bedPosition == Vector3.zero)
+            {
+                if (!m_warnedNoBed)
+                {
+                    m_warnedNoBed = true;
+                    Plugin.Log?.LogWarning(
+                        $"[AI:{m_villagerName}] No valid bed position — skipping AI tick (broken/zombie villager).");
+                }
+
+                return false;
+            }
             if (m_lastBehaviorUpdateTime > 0.0)
             {
                 m_lastBehaviorUpdateTime -= dt;

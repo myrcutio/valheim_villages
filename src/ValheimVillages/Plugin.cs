@@ -39,6 +39,7 @@ namespace ValheimVillages
 
         private static bool _recipeRefreshEnqueued;
         private static bool _regionPartitionEnqueued;
+        private static bool _recordIndexEnqueued;
 
         /// <summary>
         ///     <see cref="Time.realtimeSinceStartup" /> at the moment a hot reload
@@ -124,6 +125,7 @@ namespace ValheimVillages
                 Log.LogInfo("Hot reload — re-registering prefabs in ZNetScene");
                 ItemFactory.RegisterAllInZNetScene(ZNetScene.instance);
                 PieceFactory.RegisterAllInZNetScene(ZNetScene.instance);
+                Villager.Records.RecordPrefabFactory.RegisterInZNetScene(ZNetScene.instance);
 
                 Log.LogInfo("Hot reload — fixing up existing NPC components");
                 HotReloadHelper.FixupExistingNPCs();
@@ -135,6 +137,7 @@ namespace ValheimVillages
                 // state.
                 _hotReloadAt = Time.realtimeSinceStartup;
                 _regionPartitionEnqueued = false;
+                _recordIndexEnqueued = false;
                 Log.LogInfo("Hot reload — armed hna_partition (will fire 5s after settle)");
             }
 
@@ -189,6 +192,25 @@ namespace ValheimVillages
                     Attributes = new Dictionary<string, string>(),
                 });
                 Log?.LogDebug("[Valheim Villages] Enqueued recipe_discovery_refresh (post–world load)");
+            }
+
+            // After world load, index/migrate villager records once (mints records for
+            // legacy villagers that predate the record table so the roster + nav see them).
+            if (!_recordIndexEnqueued &&
+                ObjectDB.instance != null &&
+                ZNetScene.instance != null &&
+                Time.realtimeSinceStartup > 3f)
+            {
+                _recordIndexEnqueued = true;
+                GlobalTaskQueue.Enqueue(new VillagerTask
+                {
+                    Name = "villager_record_index",
+                    SourceId = "system",
+                    Priority = TaskPriority.High,
+                    TimeoutSeconds = TaskSettings.DefaultTimeoutSeconds,
+                    Attributes = new Dictionary<string, string>(),
+                });
+                Log?.LogDebug("[Valheim Villages] Enqueued villager_record_index (post–world load)");
             }
 
             // Enqueue HNA partition (low priority) so village region graph is built without overwhelming other tasks

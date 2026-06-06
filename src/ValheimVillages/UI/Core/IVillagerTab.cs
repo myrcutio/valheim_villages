@@ -8,21 +8,14 @@ namespace ValheimVillages.UI.Core
     /// <summary>
     ///     Extended IVillagerTab interface with Unity-dependent UI methods.
     ///     Tab implementations should implement this interface.
-    ///     The Core IVillagerTab provides the Unity-free base (Name, OnDeselected).
+    ///     The Core IVillagerTab provides the Unity-free base (Name, OnDeselected);
+    ///     the per-subject UI surface (OnSelected/OnUpdate/GetListItems/GetDetail,
+    ///     all taking a <see cref="VillagerBehaviorBridge" />) comes from
+    ///     <see cref="ITabContent{TSubject}" /> so the villager UI and the Village
+    ///     Registry UI share the same <see cref="CraftingTabHostBase{TSubject}" /> chrome.
     /// </summary>
-    public interface IVillagerTabUI : IVillagerTab
+    public interface IVillagerTabUI : IVillagerTab, ITabContent<VillagerBehaviorBridge>
     {
-        /// <summary>Called when this tab becomes the active tab.</summary>
-        void OnSelected(VillagerBehaviorBridge villager);
-
-        /// <summary>Called periodically to refresh tab data.</summary>
-        void OnUpdate(VillagerBehaviorBridge villager);
-
-        /// <summary>Get items to display in the recipe list (left pane).</summary>
-        List<TabListItemUI> GetListItems(VillagerBehaviorBridge villager);
-
-        /// <summary>Get detail information for the selected list item (right pane).</summary>
-        TabDetailDataUI GetDetail(int selectedIndex, VillagerBehaviorBridge villager);
     }
 
     /// <summary>

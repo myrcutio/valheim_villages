@@ -39,7 +39,10 @@ namespace ValheimVillages.UI.Patches
             [HarmonyPostfix]
             public static void Postfix()
             {
+                // Each no-ops unless its own session is active, and the two manage
+                // disjoint static state, so sharing the close hook is order-independent.
                 VillagerInteract.OnCraftingUIClosed();
+                RegistryInteract.OnCraftingUIClosed();
             }
         }
     }

@@ -276,9 +276,10 @@ namespace ValheimVillages
                 var zdo = nview.GetZDO();
                 if (zdo == null) continue;
 
-                // Check if this is one of our NPCs
-                var villagerType = zdo.GetString("vv_villager_type");
-                if (string.IsNullOrEmpty(villagerType)) continue;
+                // Check if this is one of our NPCs (new record back-reference or legacy tag).
+                var isVillager = !string.IsNullOrEmpty(zdo.GetString("vv_record_id"))
+                                 || !string.IsNullOrEmpty(zdo.GetString("vv_villager_type"));
+                if (!isVillager) continue;
 
                 // Get bed position from ZDO
                 var bedPos = zdo.GetVec3("vv_bed_position", Vector3.zero);
@@ -290,13 +291,7 @@ namespace ValheimVillages
                     continue;
                 }
 
-                // Get or create unique ID
-                var uniqueId = zdo.GetString("vv_villager_id");
-                if (string.IsNullOrEmpty(uniqueId))
-                {
-                    uniqueId = Guid.NewGuid().ToString();
-                    zdo.Set("vv_villager_id", uniqueId);
-                }
+                // Identity (and legacy migration) is resolved inside VillagerRestoration.Restore.
 
                 // Remove orphaned CraftingStation components from previous
                 // reloads before restoring.  VillagerStation.Initialize adds

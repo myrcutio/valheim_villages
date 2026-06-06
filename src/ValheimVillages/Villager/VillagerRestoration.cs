@@ -4,6 +4,7 @@ using ValheimVillages.Attributes;
 using ValheimVillages.Schemas;
 using ValheimVillages.UI.Interaction;
 using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villager.Records;
 using ValheimVillages.Villager.Registry;
 using ValheimVillages.Villager.Station;
 
@@ -26,18 +27,16 @@ namespace ValheimVillages.Villager
         {
             if (go == null || zdo == null) return false;
 
-            var uniqueId = zdo.GetString("vv_villager_id");
-            if (string.IsNullOrEmpty(uniqueId)) return false;
+            // Resolve the authoritative record. New villagers carry a vv_record_id
+            // back-reference; legacy ones (saved before the record table) carry
+            // vv_villager_id/type/name — migrate those into a fresh record.
+            var record = ResolveOrMigrateRecord(zdo);
+            if (record == null) return false;
+            var recordId = record.RecordId;
 
-            if (s_restoredIds.Contains(uniqueId)) return false;
+            if (s_restoredIds.Contains(recordId)) return false;
 
-            var typeStr = zdo.GetString("vv_villager_type");
-            if (string.IsNullOrEmpty(typeStr))
-            {
-                Plugin.Log?.LogWarning($"[VillagerRestoration] NPC {uniqueId} has no vv_villager_type, skipping");
-                return false;
-            }
-
+            var typeStr = record.Type;
             var def = VillagerRegistry.Get(typeStr);
             if (def == null)
             {
@@ -52,15 +51,54 @@ namespace ValheimVillages.Villager
 
             StripNativeComponents(go);
             RestoreIdentity(go, def);
-            RestoreComponents(go, uniqueId, typeStr);
+            RestoreComponents(go, recordId, typeStr);
             Dialog.ConfigureDialog(go, def);
 
-            s_restoredIds.Add(uniqueId);
+            s_restoredIds.Add(recordId);
 
             Plugin.Log?.LogInfo(
                 $"[VillagerRestoration] Restored {def.displayName} ({typeStr}) at {go.transform.position}");
 
             return true;
+        }
+
+        /// <summary>
+        ///     Return this NPC's villager record, minting one from legacy
+        ///     vv_villager_* keys if it has none (migration). Returns null if the ZDO
+        ///     isn't one of ours or the record can't be created.
+        /// </summary>
+        private static VillagerRecord ResolveOrMigrateRecord(ZDO zdo)
+        {
+            var recordId = zdo.GetString("vv_record_id");
+            if (!string.IsNullOrEmpty(recordId))
+            {
+                var existing = VillagerRecordTable.FindById(recordId);
+                if (existing != null) return existing;
+            }
+
+            // No live record — migrate from legacy identity if present.
+            var legacyType = zdo.GetString("vv_villager_type");
+            if (string.IsNullOrEmpty(legacyType))
+            {
+                if (!string.IsNullOrEmpty(recordId))
+                    Plugin.Log?.LogWarning(
+                        $"[VillagerRestoration] vv_record_id '{recordId}' has no record and no legacy " +
+                        "identity to migrate; skipping");
+                return null;
+            }
+
+            var legacyName = zdo.GetString("vv_villager_name");
+            var bedPos = zdo.GetVec3("vv_bed_position", Vector3.zero);
+            var record = VillagerRecordTable.Create(
+                legacyType,
+                string.IsNullOrEmpty(legacyName) ? legacyType : legacyName,
+                RegionGraph.VillageKey(bedPos), bedPos, RecordStatus.Alive, zdo.m_uid);
+            if (record == null) return null;
+
+            zdo.Set("vv_record_id", record.RecordId);
+            Plugin.Log?.LogInfo(
+                $"[VillagerRestoration] Migrated legacy villager '{legacyName}' ({legacyType}) -> record {record.RecordId}");
+            return record;
         }
 
         [RegisterCleanup]

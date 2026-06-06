@@ -46,8 +46,9 @@ namespace ValheimVillages.Villager.AI
 
         /// <summary>
         ///     Get unique bed positions for every villager in the world. Reads
-        ///     authoritatively from <c>ZDOMan.m_objectsByID</c>: each ZDO with the
-        ///     <c>vv_villager_type</c> tag carries a persistent <c>vv_bed_position</c>.
+        ///     authoritatively from <c>ZDOMan.m_objectsByID</c>: each villager NPC ZDO
+        ///     (identified by the new <c>vv_record_id</c> back-reference or the legacy
+        ///     <c>vv_villager_type</c> tag) carries a persistent <c>vv_bed_position</c>.
         ///     Survives villager GameObject unload (out-of-range, teleported) and
         ///     hot reloads (the in-memory <see cref="ActiveVillagers" /> dict is
         ///     cleared on reload).
@@ -68,8 +69,12 @@ namespace ValheimVillages.Villager.AI
             foreach (var zdo in objectsByID.Values)
             {
                 if (zdo == null) continue;
-                var vtype = zdo.GetString("vv_villager_type");
-                if (string.IsNullOrEmpty(vtype)) continue;
+                // A villager NPC has either the new record back-reference or the legacy
+                // type tag. (Record carrier ZDOs also have vv_record_id but no bed
+                // position, so the zero-bed check below excludes them.)
+                var isVillager = !string.IsNullOrEmpty(zdo.GetString("vv_record_id"))
+                                 || !string.IsNullOrEmpty(zdo.GetString("vv_villager_type"));
+                if (!isVillager) continue;
                 var pos = zdo.GetVec3("vv_bed_position", Vector3.zero);
                 if (pos == Vector3.zero) continue;
                 var duplicate = false;

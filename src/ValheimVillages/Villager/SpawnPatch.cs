@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 using UnityEngine;
+using ValheimVillages.Schemas;
 using ValheimVillages.UI.Interaction;
 using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villager.Records;
 using ValheimVillages.Villager.Registry;
 using ValheimVillages.Villager.Station;
 using Object = UnityEngine.Object;
@@ -148,65 +150,20 @@ namespace ValheimVillages.Villager
                 return false;
             }
 
-            var prefab = ZNetScene.instance?.GetPrefab(villagerPrefab);
-            if (prefab == null)
-            {
-                Plugin.Log?.LogError($"Failed to find prefab {villagerPrefab}");
-                player.Message(MessageHud.MessageType.Center, "Failed to spawn villager (prefab not found)");
-                return false;
-            }
-
-            // Spawn position at the bed
-            var spawnPos = bed.transform.position + Vector3.up * 0.7f;
-            var spawnRot = bed.transform.rotation;
-
-            // Instantiate the NPC
-            var npcObject = Object.Instantiate(prefab, spawnPos, spawnRot);
+            // Instantiate + configure the NPC and mint its authoritative record. Passing a
+            // null record makes SpawnVillagerNpc mint a fresh Alive one (the revive path
+            // passes an existing record to re-activate instead).
+            VillagerRecord record = null;
+            var npcObject = SpawnVillagerNpc(villagerDef, villagerType, villagerPrefab, bed.transform.position, ref record);
             if (npcObject == null)
             {
-                Plugin.Log?.LogError("Failed to instantiate NPC");
+                player.Message(MessageHud.MessageType.Center, "Failed to spawn villager");
                 return false;
             }
 
-            // Set up the NPC
-            var humanoid = npcObject.GetComponent<Humanoid>();
-            if (humanoid != null)
-            {
-                humanoid.m_name = villagerDef.displayName;
-
-                var character = npcObject.GetComponent<Character>();
-                if (character != null)
-                    character.m_faction = Character.Faction.Players;
-            }
-
-            // Add VillagerTalk and configure dialog lines from JSON definition
-            npcObject.AddComponent<VillagerTalk>();
-            npcObject.AddComponent<DoorHandler>();
-            Dialog.ConfigureDialog(npcObject, villagerDef);
-
-            // ZDO must be set before adding Villager so LoadFromZDO can read identity
+            var uniqueId = record.RecordId;
             var npcZnetView = npcObject.GetComponent<ZNetView>();
-            if (npcZnetView == null || npcZnetView.GetZDO() == null)
-            {
-                Plugin.Log?.LogError("Spawned NPC has no ZNetView/ZDO");
-                Object.Destroy(npcObject);
-                return false;
-            }
-
             var npcZdoId = npcZnetView.GetZDO().m_uid;
-            var uniqueId = Guid.NewGuid().ToString();
-            npcZnetView.GetZDO().Set("vv_villager_id", uniqueId);
-            npcZnetView.GetZDO().Set("vv_villager_type", villagerType);
-            npcZnetView.GetZDO().Set("vv_villager_name", villagerDef.displayName);
-            npcZnetView.GetZDO().Set("vv_bed_position", bed.transform.position);
-
-            // Persist to the world save, not just this session. ZDOMan only writes ZDOs whose
-            // Persistent flag is set; relying on the prefab default leaves villagers liable to be
-            // orphaned (never written to the .db) on reload. Assert it explicitly, like Tameable.
-            npcZnetView.GetZDO().Persistent = true;
-
-            if (ZNet.instance != null && ZNet.instance.IsDedicated())
-                npcZnetView.GetZDO().SetOwner(ZNet.GetUID());
 
             var bedZnetView = bed.GetComponent<ZNetView>();
             if (bedZnetView != null && bedZnetView.GetZDO() != null)
@@ -224,35 +181,6 @@ namespace ValheimVillages.Villager
                 bedZnetView.GetZDO().Set("ownerName", villagerDef.displayName);
                 Plugin.Log?.LogInfo($"Assigned bed to villager '{villagerDef.displayName}' with ZDO ID: {npcZdoId}");
             }
-
-            // Strip native AI/interaction components; our VillagerAI, VillagerTalk, and
-            // VillagerInteract replace them entirely.
-            var monsterAI = npcObject.GetComponent<MonsterAI>();
-            if (monsterAI != null)
-                Object.DestroyImmediate(monsterAI);
-
-            var npcTalk = npcObject.GetComponent<NpcTalk>();
-            if (npcTalk != null)
-                Object.DestroyImmediate(npcTalk);
-
-            var tameable = npcObject.GetComponent<Tameable>();
-            if (tameable != null)
-                Object.DestroyImmediate(tameable);
-
-            // Add Villager component (Awake adds VillagerAI and registers with VillagerAIManager)
-            npcObject.AddComponent<Villager>();
-
-            // Bridge needs villagerInstance set for UI
-            var bridge = npcObject.AddComponent<VillagerBehaviorBridge>();
-            bridge.villagerInstance = npcObject.GetComponent<Villager>();
-            bridge.Initialize(uniqueId);
-
-            // Add interaction component for dialog menu
-            npcObject.AddComponent<VillagerInteract>();
-
-            // Add virtual station for the crafting/tab UI panel
-            var villagerStation = npcObject.AddComponent<VillagerStation>();
-            villagerStation.Initialize(villagerType);
 
             // Consume the pawn item from player's inventory
             try
@@ -280,6 +208,108 @@ namespace ValheimVillages.Villager
             player.Message(MessageHud.MessageType.Center, $"Assigned {villagerDef.displayName} to bed");
 
             return true;
+        }
+
+        /// <summary>
+        ///     Instantiate and fully configure a villager NPC at <paramref name="bedPos" />:
+        ///     identity + faction, dialog, native-component stripping, our component stack,
+        ///     and the <c>vv_record_id</c> / <c>vv_bed_position</c> stamps. Resolves the
+        ///     authoritative record — mints a fresh Alive one when <paramref name="record" />
+        ///     is null (pawn spawn), or re-activates the supplied record in place (revive).
+        ///     Returns the NPC, or null on failure. Shared by the pawn-spawn path and the
+        ///     registry Revive action so both stay in lock-step.
+        /// </summary>
+        internal static GameObject SpawnVillagerNpc(
+            VillagerDef villagerDef, string villagerType, string villagerPrefab,
+            Vector3 bedPos, ref VillagerRecord record)
+        {
+            var prefab = ZNetScene.instance?.GetPrefab(villagerPrefab);
+            if (prefab == null)
+            {
+                Plugin.Log?.LogError($"Failed to find prefab {villagerPrefab}");
+                return null;
+            }
+
+            var npcObject = Object.Instantiate(prefab, bedPos + Vector3.up * 0.7f, Quaternion.identity);
+            if (npcObject == null)
+            {
+                Plugin.Log?.LogError("Failed to instantiate NPC");
+                return null;
+            }
+
+            var humanoid = npcObject.GetComponent<Humanoid>();
+            if (humanoid != null)
+            {
+                humanoid.m_name = villagerDef.displayName;
+                var character = npcObject.GetComponent<Character>();
+                if (character != null)
+                    character.m_faction = Character.Faction.Players;
+            }
+
+            // Add VillagerTalk and configure dialog lines from the JSON definition.
+            npcObject.AddComponent<VillagerTalk>();
+            npcObject.AddComponent<DoorHandler>();
+            Dialog.ConfigureDialog(npcObject, villagerDef);
+
+            var npcZnetView = npcObject.GetComponent<ZNetView>();
+            if (npcZnetView == null || npcZnetView.GetZDO() == null)
+            {
+                Plugin.Log?.LogError("Spawned NPC has no ZNetView/ZDO");
+                Object.Destroy(npcObject);
+                return null;
+            }
+
+            var npcZdoId = npcZnetView.GetZDO().m_uid;
+
+            // Resolve the authoritative record. The record owns identity
+            // (type/name/status/village); the NPC keeps only a vv_record_id back-reference,
+            // and its UniqueId IS the record id.
+            if (record == null)
+            {
+                record = VillagerRecordTable.Create(
+                    villagerType, villagerDef.displayName,
+                    RegionGraph.VillageKey(bedPos), bedPos, RecordStatus.Alive, npcZdoId);
+                if (record == null)
+                {
+                    Plugin.Log?.LogError("Failed to mint villager record; aborting spawn");
+                    Object.Destroy(npcObject);
+                    return null;
+                }
+            }
+            else
+            {
+                // Revive: re-activate the existing record and re-link the fresh NPC.
+                record.Status = RecordStatus.Alive;
+                record.NpcZdoId = npcZdoId;
+                record.BedPosition = bedPos;
+            }
+
+            npcZnetView.GetZDO().Set("vv_record_id", record.RecordId);
+            npcZnetView.GetZDO().Set("vv_bed_position", bedPos);
+            // Persist to the world save (ZDOMan only writes Persistent ZDOs).
+            npcZnetView.GetZDO().Persistent = true;
+            if (ZNet.instance != null && ZNet.instance.IsDedicated())
+                npcZnetView.GetZDO().SetOwner(ZNet.GetUID());
+
+            // Strip native AI/interaction components; our VillagerAI/VillagerTalk/VillagerInteract replace them.
+            var monsterAI = npcObject.GetComponent<MonsterAI>();
+            if (monsterAI != null) Object.DestroyImmediate(monsterAI);
+            var npcTalk = npcObject.GetComponent<NpcTalk>();
+            if (npcTalk != null) Object.DestroyImmediate(npcTalk);
+            var tameable = npcObject.GetComponent<Tameable>();
+            if (tameable != null) Object.DestroyImmediate(tameable);
+
+            // Add Villager (Awake reads identity from the record + registers VillagerAI),
+            // then the bridge / interaction / virtual-station components.
+            npcObject.AddComponent<Villager>();
+            var bridge = npcObject.AddComponent<VillagerBehaviorBridge>();
+            bridge.villagerInstance = npcObject.GetComponent<Villager>();
+            bridge.Initialize(record.RecordId);
+            npcObject.AddComponent<VillagerInteract>();
+            var villagerStation = npcObject.AddComponent<VillagerStation>();
+            villagerStation.Initialize(villagerType);
+
+            return npcObject;
         }
     }
 }

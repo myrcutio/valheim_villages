@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
+using ValheimVillages.UI.Interaction;
 using Object = UnityEngine.Object;
 
 namespace ValheimVillages.Items
@@ -24,7 +25,6 @@ namespace ValheimVillages.Items
         private const string BaseTable = "piece_table"; // wood dining table: 2.5 x 1.25, top ~0.83
         private const string CandleSource = "Candle_resin"; // candle wax mesh at "full/stack"
         private const string FeatherSource = "CelestialFeather"; // single valkyrie feather (attach/default)
-        private const string CoinSource = "treasure_stack"; // neat coin-stack mesh at "stack/stack"
         private const string CurtainSource = "piece_cloth_hanging_door_blue2"; // draping blue curtain (rod + cloth)
         private const string ShelfSource = "dvergrprops_shelf"; // dvergr shelf unit, used as a desktop letter tray
         private const string StoolSource = "dvergrprops_stool"; // stool placed on the ground in front of the desk
@@ -68,6 +68,7 @@ namespace ValheimVillages.Items
             {
                 StripGraftedChildren(existing);
                 ConfigurePiece(existing);
+                ConfigureInteraction(existing);
                 GraftProps(existing, zNetScene);
                 _registryPrefab = existing;
                 Plugin.Log?.LogInfo("[PieceFactory] Re-grafted registry prefab after hot reload");
@@ -84,6 +85,7 @@ namespace ValheimVillages.Items
             var prefab = ClonePrefab(baseTable, RegistryPrefabName);
 
             ConfigurePiece(prefab);
+            ConfigureInteraction(prefab);
             GraftProps(prefab, zNetScene);
 
             _registryPrefab = prefab;
@@ -108,6 +110,71 @@ namespace ValheimVillages.Items
                 requirements.Add(new Piece.Requirement { m_resItem = resin, m_amount = 4, m_recover = true });
             if (requirements.Count > 0)
                 piece.m_resources = requirements.ToArray();
+        }
+
+        /// <summary>
+        ///     Make the registry interactable: pressing E opens the crafting GUI with
+        ///     the registry's custom tabs. Adds a <see cref="RegistryInteract" />
+        ///     (the Interactable) and a UI-only <see cref="CraftingStation" />, in
+        ///     that order so <c>GetComponentInParent&lt;Interactable&gt;()</c> resolves
+        ///     to RegistryInteract — the same add-order invariant the villager spawn
+        ///     relies on (VillagerInteract before VillagerStation). Idempotent: the
+        ///     hot-reload branch reuses the existing prefab, so never double-add.
+        /// </summary>
+        private static void ConfigureInteraction(GameObject prefab)
+        {
+            // The Interactable must come BEFORE the CraftingStation in component
+            // order: Valheim resolves interaction via GetComponentInParent<Interactable>(),
+            // which returns the lowest-index match. If RegistryInteract isn't first,
+            // pressing E would open the native (tab-less) crafting menu instead of
+            // our registry tabs. The prefab is a persistent template mutated across
+            // hot reloads, so add-order alone isn't reliable — normalise it here.
+            var interact = prefab.GetComponent<RegistryInteract>()
+                           ?? prefab.AddComponent<RegistryInteract>();
+
+            var station = prefab.GetComponent<CraftingStation>();
+            if (station != null &&
+                ComponentIndex(prefab, station) < ComponentIndex(prefab, interact))
+            {
+                // Out of order (station before interact) — rebuild it after interact.
+                Object.DestroyImmediate(station);
+                station = null;
+            }
+
+            if (station == null)
+            {
+                // UI-only crafting station (mirrors VillagerStation.Initialize): no
+                // roof/fire requirement (opens anywhere, no NRE on m_roofCheckPoint),
+                // no discovery/build range, no effects. "$vv_" marks it virtual.
+                station = prefab.AddComponent<CraftingStation>();
+                station.m_name = "$vv_village_registry";
+                station.m_discoverRange = 0f;
+                station.m_rangeBuild = 0f;
+                station.m_craftRequireRoof = false;
+                station.m_craftRequireFire = false;
+                station.m_showBasicRecipies = false;
+                station.m_useDistance = 10f;
+                station.m_useAnimation = 0;
+                station.m_areaMarker = null;
+                station.m_inUseObject = null;
+                station.m_haveFireObject = null;
+                station.m_craftItemEffects = new EffectList();
+                station.m_craftItemDoneEffects = new EffectList();
+                station.m_repairItemDoneEffects = new EffectList();
+            }
+
+            Plugin.Log?.LogInfo(
+                $"[PieceFactory] Registry interaction ready: RegistryInteract@{ComponentIndex(prefab, interact)}, " +
+                $"CraftingStation@{ComponentIndex(prefab, station)} (interact must precede station)");
+        }
+
+        private static int ComponentIndex(GameObject prefab, Component target)
+        {
+            var comps = prefab.GetComponents<Component>();
+            for (var i = 0; i < comps.Length; i++)
+                if (ReferenceEquals(comps[i], target))
+                    return i;
+            return -1;
         }
 
         private static void GraftProps(GameObject prefab, ZNetScene zNetScene)
@@ -140,12 +207,7 @@ namespace ValheimVillages.Items
             GraftMesh(prefab, candle, "full/stack", "vv_candle2",
                 new Vector3(0.99f, TopY, 0.20f), new Vector3(0f, 0f, 14f), new Vector3(1f, 1.6f, 1f));
             AddCandleLight(prefab, new Vector3(0.99f, TopY + 0.45f, 0.20f));
-
-            // Clean stack of coins on the desktop (front-right).
-            var coins = zNetScene.GetPrefab(CoinSource);
-            var coinStack = coins != null ? coins.transform.Find("stack")?.gameObject : null;                                                                                       
-            GraftMeshGroup(prefab, coinStack, "vv_coins", new Vector3(0.85f, TopY, -0.32f), Vector3.zero, 0.6f);  
-
+            
             // Celestial feather quill laid flat across the papers.
             var feather = zNetScene.GetPrefab(FeatherSource);
             GraftMesh(prefab, feather, "attach/default", "vv_feather",

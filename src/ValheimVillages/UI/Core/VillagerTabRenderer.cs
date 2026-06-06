@@ -6,11 +6,12 @@ using RawImage = UnityEngine.UI.RawImage;
 namespace ValheimVillages.UI.Core
 {
     /// <summary>
-    ///     Content rendering, scroll handling, and layout for the villager tab UI.
+    ///     Content rendering, scroll handling, and layout for <see cref="CraftingTabHostBase{TSubject}" />.
     ///     Populates the native RecipeList (left pane) and Description panel (right pane).
-    ///     Partial class — see VillagerTabManager.cs for lifecycle and tab switching.
+    ///     Partial class — see CraftingTabHostBase.cs for lifecycle and tab switching.
+    ///     (Shared by VillagerTabManager and RegistryTabManager.)
     /// </summary>
-    public partial class VillagerTabManager
+    public abstract partial class CraftingTabHostBase<TSubject>
     {
         private const string ListItemPrefix = "VV_ListItem_";
         private Vector2? m_savedListRootAnchorMax;
@@ -28,7 +29,7 @@ namespace ValheimVillages.UI.Core
             if (gui == null || ci < 0 || ci >= m_tabs.Count) return;
 
             var tab = m_tabs[ci];
-            var items = tab is IVillagerTabUI ui ? ui.GetListItems(m_villager) : new List<TabListItemUI>();
+            var items = tab.GetListItems(CurrentSubject) ?? new List<TabListItemUI>();
             PopulateRecipeList(gui, items);
 
             if (m_selectedListIndex < 0 && items.Count > 0)
@@ -122,10 +123,10 @@ namespace ValheimVillages.UI.Core
             }
         }
 
-        private void PopulateDescription(InventoryGui gui, IVillagerTab tab)
+        private void PopulateDescription(InventoryGui gui, ITabContent<TSubject> tab)
         {
-            var detail = m_selectedListIndex >= 0 && tab is IVillagerTabUI ui
-                ? ui.GetDetail(m_selectedListIndex, m_villager)
+            var detail = m_selectedListIndex >= 0
+                ? tab.GetDetail(m_selectedListIndex, CurrentSubject)
                 : null;
 
             if (gui.m_recipeIcon != null)
@@ -325,7 +326,7 @@ namespace ValheimVillages.UI.Core
             }
         }
 
-        private void RestoreCraftingPanel()
+        protected void RestoreCraftingPanel()
         {
             foreach (var go in m_listElements)
             {

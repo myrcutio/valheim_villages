@@ -21,8 +21,11 @@ namespace ValheimVillages.Patches
             var zdo = __instance.GetZDO();
             if (zdo == null) return;
 
-            var vid = zdo.GetString("vv_villager_id");
-            if (string.IsNullOrEmpty(vid)) return;
+            // Detect our NPCs by the new record back-reference or legacy identity key
+            // (legacy ones get migrated to a record inside Restore).
+            var isVillager = !string.IsNullOrEmpty(zdo.GetString("vv_record_id"))
+                             || !string.IsNullOrEmpty(zdo.GetString("vv_villager_id"));
+            if (!isVillager) return;
 
             if (__instance.GetComponent<Villager.Villager>() != null) return;
 
