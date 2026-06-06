@@ -30,6 +30,13 @@ namespace ValheimVillages.Behaviors.Patrol
         private int m_helpWaypointIndex = -1;
         private Vector3 m_helpPosition;
 
+        // One-shot self-heal. Before parking in NeedsHelp, try a single automatic
+        // ResetDiscovery (same as vv_patrol_reset) — a stale route left by a navmesh
+        // rebuild often clears instantly. Set true once attempted; re-armed by a manual
+        // reset or a full clean patrol lap. Prevents a reset↔NeedsHelp loop: if the reset
+        // lands right back in NeedsHelp, the patrol parks for diagnosis.
+        private bool m_autoResetAttempted;
+
         public PatrolStateMachine(IVillager villager)
         {
             m_villager = villager;
@@ -70,7 +77,15 @@ namespace ValheimVillages.Behaviors.Patrol
         /// </summary>
         public void ResetDiscovery()
         {
-            Plugin.Log?.LogWarning($"[Patrol:{m_villager.VillagerName}] Discovery reset requested (debug)");
+            // A manual reset (vv_patrol_reset) re-arms the one-shot auto-heal: the operator
+            // is explicitly asking for a fresh attempt.
+            m_autoResetAttempted = false;
+            ResetDiscoveryInternal("manual");
+        }
+
+        private void ResetDiscoveryInternal(string reason)
+        {
+            Plugin.Log?.LogWarning($"[Patrol:{m_villager.VillagerName}] Discovery reset ({reason})");
             m_patrolWaypoints?.Clear();
             m_currentWaypointIndex = 0;
             IsDiscoveryComplete = false;
@@ -241,6 +256,13 @@ namespace ValheimVillages.Behaviors.Patrol
                 return;
             }
 
+            // Wrapping back to (or before) the prior index means a full lap completed
+            // without parking — the route is traversable again, so re-arm the one-shot
+            // auto-reset for any FUTURE NeedsHelp. (While stuck at the same waypoint no lap
+            // ever completes, so this never clears mid-loop and can't cause a reset cycle.)
+            if (idx <= m_currentWaypointIndex)
+                m_autoResetAttempted = false;
+
             m_currentWaypointIndex = idx;
             var wp = m_patrolWaypoints[idx];
 
@@ -252,10 +274,26 @@ namespace ValheimVillages.Behaviors.Patrol
                     snapToApproach: true))
                 return;
 
-            // No reachable approach exists. Do NOT skip the waypoint — that would
-            // silently paper over a broken route or genuinely impassable geometry.
-            // Park in NeedsHelp as an operator signal: inspect the spot, then
-            // either fix the route algorithm or the physical geometry and run
+            // One-shot self-heal before parking: a NeedsHelp is often just a stale route
+            // left over from a navmesh rebuild. Try a single automatic reset (same as
+            // vv_patrol_reset) to re-derive waypoints from the current graph. If that lands
+            // us right back here, m_autoResetAttempted is already set and we fall through to
+            // park for diagnosis — no reset↔NeedsHelp loop.
+            if (!m_autoResetAttempted)
+            {
+                m_autoResetAttempted = true;
+                Plugin.Log?.LogWarning(
+                    $"[Patrol:{m_villager.VillagerName}] No approach to waypoint {idx} " +
+                    $"({wp.Position.x:F1},{wp.Position.y:F1},{wp.Position.z:F1}) — " +
+                    "attempting one automatic patrol-reset before parking in NeedsHelp.");
+                ResetDiscoveryInternal("auto-heal");
+                return;
+            }
+
+            // No reachable approach exists, and the one auto-reset didn't help. Do NOT skip
+            // the waypoint — that would silently paper over a broken route or genuinely
+            // impassable geometry. Park in NeedsHelp as an operator signal: inspect the
+            // spot, then either fix the route algorithm or the physical geometry and run
             // vv_patrol_reset.
             m_helpWaypointIndex = idx;
             m_helpPosition = wp.Position;

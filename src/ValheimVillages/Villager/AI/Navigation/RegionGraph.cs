@@ -227,8 +227,15 @@ namespace ValheimVillages.Villager.AI.Navigation
         public static RegionGraph Get(string villageKey)
         {
             if (string.IsNullOrEmpty(villageKey)) return null;
-            s_registry.TryGetValue(villageKey, out var graph);
-            return graph;
+            if (s_registry.TryGetValue(villageKey, out var graph)) return graph;
+            // Same bucket-straddle mitigation GetOrCreate uses on the write path: a
+            // reader (patrol discovery, station registry) can compute the OTHER straddle
+            // key for a village whose single graph is registered under an adjacent key.
+            // Resolving by adjacency here — not just exact match — keeps read and write
+            // symmetric, so the lookup can't miss the one graph that actually exists.
+            if (TryFindAdjacentRegisteredKey(villageKey, out var adjacent))
+                return s_registry[adjacent];
+            return null;
         }
 
         public static RegionGraph GetNearest(Vector3 worldPos)

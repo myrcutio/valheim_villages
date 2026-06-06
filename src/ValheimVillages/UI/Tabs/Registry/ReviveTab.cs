@@ -82,9 +82,13 @@ namespace ValheimVillages.UI.Tabs.Registry
                 detail.ActionText = "Revive";
                 var recordId = r.RecordId;
                 var name = r.Name;
+                // Anchor the revive at THIS registry, not the record's stale home — the
+                // player may have rebuilt the registry elsewhere, leaving the old home
+                // outside the current village.
+                var registryPos = context.RegistryPosition;
                 detail.OnAction = () =>
                 {
-                    if (VillagerReviveService.Revive(VillagerRecordTable.FindById(recordId), out var err))
+                    if (VillagerReviveService.Revive(VillagerRecordTable.FindById(recordId), registryPos, out var err))
                         Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"{name} revived");
                     else
                         Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Cannot revive: {err}");

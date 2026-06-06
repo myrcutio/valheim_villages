@@ -51,6 +51,12 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             var allBeds = VillagerAIManager.GetAllBedPositions();
             var beds = FilterBedsByAnchor(allBeds, task);
+            // Snap each home/seed to a walkable, capsule-clear cell before it drives the
+            // bake elevation and the Pass-1 reachability flood. A registry-anchored home
+            // (or a bed) can sit inside its own colliders; flooding from there reaches a
+            // couple of cells and the region graph/boundary degenerates. Resolved against
+            // real geometry + the vanilla navmesh, so it works before slot 31 is (re)baked.
+            beds = ResolveWalkableSeeds(beds);
             var hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(
                 out var patrolMinX, out var patrolMinZ, out var patrolMaxX, out var patrolMaxZ);
 
@@ -267,6 +273,34 @@ namespace ValheimVillages.TaskQueue.Handlers
                 DebugLog.List("RubberBandPrune", "dropped_region_ids",
                     droppedRubberBand.Select(r => (object)r));
 
+            // A partition that yielded 0 regions is a FAILED bake (its only seed is walled
+            // off / outside the current footprint), NOT a genuinely empty village — the
+            // no-beds case already returned earlier at no_beds_or_areas. If the seed sits
+            // inside (or right against) an existing, non-empty graph, this is a MUTATION of
+            // that same village, not a new one: committing the empty result would clobber a
+            // working graph. (Hit by: rebuild the registry, then revive a villager whose
+            // stale home re-seeds a degenerate partition over the good graph.) Keep the
+            // existing graph instead of replacing it with nothing.
+            if (combinedRegionIds.Count == 0)
+            {
+                var existing = FindContainingNonEmptyGraph(beds);
+                if (existing != null)
+                {
+                    Plugin.Log?.LogWarning(
+                        $"[Region] Partition for key={villageKey} produced 0 regions, but its seed is inside " +
+                        $"existing graph '{existing.RegisteredVillageKey}' ({existing.RegionCount} regions, " +
+                        $"{existing.LinkCount} links) — treating as a failed mutation of the same village; " +
+                        "keeping the existing graph rather than clobbering it.");
+                    return TaskResult.Ok(new Dictionary<string, string>
+                    {
+                        { "regions", existing.RegionCount.ToString() },
+                        { "links", existing.LinkCount.ToString() },
+                        { "village_key", existing.RegisteredVillageKey ?? villageKey },
+                        { "reason", "degenerate_kept_existing" },
+                    });
+                }
+            }
+
             var graph = RegionGraph.GetOrCreate(villageKey);
             graph.SetGraph(combinedRegionIds, combinedLinks,
                 combinedCentroids, combinedLookup, combinedBoundary, kindMap);
@@ -391,6 +425,65 @@ namespace ValheimVillages.TaskQueue.Handlers
             if (beds != null && beds.Count > 0)
                 return RegionGraph.VillageKey(beds[0].x, beds[0].z);
             return "_default";
+        }
+
+        /// <summary>
+        ///     Find an existing, non-empty region graph that one of <paramref name="seeds" />
+        ///     falls inside of — i.e. the village this partition is really a mutation of.
+        ///     "Inside" means the seed resolves to a region of that graph, or (for a seed on
+        ///     a carved-out bed/obstacle cell) sits within a few metres of one of its lookup
+        ///     cells. Used to refuse committing a degenerate (0-region) re-derivation over a
+        ///     working graph: a seed in an existing graph's interior is the same village.
+        /// </summary>
+        private static RegionGraph FindContainingNonEmptyGraph(List<Vector3> seeds)
+        {
+            if (seeds == null) return null;
+            foreach (var seed in seeds)
+            {
+                var g = RegionGraph.GetNearest(seed);
+                if (g == null || g.RegionCount == 0) continue;
+                if (!string.IsNullOrEmpty(g.PointToRegionId(seed))) return g;
+                // The seed may sit on a bed/obstacle cell the prune carved out of an
+                // otherwise-covered interior; accept a near lookup cell as "inside".
+                if (g.TryFindNearestLookupCell(seed, null, out _, out _, 6f)) return g;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        ///     Map each village seed (stored villager home / bed) to the nearest
+        ///     walkable, agent-clear cell via <see cref="RegistrySeedResolver" />, so the
+        ///     bake elevation and Pass-1 flood seed from ground the agent can stand on
+        ///     rather than a point buried in the registry/bed colliders. Seeds that can't
+        ///     be resolved are kept as-is and logged loudly (no silent substitution).
+        /// </summary>
+        private static List<Vector3> ResolveWalkableSeeds(List<Vector3> beds)
+        {
+            if (beds == null || beds.Count == 0) return beds;
+
+            var snapped = new List<Vector3>(beds.Count);
+            var moved = 0;
+            foreach (var bed in beds)
+            {
+                if (RegistrySeedResolver.TryResolveWalkableSeed(bed, out var seed))
+                {
+                    if ((seed - bed).sqrMagnitude > 0.25f) moved++;
+                    snapped.Add(seed);
+                }
+                else
+                {
+                    snapped.Add(bed);
+                    Plugin.Log?.LogWarning(
+                        $"[Region] No walkable seed near home ({bed.x:F1},{bed.y:F1},{bed.z:F1}); " +
+                        "using it as-is (flood may degenerate).");
+                }
+            }
+
+            if (moved > 0)
+                Plugin.Log?.LogInfo(
+                    $"[Region] Snapped {moved}/{beds.Count} village seed(s) onto walkable cells near their anchor.");
+            return snapped;
         }
 
         private static List<Vector3> FilterBedsByAnchor(List<Vector3> allBeds, VillagerTask task)

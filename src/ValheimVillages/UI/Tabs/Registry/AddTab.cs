@@ -5,6 +5,7 @@ using ValheimVillages.Attributes;
 using ValheimVillages.Schemas;
 using ValheimVillages.UI.Core;
 using ValheimVillages.Villager;
+using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Records;
 using ValheimVillages.Villager.Registry;
 
@@ -82,11 +83,25 @@ namespace ValheimVillages.UI.Tabs.Registry
             if (context == null) return;
 
             // Spawn the chosen type at the registry. SpawnVillagerNpc mints a fresh Alive
-            // record whose home (vv_bed_position / record.BedPosition) is the registry, so
+            // record whose home (vv_bed_position / record.BedPosition) is the seed below, so
             // the villager belongs to this village with no bed involved.
+            //
+            // The registry anchor sits inside the station's own colliders — using it
+            // verbatim spawns the villager inside the tabletop AND stores a home that
+            // the slot-31 flood can't seed from. Resolve a walkable seed just outside the
+            // station footprint first; that point becomes both the spawn position and the
+            // persisted home (and therefore the navmesh-discovery flood seed).
+            var spawnPos = context.RegistryPosition;
+            if (RegistrySeedResolver.TryResolveWalkableSeed(context.RegistryPosition, out var seed))
+                spawnPos = seed;
+            else
+                Plugin.Log?.LogWarning(
+                    $"[AddTab] No walkable seed near registry {context.RegistryPosition}; " +
+                    "spawning at the anchor (region graph may degenerate).");
+
             VillagerRecord record = null;
             var prefab = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : "DvergerMage";
-            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, def.type, prefab, context.RegistryPosition, ref record);
+            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, def.type, prefab, spawnPos, ref record);
 
             Player.m_localPlayer?.Message(
                 MessageHud.MessageType.Center,

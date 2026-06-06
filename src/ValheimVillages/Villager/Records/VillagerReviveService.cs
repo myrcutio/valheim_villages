@@ -1,5 +1,6 @@
 using UnityEngine;
 using ValheimVillages.Schemas;
+using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.Villager.Records
@@ -25,10 +26,25 @@ namespace ValheimVillages.Villager.Records
             Mathf.Max(0f, CooldownSeconds - (Time.time - s_lastReviveTime));
 
         /// <summary>
-        ///     Revive the given Dead record. Returns false with a reason in
-        ///     <paramref name="error" /> if it can't (not dead, on cooldown, bad data).
+        ///     Revive the given Dead record at its recorded home. Returns false with a
+        ///     reason in <paramref name="error" /> if it can't (not dead, on cooldown, bad
+        ///     data). Prefer the <paramref name="anchor" /> overload when reviving from a
+        ///     registry — a stale home may now sit outside a rebuilt village.
         /// </summary>
         public static bool Revive(VillagerRecord record, out string error)
+        {
+            return Revive(record, null, out error);
+        }
+
+        /// <summary>
+        ///     Revive the given Dead record at <paramref name="anchor" /> (the registry the
+        ///     revive was triggered from), falling back to the record's stored home when
+        ///     null. The anchor is resolved to a walkable seed so the villager lands inside
+        ///     the village and the navmesh discovery seeds from a reachable cell — not a
+        ///     stale home that may now sit outside a rebuilt village (which re-seeds a
+        ///     degenerate partition).
+        /// </summary>
+        public static bool Revive(VillagerRecord record, Vector3? anchor, out string error)
         {
             error = null;
 
@@ -57,18 +73,30 @@ namespace ValheimVillages.Villager.Records
                 return false;
             }
 
-            var bedPos = record.BedPosition;
-            if (bedPos == Vector3.zero)
+            var rawAnchor = anchor ?? record.BedPosition;
+            if (rawAnchor == Vector3.zero)
             {
-                error = "record has no bed position to revive at";
+                error = "no anchor/home position to revive at";
                 return false;
             }
+
+            // Snap to a walkable seed near the anchor (the registry). This becomes the
+            // spawn position AND the persisted home (SpawnVillagerNpc writes bedPos onto
+            // the record), so the villager lands inside the village and the partition
+            // seeds from a reachable cell instead of a stale, now-outside home.
+            var spawnPos = rawAnchor;
+            if (RegistrySeedResolver.TryResolveWalkableSeed(rawAnchor, out var seed))
+                spawnPos = seed;
+            else
+                Plugin.Log?.LogWarning(
+                    $"[Revive] No walkable seed near anchor ({rawAnchor.x:F1},{rawAnchor.y:F1},{rawAnchor.z:F1}) " +
+                    $"for '{record.Name}'; reviving at the anchor as-is.");
 
             var prefabName = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : DefaultPrefab;
 
             // SpawnVillagerNpc re-activates the record in place (Status->Alive, re-link NPC).
             var r = record;
-            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, record.Type, prefabName, bedPos, ref r);
+            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, record.Type, prefabName, spawnPos, ref r);
             if (npc == null)
             {
                 error = "failed to spawn villager";
@@ -76,11 +104,12 @@ namespace ValheimVillages.Villager.Records
             }
 
             var npcZdoId = npc.GetComponent<ZNetView>()?.GetZDO()?.m_uid ?? ZDOID.None;
-            ClaimBedAt(bedPos, record.RecordId, record.Name, npcZdoId);
+            ClaimBedAt(spawnPos, record.RecordId, record.Name, npcZdoId);
 
             s_lastReviveTime = Time.time;
             Plugin.Log?.LogInfo(
-                $"[Revive] Revived '{record.Name}' ({record.Type}) record {record.RecordId} at {bedPos}");
+                $"[Revive] Revived '{record.Name}' ({record.Type}) record {record.RecordId} at " +
+                $"({spawnPos.x:F1},{spawnPos.y:F1},{spawnPos.z:F1})");
             return true;
         }
 
