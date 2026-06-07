@@ -18,8 +18,9 @@ Abilities/
   VillagerAbilityManager.cs            -- Manages Mountain Stride keybind (R), cooldown, persistence via Player.HaveUniqueKey
   SE_MountainStride.cs                 -- StatusEffect: 5 min duration, 20 min cooldown, sliding immunity
   MountainStride/
-    MountainStrideAbility.cs           -- [RegisterAbility("mountainstride")] implementation
+    MountainStrideAbility.cs           -- [RegisterAbility("mountainstride")] implementation (IPlayerAbility)
     MountaineerPatches.cs              -- Harmony patches: ObjectDB.Awake, Player.Update, Character.ApplySlide
+    AbilityHudPatch.cs                 -- Guardian-power-style HUD slot (clones m_gpRoot) beside the GP icon; Hud.Update postfix
   SpawnBlock/
     SpawnBlockPassiveEffect.cs         -- [RegisterPassive("spawnblock")] checks VillageAreaManager.IsInsideAnyVillage
     SpawnBlockPassive.cs               -- Harmony patch on SpawnSystem.UpdateSpawnList to block spawns in villages
@@ -41,7 +42,10 @@ Abilities/
   `AttributeScanner.ScanAndRegister()` in `Plugin.Awake`.
 - `MountaineerPatches` applied via `Harmony.PatchAll()` -- patches `ObjectDB.Awake`, `ObjectDB.CopyOtherDB`,
   `Player.Update`, `Character.ApplySlide`.
+- `AbilityHudPatch` applied via `Harmony.PatchAll()` -- `Hud.Update` postfix drives the ability HUD slot;
+  `[RegisterCleanup]` destroys the cloned UI on hot-reload.
 - `SpawnBlockPassive` applied via `Harmony.PatchAll()` -- patches `SpawnSystem.UpdateSpawnList`.
+- Dev commands: `vv_ability_learn` (teach the local player), `vv_ability_reset_cooldown`.
 
 ## Integration
 

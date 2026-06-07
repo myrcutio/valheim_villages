@@ -9,7 +9,7 @@ namespace ValheimVillages.Abilities.MountainStride
     ///     Taught by Mountaineer villagers.
     /// </summary>
     [RegisterAbility("mountainstride")]
-    public class MountainStrideAbility : IAbility
+    public class MountainStrideAbility : IPlayerAbility
     {
         public string Id => "mountainstride";
         public string DisplayName => "Mountain Stride";

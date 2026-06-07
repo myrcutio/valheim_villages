@@ -13,6 +13,15 @@ namespace ValheimVillages.Abilities
         public const float Duration = 300f; // 5 minutes
         public const float Cooldown = 1200f; // 20 minutes
 
+        private static Sprite s_icon;
+
+        /// <summary>
+        ///     The ability's icon sprite, built once and cached. Used both by the
+        ///     status-effect HUD (top-centre buff) and the guardian-power-style
+        ///     ability slot, which needs it before the effect is ever applied.
+        /// </summary>
+        public static Sprite Icon => s_icon != null ? s_icon : s_icon = CreateBuffIcon();
+
         public SE_MountainStride()
         {
             m_name = EffectName;
@@ -30,7 +39,7 @@ namespace ValheimVillages.Abilities
 
             // Generate a simple icon texture for the HUD
             if (m_icon == null)
-                m_icon = CreateBuffIcon();
+                m_icon = Icon;
         }
 
         /// <summary>

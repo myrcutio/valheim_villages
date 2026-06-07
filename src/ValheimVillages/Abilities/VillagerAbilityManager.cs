@@ -140,6 +140,12 @@ namespace ValheimVillages.Abilities
             Plugin.Log?.LogInfo("[Mountaineer] Cooldown reset via debug command");
         }
 
+        [DevCommand("Teach the local player Mountain Stride (test)", Name = "vv_ability_learn")]
+        public static void LearnCommand()
+        {
+            LearnMountainStride();
+        }
+
         [DevCommand("Log HNA attributes for current player position to BepInEx log (region, bounds, heights)",
             Name = "vv_hna_debug_player")]
         public static void LogHnaPlayerPosition(Terminal.ConsoleEventArgs args)

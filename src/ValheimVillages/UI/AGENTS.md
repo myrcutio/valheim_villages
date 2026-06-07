@@ -31,7 +31,7 @@ UI/
     InfoTab.cs                         -- [RegisterTab("info", Order=0)] shows locations, abilities, patrol status
     DebugTab.cs                        -- [RegisterTab("debug", Order=1)] shows state, tasks, movement tests
   Panels/
-    PatrolStatusPanel.cs               -- [RegisterListPanel("patrolstatus", "info")] patrol status, breach alert
+    AbilityTeachPanel.cs               -- [RegisterListPanel("ability", "info")] "Learn" rows for villager-taught abilities (ability:<id> tags)
     PatrolMapRenderer.cs               -- Renders 256x256 top-down patrol map texture
     VillageMapPanel.cs                 -- [RegisterListPanel("villagemap", "debug")] patrol map and "Remap" action
   Patches/
