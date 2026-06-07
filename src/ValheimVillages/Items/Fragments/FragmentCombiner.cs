@@ -20,11 +20,11 @@ namespace ValheimVillages.Items.Fragments
         private static readonly Dictionary<string, string> BiomeNpcMap = new()
         {
             { "Meadows", "Farmer" },
-            { "BlackForest", "Miner" },
-            { "Swamp", "Miner" },
+            { "BlackForest", "Carpenter" },
+            { "Swamp", "Blacksmith" },
             { "Mountain", "Mountaineer" },
             { "Plains", "Farmer" },
-            { "Mistlands", "Scout" },
+            { "Mistlands", "Guard" },
             { "Ashlands", "Guard" },
         };
 

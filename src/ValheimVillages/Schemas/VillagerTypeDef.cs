@@ -15,6 +15,12 @@ namespace ValheimVillages.Schemas
         public string displayName = "";
         public string description = "";
 
+        // Not-yet-implemented villager types are flagged disabled: their JSON is kept
+        // but they are hidden from registry recruit lists and excluded from any random
+        // villager generation (generic pawns, fragment rescue quests). Defaults to false
+        // so existing definitions stay enabled unless the JSON opts out.
+        public bool disabled;
+
         // Requirements
         public List<WorkbenchRequirement> workbenches = new();
         public List<string> requiredBiomes = new();

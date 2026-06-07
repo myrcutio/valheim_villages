@@ -1,5 +1,6 @@
 {
   "type": "Miner",
+  "disabled": true,
   "category": "Villager",
   "displayName": "Miner",
   "description": "Specialized in mining, ore extraction, and underground operations",

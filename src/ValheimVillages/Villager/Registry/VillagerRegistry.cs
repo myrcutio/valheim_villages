@@ -35,6 +35,32 @@ namespace ValheimVillages.Villager.Registry
             return _definitions.TryGetValue(villagerType, out var def) ? def : null;
         }
 
+        /// <summary>
+        ///     Implemented villager types only (<see cref="VillagerDef.disabled" /> == false).
+        ///     Use this for player-facing recruit lists and any random villager generation;
+        ///     use <see cref="Definitions" /> when you must resolve an existing record/spawn of
+        ///     a type that may have since been disabled.
+        /// </summary>
+        public static IEnumerable<VillagerDef> EnabledDefinitions
+        {
+            get
+            {
+                EnsureInitialized();
+                foreach (var def in _definitions.Values)
+                    if (!def.disabled)
+                        yield return def;
+            }
+        }
+
+        /// <summary>
+        ///     True if the type exists and is implemented (not flagged disabled).
+        /// </summary>
+        public static bool IsEnabled(string villagerType)
+        {
+            var def = Get(villagerType);
+            return def != null && !def.disabled;
+        }
+
         private static void EnsureInitialized()
         {
             if (_definitions != null) return;

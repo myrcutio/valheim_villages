@@ -1,5 +1,6 @@
 {
   "type": "Scout",
+  "disabled": true,
   "category": "Specialist",
   "displayName": "Scout",
   "description": "Provides exploration benefits, map information, and navigation assistance",

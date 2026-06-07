@@ -130,10 +130,10 @@ namespace ValheimVillages.Villager
                 }
                 else
                 {
-                    var types = VillagerRegistry.Definitions.Keys.ToList();
+                    var types = VillagerRegistry.EnabledDefinitions.Select(d => d.type).ToList();
                     if (types.Count == 0)
                     {
-                        Plugin.Log?.LogError("No villager types in registry");
+                        Plugin.Log?.LogError("No enabled villager types in registry");
                         return false;
                     }
 

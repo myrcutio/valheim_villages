@@ -1,5 +1,6 @@
 {
   "type": "Trader",
+  "disabled": true,
   "category": "Specialist",
   "displayName": "Trader",
   "description": "Facilitates trade routes between settlements, providing connectivity and requirement offsets",

@@ -41,7 +41,7 @@ namespace ValheimVillages.UI.Tabs.Registry
 
         private void RefreshTypes()
         {
-            m_types = VillagerRegistry.Definitions.Values
+            m_types = VillagerRegistry.EnabledDefinitions
                 .OrderBy(d => d.displayName)
                 .ToList();
         }

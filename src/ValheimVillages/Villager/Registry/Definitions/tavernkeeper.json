@@ -1,5 +1,6 @@
 {
   "type": "TavernKeeper",
+  "disabled": true,
   "category": "Specialist",
   "displayName": "Tavern Keeper",
   "description": "Manages tavern operations, cooking, brewing, and hospitality services",

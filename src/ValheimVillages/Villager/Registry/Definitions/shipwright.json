@@ -1,5 +1,6 @@
 {
   "type": "Shipwright",
+  "disabled": true,
   "category": "Specialist",
   "displayName": "Shipwright",
   "description": "Specialized in shipbuilding, boat repair, and maritime navigation",
