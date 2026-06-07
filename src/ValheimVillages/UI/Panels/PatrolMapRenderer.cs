@@ -68,7 +68,14 @@ namespace ValheimVillages.UI.Panels
             var tex = new Texture2D(MapSize, MapSize, TextureFormat.RGBA32, false);
             tex.filterMode = FilterMode.Point;
 
-            var activePolygon = waypoints != null ? BuildActivePolygon2D(waypoints) : new List<Vector2>();
+            // When real cell coverage is supplied, paint the operable area from the
+            // cells (over a wild background) so the route polygon can never mask a
+            // coverage hole. Only fall back to the route polygon as the fill when
+            // there are no cells.
+            var hasCells = floodFillCells != null && floodFillCells.Count > 0;
+            var activePolygon = !hasCells && waypoints != null
+                ? BuildActivePolygon2D(waypoints)
+                : new List<Vector2>();
 
             FillPixels(tex, activePolygon, min, worldW, worldH);
 

@@ -35,6 +35,11 @@ namespace ValheimVillages.Villager.AI
 
         private NavMeshAgent m_navAgent;
 
+        // Last target we passed to NavMeshAgent.SetDestination. Compared against the
+        // requested target (not the agent's clamped destination) so an off-mesh /
+        // unreachable-exact waypoint doesn't re-path every frame. Sentinel = never set.
+        private Vector3 m_lastAgentDest = new(float.PositiveInfinity, 0f, 0f);
+
         private Vector3 m_bedPosition;
 
         // Composable behaviors (populated by BehaviorFactory from NPC definition)
@@ -367,7 +372,14 @@ namespace ValheimVillages.Villager.AI
             {
                 var targetPos = m_currentWaypoint.Position;
                 var remaining = Vector3.Distance(transform.position, targetPos);
-                if (AgentHasArrived(targetPos))
+                // Patrol is a continuous loop — advance to the next waypoint a little
+                // before reaching the current one so the guard curves through the route
+                // instead of braking at each point. Every other state keeps precise
+                // arrival (a station approach must be reached, not anticipated).
+                var arrivalLookahead = CurrentState == BehaviorState.Patrolling
+                    ? VillagerSettings.PatrolWaypointLookahead
+                    : 0f;
+                if (AgentHasArrived(targetPos, arrivalLookahead))
                 {
                     // Arrival = the villager actually REACHED the resolved
                     // approach cell. That cell is already validated (standoff +
@@ -678,7 +690,7 @@ namespace ValheimVillages.Villager.AI
         /// </summary>
         public bool NavTo(Vector3 target, BehaviorState state, string label,
             bool snapToApproach = true, System.Func<Vector3, bool> hullPredicate = null,
-            bool directOrder = false)
+            bool directOrder = false, bool resetPath = true)
         {
             var dest = target;
             if (snapToApproach &&
@@ -710,7 +722,10 @@ namespace ValheimVillages.Villager.AI
 
             // Re-plan the advisory agent from scratch: drop any stale internal
             // path / off-mesh-link state left over from the previous target.
-            if (m_navAgent != null && m_navAgent.isOnNavMesh)
+            // resetPath:false (patrol advance) deliberately KEEPS the current path so
+            // the agent coasts on it while the next waypoint's path computes — without
+            // this the cleared path reads as pathPending+!hasPath and the mover stops.
+            if (resetPath && m_navAgent != null && m_navAgent.isOnNavMesh)
                 m_navAgent.ResetPath();
 
             // A direct order outranks autonomous behavior until the villager
@@ -804,7 +819,7 @@ namespace ValheimVillages.Villager.AI
         ///     partial-path cases (a partial path's end is short of the target,
         ///     so its small remainingDistance must NOT read as arrived).
         /// </summary>
-        private bool AgentHasArrived(Vector3 targetPos)
+        private bool AgentHasArrived(Vector3 targetPos, float lookahead = 0f)
         {
             if (m_navAgent == null || !m_navAgent.isOnNavMesh) return false;
             if (m_navAgent.pathPending || !m_navAgent.hasPath) return false;
@@ -812,7 +827,9 @@ namespace ValheimVillages.Villager.AI
             // the first tick after a new waypoint it isn't set yet → not arrived.
             if ((m_navAgent.destination - targetPos).sqrMagnitude > 0.25f) return false;
             if (m_navAgent.pathStatus != NavMeshPathStatus.PathComplete) return false;
-            return m_navAgent.remainingDistance <= m_navAgent.stoppingDistance + 0.25f;
+            // lookahead > 0 (patrol) treats the waypoint as "reached" while still
+            // approaching, so the route advances without the villager stopping.
+            return m_navAgent.remainingDistance <= m_navAgent.stoppingDistance + 0.25f + lookahead;
         }
 
         // Off-mesh rescue --------------------------------------------------
@@ -1012,14 +1029,34 @@ namespace ValheimVillages.Villager.AI
                 }
             }
 
+            // Only re-issue SetDestination when the REQUESTED target actually
+            // changes — NOT when it merely differs from m_navAgent.destination.
+            // When targetPos sits off the agent's reachable mesh (e.g. a repair
+            // approach on a poly the agent can only get near), the agent clamps
+            // its internal destination to the nearest reachable point, so
+            // (destination - targetPos) stays > 0.25 forever; comparing against it
+            // re-pathed every frame → perpetual pathPending → StopMoving → the
+            // villager froze in place with desiredVelocity set but moveDir zero.
+            // Tracking the last requested target lets the agent keep its computed
+            // path to the clamped point and actually walk there.
             if (!m_navAgent.hasPath ||
-                (m_navAgent.destination - targetPos).sqrMagnitude > 0.25f)
+                (m_lastAgentDest - targetPos).sqrMagnitude > 0.25f)
+            {
                 m_navAgent.SetDestination(targetPos);
+                m_lastAgentDest = targetPos;
+            }
 
             if (m_navAgent.pathPending)
             {
-                StopMoving();
-                return;
+                // A new path is computing. For the continuous patrol loop, keep coasting
+                // on the existing valid path so advancing to the next waypoint doesn't
+                // stutter — the prior path still points forward along the route. Every
+                // other case holds position rather than drift on a stale velocity.
+                if (!(CurrentState == BehaviorState.Patrolling && m_navAgent.hasPath))
+                {
+                    StopMoving();
+                    return;
+                }
             }
 
             // A failed/partial path means there's no valid route to the target

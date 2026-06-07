@@ -37,7 +37,8 @@
     "$piece_workbench"
   ],
   "behaviors": [
-    "craft"
+    "craft",
+    "repair"
   ],
   "tags": [
     "tab:info",

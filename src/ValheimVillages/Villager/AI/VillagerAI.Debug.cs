@@ -113,6 +113,27 @@ namespace ValheimVillages.Villager.AI
                 sb.AppendLine("    target=<none>");
             }
 
+            // What the mover is ACTUALLY commanding the character vs how fast it's
+            // really going — distinguishes "behavior isn't driving movement"
+            // (moveDir~0) from "driving but physically blocked / rotating"
+            // (moveDir set, vel~0).
+            if (m_character == null)
+            {
+                // A registered villager with a null m_character is anomalous (stripped
+                // native AI / missing component). Surface it loudly instead of printing
+                // valid-looking zero movement that masks the real state.
+                sb.AppendLine("    char: m_character=NULL (anomalous — no movement data)");
+            }
+            else
+            {
+                var mv = m_character.GetMoveDir();
+                var vel = m_character.GetVelocity();
+                sb.AppendLine(
+                    $"    char: moveDir=({mv.x:F2},{mv.z:F2}) |{new Vector3(mv.x, 0f, mv.z).magnitude:F2}| " +
+                    $"vel={new Vector3(vel.x, 0f, vel.z).magnitude:F2} " +
+                    $"needsMove={NeedsMovement(CurrentState)} hasWaypoint={m_currentWaypoint != null}");
+            }
+
             // Report the path state of the mover the villager ACTUALLY uses.
             // With NavMeshAgentMover, movement is driven by the advisory
             // NavMeshAgent's own internal path + desiredVelocity — BaseAI.m_path

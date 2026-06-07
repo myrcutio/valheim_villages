@@ -15,6 +15,16 @@ namespace ValheimVillages.Settings
         public const float UpdateInterval = 15f;
 
         /// <summary>
+        ///     Lookahead distance (m) for the continuous patrol loop: the patroller
+        ///     advances to the next route waypoint once it's within this range of the
+        ///     current one, instead of braking to a stop at each point. Combined with
+        ///     coasting on the existing path while the next one computes, this makes the
+        ///     guard curve smoothly through its route. Only patrol uses it — task targets
+        ///     (stations, chests) still require precise arrival at the approach cell.
+        /// </summary>
+        public const float PatrolWaypointLookahead = 2f;
+
+        /// <summary>
         ///     Cooldown (s) between consecutive behavior-selection passes.
         ///     The villager's path-follow inner loop still runs every tick
         ///     for smooth movement; this only gates the "which task do I
@@ -290,7 +300,7 @@ namespace ValheimVillages.Settings
         public const float CraftDuration = 5f;
 
         /// <summary>How often to re-scan for work when idle (seconds).</summary>
-        public const float WorkScanInterval = 30f;
+        public const float WorkScanInterval = 6f;
 
         /// <summary>
         ///     Arrival distance for work destinations (chests, stations).
@@ -307,6 +317,12 @@ namespace ValheimVillages.Settings
 
         /// <summary>Seconds without reaching the work destination (within 2m 3D) before giving up and trying something else.</summary>
         public const float WorkStuckTimeoutSeconds = 30f;
+
+        /// <summary>
+        ///     Radius (from a carpenter's bed) to scan for damaged structures to
+        ///     repair (meters). Sized to cover a whole village from its anchor.
+        /// </summary>
+        public const float RepairScanRadius = 40f;
     }
 
     /// <summary>

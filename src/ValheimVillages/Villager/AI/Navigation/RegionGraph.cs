@@ -478,6 +478,33 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             /// <summary>
+            ///     Centre of every lookup-grid cell — the exact set of points
+            ///     <see cref="PointToRegionId"/> resolves to, i.e. the true operable
+            ///     area of the village (concavities and holes included). This is the
+            ///     source of truth for "where a villager counts as in the village",
+            ///     unlike <see cref="GetAllRegionCenters"/> which returns one averaged
+            ///     centroid per region. Rendered as the village-map footprint so the
+            ///     map reflects real coverage rather than a derived hull.
+            /// </summary>
+            public List<Vector3> GetLookupCellCenters()
+            {
+                var list = new List<Vector3>();
+                if (m_g == null || !m_g.m_initialized) return list;
+                var halfCell = LookupCellSize * 0.5f;
+                var halfBucket = HeightBucketSize * 0.5f;
+                foreach (var key in m_g.m_lookupGrid.Keys)
+                {
+                    UnpackLookup(key, out var gx, out var gz, out var hb);
+                    list.Add(new Vector3(
+                        gx * LookupCellSize + halfCell,
+                        hb * HeightBucketSize + halfBucket,
+                        gz * LookupCellSize + halfCell));
+                }
+
+                return list;
+            }
+
+            /// <summary>
             ///     AABB of the BFS lookup grid in XZ (the points
             ///     <see cref="PointToRegionId"/> can actually resolve). Used by
             ///     the diagnostics sidecar to compare BFS coverage vs the boundary

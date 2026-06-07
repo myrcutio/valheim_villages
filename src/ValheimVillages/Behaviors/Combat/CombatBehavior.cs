@@ -89,12 +89,13 @@ namespace ValheimVillages.Behaviors.Combat
 
         public void Update(float dt)
         {
-            var humanoid = m_ai.Humanoid;
-            if (humanoid == null || !IsValidTarget(m_target))
+            if (!IsValidTarget(m_target))
             {
                 Disengage();
                 return;
             }
+
+            var humanoid = m_ai.Humanoid;
 
             // Tick fast while engaged (one-shot — re-request every Update).
             m_ai.RequestFastReselect(EngagedTickSec);
@@ -181,8 +182,6 @@ namespace ValheimVillages.Behaviors.Combat
         private Character AcquireTarget()
         {
             var me = m_ai.Character;
-            if (me == null) return null;
-
             var myPos = m_ai.Position;
             var bed = m_ai.BedPosition;
             var detectSq = CombatSettings.DetectionRadius * CombatSettings.DetectionRadius;
@@ -256,7 +255,6 @@ namespace ValheimVillages.Behaviors.Combat
         private bool HasUsableWeapon()
         {
             var h = m_ai.Humanoid;
-            if (h == null) return false;
             if (h.GetCurrentWeapon() != null) return true;
             return FindEnemyWeapon(h) != null;
         }

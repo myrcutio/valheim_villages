@@ -7,9 +7,13 @@ using ValheimVillages.Villager.AI.Navigation;
 namespace ValheimVillages.UI.Panels
 {
     /// <summary>
-    ///     Renders the minimal per-task map for the Tasks tab: the village
-    ///     perimeter (patrol route or a convex hull of the walkable region cells)
-    ///     plus task pins (work-order chest, player).
+    ///     Renders the per-task map for the Tasks tab. The map shows the village's
+    ///     ACTUAL operable area — the region graph's lookup cells, the same points
+    ///     <see cref="RegionGraph.PointToRegionId"/> resolves — identically for every
+    ///     villager type, so the map faithfully represents where the villager can
+    ///     operate (and surfaces any coverage holes / boundary-detection issues)
+    ///     rather than a per-type derived shape. A patroller's route, the villager,
+    ///     the bed, gates, and task pins are drawn as overlays on top.
     /// </summary>
     public static class VillageMapPanel
     {
@@ -26,8 +30,28 @@ namespace ValheimVillages.UI.Panels
             IReadOnlyList<(Vector3 position, Color color)> pins)
         {
             if (villager == null) return null;
-            return PatrolMapRenderer.RenderMinimal(
-                GetPerimeter(villager), WithGatePins(villager, pins));
+
+            var ai = villager.AI;
+            if (ai == null) return null;
+
+            var bed = ai.BedPosition;
+            var graph = Villages.Entity.VillageRegistry.GraphAt(bed);
+            if (graph == null) return null; // no village graph here — no map to draw
+
+            // Source of truth for the operable area: the graph's lookup cells.
+            var cells = graph.Diagnostics.GetLookupCellCenters();
+
+            // Patrol route (if any) is drawn as an OVERLAY, not the footprint.
+            var waypoints = ai.GetBehavior<PerimeterPatrolBehavior>()?.PatrolWaypoints;
+            var villagerPos = ai.Position;
+
+            return PatrolMapRenderer.Render(
+                waypoints,
+                bed,
+                villagerPos,
+                cells,
+                cellSize: RegionGraph.LookupCellSize,
+                extraPins: WithGatePins(villager, pins));
         }
 
         /// <summary>
@@ -48,87 +72,6 @@ namespace ValheimVillages.UI.Panels
             if (pins != null) merged.AddRange(pins);
             foreach (var g in gates) merged.Add((g, GatePinColor));
             return merged;
-        }
-
-        /// <summary>
-        ///     The village outline for the map. Prefers the villager's patrol
-        ///     route (already a perimeter loop); otherwise outlines the walkable
-        ///     region cells with a convex hull so non-patrollers still get a shape.
-        /// </summary>
-        private static List<Vector3> GetPerimeter(VillagerBehaviorBridge villager)
-        {
-            var patrol = villager.AI?.GetBehavior<PerimeterPatrolBehavior>();
-            var waypoints = patrol?.PatrolWaypoints;
-            if (waypoints != null)
-            {
-                var active = new List<Vector3>();
-                foreach (var w in waypoints)
-                    if (w.Active)
-                        active.Add(w.Position);
-                if (active.Count >= 3) return active;
-            }
-
-            // Non-patrollers (e.g. the Farmer) have no route. Outline the
-            // village by its boundary cells — the outer ring, where the gate
-            // pins sit — so the shape encloses the gates. The convex hull of
-            // region CENTERS used previously is inset toward the middle, so
-            // adding gate pins at the wall ring blew the map bounds out and
-            // left the outline as a tiny shape floating in the centre.
-            var bed = villager.AI?.BedPosition ?? Vector3.zero;
-            var graph = Villages.Entity.VillageRegistry.GraphAt(bed);
-            if (graph != null)
-            {
-                var boundary = graph.GetBoundaryCells();
-                if (boundary.Count >= 3)
-                {
-                    var pts = new List<Vector3>(boundary.Count);
-                    foreach (var b in boundary) pts.Add(b.worldCenter);
-                    return ConvexHull(pts);
-                }
-            }
-
-            var cells = new List<Vector3>();
-            foreach (var g in Villages.Entity.VillageRegistry.AllGraphs())
-                cells.AddRange(g.Diagnostics.GetAllRegionCenters());
-            return ConvexHull(cells);
-        }
-
-        /// <summary>2D (XZ) convex hull (monotone chain), returned as an ordered loop.</summary>
-        private static List<Vector3> ConvexHull(List<Vector3> points)
-        {
-            if (points == null || points.Count < 3)
-                return points ?? new List<Vector3>();
-
-            var pts = new List<Vector3>(points);
-            pts.Sort((a, b) =>
-                Mathf.Approximately(a.x, b.x) ? a.z.CompareTo(b.z) : a.x.CompareTo(b.x));
-
-            var hull = new List<Vector3>();
-            foreach (var p in pts)
-            {
-                while (hull.Count >= 2 &&
-                       Cross(hull[hull.Count - 2], hull[hull.Count - 1], p) <= 0)
-                    hull.RemoveAt(hull.Count - 1);
-                hull.Add(p);
-            }
-
-            var lower = hull.Count + 1;
-            for (var i = pts.Count - 2; i >= 0; i--)
-            {
-                var p = pts[i];
-                while (hull.Count >= lower &&
-                       Cross(hull[hull.Count - 2], hull[hull.Count - 1], p) <= 0)
-                    hull.RemoveAt(hull.Count - 1);
-                hull.Add(p);
-            }
-
-            hull.RemoveAt(hull.Count - 1);
-            return hull;
-        }
-
-        private static float Cross(Vector3 o, Vector3 a, Vector3 b)
-        {
-            return (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
         }
     }
 }

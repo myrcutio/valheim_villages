@@ -290,8 +290,11 @@ namespace ValheimVillages.Behaviors.Patrol
             // an obstacle near the wall (the inward inset nudges it off the
             // walkable frontier cell — e.g. into a charcoal kiln). NavTo's approach
             // resolver probes outward to the nearest standable, reachable point.
+            // resetPath:false — keep the agent's current path so it coasts forward while
+            // the next waypoint's path computes (smooth flow-through instead of a stop at
+            // each point). The destination still updates in UpdateAgentMovement.
             if (m_ai.NavTo(wp.Position, BehaviorState.Patrolling, $"patrol:W{idx}",
-                    snapToApproach: true))
+                    snapToApproach: true, resetPath: false))
                 return;
 
             // One-shot self-heal before parking: a NeedsHelp is often just a stale route

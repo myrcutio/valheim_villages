@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using ValheimVillages.Behaviors.Combat;
 using ValheimVillages.Behaviors.Patrol;
+using ValheimVillages.Behaviors.Repair;
 using ValheimVillages.Behaviors.Tidy;
 using ValheimVillages.Behaviors.Work;
 using ValheimVillages.Interfaces;
@@ -23,6 +24,7 @@ namespace ValheimVillages.Behaviors
             { "craft", ai => new CraftingBehaviorAdapter(ai) },
             { "farming", ai => new FarmBehaviorAdapter(ai) },
             { "tidy", ai => new TidyBehavior(ai) },
+            { "repair", ai => new RepairBehavior(ai) },
             { "haul", ai => new HaulBehavior(ai) },
         };
 

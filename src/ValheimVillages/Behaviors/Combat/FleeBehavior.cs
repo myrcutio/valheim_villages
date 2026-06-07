@@ -120,7 +120,6 @@ namespace ValheimVillages.Behaviors.Combat
         private Character FindNearestThreat(float radius)
         {
             var me = m_ai.Character;
-            if (me == null) return null;
             var myPos = m_ai.Position;
             var radiusSq = radius * radius;
 
