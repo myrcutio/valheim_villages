@@ -308,4 +308,117 @@ namespace ValheimVillages.Settings
         /// <summary>Seconds without reaching the work destination (within 2m 3D) before giving up and trying something else.</summary>
         public const float WorkStuckTimeoutSeconds = 30f;
     }
+
+    /// <summary>
+    ///     Configuration settings for villager combat (CombatBehavior).
+    ///     Engagement model: defend-on-detection. A combat-capable villager
+    ///     engages hostiles that enter its guard zone (a radius around its home
+    ///     post / bed) and disengages — returning to patrol — once the zone is
+    ///     clear or the target flees past the leash.
+    /// </summary>
+    public static class CombatSettings
+    {
+        /// <summary>
+        ///     How far from the villager a hostile is noticed. The villager only
+        ///     ACTS on hostiles that are also within <see cref="LeashRadius"/> of
+        ///     its home post, so this is the "line of sight" radius, not the
+        ///     guard zone size.
+        /// </summary>
+        public const float DetectionRadius = 25f;
+
+        /// <summary>
+        ///     Guard zone radius, measured from the villager's bed (home post).
+        ///     Hostiles outside this radius are ignored, and an engaged target
+        ///     that moves beyond it is dropped — the villager will not be lured
+        ///     across the map. Keep comfortably larger than a typical patrol
+        ///     route so the guard covers its whole village.
+        /// </summary>
+        public const float LeashRadius = 40f;
+
+        /// <summary>
+        ///     Distance at which a melee villager stops closing and swings. Uses
+        ///     the larger of this and the weapon's own <c>m_aiAttackRange</c> so
+        ///     long-reach weapons still work, but doesn't depend on player
+        ///     weapons having AI ranges tuned.
+        /// </summary>
+        public const float MeleeAttackRange = 2.2f;
+
+        /// <summary>
+        ///     Distance at which a ranged (crossbow) villager will open fire.
+        ///     Decoupled from the weapon's <c>m_aiAttackRange</c> (player weapons
+        ///     leave it at the ~2m default, which would make the "ranged"
+        ///     villager close to melee distance before shooting).
+        /// </summary>
+        public const float RangedEngageRange = 22f;
+
+        /// <summary>
+        ///     Ranged villagers back away (kite) when a target closes nearer than
+        ///     this, to keep the crossbow useful instead of being swarmed.
+        /// </summary>
+        public const float RangedMinStandoff = 8f;
+
+        /// <summary>How often (s) to re-scan for / re-validate a target while idle or engaged.</summary>
+        public const float TargetRescanInterval = 1f;
+
+        /// <summary>How often (s) to refresh the chase destination toward a moving target.</summary>
+        public const float ChaseRepathInterval = 0.35f;
+
+        /// <summary>Bolt stack size kept topped up in a ranged villager's inventory (infinite ammo).</summary>
+        public const int AmmoTopUpStack = 20;
+
+        /// <summary>
+        ///     A hostile within this distance of ANY fellow villager counts as
+        ///     "threatening the village" — a guard will move to engage it even if
+        ///     it isn't near the guard itself (as long as it's within the guard's
+        ///     <see cref="LeashRadius"/>). This is what makes guards defend other
+        ///     NPCs rather than only reacting to threats in their own face.
+        /// </summary>
+        public const float VillageThreatRadius = 18f;
+
+        /// <summary>
+        ///     Non-combatant villagers flee when a hostile comes within this
+        ///     distance. Smaller than the guard detection radius so guards react
+        ///     first / from further out.
+        /// </summary>
+        public const float FleeDangerRadius = 16f;
+
+        /// <summary>
+        ///     Hysteresis: a fleeing non-combatant only calms once the nearest
+        ///     hostile is beyond this (larger than <see cref="FleeDangerRadius"/>),
+        ///     so it doesn't flicker in/out of panic at the boundary.
+        /// </summary>
+        public const float FleeClearRadius = 24f;
+
+        /// <summary>
+        ///     How far a non-combatant runs from the threat when there is no guard
+        ///     on the roster to flee toward.
+        /// </summary>
+        public const float FleeDistance = 14f;
+
+        /// <summary>Eye/muzzle height (m) the guard's line-of-sight ray is cast from / to.</summary>
+        public const float LosEyeHeight = 1.5f;
+
+        /// <summary>
+        ///     Minimum seconds between line-of-sight reposition searches (sampling
+        ///     navmesh cells around the target for one with a clear shot). The cheap
+        ///     per-tick LOS raycast runs every tick; only the heavier
+        ///     "find a firing position" search is throttled.
+        /// </summary>
+        public const float LosSearchInterval = 0.4f;
+
+        /// <summary>
+        ///     Consecutive failed reposition searches before the guard concludes no
+        ///     navmesh cell can see the target, ignores it, and returns to patrol.
+        /// </summary>
+        public const int LosMaxSearchFails = 3;
+
+        /// <summary>
+        ///     After giving up on an unreachable-by-sight target, ignore it for this
+        ///     long so the guard doesn't immediately re-aggro and shoot the wall again.
+        /// </summary>
+        public const float LosIgnoreSeconds = 8f;
+
+        /// <summary>Number of candidate firing positions sampled around the target per search.</summary>
+        public const int LosSampleCount = 12;
+    }
 }

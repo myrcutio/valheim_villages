@@ -50,6 +50,11 @@ namespace ValheimVillages.Villager.AI
 
         private float m_lastBehaviorUpdateTime;
 
+        // One-shot override for the next behavior-reselect interval. -1 = use the
+        // default cadence; >= 0 = use this many seconds for the NEXT tick only.
+        // Set by the active behavior (combat) during Update to tick faster.
+        private float m_nextReselectOverride = -1f;
+
         // Timing
         private float m_lastDiscoveryTime;
         private float m_lastMemorySaveTime;
@@ -340,7 +345,14 @@ namespace ValheimVillages.Villager.AI
                 // Reset cooldown. Idle re-evaluation cadence — high enough
                 // to stop the thrash, low enough to react to player input
                 // (work orders, manual relocate) within a noticeable window.
-                m_lastBehaviorUpdateTime = VillagerSettings.BehaviorReselectIntervalSec;
+                // A behavior that needs to tick faster than that (combat, which
+                // must re-aim / fire / repath at near-frame rate) can shorten
+                // the NEXT interval from inside its Update via
+                // RequestFastReselect; the override is one-shot.
+                m_lastBehaviorUpdateTime = m_nextReselectOverride >= 0f
+                    ? m_nextReselectOverride
+                    : VillagerSettings.BehaviorReselectIntervalSec;
+                m_nextReselectOverride = -1f;
             }
 
             if (Time.time - m_lastMemorySaveTime > SaveInterval)
@@ -415,6 +427,24 @@ namespace ValheimVillages.Villager.AI
 
             m_behaviors = BehaviorFactory.CreateBehaviors(this, behaviorKeys);
 
+            // Role-based combat: combatants (guards/crossbowmen, which carry the
+            // "combat" behavior) engage threats; everyone else flees toward a guard.
+            // Auto-add a flee behavior to any non-combatant so "any non-guard flees"
+            // without each definition opting in.
+            var hasCombat = false;
+            var hasFlee = false;
+            foreach (var b in m_behaviors)
+            {
+                if (b is Behaviors.Combat.CombatBehavior) hasCombat = true;
+                if (b is Behaviors.Combat.FleeBehavior) hasFlee = true;
+            }
+
+            if (!hasCombat && !hasFlee)
+            {
+                m_behaviors.Add(new Behaviors.Combat.FleeBehavior(this));
+                m_behaviors.Sort((a, b) => b.Priority.CompareTo(a.Priority));
+            }
+
             // TODO: why is this necessary? what part of farming requires crafting?
             var craftAdapter = GetBehavior<CraftingBehaviorAdapter>();
             var farmAdapter = GetBehavior<FarmBehaviorAdapter>();
@@ -436,6 +466,9 @@ namespace ValheimVillages.Villager.AI
                 BehaviorState.Wandering => true,
                 BehaviorState.Patrolling => true,
                 BehaviorState.Working => true,
+                // Combat chase: the agent mover drives the villager toward the
+                // current target waypoint while engaging.
+                BehaviorState.Alarmed => true,
                 _ => false,
             };
         }
@@ -490,6 +523,13 @@ namespace ValheimVillages.Villager.AI
 
         /// <summary>Character component. Compatibility with farming/work.</summary>
         public Character Character => Villager != null ? Villager.GetComponent<Character>() : null;
+
+        /// <summary>
+        ///     The villager as a <see cref="Humanoid"/> (its base prefab is a
+        ///     Humanoid). Used by combat to equip weapons / ammo and call
+        ///     <c>StartAttack</c>. Null only if the Character isn't a Humanoid.
+        /// </summary>
+        public Humanoid Humanoid => Character as Humanoid;
 
         /// <summary>Current movement target position. Compatibility with BehaviorLogic.</summary>
         public Vector3? CurrentTarget => m_currentWaypoint != null ? m_currentWaypoint.Position : null;
@@ -596,6 +636,18 @@ namespace ValheimVillages.Villager.AI
         }
 
         public bool IsPaused { get; private set; }
+
+        /// <summary>
+        ///     Ask the AI to run the next behavior-selection/Update tick after
+        ///     <paramref name="seconds"/> instead of the default reselect cadence.
+        ///     One-shot — must be re-requested each Update to sustain a fast tick.
+        ///     Combat uses this to re-aim/fire/repath at near-frame rate while
+        ///     engaged, then lets it lapse back to the default when it disengages.
+        /// </summary>
+        public void RequestFastReselect(float seconds)
+        {
+            m_nextReselectOverride = Mathf.Max(0f, seconds);
+        }
 
         public VillagerWaypoint GetCurrentWaypoint()
         {

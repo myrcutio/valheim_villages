@@ -63,7 +63,8 @@
   "workStations": [],
   "skinColor": "1.15,0.85,0.55",
   "behaviors": [
-    "patrol"
+    "patrol",
+    "combat"
   ],
   "tags": [
     "passive:spawnblock",
