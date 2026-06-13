@@ -1,5 +1,7 @@
-.idea
-.cursor
+.idea/**/*
+.cursor/**/*
+.claude/**/*
+.junie/**/*
 docs
 openspec
 
