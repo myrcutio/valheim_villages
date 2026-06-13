@@ -1,8 +1,12 @@
 # Valheim Villages
 
----
+Add villagers to Valheim.  They map out an enclosed village, locate stations and containers within the walls, and attempt to fulfill work orders using available materials.
 
-Work-in-progress mod that adds villagers to valheim.  They map out an enclosed village, locate stations and containers within the walls, and attempt to fulfill work orders using available materials.
+> **Early access.** This is a first draft published for server testing. Expect rough edges — see Known Issues.
+
+### Install
+
+Requires [BepInExPack Valheim](https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/). Install via a mod manager (r2modman / Thunderstore Mod Manager) by searching for **ValheimVillages**, or manually drop `ValheimVillages.dll` into `BepInEx/plugins/ValheimVillages/`. For dedicated servers, install the same plugin on the server.
 
 ### Current features
 
