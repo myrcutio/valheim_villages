@@ -294,7 +294,7 @@ namespace ValheimVillages
                 if (!isVillager) continue;
 
                 // Get bed position from ZDO
-                var bedPos = zdo.GetVec3("vv_bed_position", Vector3.zero);
+                var bedPos = zdo.GetVec3("vv_home_position", Vector3.zero);
                 if (bedPos == Vector3.zero)
                 {
                     Plugin.Log?.LogWarning(

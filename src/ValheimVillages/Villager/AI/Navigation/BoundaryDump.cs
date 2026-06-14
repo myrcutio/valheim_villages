@@ -29,7 +29,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 return;
             }
 
-            var beds = VillagerAIManager.GetAllBedPositions();
+            var beds = VillagerAIManager.GetAllAnchorPositions();
             var bedPos = beds != null && beds.Count > 0 ? beds[0] : Vector3.zero;
 
             var graph = Villages.Entity.VillageRegistry.GraphAt(bedPos);

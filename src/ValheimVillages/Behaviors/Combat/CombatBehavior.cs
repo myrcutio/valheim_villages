@@ -183,7 +183,7 @@ namespace ValheimVillages.Behaviors.Combat
         {
             var me = m_ai.Character;
             var myPos = m_ai.Position;
-            var bed = m_ai.BedPosition;
+            var bed = m_ai.HomeAnchor;
             var detectSq = CombatSettings.DetectionRadius * CombatSettings.DetectionRadius;
             var leashSq = CombatSettings.LeashRadius * CombatSettings.LeashRadius;
 
@@ -226,7 +226,7 @@ namespace ValheimVillages.Behaviors.Combat
             {
                 var v = kv.Value;
                 if (v == null) continue;
-                if ((v.BedPosition - guardBed).sqrMagnitude > sameVillageSq) continue;
+                if ((v.HomeAnchor - guardBed).sqrMagnitude > sameVillageSq) continue;
                 if ((enemyPos - v.Position).sqrMagnitude <= threatSq) return true;
             }
 
@@ -238,7 +238,7 @@ namespace ValheimVillages.Behaviors.Combat
         {
             if (c == null || c.IsDead()) return false;
             var leashSq = CombatSettings.LeashRadius * CombatSettings.LeashRadius;
-            return (c.transform.position - m_ai.BedPosition).sqrMagnitude <= leashSq;
+            return (c.transform.position - m_ai.HomeAnchor).sqrMagnitude <= leashSq;
         }
 
         private void Disengage()

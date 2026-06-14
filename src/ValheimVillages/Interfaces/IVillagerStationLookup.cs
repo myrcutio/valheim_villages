@@ -9,7 +9,7 @@ namespace ValheimVillages.Interfaces
     /// </summary>
     public interface IVillagerStationLookup
     {
-        Vector3 BedPosition { get; }
+        Vector3 HomeAnchor { get; }
     }
 
     /// <summary>

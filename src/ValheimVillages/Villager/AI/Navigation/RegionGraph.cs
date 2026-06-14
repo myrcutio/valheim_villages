@@ -114,7 +114,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             m_regionKinds.Clear();
             m_gates.Clear();
             m_outsideCellsXz.Clear();
-            m_bedReachableCellsXz.Clear();
+            m_anchorReachableCellsXz.Clear();
             m_prunedPieceKeys.Clear();
             m_hasClassification = false;
             m_initialized = false;
@@ -228,7 +228,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         // classification" → callers must fall back to a full repartition, NOT
         // treat everything as outside.
         private readonly HashSet<long> m_outsideCellsXz = new();
-        private readonly HashSet<long> m_bedReachableCellsXz = new();
+        private readonly HashSet<long> m_anchorReachableCellsXz = new();
         private readonly HashSet<long> m_prunedPieceKeys = new();
         private bool m_hasClassification;
 
@@ -595,7 +595,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <summary>
         ///     Commit the perimeter classification produced by
         ///     <see cref="RubberBandPrune.Apply" />. <paramref name="outsideXz" />
-        ///     and <paramref name="bedReachableXz" /> are 2D <see cref="PackXz" />
+        ///     and <paramref name="anchorReachableXz" /> are 2D <see cref="PackXz" />
         ///     keys at <see cref="LookupCellSize" />; <paramref name="prunedPieceKeys" />
         ///     are 3D <see cref="PackLookup" /> keys (include height bucket). Stored
         ///     verbatim and persisted in the v4 ZDO section so loads reproduce the
@@ -603,20 +603,20 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// </summary>
         public void SetClassification(
             HashSet<long> outsideXz,
-            HashSet<long> bedReachableXz,
+            HashSet<long> anchorReachableXz,
             HashSet<long> prunedPieceKeys)
         {
             m_outsideCellsXz.Clear();
-            m_bedReachableCellsXz.Clear();
+            m_anchorReachableCellsXz.Clear();
             m_prunedPieceKeys.Clear();
             if (outsideXz != null)
                 foreach (var k in outsideXz) m_outsideCellsXz.Add(k);
-            if (bedReachableXz != null)
-                foreach (var k in bedReachableXz) m_bedReachableCellsXz.Add(k);
+            if (anchorReachableXz != null)
+                foreach (var k in anchorReachableXz) m_anchorReachableCellsXz.Add(k);
             if (prunedPieceKeys != null)
                 foreach (var k in prunedPieceKeys) m_prunedPieceKeys.Add(k);
             m_hasClassification = m_outsideCellsXz.Count > 0
-                                  || m_bedReachableCellsXz.Count > 0
+                                  || m_anchorReachableCellsXz.Count > 0
                                   || m_prunedPieceKeys.Count > 0;
         }
 
@@ -632,8 +632,8 @@ namespace ValheimVillages.Villager.AI.Navigation
             m_outsideCellsXz.Contains(PackXz(gx, gz));
 
         /// <summary>Is the terrain cell (gx,gz) reachable from a bed (inside)?</summary>
-        public bool IsBedReachableCell(int gx, int gz) =>
-            m_bedReachableCellsXz.Contains(PackXz(gx, gz));
+        public bool IsAnchorReachableCell(int gx, int gz) =>
+            m_anchorReachableCellsXz.Contains(PackXz(gx, gz));
 
         /// <summary>Was this 3D piece lookup key pruned (not piece-reachable)?</summary>
         public bool IsPieceKeyPruned(long lookupKey) =>
@@ -641,7 +641,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         // Raw set access for the persistence layer (v4 serialization).
         internal IReadOnlyCollection<long> OutsideCellsXz => m_outsideCellsXz;
-        internal IReadOnlyCollection<long> BedReachableCellsXz => m_bedReachableCellsXz;
+        internal IReadOnlyCollection<long> AnchorReachableCellsXz => m_anchorReachableCellsXz;
         internal IReadOnlyCollection<long> PrunedPieceKeys => m_prunedPieceKeys;
 
         #endregion

@@ -29,7 +29,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             Name = "vv_hna_dump")]
         public static void Dump()
         {
-            var beds = VillagerAIManager.GetAllBedPositions();
+            var beds = VillagerAIManager.GetAllAnchorPositions();
             if (beds == null || beds.Count == 0)
             {
                 Console.instance?.Print("No villager beds found.");

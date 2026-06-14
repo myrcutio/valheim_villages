@@ -188,7 +188,7 @@ namespace ValheimVillages.UI.Tabs
         private void AddNavigationCommands(VillagerBehaviorBridge villager)
         {
             var v = villager;
-            AddNavCommand(v, "Go to Bed", LocationType.Bed);
+            AddNavCommand(v, "Go Home", LocationType.Home);
             AddNavCommand(v, "Find Fire", LocationType.Fire);
         }
 
@@ -209,12 +209,12 @@ namespace ValheimVillages.UI.Tabs
                         return;
                     }
 
-                    var bedPos = ai.GetMemory()?.BedPosition ?? ai.Position;
+                    var bedPos = ai.GetMemory()?.HomeAnchor ?? ai.Position;
 
                     // Bed is per-villager; everything else comes from the
                     // village PoI registry (nearest of the requested type).
                     Vector3 dest;
-                    if (type == LocationType.Bed)
+                    if (type == LocationType.Home)
                     {
                         dest = bedPos;
                     }

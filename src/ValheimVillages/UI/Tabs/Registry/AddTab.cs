@@ -83,7 +83,7 @@ namespace ValheimVillages.UI.Tabs.Registry
             if (context == null) return;
 
             // Spawn the chosen type at the registry. SpawnVillagerNpc mints a fresh Alive
-            // record whose home (vv_bed_position / record.BedPosition) is the seed below, so
+            // record whose home (vv_home_position / record.HomeAnchor) is the seed below, so
             // the villager belongs to this village with no bed involved.
             //
             // The registry anchor sits inside the station's own colliders — using it
@@ -103,7 +103,7 @@ namespace ValheimVillages.UI.Tabs.Registry
             var prefab = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : "DvergerMage";
             // Recruited AT this registry → belongs to this registry's village (already
             // minted at placement). Pass its id so the spawn resolves it without minting.
-            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, def.type, prefab, spawnPos, ref record, context.VillageId);
+            var npc = VillagerSpawner.SpawnVillagerNpc(def, def.type, prefab, spawnPos, ref record, context.VillageId);
 
             Player.m_localPlayer?.Message(
                 MessageHud.MessageType.Center,

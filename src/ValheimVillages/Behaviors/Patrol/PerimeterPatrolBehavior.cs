@@ -78,7 +78,7 @@ namespace ValheimVillages.Behaviors.Patrol
         #region Pass-through patrol state
 
         public bool IsDiscoveryComplete => m_patrol?.IsDiscoveryComplete ?? false;
-        public Vector3 BedPosition => m_patrol?.BedPosition ?? Vector3.zero;
+        public Vector3 HomeAnchor => m_patrol?.HomeAnchor ?? Vector3.zero;
 
         /// <summary>Index of the waypoint the patrol parked at in NeedsHelp, or -1.</summary>
         public int HelpWaypointIndex => m_patrol?.HelpWaypointIndex ?? -1;

@@ -35,7 +35,7 @@ namespace ValheimVillages.Dev
                 return;
             }
 
-            var bed = carp.BedPosition;
+            var bed = carp.HomeAnchor;
             var pos = carp.Position;
             var radius = WorkSettings.RepairScanRadius;
             Print($"[vv_repair_probe] {carp.NpcName} bed=({bed.x:F1},{bed.z:F1}) pos=({pos.x:F1},{pos.z:F1}) " +

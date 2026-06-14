@@ -104,10 +104,10 @@ namespace ValheimVillages.Behaviors.Crafting
 
             m_lastScanTime = Time.time;
 
-            var bp = m_villager.BedPosition;
+            var bp = m_villager.HomeAnchor;
             Plugin.Log?.LogDebug(
                 $"[WorkScan:{m_villager.VillagerName}] Enqueueing work order scan. " +
-                $"VillagerType={m_villager.VillagerType}, BedPos=({bp.x:F2},{bp.y:F2},{bp.z:F2})");
+                $"VillagerType={m_villager.VillagerType}, HomeAnchor=({bp.x:F2},{bp.y:F2},{bp.z:F2})");
 
             m_scanPending = true;
 
@@ -121,9 +121,9 @@ namespace ValheimVillages.Behaviors.Crafting
                 {
                     { "villager_id", m_villager.UniqueID },
                     { "villager_type", m_villager.VillagerType },
-                    { "bed_x", bp.x.ToString("F2", CultureInfo.InvariantCulture) },
-                    { "bed_y", bp.y.ToString("F2", CultureInfo.InvariantCulture) },
-                    { "bed_z", bp.z.ToString("F2", CultureInfo.InvariantCulture) },
+                    { "home_x", bp.x.ToString("F2", CultureInfo.InvariantCulture) },
+                    { "home_y", bp.y.ToString("F2", CultureInfo.InvariantCulture) },
+                    { "home_z", bp.z.ToString("F2", CultureInfo.InvariantCulture) },
                 },
                 Callback = OnWorkOrderScanResult,
             });

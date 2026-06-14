@@ -488,7 +488,7 @@ namespace ValheimVillages.Villages
         public static void DumpStations()
         {
             var sb = new System.Text.StringBuilder();
-            var beds = Villager.AI.VillagerAIManager.GetAllBedPositions();
+            var beds = Villager.AI.VillagerAIManager.GetAllAnchorPositions();
             sb.AppendLine($"[vv_stations] {beds.Count} bed(s); {s_stationsByVillage.Count} village(s) cached");
 
             foreach (var bed in beds)

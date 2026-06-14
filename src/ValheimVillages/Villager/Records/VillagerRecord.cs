@@ -24,7 +24,7 @@ namespace ValheimVillages.Villager.Records
         public const string NameKey = "vv_record_name";
         public const string StatusKey = "vv_record_status"; // int (RecordStatus)
         public const string VillageTag = "vv_record_village"; // owning Village id (vv_village_id)
-        public const string BedKey = "vv_record_bed"; // Vector3
+        public const string HomeKey = "vv_record_home"; // Vector3
         public const string EggPrefabKey = "vv_record_egg_prefab"; // string (empty until egg phase)
         public const string NpcKey = "vv_record_npc"; // ZDOID back-link to the live NPC (when alive)
 
@@ -68,12 +68,12 @@ namespace ValheimVillages.Villager.Records
             set => SetString(VillageTag, value);
         }
 
-        public Vector3 BedPosition
+        public Vector3 HomeAnchor
         {
-            get => m_zdo.GetVec3(BedKey, Vector3.zero);
+            get => m_zdo.GetVec3(HomeKey, Vector3.zero);
             set
             {
-                m_zdo.Set(BedKey, value);
+                m_zdo.Set(HomeKey, value);
                 m_zdo.Persistent = true;
             }
         }

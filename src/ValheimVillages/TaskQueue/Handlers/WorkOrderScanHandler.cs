@@ -35,7 +35,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 string.IsNullOrEmpty(villagerType))
                 return TaskResult.Fail("Missing villager_type");
 
-            if (!TaskAttributeParser.TryParsePosition(task.Attributes, "bed", out var bedPos))
+            if (!TaskAttributeParser.TryParsePosition(task.Attributes, "home", out var bedPos))
                 return TaskResult.Fail("Missing or invalid bed position");
 
             // Look up the VillagerAI to access memory

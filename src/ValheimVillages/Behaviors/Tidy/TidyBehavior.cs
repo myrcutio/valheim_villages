@@ -93,7 +93,7 @@ namespace ValheimVillages.Behaviors.Tidy
             // the villager's bed), not per-villager memory. TryFindStation returns
             // the nearest one matching the filter that also has a reachable
             // approach, so an unreachable mess won't be picked.
-            var bedPos = m_ai.GetMemory().BedPosition;
+            var bedPos = m_ai.GetMemory().HomeAnchor;
             if (VillageStationRegistry.TryFindStation<CookingStation>(
                     bedPos, HasDoneOrBurntItems, out _, out var station))
             {

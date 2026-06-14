@@ -51,7 +51,7 @@ namespace ValheimVillages.Schemas
         {
             switch (type)
             {
-                case LocationType.Bed: return 3f;
+                case LocationType.Home: return 3f;
                 case LocationType.Shelter: return 20f;
                 case LocationType.Fire: return 15f;
                 case LocationType.Table: return 10f;
@@ -70,7 +70,7 @@ namespace ValheimVillages.Schemas
         {
             switch (type)
             {
-                case LocationType.Bed: return 1;
+                case LocationType.Home: return 1;
                 case LocationType.Shelter: return 3;
                 case LocationType.Fire: return 2;
                 case LocationType.Table: return 2;

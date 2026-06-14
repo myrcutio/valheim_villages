@@ -101,7 +101,7 @@ namespace ValheimVillages.Villager
             }
 
             var legacyName = zdo.GetString("vv_villager_name");
-            var bedPos = zdo.GetVec3("vv_bed_position", Vector3.zero);
+            var bedPos = zdo.GetVec3("vv_home_position", Vector3.zero);
             // Resolve (never mint) the village: stamped id, else existing graph coverage,
             // else registry-anchor proximity. A legacy villager that resolves to no village
             // is NOT migrated (villages are created only at a registry station).

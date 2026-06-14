@@ -34,7 +34,7 @@ namespace ValheimVillages.UI.Panels
             var ai = villager.AI;
             if (ai == null) return null;
 
-            var bed = ai.BedPosition;
+            var bed = ai.HomeAnchor;
             var graph = Villages.Entity.VillageRegistry.GraphAt(bed);
             if (graph == null) return null; // no village graph here — no map to draw
 
@@ -63,7 +63,7 @@ namespace ValheimVillages.UI.Panels
             VillagerBehaviorBridge villager,
             IReadOnlyList<(Vector3 position, Color color)> pins)
         {
-            var bed = villager.AI?.BedPosition ?? Vector3.zero;
+            var bed = villager.AI?.HomeAnchor ?? Vector3.zero;
             var graph = Villages.Entity.VillageRegistry.GraphAt(bed);
             var gates = graph?.GetGates();
             if (gates == null || gates.Count == 0) return pins;

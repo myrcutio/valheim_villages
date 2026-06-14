@@ -6,7 +6,7 @@ namespace ValheimVillages.Tests.RegionGraph;
 
 /// <summary>
 ///     Pass 2 (bed inside-out flood), now pure via injected providers:
-///     <see cref="RubberBandPrune.BedReachableFlood" />. Floods the set of cells a
+///     <see cref="RubberBandPrune.AnchorReachableFlood" />. Floods the set of cells a
 ///     villager can actually reach from a bed — snapping the bed onto the floor
 ///     it rests on, refusing to walk into "outside" cells, and stopping at walls.
 ///     Driven here with synthetic populated/height/wall fixtures (cell size 1).
@@ -17,8 +17,8 @@ public class Pass2BedReachableTests
         GridEnv env, Vector3[] beds, HashSet<long> outside,
         out HashSet<long> reach, out Dictionary<long, float> reachY, out int seeds,
         System.Action<string>? warn = null) =>
-        RubberBandPrune.BedReachableFlood(
-            0, 0, 6, 6, beds, outside, cell: 1f, bedSnapRingMax: 6,
+        RubberBandPrune.AnchorReachableFlood(
+            0, 0, 6, 6, beds, outside, cell: 1f, anchorSnapRingMax: 6,
             env.IsPopulated, env.SurfaceY, env.WallBlocks,
             out reach, out reachY, out seeds, warn);
 

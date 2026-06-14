@@ -11,16 +11,14 @@ namespace ValheimVillages.Villager
             VillagerName = villagerInstance.villagerName;
             VillagerType = villagerInstance.villagerType;
             UniqueID = villagerInstance.uid;
-            BedLocation = villagerInstance.BedPosition;
+            HomeAnchor = villagerInstance.HomeAnchor;
             CurrentWaypoint = villagerInstance.villagerAI?.GetCurrentWaypoint();
         }
 
-        public Vector3 BedLocation { get; }
+        public Vector3 HomeAnchor { get; }
         public VillagerWaypoint CurrentWaypoint { get; }
         public string VillagerName { get; }
         public string VillagerType { get; }
         public string UniqueID { get; }
-
-        public Vector3 BedPosition => BedLocation;
     }
 }

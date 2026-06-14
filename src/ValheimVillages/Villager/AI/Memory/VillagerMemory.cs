@@ -16,7 +16,7 @@ namespace ValheimVillages.Villager.AI.Memory
     {
         public VillagerMemory(Vector3 bedPosition)
         {
-            BedPosition = bedPosition;
+            HomeAnchor = bedPosition;
         }
 
         /// <summary>Highest comfort level experienced.</summary>
@@ -26,7 +26,7 @@ namespace ValheimVillages.Villager.AI.Memory
         public Vector3? BestComfortPosition { get; set; }
 
         /// <summary>The NPC's home bed position.</summary>
-        public Vector3 BedPosition { get; set; }
+        public Vector3 HomeAnchor { get; set; }
 
         /// <summary>Update best comfort level if current is higher.</summary>
         public void UpdateBestComfort(float comfort, Vector3 position)

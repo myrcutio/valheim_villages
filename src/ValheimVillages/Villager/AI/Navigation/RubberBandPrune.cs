@@ -29,13 +29,13 @@ namespace ValheimVillages.Villager.AI.Navigation
     ///             (max of terrain/piece) so the waist probe sits above the floor
     ///             and bed; <c>WallBlocks</c> ignores bed colliders; refuses to
     ///             expand into <c>outsideCells</c>.
-    ///             Output: <c>bedReachableCells</c> (terrain XZ keys reachable from at
+    ///             Output: <c>anchorReachableCells</c> (terrain XZ keys reachable from at
     ///             least one bed). Catches internal cliffs, pits, locked-off rooms.
     ///         </item>
     ///         <item>
     ///             <b>Pass 3</b> (piece): bed-reachable flood on the piece layer.
     ///             Seeds are piece lookup keys within <c>MaxSeedStep</c> Y of a
-    ///             <c>bedReachableCells</c> terrain cell (i.e. "a villager could step
+    ///             <c>anchorReachableCells</c> terrain cell (i.e. "a villager could step
     ///             from terrain onto this piece"). BFS expands via 4-connected horizontal
     ///             neighbour XZs across all height buckets present at the neighbour
     ///             (stair pieces naturally bridge floors at different Ys), gated by
@@ -50,7 +50,7 @@ namespace ValheimVillages.Villager.AI.Navigation
     ///     <list type="bullet">
     ///         <item>
     ///             Terrain <c>LookupGrid</c> entries / tris dropped iff XZ NOT in
-    ///             <c>bedReachableCells</c>.
+    ///             <c>anchorReachableCells</c>.
     ///         </item>
     ///         <item>
     ///             Piece <c>LookupGrid</c> entries / tris dropped iff lookup key NOT
@@ -130,7 +130,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             out HashSet<string> droppedRegionIds,
             out List<(string fromRid, string toRid,
                       Vector3 startPos, Vector3 endPos)> pass3DiscoveredEdgeList,
-            out HashSet<long> bedReachableCellsOut,
+            out HashSet<long> anchorReachableCellsOut,
             out HashSet<long> outsideCellsOut,
             out HashSet<long> prunedPieceKeysOut,
             out List<Vector3> gateMarkersOut)
@@ -141,7 +141,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             // definite-assignment rule. Pass 3 will overwrite later if it runs.
             pass3DiscoveredEdgeList = new List<(string fromRid, string toRid,
                                                 Vector3 startPos, Vector3 endPos)>();
-            bedReachableCellsOut = new HashSet<long>();
+            anchorReachableCellsOut = new HashSet<long>();
             outsideCellsOut = new HashSet<long>();
             prunedPieceKeysOut = new HashSet<long>();
             gateMarkersOut = new List<Vector3>();
@@ -306,11 +306,11 @@ namespace ValheimVillages.Villager.AI.Navigation
             // carries a region — the floor the villager stands on. This is the
             // main position marker, not a fallback.
             //
-            // bedReachableCellY records each reached cell's surface Y so Pass 3
+            // anchorReachableCellY records each reached cell's surface Y so Pass 3
             // seeds the piece flood at the same height (not the terrain a metre
             // below, which would exceed MaxClimb and orphan the floor pieces).
-            var bedReachableCells = new HashSet<long>();
-            var bedReachableCellY = new Dictionary<long, float>();
+            var anchorReachableCells = new HashSet<long>();
+            var anchorReachableCellY = new Dictionary<long, float>();
             var pass2Seeds = 0;
 
             // Region surface Y at a cell: the highest region-centroid Y present
@@ -332,20 +332,20 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             if (beds != null && beds.Count > 0 && ZoneSystem.instance != null)
             {
-                // Pass 2 flood now lives in the pure BedReachableFlood helper.
+                // Pass 2 flood now lives in the pure AnchorReachableFlood helper.
                 // isPopulated keeps the bed-snap on the ContainsKey fast path (no
                 // ground cast); surfaceY supplies the walk-surface height.
-                BedReachableFlood(
-                    gxMin, gzMin, gxMax, gzMax, beds, outsideCells, cell, bedSnapRingMax: 6,
+                AnchorReachableFlood(
+                    gxMin, gzMin, gxMax, gzMax, beds, outsideCells, cell, anchorSnapRingMax: 6,
                     isPopulated: ck => xzMaxYTerrain.ContainsKey(ck) || xzMaxYPiece.ContainsKey(ck),
                     surfaceY: (xzKey, gx, gz) => SurfaceY(xzKey, gx, gz, out _),
                     wallBlocks: (ax, az, bx, bz, ya, yb) => WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask),
-                    out bedReachableCells, out bedReachableCellY, out pass2Seeds,
+                    out anchorReachableCells, out anchorReachableCellY, out pass2Seeds,
                     warn: msg => Plugin.Log?.LogWarning(msg));
             }
 
             stats.Pass2Seeds = pass2Seeds;
-            stats.BedReachableTerrainCells = bedReachableCells.Count;
+            stats.AnchorReachableTerrainCells = anchorReachableCells.Count;
 
             // --- Pass 3: bed-reachable piece flood (bridges through terrain) ---
             // Unified BFS over (XZ, Y) nodes. Seeded from every bed-reachable
@@ -486,7 +486,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 }
             }
 
-            if (xzToLookupKeysPiece.Count > 0 && bedReachableCells.Count > 0
+            if (xzToLookupKeysPiece.Count > 0 && anchorReachableCells.Count > 0
                                               && ZoneSystem.instance != null)
             {
                 var half = cell * 0.5f;
@@ -506,7 +506,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 // from a terrain visit, we look up the terrain region at curXz
                 // and record (terrainRid, newRid) as a piece↔terrain edge.
                 var pieceQueue = new Queue<(long xz, float y, bool isTerrain, string sourceRid)>();
-                foreach (var xz in bedReachableCells)
+                foreach (var xz in anchorReachableCells)
                 {
                     UnpackXz(xz, out var gx, out var gz);
                     var wx = gx * cell + half;
@@ -515,7 +515,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     // in a floored village), not the terrain a metre below —
                     // otherwise the floor pieces sit > MaxClimb above the seed
                     // and Pass 3 never reaches them.
-                    var ty = bedReachableCellY.TryGetValue(xz, out var sy)
+                    var ty = anchorReachableCellY.TryGetValue(xz, out var sy)
                         ? sy
                         : ZoneSystem.instance.GetGroundHeight(new Vector3(wx, 0f, wz));
                     pieceQueue.Enqueue((xz, ty, true, null));
@@ -536,13 +536,13 @@ namespace ValheimVillages.Villager.AI.Navigation
                         //     bridges propagate sourceRid=null (no piece adjacency
                         //     created by terrain-walk bridges; they're pure
                         //     connectivity).
-                        if (bedReachableCells.Contains(nXz) && !visitedTerrainXz.Contains(nXz))
+                        if (anchorReachableCells.Contains(nXz) && !visitedTerrainXz.Contains(nXz))
                         {
                             var nwx = ngx * cell + half;
                             var nwz = ngz * cell + half;
                             // Bridge at Pass 2's recorded surface Y (same
                             // reason as the seed loop above).
-                            var tnY = bedReachableCellY.TryGetValue(nXz, out var nsy)
+                            var tnY = anchorReachableCellY.TryGetValue(nXz, out var nsy)
                                 ? nsy
                                 : ZoneSystem.instance.GetGroundHeight(new Vector3(nwx, 0f, nwz));
                             if (Mathf.Abs(tnY - curY) <= MaxClimb) pieceQueue.Enqueue((nXz, tnY, true, null));
@@ -622,7 +622,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             stats.Pass3Seeds = pass3Seeds;
-            stats.BedReachablePieceKeys = pieceReachableKeys.Count;
+            stats.AnchorReachablePieceKeys = pieceReachableKeys.Count;
             pass3DiscoveredEdgeList = pass3EdgePairs;
 
             // Prune complement on the piece layer: every piece lookup key we
@@ -662,11 +662,11 @@ namespace ValheimVillages.Villager.AI.Navigation
                 stats.StaticSolidTrianglesDropped = beforeCount - triangles.Count;
             }
 
-            // Terrain LookupGrid: drop entry iff its XZ is NOT in bedReachable.
+            // Terrain LookupGrid: drop entry iff its XZ is NOT in anchorReachable.
             var terrainLookupDropped = 0;
             foreach (var kv in xzToLookupKeysTerrain)
             {
-                if (bedReachableCells.Contains(kv.Key)) continue;
+                if (anchorReachableCells.Contains(kv.Key)) continue;
                 foreach (var lookupKey in kv.Value)
                     if (lookupGrid.Remove(lookupKey))
                         terrainLookupDropped++;
@@ -688,7 +688,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             stats.Pass3PieceKeysDropped = pass3PieceKeysDropped;
 
             // Triangle sweep: terrain tris drop iff centroid XZ NOT in
-            // bedReachable; piece tris drop iff their lookup key (gx, gz,
+            // anchorReachable; piece tris drop iff their lookup key (gx, gz,
             // hb derived from centroid Y) is NOT in pieceReachableKeys.
             // Triangle kind comes from kindMap[t.RegionId]; missing kind
             // defaults to Terrain (safe — terrain rule is stricter).
@@ -713,7 +713,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                         return !pieceReachableKeys.Contains(pKey);
                     }
 
-                    return !bedReachableCells.Contains(XzKey(tgx, tgz));
+                    return !anchorReachableCells.Contains(XzKey(tgx, tgz));
                 });
                 stats.TrianglesDropped = beforeCount - triangles.Count;
             }
@@ -721,7 +721,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             // --- Region-level cascade ---
             // A region is dropped wholesale iff none of its cells survived
             // the per-kind keep rule:
-            //   terrain region: ≥1 XZ cell in bedReachableCells (uses ridToXz)
+            //   terrain region: ≥1 XZ cell in anchorReachableCells (uses ridToXz)
             //   piece region:   ≥1 lookup key in pieceReachableKeys (uses
             //                   ridToPieceKeys, which preserves hb info that
             //                   ridToXz collapses away)
@@ -747,7 +747,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 {
                     if (ridToXz.TryGetValue(rid, out var cells))
                         foreach (var xz in cells)
-                            if (bedReachableCells.Contains(xz))
+                            if (anchorReachableCells.Contains(xz))
                             {
                                 anyKept = true;
                                 break;
@@ -876,7 +876,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             // neighbour(s). That is the clean, outer-only ring the patrol route
             // builder orders. Falls back to the upstream cells if the frontier is
             // degenerate (e.g. no beds, so no bed-reachable flood).
-            if (bedReachableCells.Count > 0)
+            if (anchorReachableCells.Count > 0)
             {
                 // March outward up to MaxWallSpan cells per direction. The wall
                 // occupies cells that are neither walkable (bed-reachable) nor
@@ -894,14 +894,14 @@ namespace ValheimVillages.Villager.AI.Navigation
                 for (var gz = gzMin; gz <= gzMax; gz++)
                 {
                     var key = XzKey(gx, gz);
-                    if (!bedReachableCells.Contains(key)) continue;
+                    if (!anchorReachableCells.Contains(key)) continue;
 
                     var outward = Vector3.zero;
                     for (var i = 0; i < 4; i++)
                         for (var step = 1; step <= MaxWallSpan; step++)
                         {
                             var nk = XzKey(gx + fdx[i] * step, gz + fdz[i] * step);
-                            if (bedReachableCells.Contains(nk)) break; // walkable beyond → interior
+                            if (anchorReachableCells.Contains(nk)) break; // walkable beyond → interior
                             if (outsideCells.Contains(nk))
                             {
                                 outward += new Vector3(fdx[i], 0f, fdz[i]);
@@ -938,10 +938,10 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             // Publish authoritative HNA reachability sets to the caller so
             // the second NavMesh bake can carve cells the prune dropped but
-            // the first bake's voxelizer left walkable. bedReachableCells is
+            // the first bake's voxelizer left walkable. anchorReachableCells is
             // the post-Pass-2 keep set; outsideCells is the Pass-1 perimeter
             // flood result. Both are at LookupCellSize XZ resolution.
-            bedReachableCellsOut = new HashSet<long>(bedReachableCells);
+            anchorReachableCellsOut = new HashSet<long>(anchorReachableCells);
             outsideCellsOut = new HashSet<long>(outsideCells);
 
             return stats;
@@ -1027,7 +1027,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <summary>
         ///     Pure Pass-2 bed-reachable ("inside-out") flood. For each bed, snaps
         ///     to the nearest populated, non-outside cell within
-        ///     <paramref name="bedSnapRingMax" /> rings (the floor the villager
+        ///     <paramref name="anchorSnapRingMax" /> rings (the floor the villager
         ///     stands on, even when the bed's own cell is carved out), then runs a
         ///     4-connected BFS that refuses to enter <paramref name="outsideCells" />
         ///     and is gated by <paramref name="wallBlocks" />. Engine-free:
@@ -1036,22 +1036,22 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     each cell's walk-surface height. Beds that cannot snap are reported
         ///     via <paramref name="warn" /> and skipped.
         /// </summary>
-        internal static void BedReachableFlood(
+        internal static void AnchorReachableFlood(
             int gxMin, int gzMin, int gxMax, int gzMax,
             IReadOnlyList<Vector3> beds,
             HashSet<long> outsideCells,
             float cell,
-            int bedSnapRingMax,
+            int anchorSnapRingMax,
             Func<long, bool> isPopulated,
             Func<long, int, int, float> surfaceY,
             Func<int, int, int, int, float, float, bool> wallBlocks,
-            out HashSet<long> bedReachableCells,
-            out Dictionary<long, float> bedReachableCellY,
+            out HashSet<long> anchorReachableCells,
+            out Dictionary<long, float> anchorReachableCellY,
             out int seedCount,
             Action<string> warn = null)
         {
-            bedReachableCells = new HashSet<long>();
-            bedReachableCellY = new Dictionary<long, float>();
+            anchorReachableCells = new HashSet<long>();
+            anchorReachableCellY = new Dictionary<long, float>();
             seedCount = 0;
             if (beds == null || beds.Count == 0) return;
 
@@ -1065,7 +1065,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 // bed rests on, even when the bed's own cell is carved).
                 int bgx = bgx0, bgz = bgz0;
                 var snapped = false;
-                for (var r = 0; r <= bedSnapRingMax && !snapped; r++)
+                for (var r = 0; r <= anchorSnapRingMax && !snapped; r++)
                 for (var ox = -r; ox <= r && !snapped; ox++)
                 for (var oz = -r; oz <= r && !snapped; oz++)
                 {
@@ -1086,15 +1086,15 @@ namespace ValheimVillages.Villager.AI.Navigation
                     warn?.Invoke(
                         $"[RubberBand] Pass 2 bed skipped: bed=({bed.x:F1},{bed.z:F1}) " +
                         $"cell=({bgx0},{bgz0}) — no populated, non-outside cell within " +
-                        $"{bedSnapRingMax} cells (bed walled off or outside the village?).");
+                        $"{anchorSnapRingMax} cells (bed walled off or outside the village?).");
                     continue;
                 }
 
                 var bedKey = XzKey(bgx, bgz);
-                if (bedReachableCells.Add(bedKey))
+                if (anchorReachableCells.Add(bedKey))
                 {
                     var seedY = surfaceY(bedKey, bgx, bgz);
-                    bedReachableCellY[bedKey] = seedY;
+                    anchorReachableCellY[bedKey] = seedY;
                     bedQueue.Enqueue((bedKey, seedY));
                     seedCount++;
                 }
@@ -1111,12 +1111,12 @@ namespace ValheimVillages.Villager.AI.Navigation
                     int ngx = gx + dx[d], ngz = gz + dz[d];
                     if (ngx < gxMin || ngx > gxMax || ngz < gzMin || ngz > gzMax) continue;
                     var nKey = XzKey(ngx, ngz);
-                    if (bedReachableCells.Contains(nKey)) continue;
+                    if (anchorReachableCells.Contains(nKey)) continue;
                     if (outsideCells.Contains(nKey)) continue;
                     var nY = surfaceY(nKey, ngx, ngz);
                     if (wallBlocks(gx, gz, ngx, ngz, curY, nY)) continue;
-                    bedReachableCells.Add(nKey);
-                    bedReachableCellY[nKey] = nY;
+                    anchorReachableCells.Add(nKey);
+                    anchorReachableCellY[nKey] = nY;
                     bedQueue.Enqueue((nKey, nY));
                 }
             }
@@ -1190,7 +1190,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         /// <summary>
         ///     Public XZ-key packer matching the encoding used by
-        ///     <c>outsideCells</c>, <c>bedReachableCells</c>, and the diagnostic
+        ///     <c>outsideCells</c>, <c>anchorReachableCells</c>, and the diagnostic
         ///     snapshot. External callers that need to build sets in the same
         ///     coordinate space (e.g. the second-bake prune-complement) use this.
         /// </summary>
@@ -2050,13 +2050,13 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int Pass2Seeds;
 
             /// <summary>Terrain XZ cells reached by Pass 2's bed flood (or the fallback set).</summary>
-            public int BedReachableTerrainCells;
+            public int AnchorReachableTerrainCells;
 
             /// <summary>Piece lookup keys seeded for Pass 3 (piece cells within step-height of a bed-reachable terrain cell).</summary>
             public int Pass3Seeds;
 
             /// <summary>Piece lookup keys reached by Pass 3's piece flood (or the fallback set).</summary>
-            public int BedReachablePieceKeys;
+            public int AnchorReachablePieceKeys;
 
             /// <summary>Piece lookup keys dropped by Pass 3 (not reached by the piece flood).</summary>
             public int Pass3PieceKeysDropped;

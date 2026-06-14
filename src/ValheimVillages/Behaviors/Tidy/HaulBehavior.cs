@@ -127,7 +127,7 @@ namespace ValheimVillages.Behaviors.Tidy
         private bool TryWalk(Vector3 target, string label)
         {
             if (!VillageStationRegistry.TryResolveApproach(
-                    target, m_ai.Position, out var approach, m_ai.BedPosition))
+                    target, m_ai.Position, out var approach, m_ai.HomeAnchor))
                 return false;
 
             return m_ai.NavTo(approach, BehaviorState.Traveling, label,
@@ -168,7 +168,7 @@ namespace ValheimVillages.Behaviors.Tidy
         /// </summary>
         private bool FindHaulTarget()
         {
-            var center = m_ai.BedPosition;
+            var center = m_ai.HomeAnchor;
             var radius = WorkSettings.HaulScanRadius;
 
             var containers = ContainerScanner.FindNearbyContainers(center, radius);
@@ -218,7 +218,7 @@ namespace ValheimVillages.Behaviors.Tidy
                 !ContainerScanner.CanAcceptItemData(m_targetChest, m_targetDrop.m_itemData))
             {
                 var containers = ContainerScanner.FindNearbyContainers(
-                    m_ai.BedPosition, WorkSettings.HaulScanRadius);
+                    m_ai.HomeAnchor, WorkSettings.HaulScanRadius);
                 m_targetChest = FindAcceptingChest(containers, m_targetDrop.m_itemData);
             }
 
@@ -248,7 +248,7 @@ namespace ValheimVillages.Behaviors.Tidy
             if (!stored)
             {
                 var containers = ContainerScanner.FindNearbyContainers(
-                    m_ai.BedPosition, WorkSettings.HaulScanRadius);
+                    m_ai.HomeAnchor, WorkSettings.HaulScanRadius);
                 foreach (var c in containers)
                 {
                     if (!ContainerScanner.CanAcceptItemData(c, payload)) continue;

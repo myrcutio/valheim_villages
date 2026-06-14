@@ -233,7 +233,7 @@ namespace ValheimVillages.Diagnostics
             sb.Append("\"type\":\"").Append(JsonEscape(ai.VillagerType.ToString())).Append("\",");
             sb.Append("\"state\":\"").Append(JsonEscape(ai.CurrentState.ToString())).Append("\",");
             sb.Append("\"pos\":").Append(JsonVec3(pos)).Append(',');
-            var bp = ai.Memory != null ? ai.Memory.BedPosition : Vector3.zero;
+            var bp = ai.Memory != null ? ai.Memory.HomeAnchor : Vector3.zero;
             sb.Append("\"bedPosition\":").Append(JsonVec3(bp));
             sb.Append('}');
         }

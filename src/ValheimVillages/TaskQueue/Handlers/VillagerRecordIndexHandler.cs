@@ -51,7 +51,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             {
                 var type = zdo.GetString("vv_villager_type");
                 var name = zdo.GetString("vv_villager_name");
-                var bedPos = zdo.GetVec3("vv_bed_position", Vector3.zero);
+                var bedPos = zdo.GetVec3("vv_home_position", Vector3.zero);
                 // Resolve (never mint) the village; skip migration if none resolves
                 // (villages are created only at a registry station).
                 var stamped = zdo.GetString(Village.IdKey);

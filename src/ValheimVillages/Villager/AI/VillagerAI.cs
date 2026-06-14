@@ -40,7 +40,7 @@ namespace ValheimVillages.Villager.AI
         // unreachable-exact waypoint doesn't re-path every frame. Sentinel = never set.
         private Vector3 m_lastAgentDest = new(float.PositiveInfinity, 0f, 0f);
 
-        private Vector3 m_bedPosition;
+        private Vector3 m_homeAnchor;
 
         // Composable behaviors (populated by BehaviorFactory from NPC definition)
         private List<IBehavior> m_behaviors = new();
@@ -136,10 +136,10 @@ namespace ValheimVillages.Villager.AI
         {
             Villager = instance;
             UniqueId = Villager.uid;
-            m_bedPosition = Villager.BedPosition;
+            m_homeAnchor = Villager.HomeAnchor;
             VillagerType = Villager.villagerType;
             m_villagerName = Villager.villagerName;
-            Memory = new VillagerMemory(m_bedPosition);
+            Memory = new VillagerMemory(m_homeAnchor);
         }
 
         /// <summary>
@@ -188,16 +188,16 @@ namespace ValheimVillages.Villager.AI
                 }
 
                 UniqueId = Villager.uid;
-                m_bedPosition = Villager.BedPosition;
+                m_homeAnchor = Villager.HomeAnchor;
                 VillagerType = Villager.villagerType;
                 m_villagerName = Villager.villagerName;
-                Memory = new VillagerMemory(m_bedPosition);
+                Memory = new VillagerMemory(m_homeAnchor);
                 VillagerAIManager.RegisterActive(this);
             }
 
             m_doorHandler = GetComponent<DoorHandler>();
 
-            RegisterOwnedBed();
+            RegisterHome();
             RegisterBehaviors();
 
 
@@ -221,12 +221,12 @@ namespace ValheimVillages.Villager.AI
             VillagerAIManager.Unregister(this);
         }
 
-        public void RegisterOwnedBed()
+        public void RegisterHome()
         {
-            Memory.BedPosition = m_bedPosition;
+            Memory.HomeAnchor = m_homeAnchor;
         }
 
-        private bool m_warnedNoBed;
+        private bool m_warnedNoHome;
 
         public override bool UpdateAI(float dt)
         {
@@ -238,11 +238,11 @@ namespace ValheimVillages.Villager.AI
             // off-mesh rescue at world origin, where BaseAI.MoveTo throws an NRE every
             // frame — flooding the log and tanking the frame rate. Skip the tick
             // (logged once) instead of spamming a per-frame crash.
-            if (m_bedPosition == Vector3.zero)
+            if (m_homeAnchor == Vector3.zero)
             {
-                if (!m_warnedNoBed)
+                if (!m_warnedNoHome)
                 {
-                    m_warnedNoBed = true;
+                    m_warnedNoHome = true;
                     Plugin.Log?.LogWarning(
                         $"[AI:{m_villagerName}] No valid bed position — skipping AI tick (broken/zombie villager).");
                 }
@@ -558,8 +558,8 @@ namespace ValheimVillages.Villager.AI
         /// <summary>Villager type string from JSON definition (e.g. "Guard", "Farmer").</summary>
         public string VillagerType { get; private set; }
 
-        Vector3 IVillagerStationLookup.BedPosition =>
-            Memory != null ? Memory.BedPosition : default;
+        Vector3 IVillagerStationLookup.HomeAnchor =>
+            Memory != null ? Memory.HomeAnchor : default;
 
         /// <summary>
         ///     This villager's bed (home) position. Station/approach lookups
@@ -567,7 +567,7 @@ namespace ValheimVillages.Villager.AI
         ///     position — so a villager bumped off the graph still resolves work
         ///     against its home village instead of "no village here".
         /// </summary>
-        public Vector3 BedPosition => m_bedPosition;
+        public Vector3 HomeAnchor => m_homeAnchor;
 
         string IVillagerWorkContext.NpcName => NpcName;
         Vector3 IVillagerWorkContext.Position => Position;
@@ -926,11 +926,11 @@ namespace ValheimVillages.Villager.AI
                 Plugin.Log?.LogWarning(
                     $"[AI:{m_villagerName}] Stranded off the village graph at " +
                     $"({transform.position.x:F1},{transform.position.z:F1}); recovering to bed " +
-                    $"({m_bedPosition.x:F1},{m_bedPosition.z:F1}).");
+                    $"({m_homeAnchor.x:F1},{m_homeAnchor.z:F1}).");
             }
 
             // Walk home over the terrain (base-game pathing, NOT the village agent).
-            MoveTo(dt, m_bedPosition, 1f, true);
+            MoveTo(dt, m_homeAnchor, 1f, true);
             return true;
         }
 
@@ -941,8 +941,8 @@ namespace ValheimVillages.Villager.AI
         /// </summary>
         private void TeleportHome()
         {
-            var dest = m_bedPosition;
-            if (NavMesh.SamplePosition(m_bedPosition, out var hit, 5f, AgentFilter()))
+            var dest = m_homeAnchor;
+            if (NavMesh.SamplePosition(m_homeAnchor, out var hit, 5f, AgentFilter()))
                 dest = hit.position;
             transform.position = dest;
             if (m_navAgent != null && m_navAgent.isOnNavMesh)
@@ -961,7 +961,7 @@ namespace ValheimVillages.Villager.AI
         /// </summary>
         private bool IsStranded()
         {
-            var graph = Villages.Entity.VillageRegistry.GraphAt(m_bedPosition);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(m_homeAnchor);
             if (graph != null && graph.PointToRegionId(transform.position) != null)
                 return false; // resolves to a region — on the graph, fine
 
@@ -970,7 +970,7 @@ namespace ValheimVillages.Villager.AI
             if (!NavMesh.SamplePosition(transform.position, out var from, 3f, filter))
                 return true;
             // Can't locate the bed on the mesh — don't start a rescue we can't finish.
-            if (!NavMesh.SamplePosition(m_bedPosition, out var to, 5f, filter))
+            if (!NavMesh.SamplePosition(m_homeAnchor, out var to, 5f, filter))
                 return false;
             var path = new NavMeshPath();
             NavMesh.CalculatePath(from.position, to.position, filter, path);

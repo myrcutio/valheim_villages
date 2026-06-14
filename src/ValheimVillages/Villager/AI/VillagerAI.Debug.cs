@@ -67,7 +67,7 @@ namespace ValheimVillages.Villager.AI
                 var ai = kv.Value;
                 if (ai == null) continue;
 
-                var bed = ai.m_bedPosition;
+                var bed = ai.m_homeAnchor;
                 var containers = Work.ContainerScanner.FindNearbyContainers(
                     bed, Settings.WorkSettings.ChestScanRadius);
                 var orders = Work.ContainerScanner.FindAllWorkOrders(containers, ai.VillagerType);
@@ -100,7 +100,7 @@ namespace ValheimVillages.Villager.AI
             sb.AppendLine($"    pos=({pos.x:F1},{pos.y:F1},{pos.z:F1})  state={CurrentState}  " +
                           $"paused={IsPaused} lingering={IsLingering} casual={IsCasualTravel}");
             sb.AppendLine($"    region@pos={region ?? "UNRESOLVED"}  " +
-                          $"bed=({m_bedPosition.x:F1},{m_bedPosition.y:F1},{m_bedPosition.z:F1})");
+                          $"bed=({m_homeAnchor.x:F1},{m_homeAnchor.y:F1},{m_homeAnchor.z:F1})");
 
             if (m_currentWaypoint != null)
             {

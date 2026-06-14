@@ -48,7 +48,7 @@ namespace ValheimVillages.Villager.AI
         ///     Get unique bed positions for every villager in the world. Reads
         ///     authoritatively from <c>ZDOMan.m_objectsByID</c>: each villager NPC ZDO
         ///     (identified by the new <c>vv_record_id</c> back-reference or the legacy
-        ///     <c>vv_villager_type</c> tag) carries a persistent <c>vv_bed_position</c>.
+        ///     <c>vv_villager_type</c> tag) carries a persistent <c>vv_home_position</c>.
         ///     Survives villager GameObject unload (out-of-range, teleported) and
         ///     hot reloads (the in-memory <see cref="ActiveVillagers" /> dict is
         ///     cleared on reload).
@@ -58,7 +58,7 @@ namespace ValheimVillages.Villager.AI
         ///     bugs (e.g. villagers unloaded across reload) by silently using a
         ///     stale subset.
         /// </summary>
-        public static List<Vector3> GetAllBedPositions()
+        public static List<Vector3> GetAllAnchorPositions()
         {
             var list = new List<Vector3>();
             var zdoMan = ZDOMan.instance;
@@ -75,7 +75,7 @@ namespace ValheimVillages.Villager.AI
                 var isVillager = !string.IsNullOrEmpty(zdo.GetString("vv_record_id"))
                                  || !string.IsNullOrEmpty(zdo.GetString("vv_villager_type"));
                 if (!isVillager) continue;
-                var pos = zdo.GetVec3("vv_bed_position", Vector3.zero);
+                var pos = zdo.GetVec3("vv_home_position", Vector3.zero);
                 if (pos == Vector3.zero) continue;
                 var duplicate = false;
                 foreach (var existing in list)

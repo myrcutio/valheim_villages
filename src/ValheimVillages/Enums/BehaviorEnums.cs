@@ -16,7 +16,7 @@ namespace ValheimVillages.Enums
     /// </summary>
     public enum LocationType
     {
-        Bed, // Home bed - sleep location
+        Home, // Villager home / registry anchor
         Shelter, // Any covered area (roof overhead)
         Fire, // Fireplace/campfire (preferably sheltered)
         Table, // Tables for feasting/socializing

@@ -11,7 +11,7 @@ namespace ValheimVillages.Interfaces
     /// </summary>
     public interface IVillagerMemory
     {
-        Vector3 BedPosition { get; set; }
+        Vector3 HomeAnchor { get; set; }
         void UpdateBestComfort(float comfort, Vector3 position);
     }
 }

@@ -7,14 +7,13 @@ namespace ValheimVillages.Villager.Records
 {
     /// <summary>
     ///     Revives a fallen (<see cref="RecordStatus.Dead" />) villager from its record:
-    ///     re-spawns the NPC at its bed, flips the record back to Alive, and re-claims the
-    ///     bed. No material cost for now — a global cooldown gates how often revives can
-    ///     happen.
+    ///     re-spawns the NPC at the registry anchor (or its stored home) and flips the
+    ///     record back to Alive. No material cost for now — a global cooldown gates how
+    ///     often revives can happen.
     /// </summary>
     public static class VillagerReviveService
     {
         public const float CooldownSeconds = 30f;
-        private const float BedMatchRadius = 1f;
         private const string DefaultPrefab = "DvergerMage";
 
         // -CooldownSeconds so the first revive after load is immediately available.
@@ -73,7 +72,7 @@ namespace ValheimVillages.Villager.Records
                 return false;
             }
 
-            var rawAnchor = anchor ?? record.BedPosition;
+            var rawAnchor = anchor ?? record.HomeAnchor;
             if (rawAnchor == Vector3.zero)
             {
                 error = "no anchor/home position to revive at";
@@ -96,43 +95,18 @@ namespace ValheimVillages.Villager.Records
 
             // SpawnVillagerNpc re-activates the record in place (Status->Alive, re-link NPC).
             var r = record;
-            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, record.Type, prefabName, spawnPos, ref r);
+            var npc = VillagerSpawner.SpawnVillagerNpc(def, record.Type, prefabName, spawnPos, ref r);
             if (npc == null)
             {
                 error = "failed to spawn villager";
                 return false;
             }
 
-            var npcZdoId = npc.GetComponent<ZNetView>()?.GetZDO()?.m_uid ?? ZDOID.None;
-            ClaimBedAt(spawnPos, record.RecordId, record.Name, npcZdoId);
-
             s_lastReviveTime = Time.time;
             Plugin.Log?.LogInfo(
                 $"[Revive] Revived '{record.Name}' ({record.Type}) record {record.RecordId} at " +
                 $"({spawnPos.x:F1},{spawnPos.y:F1},{spawnPos.z:F1})");
             return true;
-        }
-
-        /// <summary>
-        ///     Re-claim the bed at <paramref name="bedPos" /> for the revived villager (the
-        ///     bed was released when it died). Best-effort: only loaded beds are found.
-        /// </summary>
-        private static void ClaimBedAt(Vector3 bedPos, string recordId, string villagerName, ZDOID npcZdoId)
-        {
-            var beds = Object.FindObjectsByType<Bed>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            foreach (var bed in beds)
-            {
-                if (bed == null || bed.transform == null) continue;
-                if (Vector3.Distance(bed.transform.position, bedPos) > BedMatchRadius) continue;
-
-                var zdo = bed.GetComponent<ZNetView>()?.GetZDO();
-                if (zdo == null) continue;
-
-                zdo.Set("vv_bed_owner", recordId);
-                zdo.Set("owner", npcZdoId != ZDOID.None ? npcZdoId.ID : 0L);
-                zdo.Set("ownerName", villagerName);
-                return;
-            }
         }
     }
 }

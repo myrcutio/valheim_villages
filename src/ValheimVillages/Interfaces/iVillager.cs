@@ -15,6 +15,6 @@ namespace ValheimVillages.Interfaces
         string UniqueID { get; }
 
         /// <summary>Bed position for task attributes (e.g. work order scan).</summary>
-        Vector3 BedPosition { get; }
+        Vector3 HomeAnchor { get; }
     }
 }

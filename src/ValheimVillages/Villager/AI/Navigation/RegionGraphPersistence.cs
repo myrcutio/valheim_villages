@@ -219,7 +219,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
         // --- Classification (v4) ---
-        // Layout in the |#| section: <outsideBitmask>~<bedReachableBitmask>~<pieceTriples>
+        // Layout in the |#| section: <outsideBitmask>~<anchorReachableBitmask>~<pieceTriples>
         // Each terrain bitmask: tiles joined by '!', each "tileGx,tileGz,<base64 32B>"
         // (256-bit mask, bit = bx*16+bz). Piece set: "gx,gz,hb" triples joined by '!'.
 
@@ -229,7 +229,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.Append(ClassSectionDelimiter);
             AppendXzBitmask(sb, graph.OutsideCellsXz);
             sb.Append('~');
-            AppendXzBitmask(sb, graph.BedReachableCellsXz);
+            AppendXzBitmask(sb, graph.AnchorReachableCellsXz);
             sb.Append('~');
             AppendPieceKeys(sb, graph.PrunedPieceKeys);
         }
@@ -238,12 +238,12 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             var subs = classSection.Split('~');
             var outside = new HashSet<long>();
-            var bedReachable = new HashSet<long>();
+            var anchorReachable = new HashSet<long>();
             var pieces = new HashSet<long>();
             if (subs.Length > 0) ParseXzBitmask(subs[0], outside);
-            if (subs.Length > 1) ParseXzBitmask(subs[1], bedReachable);
+            if (subs.Length > 1) ParseXzBitmask(subs[1], anchorReachable);
             if (subs.Length > 2) ParsePieceKeys(subs[2], pieces);
-            graph.SetClassification(outside, bedReachable, pieces);
+            graph.SetClassification(outside, anchorReachable, pieces);
         }
 
         private static void AppendXzBitmask(StringBuilder sb, IReadOnlyCollection<long> cells)

@@ -12,16 +12,16 @@ namespace ValheimVillages.Villager
         public ZNetView nView;
         public VillagerAI villagerAI;
 
-        private Vector3 m_bedPosition;
+        private Vector3 m_homeAnchor;
         private ZDO m_zdo;
 
-        public Vector3 BedPosition
+        public Vector3 HomeAnchor
         {
-            get => m_bedPosition;
+            get => m_homeAnchor;
             set
             {
-                m_bedPosition = value;
-                nView.GetZDO().Set("vv_bed_position", m_bedPosition);
+                m_homeAnchor = value;
+                nView.GetZDO().Set("vv_home_position", m_homeAnchor);
             }
         }
 
@@ -68,11 +68,11 @@ namespace ValheimVillages.Villager
             villagerType = record.Type;
             villagerName = record.Name;
             // Home anchor comes from the record too. The freshly-instantiated NPC ZDO's
-            // vv_bed_position is unreliable at spawn time (reads back zero), whereas the
-            // record's field is authoritative and sticks. Keeps the BedPosition setter
-            // mirroring vv_bed_position for nav/legacy readers.
-            m_bedPosition = record.BedPosition;
-            Plugin.Log?.LogDebug($"[Villager] '{villagerName}' home from record={record.BedPosition}");
+            // vv_home_position is unreliable at spawn time (reads back zero), whereas the
+            // record's field is authoritative and sticks. Keeps the HomeAnchor setter
+            // mirroring vv_home_position for nav/legacy readers.
+            m_homeAnchor = record.HomeAnchor;
+            Plugin.Log?.LogDebug($"[Villager] '{villagerName}' home from record={record.HomeAnchor}");
         }
 
         private void LoadFromZDO()

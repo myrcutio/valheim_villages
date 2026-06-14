@@ -26,7 +26,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     {
         public const string RegionPartitionTaskName = "hna_partition";
 
-        public const float BedVillageRadius = 15f;
+        public const float AnchorVillageRadius = 15f;
         internal const float FloodFillRadius = 30f;
         private const float RegionBuildRadius = 30f;
 
@@ -50,8 +50,8 @@ namespace ValheimVillages.TaskQueue.Handlers
             // enqueue — the graph is stable while the task waits in the queue.
             VillageNavLock.RequestHold(NavRebuildSettleSeconds);
 
-            var allBeds = VillagerAIManager.GetAllBedPositions();
-            var beds = FilterBedsByAnchor(allBeds, task);
+            var allBeds = VillagerAIManager.GetAllAnchorPositions();
+            var beds = FilterAnchorsByTask(allBeds, task);
             // Snap each home/seed to a walkable, capsule-clear cell before it drives the
             // bake elevation and the Pass-1 reachability flood. A registry-anchored home
             // (or a bed) can sit inside its own colliders; flooding from there reaches a
@@ -114,7 +114,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 Plugin.Log?.LogInfo("[Region] Partition skipped: no village areas and no villager beds.");
                 return TaskResult.Ok(new Dictionary<string, string>
                 {
-                    { "regions", "0" }, { "links", "0" }, { "reason", "no_beds_or_areas" },
+                    { "regions", "0" }, { "links", "0" }, { "reason", "no_anchors_or_areas" },
                 });
             }
 
@@ -129,7 +129,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                     "Cannot determine bake elevation without beds — refusing to bake at sea-level fallback.");
                 return TaskResult.Ok(new Dictionary<string, string>
                 {
-                    { "regions", "0" }, { "links", "0" }, { "reason", "no_beds_for_bake_y" },
+                    { "regions", "0" }, { "links", "0" }, { "reason", "no_anchors_for_bake_y" },
                 });
             }
 
@@ -209,7 +209,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 minX, minZ, maxX, maxZ,
                 out var droppedRubberBand,
                 out var pass3DiscoveredEdges,
-                out var bedReachableCells,
+                out var anchorReachableCells,
                 out var outsideCells,
                 out var prunedPieceKeys,
                 out var gateMarkers);
@@ -265,9 +265,9 @@ namespace ValheimVillages.TaskQueue.Handlers
             DebugLog.Event("RubberBandPrune", "applied",
                 ("outside_terrain_cells", rbStats.OutsideTerrainCells),
                 ("pass2_seeds", rbStats.Pass2Seeds),
-                ("bed_reachable_terrain_cells", rbStats.BedReachableTerrainCells),
+                ("anchor_reachable_terrain_cells", rbStats.AnchorReachableTerrainCells),
                 ("pass3_seeds", rbStats.Pass3Seeds),
-                ("bed_reachable_piece_keys", rbStats.BedReachablePieceKeys),
+                ("anchor_reachable_piece_keys", rbStats.AnchorReachablePieceKeys),
                 ("pass3_piece_keys_dropped", rbStats.Pass3PieceKeysDropped),
                 ("pass3_links_added", rbStats.Pass3LinksAdded),
                 ("pass4_verts_snapped", rbStats.Pass4BoundaryVertsSnapped),
@@ -322,7 +322,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             // persists (v4 ZDO) and gives the incremental reconcilers a baseline
             // to diff against. Must run after SetGraph so HasClassification flips
             // only on a populated graph.
-            graph.SetClassification(outsideCells, bedReachableCells, prunedPieceKeys);
+            graph.SetClassification(outsideCells, anchorReachableCells, prunedPieceKeys);
             if (gateMarkers.Count > 0)
                 Plugin.Log?.LogInfo(
                     $"[Region] Sealed {gateMarkers.Count} gate(s) into the village boundary");
@@ -527,7 +527,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             return snapped;
         }
 
-        private static List<Vector3> FilterBedsByAnchor(List<Vector3> allBeds, VillagerTask task)
+        private static List<Vector3> FilterAnchorsByTask(List<Vector3> allBeds, VillagerTask task)
         {
             if (allBeds == null || allBeds.Count == 0) return allBeds;
             if (task?.Attributes == null ||
@@ -795,9 +795,9 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             // --- Find seeds: closest terrain region centroid to each bed ---
             var seeds = new HashSet<string>();
-            const float bedYTol = 3f;
-            const float bedXZTol = 30f;
-            const float bedXZTolSq = bedXZTol * bedXZTol;
+            const float anchorYTol = 3f;
+            const float anchorXZTol = 30f;
+            const float anchorXZTolSq = anchorXZTol * anchorXZTol;
             if (beds != null)
                 foreach (var bed in beds)
                 {
@@ -806,10 +806,10 @@ namespace ValheimVillages.TaskQueue.Handlers
                     foreach (var rid in terrainResult.RegionIds)
                     {
                         if (!terrainResult.Centroids.TryGetValue(rid, out var c)) continue;
-                        if (Mathf.Abs(c.y - bed.y) > bedYTol) continue;
+                        if (Mathf.Abs(c.y - bed.y) > anchorYTol) continue;
                         float dx = c.x - bed.x, dz = c.z - bed.z;
                         var dSq = dx * dx + dz * dz;
-                        if (dSq > bedXZTolSq) continue;
+                        if (dSq > anchorXZTolSq) continue;
                         if (dSq < closestDistSq)
                         {
                             closestDistSq = dSq;

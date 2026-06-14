@@ -380,10 +380,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             float bMinX = pos.x - 40f, bMaxX = pos.x + 40f;
             float bMinZ = pos.z - 40f, bMaxZ = pos.z + 40f;
 
-            var beds = VillagerAIManager.GetAllBedPositions()
+            var beds = VillagerAIManager.GetAllAnchorPositions()
                        ?? new List<Vector3>();
-            const float bedRadius = 30f;
-            const float bedR2 = bedRadius * bedRadius;
+            const float anchorRadius = 30f;
+            const float anchorR2 = anchorRadius * anchorRadius;
 
             var filter = new NavMeshQueryFilter
             {
@@ -426,7 +426,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 foreach (var bed in beds)
                 {
                     float dx = c.x - bed.x, dz = c.z - bed.z;
-                    if (dx * dx + dz * dz <= bedR2)
+                    if (dx * dx + dz * dz <= anchorR2)
                     {
                         near = true;
                         break;

@@ -30,7 +30,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             int existingCount)
         {
             var outputItem = match.ItemPrefabName;
-            var bedPos = ai.BedPosition;
+            var bedPos = ai.HomeAnchor;
 
             // HARVEST FIRST: a ready crop in the village is harvestable work on its
             // own — it does NOT need a farm location. A grown crop is a Pickable_X
@@ -73,7 +73,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             }
             else
             {
-                var cultivatedPos = FindCultivatedGroundNearBed(bedPos);
+                var cultivatedPos = FindCultivatedGroundNearAnchor(bedPos);
                 if (!cultivatedPos.HasValue)
                 {
                     Plugin.Log?.LogDebug(
@@ -138,7 +138,7 @@ namespace ValheimVillages.TaskQueue.Handlers
         ///     Cultivated ground is a Heightmap property, not a discoverable object,
         ///     so normal POI discovery can't find it.
         /// </summary>
-        private static Vector3? FindCultivatedGroundNearBed(Vector3 bedPos)
+        private static Vector3? FindCultivatedGroundNearAnchor(Vector3 bedPos)
         {
             const float maxRadius = 30f;
             const float step = 3f;

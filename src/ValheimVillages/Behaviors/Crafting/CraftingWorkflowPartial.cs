@@ -32,7 +32,7 @@ namespace ValheimVillages.Behaviors.Crafting
             // village (or the wrong one), but its home village is always known.
             // Current position is still the path start (2nd arg).
             if (!VillageStationRegistry.TryResolveApproach(
-                    target, m_ai.Position, out var approach, m_ai.BedPosition))
+                    target, m_ai.Position, out var approach, m_ai.HomeAnchor))
             {
                 AbandonWork($"no HNA-valid approach to {targetDescription} @ ({target.x:F1},{target.y:F1},{target.z:F1})");
                 return false;

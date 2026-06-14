@@ -14,7 +14,7 @@ namespace ValheimVillages.UI.Panels
         private const int MapSize = 256;
         private const float Padding = 10f;
         private const int WaypointDotRadius = 4;
-        private const int BedDotRadius = 5;
+        private const int AnchorDotRadius = 5;
         private const int PathLineWidth = 2;
 
         private static readonly Color WildColor = new(0.6f, 0.15f, 0.15f, 0.7f);
@@ -23,7 +23,7 @@ namespace ValheimVillages.UI.Panels
         private static readonly Color WaypointColor = new(0.1f, 1f, 0.1f, 1f);
         private static readonly Color InactiveWaypointColor = new(0.7f, 0.5f, 0.2f, 0.7f);
         private static readonly Color InactivePathColor = new(0.5f, 0.35f, 0.15f, 0.4f);
-        private static readonly Color BedColor = new(1f, 0.9f, 0.3f, 1f);
+        private static readonly Color AnchorColor = new(1f, 0.9f, 0.3f, 1f);
         private static readonly Color PatrollerColor = new(0.3f, 0.6f, 1f, 1f);
         private static readonly Color FloodFillColor = new(0.45f, 0.45f, 0.45f, 0.95f);
         private static readonly Color GroundTruthColor = new(1f, 0.4f, 0.9f, 1f);
@@ -39,7 +39,7 @@ namespace ValheimVillages.UI.Panels
         /// </summary>
         public static Texture2D Render(
             IReadOnlyList<VillagerWaypoint> waypoints,
-            Vector3 bedPosition,
+            Vector3 anchorPosition,
             Vector3? patrollerPosition,
             List<Vector3> floodFillCells = null,
             List<Vector3> groundTruthPath = null,
@@ -58,7 +58,7 @@ namespace ValheimVillages.UI.Panels
                     (extraPins == null || extraPins.Count == 0))
                     return RenderEmpty();
 
-            ComputeBounds(waypoints, bedPosition, floodFillCells, groundTruthPath, extraPins, out var min, out var max);
+            ComputeBounds(waypoints, anchorPosition, floodFillCells, groundTruthPath, extraPins, out var min, out var max);
 
             var worldW = max.x - min.x;
             var worldH = max.y - min.y;
@@ -85,7 +85,7 @@ namespace ValheimVillages.UI.Panels
             if (waypoints != null)
             {
                 DrawPatrolPath(tex, waypoints, min, worldW, worldH);
-                DrawDots(tex, waypoints, bedPosition, patrollerPosition, min, worldW, worldH);
+                DrawDots(tex, waypoints, anchorPosition, patrollerPosition, min, worldW, worldH);
             }
 
             if (groundTruthPath != null && groundTruthPath.Count >= 2)
@@ -94,15 +94,15 @@ namespace ValheimVillages.UI.Panels
             }
             else
             {
-                var bedPx = WorldToPixel(bedPosition, min, worldW, worldH);
-                DrawCircle(tex, bedPx, BedDotRadius, BedColor);
+                var anchorPx = WorldToPixel(anchorPosition, min, worldW, worldH);
+                DrawCircle(tex, anchorPx, AnchorDotRadius, AnchorColor);
             }
 
             if (extraPins != null)
                 foreach (var pin in extraPins)
                 {
                     var pinPx = WorldToPixel(pin.position, min, worldW, worldH);
-                    DrawCircle(tex, pinPx, BedDotRadius, pin.color);
+                    DrawCircle(tex, pinPx, AnchorDotRadius, pin.color);
                 }
 
             tex.Apply();
@@ -429,13 +429,13 @@ namespace ValheimVillages.UI.Panels
                 DrawCircle(tex, px, WaypointDotRadius, WaypointColor);
             }
 
-            var bedPx = WorldToPixel(bed, min, worldW, worldH);
-            DrawCircle(tex, bedPx, BedDotRadius, BedColor);
+            var anchorPx = WorldToPixel(bed, min, worldW, worldH);
+            DrawCircle(tex, anchorPx, AnchorDotRadius, AnchorColor);
 
             if (patroller.HasValue)
             {
                 var patrollerPx = WorldToPixel(patroller.Value, min, worldW, worldH);
-                DrawCircle(tex, patrollerPx, BedDotRadius, PatrollerColor);
+                DrawCircle(tex, patrollerPx, AnchorDotRadius, PatrollerColor);
             }
         }
 

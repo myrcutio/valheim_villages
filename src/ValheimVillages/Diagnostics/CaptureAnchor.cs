@@ -53,7 +53,7 @@ namespace ValheimVillages.Diagnostics
                 Reason = reason;
             }
 
-            public static Result NoBed(string reason) =>
+            public static Result NoAnchor(string reason) =>
                 new Result(false, Vector3.zero, 0f, 0f, reason);
 
             public static Result From(Vector3 bedPos) =>
@@ -87,7 +87,7 @@ namespace ValheimVillages.Diagnostics
         ///     trivial; multi-village resolution is left to A3's optional
         ///     village-id argument on the <c>vv_capture</c> console command).
         ///
-        ///     Returns <see cref="Result.NoBed"/> when no seed bed is
+        ///     Returns <see cref="Result.NoAnchor"/> when no seed bed is
         ///     registered — the calling capture path should log + degrade to a
         ///     passive snapshot rather than substitute fabricated coordinates.
         /// </summary>
@@ -96,15 +96,15 @@ namespace ValheimVillages.Diagnostics
             List<Vector3> beds;
             try
             {
-                beds = VillagerAIManager.GetAllBedPositions();
+                beds = VillagerAIManager.GetAllAnchorPositions();
             }
             catch
             {
-                return Result.NoBed("VillagerAIManager threw resolving beds");
+                return Result.NoAnchor("VillagerAIManager threw resolving beds");
             }
 
             if (beds == null || beds.Count == 0)
-                return Result.NoBed("no seed beds registered");
+                return Result.NoAnchor("no seed beds registered");
 
             if (preferNear == null) return Result.From(beds[0]);
 

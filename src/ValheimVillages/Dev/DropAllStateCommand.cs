@@ -30,7 +30,6 @@ namespace ValheimVillages.Dev
     ///       <item>villager NPCs (any ZDO with <c>vv_record_id</c> or legacy
     ///         <c>vv_villager_type</c> — e.g. Dverger clones)</item>
     ///       <item>registry stations (<c>vv_village_registry</c>)</item>
-    ///       <item>claimed beds (any Bed ZDO carrying <c>vv_bed_owner</c>)</item>
     ///       <item>every other <c>vv_*</c> prefab instance (furnishings, egg/pawn item
     ///         drops, work-order props) — caught by prefab-name prefix</item>
     ///     </list>
@@ -151,7 +150,6 @@ namespace ValheimVillages.Dev
             if (prefab == VillagePrefabFactory.VillagePrefabHash) return "village-carrier";
             if (!string.IsNullOrEmpty(zdo.GetString("vv_record_id"))
                 || !string.IsNullOrEmpty(zdo.GetString("vv_villager_type"))) return "villager-npc";
-            if (!string.IsNullOrEmpty(zdo.GetString("vv_bed_owner"))) return "claimed-bed";
             if (vvHashes.Contains(prefab)) return "vv-prefab";
             return null;
         }

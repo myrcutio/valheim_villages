@@ -148,7 +148,7 @@ namespace ValheimVillages.Villager.Records
 
             var prefab = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : "DvergerMage";
             VillagerRecord rec = null;
-            var npc = VillagerPawnPatch.SpawnVillagerNpc(def, def.type, prefab, pos, ref rec, villageId);
+            var npc = VillagerSpawner.SpawnVillagerNpc(def, def.type, prefab, pos, ref rec, villageId);
             Print(npc != null
                 ? $"[vv_recruit] recruited {def.type} at {pos} into village {villageId}"
                 : "[vv_recruit] failed");

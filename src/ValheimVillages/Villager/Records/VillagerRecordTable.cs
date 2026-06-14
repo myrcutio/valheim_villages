@@ -9,7 +9,7 @@ namespace ValheimVillages.Villager.Records
     ///     Static facade over the villager record store. The records live in
     ///     free-standing <c>vv_villager_record</c> ZDOs; this enumerates/queries them by
     ///     scanning <c>ZDOMan.m_objectsByID</c> (the same reflection idiom as
-    ///     <c>VillagerAIManager.GetAllBedPositions</c>) filtered to the carrier prefab
+    ///     <c>VillagerAIManager.GetAllAnchorPositions</c>) filtered to the carrier prefab
     ///     hash, so the ZDO layer is always the source of truth — no in-memory cache to
     ///     keep in sync across hot reloads or world loads.
     /// </summary>
@@ -50,7 +50,7 @@ namespace ValheimVillages.Villager.Records
                 Type = type,
                 Name = name,
                 Village = villageKey,
-                BedPosition = bedPos,
+                HomeAnchor = bedPos,
                 Status = status,
                 NpcZdoId = npcZdoId,
                 EggPrefab = "",

@@ -52,7 +52,7 @@ namespace ValheimVillages.Behaviors.Patrol
         public bool IsDiscoveryComplete { get; private set; }
 
         /// <summary>Bed position for map rendering and UI.</summary>
-        public Vector3 BedPosition => m_ai?.Memory?.BedPosition ?? Vector3.zero;
+        public Vector3 HomeAnchor => m_ai?.Memory?.HomeAnchor ?? Vector3.zero;
 
         public int WaypointCount => m_patrolWaypoints?.Count ?? 0;
         public int ActiveWaypointCount => m_patrolWaypoints?.Count(w => w.Active) ?? 0;
@@ -152,11 +152,11 @@ namespace ValheimVillages.Behaviors.Patrol
             // never mint here: a read/discovery path must not fabricate a village ZDO.
             // If nothing covers the bed, return null so the caller's
             // FindById(null)?.Graph yields null and patrol takes its no-graph branch.
-            var byPos = VillageRegistry.GetVillageAt(m_ai.Memory.BedPosition);
+            var byPos = VillageRegistry.GetVillageAt(m_ai.Memory.HomeAnchor);
             if (byPos != null) return byPos.VillageId;
             Plugin.Log?.LogWarning(
                 $"[Patrol:{m_villager?.VillagerName}] guard has no vv_village_id and no village " +
-                $"covers its bed {m_ai.Memory.BedPosition}; waiting for a partition (not minting).");
+                $"covers its bed {m_ai.Memory.HomeAnchor}; waiting for a partition (not minting).");
             return null;
         }
 
@@ -177,7 +177,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 if (!m_hnaPartitionRequested)
                 {
                     m_hnaPartitionRequested = true;
-                    var bedPos = m_ai.Memory.BedPosition;
+                    var bedPos = m_ai.Memory.HomeAnchor;
                     Plugin.Log?.LogInfo($"[Patrol:{m_villager.VillagerName}] HNA graph unavailable, requesting hna_partition build");
                     GlobalTaskQueue.Enqueue(new VillagerTask
                     {
@@ -198,7 +198,7 @@ namespace ValheimVillages.Behaviors.Patrol
             }
 
             var routePoints = PatrolRouteBuilder.Build(
-                graph.GetBoundaryCells(), m_ai.Memory.BedPosition);
+                graph.GetBoundaryCells(), m_ai.Memory.HomeAnchor);
             if (routePoints.Count >= 3)
             {
                 m_patrolWaypoints = routePoints

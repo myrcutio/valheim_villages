@@ -21,7 +21,7 @@ namespace ValheimVillages.Patches
         /// </summary>
         private static List<Vector3> GetPhantomPositions()
         {
-            var beds = VillagerAIManager.GetAllBedPositions();
+            var beds = VillagerAIManager.GetAllAnchorPositions();
             if (beds.Count == 0) return beds;
 
             var seen = new HashSet<Vector2Int>();

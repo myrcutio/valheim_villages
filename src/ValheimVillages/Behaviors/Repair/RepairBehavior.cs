@@ -174,7 +174,7 @@ namespace ValheimVillages.Behaviors.Repair
         /// </summary>
         private bool FindDamaged()
         {
-            var center = m_ai.BedPosition;
+            var center = m_ai.HomeAnchor;
             var radius = WorkSettings.RepairScanRadius;
             var myPos = m_ai.Position;
 
@@ -236,7 +236,7 @@ namespace ValheimVillages.Behaviors.Repair
             approach = Vector3.zero;
             if (!VillagerAgentType.IsRegistered) return false;
 
-            var graph = Villages.Entity.VillageRegistry.GraphAt(m_ai.BedPosition);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(m_ai.HomeAnchor);
             if (graph == null) return false;
 
             // Reachable = the approach lies inside this village's operable area (the
