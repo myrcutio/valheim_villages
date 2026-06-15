@@ -1,10 +1,10 @@
 {
   "name": "ValheimVillages",
-  "version_number": "0.1.0",
+  "version_number": "0.1.1",
   "website_url": "https://github.com/myrcutio/valheim_villages",
   "description": "Adds villagers who map an enclosed village, find stations and chests, and fulfill work orders from available materials.",
   "dependencies": [
     "denikson-BepInExPack_Valheim-5.4.2333"
   ],
-  "tags": ["Mods","AI Generated","NPCs"]
+  "tags": ["NPCs","AI Generated"]
 }
