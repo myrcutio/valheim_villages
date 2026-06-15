@@ -53,3 +53,78 @@ jobs:
             --title "${GITHUB_REF_NAME}" \
             --notes "See CHANGELOG.md for changes in this release." \
             --generate-notes
+
+  # Uploads the same committed zip to Thunderstore. Runs on a stock (glibc) runner
+  # rather than the Alpine job above: tcli is a .NET tool and the .NET runtime is
+  # painful on Alpine's musl, whereas ubuntu-latest ships .NET + jq, so this stays
+  # shell-only (no JS actions; checkout via git like the job above). Does NOT
+  # compile — it publishes the pre-built dist/ zip and derives the package metadata
+  # FROM that zip, so the published version/name/description can never drift from
+  # the artifact. The only fixed values here are the publish target (namespace,
+  # community, categories). Skipped automatically when TCLI_AUTH_TOKEN is unset.
+  publish-thunderstore:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      TCLI_AUTH_TOKEN: ${{ secrets.TCLI_AUTH_TOKEN }}
+    steps:
+      - name: Checkout tagged commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone --depth 1 --branch "${GITHUB_REF_NAME}" \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+
+      - name: Publish to Thunderstore
+        if: ${{ env.TCLI_AUTH_TOKEN != '' }}
+        working-directory: repo
+        run: |
+          set -euo pipefail
+
+          zip="$(ls dist/ValheimVillages-*.zip 2>/dev/null | head -1 || true)"
+          if [ -z "$zip" ]; then
+            echo "No dist/ValheimVillages-*.zip found on the tagged commit." >&2
+            echo "Build it locally with scripts/package.sh and commit it under dist/." >&2
+            exit 1
+          fi
+          echo "Publishing ${zip}"
+
+          # Pull package identity from the built zip so it always matches the
+          # artifact (single source of truth: PluginVersion -> manifest.json -> zip).
+          manifest="$(unzip -p "$zip" manifest.json)"
+          name="$(jq -r .name <<<"$manifest")"
+          version="$(jq -r .version_number <<<"$manifest")"
+          description="$(jq -r .description <<<"$manifest")"
+          website="$(jq -r .website_url <<<"$manifest")"
+
+          # tcli needs a thunderstore.toml for the publish target (namespace +
+          # community + categories) — these are not in the Thunderstore manifest.
+          cat > thunderstore.toml <<EOF
+          [general]
+          repository = "https://thunderstore.io"
+
+          [package]
+          namespace = "idontunderstand"
+          name = "${name}"
+          versionNumber = "${version}"
+          description = "${description}"
+          websiteUrl = "${website}"
+          containsNsfwContent = false
+
+          [package.dependencies]
+
+          [build]
+          icon = "./Thunderstore/icon.png"
+          readme = "./README.md"
+          outdir = "./build"
+
+          [publish]
+          communities = ["valheim"]
+
+          [publish.categories]
+          valheim = ["ai-generated", "npcs"]
+          EOF
+
+          dotnet tool install -g tcli
+          export PATH="${PATH}:${HOME}/.dotnet/tools"
+          tcli publish --file "$zip" --config-path thunderstore.toml
