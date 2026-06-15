@@ -43,9 +43,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          zip="$(ls dist/ValheimVillages-*.zip 2>/dev/null | head -1 || true)"
-          if [ -z "$zip" ]; then
-            echo "No dist/ValheimVillages-*.zip found on the tagged commit." >&2
+          version="${GITHUB_REF_NAME#v}"
+          zip="dist/ValheimVillages-${version}.zip"
+          if [ ! -f "$zip" ]; then
+            echo "Expected ${zip} on the tagged commit, but it is missing." >&2
             echo "Build it locally with scripts/package.sh and commit it under dist/." >&2
             exit 1
           fi
@@ -81,9 +82,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          zip="$(ls dist/ValheimVillages-*.zip 2>/dev/null | head -1 || true)"
-          if [ -z "$zip" ]; then
-            echo "No dist/ValheimVillages-*.zip found on the tagged commit." >&2
+          tagversion="${GITHUB_REF_NAME#v}"
+          zip="dist/ValheimVillages-${tagversion}.zip"
+          if [ ! -f "$zip" ]; then
+            echo "Expected ${zip} on the tagged commit, but it is missing." >&2
             echo "Build it locally with scripts/package.sh and commit it under dist/." >&2
             exit 1
           fi
@@ -124,6 +126,9 @@ jobs:
           [publish.categories]
           valheim = ["ai-generated", "npcs"]
           EOF
+
+          # Strip all whitespace before tcli reads it from the environment.
+          export TCLI_AUTH_TOKEN="$(printf '%s' "${TCLI_AUTH_TOKEN}" | tr -d '[:space:]')"
 
           dotnet tool install -g tcli
           export PATH="${PATH}:${HOME}/.dotnet/tools"
