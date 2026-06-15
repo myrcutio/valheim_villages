@@ -177,7 +177,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <summary>
         ///     Pack a 2D XZ grid cell into a long key (no height bucket). This is
         ///     the single source of truth for the 2D cell key space used by the
-        ///     perimeter classification (outside / bed-reachable terrain cells);
+        ///     perimeter classification (outside / anchor-reachable terrain cells);
         ///     <see cref="RubberBandPrune" />'s internal <c>XzKey</c> delegates
         ///     here so the partition, persistence, and incremental reconcilers all
         ///     agree on the encoding. Symmetric sign handling: high half via
@@ -631,7 +631,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         public bool IsOutsideCell(int gx, int gz) =>
             m_outsideCellsXz.Contains(PackXz(gx, gz));
 
-        /// <summary>Is the terrain cell (gx,gz) reachable from a bed (inside)?</summary>
+        /// <summary>Is the terrain cell (gx,gz) reachable from a anchor (inside)?</summary>
         public bool IsAnchorReachableCell(int gx, int gz) =>
             m_anchorReachableCellsXz.Contains(PackXz(gx, gz));
 

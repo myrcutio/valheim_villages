@@ -90,12 +90,12 @@ namespace ValheimVillages.Behaviors.Tidy
         private bool FindDirtyStation()
         {
             // Cooking stations come from the shared village registry (resolved by
-            // the villager's bed), not per-villager memory. TryFindStation returns
+            // the villager's anchor), not per-villager memory. TryFindStation returns
             // the nearest one matching the filter that also has a reachable
             // approach, so an unreachable mess won't be picked.
-            var bedPos = m_ai.GetMemory().HomeAnchor;
+            var anchorPos = m_ai.GetMemory().HomeAnchor;
             if (VillageStationRegistry.TryFindStation<CookingStation>(
-                    bedPos, HasDoneOrBurntItems, out _, out var station))
+                    anchorPos, HasDoneOrBurntItems, out _, out var station))
             {
                 m_targetStation = station;
                 return true;

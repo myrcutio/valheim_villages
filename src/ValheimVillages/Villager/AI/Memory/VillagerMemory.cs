@@ -5,7 +5,7 @@ using ValheimVillages.Interfaces;
 namespace ValheimVillages.Villager.AI.Memory
 {
     /// <summary>
-    ///     Per-villager remembered state: the home bed and the best comfort the
+    ///     Per-villager remembered state: the home anchor and the best comfort the
     ///     villager has personally experienced. Shared points of interest
     ///     (fires, tables, farms) and stations are NOT stored here anymore —
     ///     they live in the village-level registries (<c>VillagePoiRegistry</c> /
@@ -14,9 +14,9 @@ namespace ValheimVillages.Villager.AI.Memory
     /// </summary>
     public class VillagerMemory : IVillagerMemory
     {
-        public VillagerMemory(Vector3 bedPosition)
+        public VillagerMemory(Vector3 anchorPosition)
         {
-            HomeAnchor = bedPosition;
+            HomeAnchor = anchorPosition;
         }
 
         /// <summary>Highest comfort level experienced.</summary>
@@ -25,7 +25,7 @@ namespace ValheimVillages.Villager.AI.Memory
         /// <summary>Position where best comfort was experienced.</summary>
         public Vector3? BestComfortPosition { get; set; }
 
-        /// <summary>The NPC's home bed position.</summary>
+        /// <summary>The NPC's home anchor position.</summary>
         public Vector3 HomeAnchor { get; set; }
 
         /// <summary>Update best comfort level if current is higher.</summary>

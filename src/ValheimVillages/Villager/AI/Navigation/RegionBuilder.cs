@@ -65,10 +65,10 @@ namespace ValheimVillages.Villager.AI.Navigation
         // cloned from Humanoid). Applies to BOTH terrain and piece tris:
         // a 45° roof tile is just as unwalkable as a 45° cliff. Looser
         // values (32°, 45°) over-merged regions in coplanar pass, which
-        // drifted area-weighted centroids far from beds and broke centroid-
+        // drifted area-weighted centroids far from anchors and broke centroid-
         // based BFS seeding (seeds=1 with fallback, dropping reachable
         // count from 12 to ~2). 27° keeps centroids local enough that both
-        // beds reliably seed.
+        // anchors reliably seed.
         //
         // Stair pieces are usually triangulated as flat horizontal treads
         // (normal.y = 1, passes any slope check) with discrete climb
@@ -133,7 +133,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         //
         // 0.1m radius: tight enough to not false-positive on pieces
         // 0.2m+ away from the centroid. 1.0m lift: walker waist; below
-        // typical ceilings, above bed tops and decorations.
+        // typical ceilings, above anchor tops and decorations.
         private const float PieceWaistProbeLift = 1.0f;
         private const float PieceWaistProbeRadius = 0.1f;
 
@@ -146,7 +146,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         // a player carved into the side of a hill. NOTE: this still only
         // catches enclosures that survive as a SINGLE region after subdiv;
         // larger enclosures split into multiple sub-regions all "linked" to
-        // each other will need a BFS-from-bed-seed reachability pass.
+        // each other will need a BFS-from-anchor-seed reachability pass.
         private const float TerrainIsolatedMaxArea = 16f; // m²
 
         // Same layers as the piece bake (Default + static_solid + piece).
@@ -446,7 +446,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         internal static BuildResult BuildFromTriangulation(
             SurfaceKind kind,
             float minX, float minZ, float maxX, float maxZ,
-            List<Vector3> beds)
+            List<Vector3> anchors)
         {
             var result = new BuildResult
             {
@@ -462,7 +462,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 RegionBounds = new Dictionary<string, Bounds>(),
                 RegionVertexList = new Dictionary<string, List<Vector3>>(),
             };
-            if (beds == null || beds.Count == 0) return result;
+            if (anchors == null || anchors.Count == 0) return result;
 
             var agentTypeId = VillagerAgentType.IsRegistered
                 ? VillagerAgentType.UnityAgentTypeID
@@ -490,7 +490,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             var triCount = idx.Length / 3;
 
-            // --- Filter triangles: normal, bounds, polygon/bed, villager agent, terrain ---
+            // --- Filter triangles: normal, bounds, polygon/anchor, villager agent, terrain ---
             var rawAccepted = new List<int>();
             var triCentroids = new Vector3[triCount];
             int rejNormal = 0, rejBounds = 0, rejAgent = 0, rejTerrain = 0;
@@ -575,12 +575,12 @@ namespace ValheimVillages.Villager.AI.Navigation
                     }
                 }
 
-                // Scope note: bake bounds = village beds + patrol bounds +
+                // Scope note: bake bounds = village anchors + patrol bounds +
                 // 30m pad, set in RegionPartitionHandler. Deliberately
                 // patrol-independent in here — the polygon path re-introduces
                 // the chicken-egg dependency the skill warns about, and
-                // bed-distance drops outlying terrain when the village extends
-                // past 30m from any bed. Both kinds fall through to the shared
+                // anchor-distance drops outlying terrain when the village extends
+                // past 30m from any anchor. Both kinds fall through to the shared
                 // agent NavMesh sample below.
 
                 if (!NavMesh.SamplePosition(c, out var hit, AgentFilterRadius, filter) ||

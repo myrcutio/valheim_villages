@@ -79,10 +79,10 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             // Snap radius 3m (was 1m). The start/end here are HNA graph LOOKUP
             // CELLS (from TryResolveApproach's snap), which don't always sit on
-            // the combined-bake navmesh — a bed whose nearest lookup cell lands
+            // the combined-bake navmesh — a anchor whose nearest lookup cell lands
             // in an eroded/blocked spot can be >1m off the walkable surface. With
             // a 1m radius that start failed to map and EVERY approach from that
-            // bed reported unreachable (observed: the Farmer's bed-2, snapped
+            // anchor reported unreachable (observed: the Farmer's anchor-2, snapped
             // pathStart 1.24m off-mesh, resolved 0 of 270 candidates). 3m maps it
             // onto the nearby walkable surface without reaching a different level.
             if (!NavMesh.SamplePosition(start, out var startHit, 3f, filter)) return false;

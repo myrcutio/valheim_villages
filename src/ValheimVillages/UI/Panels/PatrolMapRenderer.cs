@@ -198,13 +198,13 @@ namespace ValheimVillages.UI.Panels
         }
 
         private static void ComputeBounds(
-            IReadOnlyList<VillagerWaypoint> waypoints, Vector3 bed,
+            IReadOnlyList<VillagerWaypoint> waypoints, Vector3 anchor,
             List<Vector3> floodFillCells, List<Vector3> groundTruthPath,
             IReadOnlyList<(Vector3 position, Color color)> extraPins,
             out Vector2 min, out Vector2 max)
         {
-            float minX = bed.x, maxX = bed.x;
-            float minZ = bed.z, maxZ = bed.z;
+            float minX = anchor.x, maxX = anchor.x;
+            float minZ = anchor.z, maxZ = anchor.z;
 
             if (waypoints != null)
                 for (var i = 0; i < waypoints.Count; i++)
@@ -412,7 +412,7 @@ namespace ValheimVillages.UI.Panels
         private static void DrawDots(
             Texture2D tex,
             IReadOnlyList<VillagerWaypoint> waypoints,
-            Vector3 bed, Vector3? patroller,
+            Vector3 anchor, Vector3? patroller,
             Vector2 min, float worldW, float worldH)
         {
             for (var i = 0; i < waypoints.Count; i++)
@@ -429,7 +429,7 @@ namespace ValheimVillages.UI.Panels
                 DrawCircle(tex, px, WaypointDotRadius, WaypointColor);
             }
 
-            var anchorPx = WorldToPixel(bed, min, worldW, worldH);
+            var anchorPx = WorldToPixel(anchor, min, worldW, worldH);
             DrawCircle(tex, anchorPx, AnchorDotRadius, AnchorColor);
 
             if (patroller.HasValue)

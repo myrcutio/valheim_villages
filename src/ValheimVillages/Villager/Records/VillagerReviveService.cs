@@ -80,7 +80,7 @@ namespace ValheimVillages.Villager.Records
             }
 
             // Snap to a walkable seed near the anchor (the registry). This becomes the
-            // spawn position AND the persisted home (SpawnVillagerNpc writes bedPos onto
+            // spawn position AND the persisted home (SpawnVillagerNpc writes anchorPos onto
             // the record), so the villager lands inside the village and the partition
             // seeds from a reachable cell instead of a stale, now-outside home.
             var spawnPos = rawAnchor;

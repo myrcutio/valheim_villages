@@ -22,9 +22,18 @@ namespace ValheimVillages.TaskQueue.Handlers
     ///     <see cref="RegionBuilder" />.
     /// </summary>
     [RegisterTaskHandler]
-    public class RegionPartitionHandler : ITaskHandlerWithLog
+    public class RegionPartitionHandler : ITaskHandlerWithLog, ITaskPrecondition
     {
         public const string RegionPartitionTaskName = "hna_partition";
+
+        // The piece layers NavMeshBakeManager collects PhysicsColliders from. The
+        // readiness gate (IsReady) requires every object on these layers in the village
+        // sector to be instantiated before the bake runs — kept in sync with
+        // NavMeshBakeManager's s_pieceMask so "ready" means exactly "the bake will see
+        // it". (Terrain is not a sector ZDO; IsZoneLoaded covers the heightmap.)
+        private static readonly int s_pieceLayerMask =
+            LayerMask.GetMask("Default", "static_solid", "piece");
+        private static readonly List<ZDO> s_readinessScratch = new();
 
         public const float AnchorVillageRadius = 15f;
         internal const float FloodFillRadius = 30f;
@@ -42,6 +51,67 @@ namespace ValheimVillages.TaskQueue.Handlers
 
         public string TaskName => RegionPartitionTaskName;
 
+        /// <summary>
+        ///     Gate dequeue until the world is loaded AND settled within the village
+        ///     footprint, so <see cref="NavMeshBakeManager.BakeVillage" /> reads real
+        ///     terrain + piece colliders rather than a half-streamed world. The boot
+        ///     partition previously ran ~5s after load against 0 bake sources (zone not
+        ///     yet loaded / objects not yet instantiated) and committed a graph that
+        ///     didn't cover the village. Criteria are deterministic — no magnitude
+        ///     thresholds and no spatial assumptions about where the village sits:
+        ///     every anchor's zone must be loaded and every bake-relevant object in it
+        ///     instantiated.
+        /// </summary>
+        public bool IsReady(VillagerTask task)
+        {
+            if (ZNet.instance == null || ZNetScene.instance == null ||
+                ZoneSystem.instance == null || ZDOMan.instance == null)
+                return false;
+            if (!VillagerAgentType.IsRegistered) return false;
+
+            var anchors = FilterAnchorsByTask(VillagerAIManager.GetAllAnchorPositions(), task);
+            // No anchors yet => nothing to partition. Let Handle() run and no-op (it
+            // returns no_anchors and never bakes) rather than defer indefinitely.
+            if (anchors == null || anchors.Count == 0) return true;
+
+            var area = ZoneSystem.instance.m_activeArea;
+            foreach (var anchor in anchors)
+            {
+                var zone = ZoneSystem.GetZone(anchor);
+                if (!ZoneSystem.instance.IsZoneLoaded(zone)) return false;
+
+                // Every piece-layer object in the sector must be instantiated, i.e.
+                // object streaming for the village footprint is complete (guards the
+                // observed PieceSources=0 / partially-streamed case). Terrain rides
+                // along with the loaded zone (heightmap), so no separate probe — which
+                // also avoids assuming the village sits at terrain height.
+                if (!SectorBakeGeometryInstantiated(zone, area)) return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        ///     True when every bake-relevant (piece-layer) ZDO in the sector has a live
+        ///     <see cref="ZNetView" /> — the deterministic "objects done streaming"
+        ///     signal.
+        /// </summary>
+        private static bool SectorBakeGeometryInstantiated(Vector2i zone, int area)
+        {
+            s_readinessScratch.Clear();
+            ZDOMan.instance.FindSectorObjects(zone, area, 0, s_readinessScratch);
+            foreach (var zdo in s_readinessScratch)
+            {
+                if (zdo == null) continue;
+                var prefab = ZNetScene.instance.GetPrefab(zdo.GetPrefab());
+                if (prefab == null) continue;
+                if (((1 << prefab.layer) & s_pieceLayerMask) == 0) continue;
+                if (ZNetScene.instance.FindInstance(zdo) == null) return false;
+            }
+
+            return true;
+        }
+
         public TaskResult Handle(VillagerTask task, VillagerActivityLog activityLog)
         {
             // Freeze villager movement across the rebuild + settle so a path
@@ -50,18 +120,18 @@ namespace ValheimVillages.TaskQueue.Handlers
             // enqueue — the graph is stable while the task waits in the queue.
             VillageNavLock.RequestHold(NavRebuildSettleSeconds);
 
-            var allBeds = VillagerAIManager.GetAllAnchorPositions();
-            var beds = FilterAnchorsByTask(allBeds, task);
+            var allAnchors = VillagerAIManager.GetAllAnchorPositions();
+            var anchors = FilterAnchorsByTask(allAnchors, task);
             // Snap each home/seed to a walkable, capsule-clear cell before it drives the
             // bake elevation and the Pass-1 reachability flood. A registry-anchored home
-            // (or a bed) can sit inside its own colliders; flooding from there reaches a
+            // (or a anchor) can sit inside its own colliders; flooding from there reaches a
             // couple of cells and the region graph/boundary degenerates. Resolved against
             // real geometry + the vanilla navmesh, so it works before slot 31 is (re)baked.
-            beds = ResolveWalkableSeeds(beds);
+            anchors = ResolveWalkableSeeds(anchors);
             var hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(
                 out var patrolMinX, out var patrolMinZ, out var patrolMaxX, out var patrolMaxZ);
 
-            var village = ResolveVillage(task, beds);
+            var village = ResolveVillage(task, anchors);
             if (village == null)
             {
                 Plugin.Log?.LogWarning(
@@ -76,18 +146,18 @@ namespace ValheimVillages.TaskQueue.Handlers
             var villageKey = village.VillageId;
 
             float minX, minZ, maxX, maxZ;
-            if (hasPatrolBounds && beds != null && beds.Count > 0)
+            if (hasPatrolBounds && anchors != null && anchors.Count > 0)
             {
                 minX = patrolMinX;
                 minZ = patrolMinZ;
                 maxX = patrolMaxX;
                 maxZ = patrolMaxZ;
-                foreach (var bed in beds)
+                foreach (var anchor in anchors)
                 {
-                    if (bed.x - RegionBuildRadius < minX) minX = bed.x - RegionBuildRadius;
-                    if (bed.z - RegionBuildRadius < minZ) minZ = bed.z - RegionBuildRadius;
-                    if (bed.x + RegionBuildRadius > maxX) maxX = bed.x + RegionBuildRadius;
-                    if (bed.z + RegionBuildRadius > maxZ) maxZ = bed.z + RegionBuildRadius;
+                    if (anchor.x - RegionBuildRadius < minX) minX = anchor.x - RegionBuildRadius;
+                    if (anchor.z - RegionBuildRadius < minZ) minZ = anchor.z - RegionBuildRadius;
+                    if (anchor.x + RegionBuildRadius > maxX) maxX = anchor.x + RegionBuildRadius;
+                    if (anchor.z + RegionBuildRadius > maxZ) maxZ = anchor.z + RegionBuildRadius;
                 }
             }
             else if (hasPatrolBounds)
@@ -97,21 +167,21 @@ namespace ValheimVillages.TaskQueue.Handlers
                 maxX = patrolMaxX;
                 maxZ = patrolMaxZ;
             }
-            else if (beds != null && beds.Count > 0)
+            else if (anchors != null && anchors.Count > 0)
             {
-                minX = maxX = beds[0].x;
-                minZ = maxZ = beds[0].z;
-                foreach (var bed in beds)
+                minX = maxX = anchors[0].x;
+                minZ = maxZ = anchors[0].z;
+                foreach (var anchor in anchors)
                 {
-                    if (bed.x - RegionBuildRadius < minX) minX = bed.x - RegionBuildRadius;
-                    if (bed.z - RegionBuildRadius < minZ) minZ = bed.z - RegionBuildRadius;
-                    if (bed.x + RegionBuildRadius > maxX) maxX = bed.x + RegionBuildRadius;
-                    if (bed.z + RegionBuildRadius > maxZ) maxZ = bed.z + RegionBuildRadius;
+                    if (anchor.x - RegionBuildRadius < minX) minX = anchor.x - RegionBuildRadius;
+                    if (anchor.z - RegionBuildRadius < minZ) minZ = anchor.z - RegionBuildRadius;
+                    if (anchor.x + RegionBuildRadius > maxX) maxX = anchor.x + RegionBuildRadius;
+                    if (anchor.z + RegionBuildRadius > maxZ) maxZ = anchor.z + RegionBuildRadius;
                 }
             }
             else
             {
-                Plugin.Log?.LogInfo("[Region] Partition skipped: no village areas and no villager beds.");
+                Plugin.Log?.LogInfo("[Region] Partition skipped: no village areas and no villager anchors.");
                 return TaskResult.Ok(new Dictionary<string, string>
                 {
                     { "regions", "0" }, { "links", "0" }, { "reason", "no_anchors_or_areas" },
@@ -122,11 +192,11 @@ namespace ValheimVillages.TaskQueue.Handlers
             // over this village's bounds. Without this, RegionBuilder's
             // NavMesh queries against slot 31 return no triangles because
             // Valheim only bakes the Humanoid agent (slot 1).
-            if (beds == null || beds.Count == 0)
+            if (anchors == null || anchors.Count == 0)
             {
                 Plugin.Log?.LogError(
-                    $"[Region] Partition aborted: no villager beds for village '{villageKey}'. " +
-                    "Cannot determine bake elevation without beds — refusing to bake at sea-level fallback.");
+                    $"[Region] Partition aborted: no villager anchors for village '{villageKey}'. " +
+                    "Cannot determine bake elevation without anchors — refusing to bake at sea-level fallback.");
                 return TaskResult.Ok(new Dictionary<string, string>
                 {
                     { "regions", "0" }, { "links", "0" }, { "reason", "no_anchors_for_bake_y" },
@@ -134,10 +204,10 @@ namespace ValheimVillages.TaskQueue.Handlers
             }
 
             float bakeMinY = float.MaxValue, bakeMaxY = float.MinValue;
-            foreach (var bed in beds)
+            foreach (var anchor in anchors)
             {
-                if (bed.y < bakeMinY) bakeMinY = bed.y;
-                if (bed.y > bakeMaxY) bakeMaxY = bed.y;
+                if (anchor.y < bakeMinY) bakeMinY = anchor.y;
+                if (anchor.y > bakeMaxY) bakeMaxY = anchor.y;
             }
 
             const float bakeYPadding = 30f;
@@ -172,12 +242,12 @@ namespace ValheimVillages.TaskQueue.Handlers
             // surfaces should override raw terrain at the same XZ + height
             // bucket.
             var terrainResult = RegionBuilder.BuildFromTriangulation(
-                SurfaceKind.Terrain, minX, minZ, maxX, maxZ, beds);
+                SurfaceKind.Terrain, minX, minZ, maxX, maxZ, anchors);
             var pieceResult = RegionBuilder.BuildFromTriangulation(
-                SurfaceKind.Piece, minX, minZ, maxX, maxZ, beds);
+                SurfaceKind.Piece, minX, minZ, maxX, maxZ, anchors);
 
             // Cross-kind BFS reachability: prune terrain regions not
-            // reachable from beds through the combined terrain↔piece
+            // reachable from anchors through the combined terrain↔piece
             // adjacency graph. Pieces (stone tiles, floors, paths) act as
             // legitimate bridges between terrain regions; without this,
             // terrain pieced over by walkable floor pieces appears
@@ -189,7 +259,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             // a graph missing every piece-to-piece edge discovered by the
             // cell-level flood (and the trace would show "no path" for
             // any region only reachable via the piece chain).
-            var crossKindAdj = BuildCrossKindAdjacency(terrainResult, pieceResult, beds);
+            var crossKindAdj = BuildCrossKindAdjacency(terrainResult, pieceResult, anchors);
 
 
             // Combine terrain + piece region sets (union + shadow suppression +
@@ -205,7 +275,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             var rbStats = RubberBandPrune.Apply(
                 combinedRegionIds, combinedCentroids, combinedLookup,
                 combinedBoundary, combinedLinks, kindMap, combinedTriangles,
-                beds,
+                anchors,
                 minX, minZ, maxX, maxZ,
                 out var droppedRubberBand,
                 out var pass3DiscoveredEdges,
@@ -288,7 +358,7 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             // A partition that yielded 0 regions is a FAILED bake (its only seed is walled
             // off / outside the current footprint), NOT a genuinely empty village — the
-            // no-beds case already returned earlier at no_beds_or_areas. If the seed sits
+            // no-anchors case already returned earlier at no_anchors_or_areas. If the seed sits
             // inside (or right against) an existing, non-empty graph, this is a MUTATION of
             // that same village, not a new one: committing the empty result would clobber a
             // working graph. (Hit by: rebuild the registry, then revive a villager whose
@@ -296,7 +366,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             // existing graph instead of replacing it with nothing.
             if (combinedRegionIds.Count == 0)
             {
-                var existing = FindContainingNonEmptyGraph(beds);
+                var existing = FindContainingNonEmptyGraph(anchors);
                 if (existing != null)
                 {
                     Plugin.Log?.LogWarning(
@@ -436,12 +506,12 @@ namespace ValheimVillages.TaskQueue.Handlers
         /// <summary>
         ///     Resolve the EXISTING durable <see cref="Village" /> this partition builds
         ///     for, by (1) an explicit <c>village_id</c> attribute, (2) an
-        ///     <c>anchor_x/anchor_z</c> pair, or (3) the first seed bed — by id, graph
+        ///     <c>anchor_x/anchor_z</c> pair, or (3) the first seed anchor — by id, graph
         ///     coverage, or registry-anchor proximity. NEVER mints: a partition runs for a
         ///     village that already exists (created at registry placement). Returns null
         ///     when none resolves, and the caller aborts rather than fabricating one.
         /// </summary>
-        private static Village ResolveVillage(VillagerTask task, List<Vector3> beds)
+        private static Village ResolveVillage(VillagerTask task, List<Vector3> anchors)
         {
             if (task?.Attributes != null &&
                 task.Attributes.TryGetValue("village_id", out var id) &&
@@ -457,13 +527,13 @@ namespace ValheimVillages.TaskQueue.Handlers
                 float.TryParse(axStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var ax) &&
                 float.TryParse(azStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var az))
             {
-                var y = beds != null && beds.Count > 0 ? beds[0].y : 0f;
+                var y = anchors != null && anchors.Count > 0 ? anchors[0].y : 0f;
                 var anchor = new Vector3(ax, y, az);
                 return VillageRegistry.GetVillageCovering(anchor) ?? VillageRegistry.FindNearAnchor(anchor);
             }
 
-            if (beds != null && beds.Count > 0)
-                return VillageRegistry.GetVillageCovering(beds[0]) ?? VillageRegistry.FindNearAnchor(beds[0]);
+            if (anchors != null && anchors.Count > 0)
+                return VillageRegistry.GetVillageCovering(anchors[0]) ?? VillageRegistry.FindNearAnchor(anchors[0]);
 
             return null;
         }
@@ -493,66 +563,66 @@ namespace ValheimVillages.TaskQueue.Handlers
         }
 
         /// <summary>
-        ///     Map each village seed (stored villager home / bed) to the nearest
+        ///     Map each village seed (stored villager home / anchor) to the nearest
         ///     walkable, agent-clear cell via <see cref="RegistrySeedResolver" />, so the
         ///     bake elevation and Pass-1 flood seed from ground the agent can stand on
-        ///     rather than a point buried in the registry/bed colliders. Seeds that can't
+        ///     rather than a point buried in the registry/anchor colliders. Seeds that can't
         ///     be resolved are kept as-is and logged loudly (no silent substitution).
         /// </summary>
-        private static List<Vector3> ResolveWalkableSeeds(List<Vector3> beds)
+        private static List<Vector3> ResolveWalkableSeeds(List<Vector3> anchors)
         {
-            if (beds == null || beds.Count == 0) return beds;
+            if (anchors == null || anchors.Count == 0) return anchors;
 
-            var snapped = new List<Vector3>(beds.Count);
+            var snapped = new List<Vector3>(anchors.Count);
             var moved = 0;
-            foreach (var bed in beds)
+            foreach (var anchor in anchors)
             {
-                if (RegistrySeedResolver.TryResolveWalkableSeed(bed, out var seed))
+                if (RegistrySeedResolver.TryResolveWalkableSeed(anchor, out var seed))
                 {
-                    if ((seed - bed).sqrMagnitude > 0.25f) moved++;
+                    if ((seed - anchor).sqrMagnitude > 0.25f) moved++;
                     snapped.Add(seed);
                 }
                 else
                 {
-                    snapped.Add(bed);
+                    snapped.Add(anchor);
                     Plugin.Log?.LogWarning(
-                        $"[Region] No walkable seed near home ({bed.x:F1},{bed.y:F1},{bed.z:F1}); " +
+                        $"[Region] No walkable seed near home ({anchor.x:F1},{anchor.y:F1},{anchor.z:F1}); " +
                         "using it as-is (flood may degenerate).");
                 }
             }
 
             if (moved > 0)
                 Plugin.Log?.LogInfo(
-                    $"[Region] Snapped {moved}/{beds.Count} village seed(s) onto walkable cells near their anchor.");
+                    $"[Region] Snapped {moved}/{anchors.Count} village seed(s) onto walkable cells near their anchor.");
             return snapped;
         }
 
-        private static List<Vector3> FilterAnchorsByTask(List<Vector3> allBeds, VillagerTask task)
+        private static List<Vector3> FilterAnchorsByTask(List<Vector3> allAnchors, VillagerTask task)
         {
-            if (allBeds == null || allBeds.Count == 0) return allBeds;
+            if (allAnchors == null || allAnchors.Count == 0) return allAnchors;
             if (task?.Attributes == null ||
                 !task.Attributes.TryGetValue("anchor_x", out var axStr) ||
                 !task.Attributes.TryGetValue("anchor_z", out var azStr))
-                return allBeds;
+                return allAnchors;
 
             if (!float.TryParse(axStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var anchorX) ||
                 !float.TryParse(azStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var anchorZ))
-                return allBeds;
+                return allAnchors;
 
             var r2 = VillageClusterRadius * VillageClusterRadius;
             var filtered = new List<Vector3>();
-            foreach (var bed in allBeds)
+            foreach (var anchor in allAnchors)
             {
-                float dx = bed.x - anchorX, dz = bed.z - anchorZ;
-                if (dx * dx + dz * dz <= r2) filtered.Add(bed);
+                float dx = anchor.x - anchorX, dz = anchor.z - anchorZ;
+                if (dx * dx + dz * dz <= r2) filtered.Add(anchor);
             }
 
             Plugin.Log?.LogInfo(
-                $"[Region] Filtered beds by anchor ({anchorX:F0},{anchorZ:F0}): " +
-                $"{filtered.Count}/{allBeds.Count} within {VillageClusterRadius}m");
+                $"[Region] Filtered anchors by anchor ({anchorX:F0},{anchorZ:F0}): " +
+                $"{filtered.Count}/{allAnchors.Count} within {VillageClusterRadius}m");
             if (filtered.Count == 0)
                 Plugin.Log?.LogWarning(
-                    $"[Region] No beds within {VillageClusterRadius}m of anchor ({anchorX:F0},{anchorZ:F0})");
+                    $"[Region] No anchors within {VillageClusterRadius}m of anchor ({anchorX:F0},{anchorZ:F0})");
             return filtered;
         }
 
@@ -560,9 +630,9 @@ namespace ValheimVillages.TaskQueue.Handlers
         ///     Builds the cross-kind region adjacency graph (terrain↔terrain +
         ///     piece↔piece in-pass edges, plus terrain↔piece cross-kind edges via
         ///     shared quantized vertex positions and via vertex-to-vertex
-        ///     proximity) and locates bed-anchored terrain seeds. Persists both
+        ///     proximity) and locates anchor-anchored terrain seeds. Persists both
         ///     to <see cref="BfsAdjacencyStore" /> so the <c>vv_bfs_trace</c> dev
-        ///     command can compute paths back to a bed without re-running the
+        ///     command can compute paths back to a anchor without re-running the
         ///     partition. Read-only: does NOT mutate inputs and does NOT prune
         ///     regions; downstream <see cref="RubberBandPrune" /> handles cell-grid
         ///     reachability via the outermost wall layer.
@@ -573,7 +643,7 @@ namespace ValheimVillages.TaskQueue.Handlers
         ///     persisting to <see cref="BfsAdjacencyStore" /> directly so
         ///     the caller can merge in Pass 3's discovered piece-step
         ///     edges before publishing. Returns null on early abort
-        ///     conditions (no terrain regions, no bed-mapped seeds).
+        ///     conditions (no terrain regions, no anchor-mapped seeds).
         /// </summary>
         private static (Dictionary<string, HashSet<string>> adjacency,
                         HashSet<string> seeds,
@@ -581,7 +651,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             BuildCrossKindAdjacency(
             RegionBuilder.BuildResult terrainResult,
             RegionBuilder.BuildResult pieceResult,
-            List<Vector3> beds)
+            List<Vector3> anchors)
         {
             if (terrainResult.RegionIds == null || terrainResult.RegionIds.Count == 0) return null;
 
@@ -793,21 +863,21 @@ namespace ValheimVillages.TaskQueue.Handlers
                     }
                 }
 
-            // --- Find seeds: closest terrain region centroid to each bed ---
+            // --- Find seeds: closest terrain region centroid to each anchor ---
             var seeds = new HashSet<string>();
             const float anchorYTol = 3f;
             const float anchorXZTol = 30f;
             const float anchorXZTolSq = anchorXZTol * anchorXZTol;
-            if (beds != null)
-                foreach (var bed in beds)
+            if (anchors != null)
+                foreach (var anchor in anchors)
                 {
                     string closest = null;
                     var closestDistSq = float.MaxValue;
                     foreach (var rid in terrainResult.RegionIds)
                     {
                         if (!terrainResult.Centroids.TryGetValue(rid, out var c)) continue;
-                        if (Mathf.Abs(c.y - bed.y) > anchorYTol) continue;
-                        float dx = c.x - bed.x, dz = c.z - bed.z;
+                        if (Mathf.Abs(c.y - anchor.y) > anchorYTol) continue;
+                        float dx = c.x - anchor.x, dz = c.z - anchor.z;
                         var dSq = dx * dx + dz * dz;
                         if (dSq > anchorXZTolSq) continue;
                         if (dSq < closestDistSq)
@@ -822,11 +892,11 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             if (seeds.Count == 0)
             {
-                var bedCount = beds?.Count ?? 0;
+                var anchorCount = anchors?.Count ?? 0;
                 var regionCount = terrainResult.RegionIds?.Count ?? 0;
                 Plugin.Log?.LogError(
-                    "[Region] CrossKind adjacency aborted: no bed mapped to any terrain region " +
-                    $"(beds={bedCount}, terrain_regions={regionCount}). " +
+                    "[Region] CrossKind adjacency aborted: no anchor mapped to any terrain region " +
+                    $"(anchors={anchorCount}, terrain_regions={regionCount}). " +
                     "Refusing to seed BFS from a synthetic largest-region fallback; vv_bfs_trace will report no data.");
                 return null;
             }

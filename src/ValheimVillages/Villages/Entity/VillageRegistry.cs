@@ -37,11 +37,9 @@ namespace ValheimVillages.Villages.Entity
             // CreateNewZDO does NOT persist the prefab hash — set it so GetPrefab()
             // returns the carrier hash (how EnumerateAll finds villages).
             zdo.SetPrefab(VillagePrefabFactory.VillagePrefabHash);
+            // ZDOMan.GetSaveClone writes every Persistent ZDO regardless of owner, so this
+            // flag alone makes the village survive a world save/reload (ownership is irrelevant).
             zdo.Persistent = true;
-            // On a dedicated server the host must own the ZDO so it's written to the
-            // world .db (same fix VillagerRecordTable.Create applies).
-            if (ZNet.instance != null && ZNet.instance.IsDedicated())
-                zdo.SetOwner(ZNet.GetUID());
 
             var id = Guid.NewGuid().ToString();
             zdo.Set(Village.IdKey, id);

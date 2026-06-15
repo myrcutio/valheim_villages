@@ -22,18 +22,18 @@ namespace ValheimVillages.Villager.AI.Navigation
     ///             the OUTER ring, so secondary courtyards are not marked outside.
     ///         </item>
     ///         <item>
-    ///             <b>Pass 2</b> (terrain): inside-out flood seeded from each bed,
+    ///             <b>Pass 2</b> (terrain): inside-out flood seeded from each anchor,
     ///             snapped to the nearest populated cell (the floor the villager
     ///             stands on, not the terrain hole a metre below a raised
     ///             foundation). Flood surface Y is the region-centroid surface
     ///             (max of terrain/piece) so the waist probe sits above the floor
-    ///             and bed; <c>WallBlocks</c> ignores bed colliders; refuses to
+    ///             and anchor; <c>WallBlocks</c> ignores anchor colliders; refuses to
     ///             expand into <c>outsideCells</c>.
     ///             Output: <c>anchorReachableCells</c> (terrain XZ keys reachable from at
-    ///             least one bed). Catches internal cliffs, pits, locked-off rooms.
+    ///             least one anchor). Catches internal cliffs, pits, locked-off rooms.
     ///         </item>
     ///         <item>
-    ///             <b>Pass 3</b> (piece): bed-reachable flood on the piece layer.
+    ///             <b>Pass 3</b> (piece): anchor-reachable flood on the piece layer.
     ///             Seeds are piece lookup keys within <c>MaxSeedStep</c> Y of a
     ///             <c>anchorReachableCells</c> terrain cell (i.e. "a villager could step
     ///             from terrain onto this piece"). BFS expands via 4-connected horizontal
@@ -72,11 +72,11 @@ namespace ValheimVillages.Villager.AI.Navigation
         // The probe is a thin Y-slab at walker waist height that fully
         // spans the cell pair in the step direction. Tuned to:
         //   - CATCH walls (extend from ground to 2m+, body crosses waist)
-        //   - MISS beds (top at ~0.6m, below WaistMin)
+        //   - MISS anchors (top at ~0.6m, below WaistMin)
         //   - MISS overhead arches / vaults / ceilings (start at ~2m,
         //     above WaistMax)
         //
-        // WaistMin 0.7m: above typical bed top (~0.6m) and above the
+        // WaistMin 0.7m: above typical anchor top (~0.6m) and above the
         // villager's max climb (~0.3m). Things shorter than this the
         // walker can step over, so they shouldn't block.
         // WaistMax 1.3m: walker chest height. Above this we'd start
@@ -125,7 +125,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             List<RegionLink> links,
             Dictionary<string, SurfaceKind> kindMap,
             List<RegionBuilder.CachedTriangle> triangles,
-            List<Vector3> beds,
+            List<Vector3> anchors,
             float minX, float minZ, float maxX, float maxZ,
             out HashSet<string> droppedRegionIds,
             out List<(string fromRid, string toRid,
@@ -280,7 +280,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (outsideCells.Contains(kv.Key))
                     stats.OutsideTerrainCells++;
 
-            // --- Pass 2: inside-out flood from beds ---
+            // --- Pass 2: inside-out flood from anchors ---
             // Walks any reachable cell in the bake bounds. A villager can
             // legitimately walk on any non-outside cell that isn't
             // wall-blocked from its neighbour, regardless of whether a terrain
@@ -291,18 +291,18 @@ namespace ValheimVillages.Villager.AI.Navigation
             // cell (SurfaceY below). In a floored village the walkable surface
             // is the floor PIECES (≈1m above the terrain heightmap), so the old
             // GetGroundHeight anchor put the waist probe a metre too low, where
-            // it clipped the floor pieces (and the bed) and walled every cell
+            // it clipped the floor pieces (and the anchor) and walled every cell
             // off from its neighbour. Anchoring on the region surface puts the
-            // probe band above the floor/bed and below walls — exactly the
+            // probe band above the floor/anchor and below walls — exactly the
             // height Pass 1's diagnostic uses to report WallBlocks=false across
             // a floor. GetGroundHeight is the fallback only for cells with no
             // region at all (unpopulated).
             //
-            // Bed seeding (PRIMARY = snap to the nearest populated cell): a bed
+            // Bed seeding (PRIMARY = snap to the nearest populated cell): a anchor
             // commonly sits on a floor whose own XZ cell is carved out of the
-            // partition (the bed blocker shadows it), leaving it unpopulated.
-            // Seeding the literal bed cell put the flood on the terrain hole
-            // under the bed. We snap each bed to the nearest cell that actually
+            // partition (the anchor blocker shadows it), leaving it unpopulated.
+            // Seeding the literal anchor cell put the flood on the terrain hole
+            // under the anchor. We snap each anchor to the nearest cell that actually
             // carries a region — the floor the villager stands on. This is the
             // main position marker, not a fallback.
             //
@@ -330,13 +330,13 @@ namespace ValheimVillages.Villager.AI.Navigation
                     : 0f;
             }
 
-            if (beds != null && beds.Count > 0 && ZoneSystem.instance != null)
+            if (anchors != null && anchors.Count > 0 && ZoneSystem.instance != null)
             {
                 // Pass 2 flood now lives in the pure AnchorReachableFlood helper.
-                // isPopulated keeps the bed-snap on the ContainsKey fast path (no
+                // isPopulated keeps the anchor-snap on the ContainsKey fast path (no
                 // ground cast); surfaceY supplies the walk-surface height.
                 AnchorReachableFlood(
-                    gxMin, gzMin, gxMax, gzMax, beds, outsideCells, cell, anchorSnapRingMax: 6,
+                    gxMin, gzMin, gxMax, gzMax, anchors, outsideCells, cell, anchorSnapRingMax: 6,
                     isPopulated: ck => xzMaxYTerrain.ContainsKey(ck) || xzMaxYPiece.ContainsKey(ck),
                     surfaceY: (xzKey, gx, gz) => SurfaceY(xzKey, gx, gz, out _),
                     wallBlocks: (ax, az, bx, bz, ya, yb) => WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask),
@@ -347,14 +347,14 @@ namespace ValheimVillages.Villager.AI.Navigation
             stats.Pass2Seeds = pass2Seeds;
             stats.AnchorReachableTerrainCells = anchorReachableCells.Count;
 
-            // --- Pass 3: bed-reachable piece flood (bridges through terrain) ---
-            // Unified BFS over (XZ, Y) nodes. Seeded from every bed-reachable
+            // --- Pass 3: anchor-reachable piece flood (bridges through terrain) ---
+            // Unified BFS over (XZ, Y) nodes. Seeded from every anchor-reachable
             // terrain cell at its true ground height (ZoneSystem heightmap, not
             // region-centroid Y — region centroids drift up to ~0.75m and that
             // matters at the MaxClimb threshold). At each visit, the flood
             // tries stepping to:
             //   (a) the neighbour XZ's terrain — but ONLY if that XZ is itself
-            //       bed-reachable. Terrain visits are pure CONNECTIVITY BRIDGES
+            //       anchor-reachable. Terrain visits are pure CONNECTIVITY BRIDGES
             //       (let the flood span two piece islands separated by a strip
             //       of open ground). They never add anything to
             //       pieceReachableKeys — terrain decisions are Pass 2's alone.
@@ -415,7 +415,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             // targetY. Used as a Pass 3 piece-step source-region fallback
             // when the current visit is a terrain visit at a cell that
             // has no terrain region (Pass 2 walks any non-outside cell —
-            // floor pieces commonly shadow terrain so a bed-reachable
+            // floor pieces commonly shadow terrain so a anchor-reachable
             // cell can have only piece geometry). Picks the closest-in-Y
             // candidate so the recorded edge represents the most natural
             // walker step (smallest Δy).
@@ -493,7 +493,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var visitedTerrainXz = new HashSet<long>();
                 // Queue entries are tagged isTerrain so dedup is kind-aware:
                 //   - Terrain visits (seed + bridge) dedup by XZ via
-                //     visitedTerrainXz on dequeue. Each bed-reachable XZ is
+                //     visitedTerrainXz on dequeue. Each anchor-reachable XZ is
                 //     processed once at ground altitude.
                 //   - Piece visits (piece-step) skip the XZ gate so a column
                 //     with stacked pieces can be re-entered at multiple
@@ -531,7 +531,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                         int ngx = gx + dx[d], ngz = gz + dz[d];
                         var nXz = XzKey(ngx, ngz);
                         // (a) Terrain bridge: enqueue as a terrain visit at the
-                        //     neighbour's ground height if it's bed-reachable and
+                        //     neighbour's ground height if it's anchor-reachable and
                         //     the climb from curY fits within MaxClimb. Terrain
                         //     bridges propagate sourceRid=null (no piece adjacency
                         //     created by terrain-walk bridges; they're pure
@@ -673,7 +673,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             // Piece LookupGrid (Pass 3): drop entry iff its lookup key is not
-            // in pieceReachableKeys (bed-reachable piece flood result).
+            // in pieceReachableKeys (anchor-reachable piece flood result).
             var pieceLookupDropped = 0;
             var pass3PieceKeysDropped = 0;
             foreach (var kv in xzToLookupKeysPiece)
@@ -871,15 +871,15 @@ namespace ValheimVillages.Villager.AI.Navigation
             // interior rings. The outside-in flood already separates the two: an
             // interior obstacle is enclosed by walkable cells, so it is never
             // 4-adjacent to outsideCells. Rebuild boundaryCells as the OUTER
-            // frontier — bed-reachable cells with at least one 4-neighbour in
+            // frontier — anchor-reachable cells with at least one 4-neighbour in
             // outsideCells — with the outward normal pointing toward the outside
             // neighbour(s). That is the clean, outer-only ring the patrol route
             // builder orders. Falls back to the upstream cells if the frontier is
-            // degenerate (e.g. no beds, so no bed-reachable flood).
+            // degenerate (e.g. no anchors, so no anchor-reachable flood).
             if (anchorReachableCells.Count > 0)
             {
                 // March outward up to MaxWallSpan cells per direction. The wall
-                // occupies cells that are neither walkable (bed-reachable) nor
+                // occupies cells that are neither walkable (anchor-reachable) nor
                 // outside, so inside and outside aren't directly 4-adjacent — we
                 // step ACROSS the wall to find the outside. Hitting another
                 // walkable cell first means walkable area continues that way (an
@@ -1025,20 +1025,20 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
         /// <summary>
-        ///     Pure Pass-2 bed-reachable ("inside-out") flood. For each bed, snaps
+        ///     Pure Pass-2 anchor-reachable ("inside-out") flood. For each anchor, snaps
         ///     to the nearest populated, non-outside cell within
         ///     <paramref name="anchorSnapRingMax" /> rings (the floor the villager
-        ///     stands on, even when the bed's own cell is carved out), then runs a
+        ///     stands on, even when the anchor's own cell is carved out), then runs a
         ///     4-connected BFS that refuses to enter <paramref name="outsideCells" />
         ///     and is gated by <paramref name="wallBlocks" />. Engine-free:
         ///     <paramref name="isPopulated" /> answers "does any region cover this
-        ///     cell" (the bed-snap fast path) and <paramref name="surfaceY" /> gives
+        ///     cell" (the anchor-snap fast path) and <paramref name="surfaceY" /> gives
         ///     each cell's walk-surface height. Beds that cannot snap are reported
         ///     via <paramref name="warn" /> and skipped.
         /// </summary>
         internal static void AnchorReachableFlood(
             int gxMin, int gzMin, int gxMax, int gzMax,
-            IReadOnlyList<Vector3> beds,
+            IReadOnlyList<Vector3> anchors,
             HashSet<long> outsideCells,
             float cell,
             int anchorSnapRingMax,
@@ -1053,16 +1053,16 @@ namespace ValheimVillages.Villager.AI.Navigation
             anchorReachableCells = new HashSet<long>();
             anchorReachableCellY = new Dictionary<long, float>();
             seedCount = 0;
-            if (beds == null || beds.Count == 0) return;
+            if (anchors == null || anchors.Count == 0) return;
 
-            var bedQueue = new Queue<(long key, float y)>();
-            foreach (var bed in beds)
+            var anchorQueue = new Queue<(long key, float y)>();
+            foreach (var anchor in anchors)
             {
-                var bgx0 = Mathf.FloorToInt(bed.x / cell);
-                var bgz0 = Mathf.FloorToInt(bed.z / cell);
+                var bgx0 = Mathf.FloorToInt(anchor.x / cell);
+                var bgz0 = Mathf.FloorToInt(anchor.z / cell);
 
                 // Snap to the nearest populated, non-outside cell (the floor the
-                // bed rests on, even when the bed's own cell is carved).
+                // anchor rests on, even when the anchor's own cell is carved).
                 int bgx = bgx0, bgz = bgz0;
                 var snapped = false;
                 for (var r = 0; r <= anchorSnapRingMax && !snapped; r++)
@@ -1084,27 +1084,27 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (!snapped)
                 {
                     warn?.Invoke(
-                        $"[RubberBand] Pass 2 bed skipped: bed=({bed.x:F1},{bed.z:F1}) " +
+                        $"[RubberBand] Pass 2 anchor skipped: anchor=({anchor.x:F1},{anchor.z:F1}) " +
                         $"cell=({bgx0},{bgz0}) — no populated, non-outside cell within " +
-                        $"{anchorSnapRingMax} cells (bed walled off or outside the village?).");
+                        $"{anchorSnapRingMax} cells (anchor walled off or outside the village?).");
                     continue;
                 }
 
-                var bedKey = XzKey(bgx, bgz);
-                if (anchorReachableCells.Add(bedKey))
+                var anchorKey = XzKey(bgx, bgz);
+                if (anchorReachableCells.Add(anchorKey))
                 {
-                    var seedY = surfaceY(bedKey, bgx, bgz);
-                    anchorReachableCellY[bedKey] = seedY;
-                    bedQueue.Enqueue((bedKey, seedY));
+                    var seedY = surfaceY(anchorKey, bgx, bgz);
+                    anchorReachableCellY[anchorKey] = seedY;
+                    anchorQueue.Enqueue((anchorKey, seedY));
                     seedCount++;
                 }
             }
 
             int[] dx = { 1, -1, 0, 0 };
             int[] dz = { 0, 0, 1, -1 };
-            while (bedQueue.Count > 0)
+            while (anchorQueue.Count > 0)
             {
-                var (curKey, curY) = bedQueue.Dequeue();
+                var (curKey, curY) = anchorQueue.Dequeue();
                 UnpackXz(curKey, out var gx, out var gz);
                 for (var d = 0; d < 4; d++)
                 {
@@ -1117,7 +1117,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     if (wallBlocks(gx, gz, ngx, ngz, curY, nY)) continue;
                     anchorReachableCells.Add(nKey);
                     anchorReachableCellY[nKey] = nY;
-                    bedQueue.Enqueue((nKey, nY));
+                    anchorQueue.Enqueue((nKey, nY));
                 }
             }
         }
@@ -1302,7 +1302,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                    || (yA != yB && ProbeAtWaist(gxA, gzA, gxB, gzB, yB, cell, mask));
         }
 
-        // Reused buffer for the bed-aware waist probe. Sized generously —
+        // Reused buffer for the anchor-aware waist probe. Sized generously —
         // dense village cells can stack many piece colliders in one waist box.
         private static readonly Collider[] s_waistProbeBuf = new Collider[64];
 
@@ -1319,10 +1319,10 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var col = s_waistProbeBuf[i];
                 if (col == null) continue;
                 // Beds are carved out of the agent NavMesh by the bake, so
-                // they must never ALSO gate flood reachability. A bed standing
+                // they must never ALSO gate flood reachability. A anchor standing
                 // on a raised floor sits squarely in the waist band and would
                 // otherwise wall off its own seed cell (and any neighbour it
-                // overhangs), collapsing bed-reachability to nothing.
+                // overhangs), collapsing anchor-reachability to nothing.
                 if (IsBedCollider(col)) continue;
                 return true;
             }
@@ -1344,7 +1344,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         // reference frame, unchanged by open state — DoorHandler.OpenDoor
         // relies on the same invariant), so a gate bounds the village whether
         // it is open or shut. Applied to Pass 1 (and the bake's outside-cell
-        // flood) only; Pass 2's bed flood is left ungated so the gate cell
+        // flood) only; Pass 2's anchor flood is left ungated so the gate cell
         // itself stays inside and walkable.
 
         internal readonly struct GateSeal
@@ -1941,7 +1941,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             var names = new List<string>(Mathf.Min(total, 8));
-            // Mirror ProbeAtWaist: bed colliders are ignored for the blocking
+            // Mirror ProbeAtWaist: anchor colliders are ignored for the blocking
             // verdict (the bake carves them out of the agent NavMesh) but still
             // listed — tagged — so vv_probe shows what's physically there.
             var blocked = false;
@@ -1975,7 +1975,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         //   - Spans the full cell width perpendicular to the step (catches
         //     walls overlapping the shared edge anywhere across its 1m).
         //   - Y range floorY+WaistMin to floorY+WaistMax: thin horizontal
-        //     slice at walker waist height, above beds and below arches.
+        //     slice at walker waist height, above anchors and below arches.
         // Diagonal steps aren't used by the 4-neighbour BFS; non-cardinal
         // input is logged as a contract violation.
         private static void ComputeWaistProbeBox(int gxA, int gzA, int gxB, int gzB,
@@ -2049,10 +2049,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             /// <summary>Bed seeds that successfully resolved to a non-outside terrain cell (Pass 2).</summary>
             public int Pass2Seeds;
 
-            /// <summary>Terrain XZ cells reached by Pass 2's bed flood (or the fallback set).</summary>
+            /// <summary>Terrain XZ cells reached by Pass 2's anchor flood (or the fallback set).</summary>
             public int AnchorReachableTerrainCells;
 
-            /// <summary>Piece lookup keys seeded for Pass 3 (piece cells within step-height of a bed-reachable terrain cell).</summary>
+            /// <summary>Piece lookup keys seeded for Pass 3 (piece cells within step-height of a anchor-reachable terrain cell).</summary>
             public int Pass3Seeds;
 
             /// <summary>Piece lookup keys reached by Pass 3's piece flood (or the fallback set).</summary>

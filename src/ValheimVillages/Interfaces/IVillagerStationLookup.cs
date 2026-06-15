@@ -4,7 +4,7 @@ namespace ValheimVillages.Interfaces
 {
     /// <summary>
     ///     Minimal villager context for resolving village stations/PoIs by
-    ///     position (anchored on the villager's bed). Implemented by
+    ///     position (anchored on the villager's anchor). Implemented by
     ///     Villager.AI.VillagerAI.
     /// </summary>
     public interface IVillagerStationLookup

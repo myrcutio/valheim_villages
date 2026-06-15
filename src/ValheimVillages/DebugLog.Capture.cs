@@ -28,7 +28,7 @@ namespace ValheimVillages
         ///     &lt;SidecarDir&gt;/last_capture.png and last_capture.json on every call.
         ///
         ///     <para>For incident captures that need a custom output directory
-        ///     and/or a non-seed-bed anchor, use the
+        ///     and/or a non-seed-anchor anchor, use the
         ///     <see cref="Capture(CaptureRequest)"/> overload.</para>
         /// </summary>
         public static void Capture(string trigger)
@@ -93,7 +93,7 @@ namespace ValheimVillages
         /// <summary>
         ///     Optional anchor override. When null, the orchestration session
         ///     resolves via <see cref="CaptureAnchor.Resolve()"/> (nearest seed
-        ///     bed at default clearance). When set, the session anchors at
+        ///     anchor at default clearance). When set, the session anchors at
         ///     this position with the provided clearance — incident captures
         ///     use this with the villager/destination pos and a 10m clearance.
         /// </summary>
@@ -121,7 +121,7 @@ namespace ValheimVillages
 
         /// <summary>
         ///     Default request: writes vv_dumps/last_capture.{png,json}, uses
-        ///     seed-bed anchor at default clearance, includes diagnostics.
+        ///     seed-anchor anchor at default clearance, includes diagnostics.
         ///     Matches the pre-refactor <see cref="DebugLog.Capture(string)"/>
         ///     contract.
         /// </summary>
@@ -168,7 +168,7 @@ namespace ValheimVillages
 
         /// <summary>
         ///     Triggers whose capture should be orchestrated (teleport player to
-        ///     the seed-bed anchor, look straight down, hide HUD, snap, restore
+        ///     the seed-anchor anchor, look straight down, hide HUD, snap, restore
         ///     state in a <c>finally</c>). Repartition is included because the
         ///     auto-repartition that follows hot-reload is the canonical "graph
         ///     is fully rebuilt — show me the state" moment; capturing it
@@ -447,7 +447,7 @@ namespace ValheimVillages
     /// <summary>
     ///     One-shot orchestration of the player's transform + HUD visibility
     ///     for a deterministic capture. <see cref="TryBegin"/> snapshots the
-    ///     current state, teleports the player to the seed-bed anchor pose,
+    ///     current state, teleports the player to the seed-anchor anchor pose,
     ///     and hides the HUD; <see cref="Restore"/> must be called from a
     ///     <c>finally</c> so any exception in the capture pipeline still
     ///     returns the player to where they were and re-shows the HUD.
@@ -461,7 +461,7 @@ namespace ValheimVillages
     ///     before the frame is grabbed to guarantee the snap.</para>
     ///
     ///     Returns <c>null</c> from <see cref="TryBegin"/> when prerequisites
-    ///     aren't met (no Player, no seed bed). In that case the capture
+    ///     aren't met (no Player, no seed anchor). In that case the capture
     ///     degrades to a passive snapshot from the current camera — see the
     ///     "no silent fallbacks" rule: we never substitute fabricated anchor
     ///     coordinates.
@@ -536,7 +536,7 @@ namespace ValheimVillages
             if (req.AnchorOverride.HasValue)
             {
                 // Caller-supplied anchor (incident flow): a specific world
-                // position with a tighter clearance. Bypasses seed-bed
+                // position with a tighter clearance. Bypasses seed-anchor
                 // resolution entirely so incidents at distant villagers /
                 // destinations don't get mis-anchored on the wrong village.
                 anchor = Diagnostics.CaptureAnchor.ResolveAt(

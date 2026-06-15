@@ -16,7 +16,7 @@ Shared points of interest are discovered at the village level (Villages/VillageP
 Villager/
   Villager.cs                          -- Villager component (villagerType, villagerAI); bridge from GameObject to AI
   VillagerAdapter.cs                   -- Adapter for code that needs Villager-like API
-  VillagerRestoration.cs               -- Restore(MonsterAI, ZDO): identity, dialog, components; [RegisterCleanup] ClearTracking
+  VillagerRestoration.cs               -- Restore(MonsterAI, ZDO): identity, dialog, components; idempotent per-GameObject (re-grafts after portal/zone reload)
   SpawnPatch.cs                        -- VillagerPawnPatch: Register with VillagerAIManager, LogAvailableDvergrPrefabs
   Dialog.cs                            -- Dialog/random talk wiring
   Station/

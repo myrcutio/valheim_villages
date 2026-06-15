@@ -61,14 +61,30 @@ namespace ValheimVillages.Items
 
             foreach (var def in GetDefinitions()) CreatePrefabIfNeeded(objectDB, def);
 
+            // Drop dead (destroyed) entries left by earlier reloads before re-adding. A single
+            // fake-null in m_items makes ObjectDB.GetAllItems throw every frame (the
+            // PlayerCustomizaton.LoadHair NRE storm); a dead m_itemByHash value does the same.
+            var purged = _prefabs.RemoveAll(p => p == null)
+                         + objectDB.m_items.RemoveAll(go => go == null);
+
             var itemByHash = GetPrivateDictionary(objectDB, "m_itemByHash");
+            if (itemByHash != null)
+            {
+                var deadHashes = new List<int>();
+                foreach (var kv in itemByHash)
+                    if (kv.Value == null) deadHashes.Add(kv.Key);
+                foreach (var h in deadHashes) itemByHash.Remove(h);
+                purged += deadHashes.Count;
+            }
+
             foreach (var prefab in _prefabs)
             {
                 AddToCollection(objectDB.m_items, prefab);
                 AddToHashMap(itemByHash, prefab);
             }
 
-            Plugin.Log?.LogInfo($"Registered {_prefabs.Count} custom items in ObjectDB");
+            Plugin.Log?.LogInfo(
+                $"Registered {_prefabs.Count} custom items in ObjectDB (purged {purged} dead entries)");
         }
 
         /// <summary>
@@ -77,7 +93,18 @@ namespace ValheimVillages.Items
         /// </summary>
         public static void RegisterAllInZNetScene(ZNetScene instance)
         {
+            _prefabs.RemoveAll(p => p == null);
+            instance.m_prefabs.RemoveAll(go => go == null);
+
             var namedPrefabs = GetPrivateDictionary(instance, "m_namedPrefabs");
+            if (namedPrefabs != null)
+            {
+                var deadHashes = new List<int>();
+                foreach (var kv in namedPrefabs)
+                    if (kv.Value == null) deadHashes.Add(kv.Key);
+                foreach (var h in deadHashes) namedPrefabs.Remove(h);
+            }
+
             foreach (var prefab in _prefabs)
             {
                 AddToCollection(instance.m_prefabs, prefab);
@@ -298,7 +325,9 @@ namespace ValheimVillages.Items
 
             basePrefab.SetActive(wasActive);
             prefab.name = newName;
-            Object.DontDestroyOnLoad(prefab);
+            // Park the template under the shared inactive root so it never renders/awakes at
+            // world origin; activeSelf stays true so ZNetScene/placement clones come out active.
+            prefab.transform.SetParent(PrefabTemplates.Root, false);
             prefab.SetActive(true);
 
             return prefab;
@@ -345,13 +374,17 @@ namespace ValheimVillages.Items
 
         private static void AddToCollection(List<GameObject> list, GameObject prefab)
         {
+            // Unity '==' catches a destroyed ("fake-null") GameObject; List.Contains uses
+            // reference equality and does NOT, so a dead template would otherwise be re-added
+            // and then throw every frame in ObjectDB.GetAllItems / ZNetScene lookups.
+            if (prefab == null) return;
             if (!list.Contains(prefab))
                 list.Add(prefab);
         }
 
         private static void AddToHashMap(Dictionary<int, GameObject> hashMap, GameObject prefab)
         {
-            if (hashMap == null) return;
+            if (hashMap == null || prefab == null) return;
             var hash = prefab.name.GetStableHashCode();
             hashMap[hash] = prefab;
         }

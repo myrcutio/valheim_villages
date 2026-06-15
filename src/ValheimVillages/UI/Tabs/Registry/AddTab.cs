@@ -14,7 +14,7 @@ namespace ValheimVillages.UI.Tabs.Registry
     /// <summary>
     ///     Lists the villager types that can be recruited at this registry (loaded from
     ///     <see cref="VillagerRegistry" />). Recruiting spawns the chosen type at the
-    ///     registry station (its home anchor becomes the registry — no bed required) and
+    ///     registry station (its home anchor becomes the registry — no anchor required) and
     ///     mints a fresh Alive record. No cost for now; the egg/material flow is later.
     /// </summary>
     [RegisterRegistryTab("add", Order = 1)]
@@ -84,7 +84,7 @@ namespace ValheimVillages.UI.Tabs.Registry
 
             // Spawn the chosen type at the registry. SpawnVillagerNpc mints a fresh Alive
             // record whose home (vv_home_position / record.HomeAnchor) is the seed below, so
-            // the villager belongs to this village with no bed involved.
+            // the villager belongs to this village with no anchor involved.
             //
             // The registry anchor sits inside the station's own colliders — using it
             // verbatim spawns the villager inside the tabletop AND stores a home that

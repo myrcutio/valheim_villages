@@ -35,10 +35,10 @@ namespace ValheimVillages.Dev
                 return;
             }
 
-            var bed = carp.HomeAnchor;
+            var anchor = carp.HomeAnchor;
             var pos = carp.Position;
             var radius = WorkSettings.RepairScanRadius;
-            Print($"[vv_repair_probe] {carp.NpcName} bed=({bed.x:F1},{bed.z:F1}) pos=({pos.x:F1},{pos.z:F1}) " +
+            Print($"[vv_repair_probe] {carp.NpcName} anchor=({anchor.x:F1},{anchor.z:F1}) pos=({pos.x:F1},{pos.z:F1}) " +
                   $"scanR={radius} agentReg={VillagerAgentType.IsRegistered}");
 
             var filter = new NavMeshQueryFilter
@@ -47,13 +47,13 @@ namespace ValheimVillages.Dev
                 areaMask = NavMesh.AllAreas,
             };
 
-            var graph = Villages.Entity.VillageRegistry.GraphAt(bed);
-            Print($"  graph@bed={(graph == null ? "NULL" : "ok")} bedRegion={(graph == null ? "-" : graph.PointToRegionId(bed))}");
+            var graph = Villages.Entity.VillageRegistry.GraphAt(anchor);
+            Print($"  graph@anchor={(graph == null ? "NULL" : "ok")} anchorRegion={(graph == null ? "-" : graph.PointToRegionId(anchor))}");
 
             var seen = new HashSet<WearNTear>();
             var damaged = new List<(WearNTear w, float dPosSq)>();
             var total = 0;
-            foreach (var w in PhysicsHelper.GetAllInRadius<WearNTear>(bed, radius))
+            foreach (var w in PhysicsHelper.GetAllInRadius<WearNTear>(anchor, radius))
             {
                 if (w == null || !seen.Add(w)) continue;
                 var nv = w.GetComponent<ZNetView>();

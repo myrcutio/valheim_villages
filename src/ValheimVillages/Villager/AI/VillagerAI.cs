@@ -233,7 +233,7 @@ namespace ValheimVillages.Villager.AI
             if (Villager == null) return false;
             if (!base.UpdateAI(dt)) return false;
 
-            // A villager whose home (bed) never resolved to a real position is broken
+            // A villager whose home (anchor) never resolved to a real position is broken
             // (a half-initialised / zombie ZDO). Running its movement AI aims the
             // off-mesh rescue at world origin, where BaseAI.MoveTo throws an NRE every
             // frame — flooding the log and tanking the frame rate. Skip the tick
@@ -244,7 +244,7 @@ namespace ValheimVillages.Villager.AI
                 {
                     m_warnedNoHome = true;
                     Plugin.Log?.LogWarning(
-                        $"[AI:{m_villagerName}] No valid bed position — skipping AI tick (broken/zombie villager).");
+                        $"[AI:{m_villagerName}] No valid anchor position — skipping AI tick (broken/zombie villager).");
                 }
 
                 return false;
@@ -562,7 +562,7 @@ namespace ValheimVillages.Villager.AI
             Memory != null ? Memory.HomeAnchor : default;
 
         /// <summary>
-        ///     This villager's bed (home) position. Station/approach lookups
+        ///     This villager's anchor (home) position. Station/approach lookups
         ///     anchor the VILLAGE on this — not the villager's transient
         ///     position — so a villager bumped off the graph still resolves work
         ///     against its home village instead of "no village here".
@@ -925,7 +925,7 @@ namespace ValheimVillages.Villager.AI
                 m_rescueProgressTime = Time.time;
                 Plugin.Log?.LogWarning(
                     $"[AI:{m_villagerName}] Stranded off the village graph at " +
-                    $"({transform.position.x:F1},{transform.position.z:F1}); recovering to bed " +
+                    $"({transform.position.x:F1},{transform.position.z:F1}); recovering to anchor " +
                     $"({m_homeAnchor.x:F1},{m_homeAnchor.z:F1}).");
             }
 
@@ -936,7 +936,7 @@ namespace ValheimVillages.Villager.AI
 
         /// <summary>
         ///     Last-resort teleport for a villager on a disconnected navmesh island
-        ///     that no path can free. Snaps to the agent mesh nearest the bed and
+        ///     that no path can free. Snaps to the agent mesh nearest the anchor and
         ///     moves the character (and its advisory agent) there.
         /// </summary>
         private void TeleportHome()
@@ -955,7 +955,7 @@ namespace ValheimVillages.Villager.AI
         /// <summary>
         ///     True when the villager can't be reached by the village region graph
         ///     AND the agent NavMesh can't path it home — "genuinely stranded". A
-        ///     region-unresolved villager that CAN still agent-path to its bed (an
+        ///     region-unresolved villager that CAN still agent-path to its anchor (an
         ///     interior lookup-grid hole) is NOT stranded, so healthy interior
         ///     villagers are never rescued.
         /// </summary>
@@ -969,7 +969,7 @@ namespace ValheimVillages.Villager.AI
             // Off the agent mesh entirely (can't even snap nearby) → stranded.
             if (!NavMesh.SamplePosition(transform.position, out var from, 3f, filter))
                 return true;
-            // Can't locate the bed on the mesh — don't start a rescue we can't finish.
+            // Can't locate the anchor on the mesh — don't start a rescue we can't finish.
             if (!NavMesh.SamplePosition(m_homeAnchor, out var to, 5f, filter))
                 return false;
             var path = new NavMeshPath();

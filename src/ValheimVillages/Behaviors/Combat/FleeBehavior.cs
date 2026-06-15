@@ -171,9 +171,9 @@ namespace ValheimVillages.Behaviors.Combat
         private Vector3 SafeSpot(Vector3 myPos, Vector3 threatPos)
         {
             var myDistSq = (myPos - threatPos).sqrMagnitude;
-            var bed = m_ai.HomeAnchor;
-            if (bed != Vector3.zero && (bed - threatPos).sqrMagnitude > myDistSq)
-                return bed; // home is farther from the threat — hole up indoors
+            var anchor = m_ai.HomeAnchor;
+            if (anchor != Vector3.zero && (anchor - threatPos).sqrMagnitude > myDistSq)
+                return anchor; // home is farther from the threat — hole up indoors
 
             var away = myPos - threatPos;
             away.y = 0f;

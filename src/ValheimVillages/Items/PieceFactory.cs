@@ -459,7 +459,9 @@ namespace ValheimVillages.Items
 
             basePrefab.SetActive(wasActive);
             prefab.name = newName;
-            Object.DontDestroyOnLoad(prefab);
+            // Park the template under the shared inactive root so it never renders/awakes at
+            // world origin; activeSelf stays true so ZNetScene/placement clones come out active.
+            prefab.transform.SetParent(PrefabTemplates.Root, false);
             prefab.SetActive(true);
 
             return prefab;

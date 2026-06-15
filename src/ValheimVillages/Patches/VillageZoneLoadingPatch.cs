@@ -7,7 +7,7 @@ namespace ValheimVillages.Patches
 {
     /// <summary>
     ///     Keeps village zones loaded on the server even when no player is nearby.
-    ///     Injects village bed positions as phantom reference points for zone
+    ///     Injects village anchor positions as phantom reference points for zone
     ///     creation and object spawning.
     /// </summary>
     public static class VillageZoneLoadingPatch
@@ -16,18 +16,18 @@ namespace ValheimVillages.Patches
         private const float ZoneSize = 64f;
 
         /// <summary>
-        ///     Deduplicate bed positions into one per zone grid cell so multiple
+        ///     Deduplicate anchor positions into one per zone grid cell so multiple
         ///     villagers in the same village produce only one phantom zone center.
         /// </summary>
         private static List<Vector3> GetPhantomPositions()
         {
-            var beds = VillagerAIManager.GetAllAnchorPositions();
-            if (beds.Count == 0) return beds;
+            var anchors = VillagerAIManager.GetAllAnchorPositions();
+            if (anchors.Count == 0) return anchors;
 
             var seen = new HashSet<Vector2Int>();
             var result = new List<Vector3>();
 
-            foreach (var pos in beds)
+            foreach (var pos in anchors)
             {
                 var cell = new Vector2Int(
                     Mathf.FloorToInt(pos.x / ZoneSize),
@@ -45,7 +45,7 @@ namespace ValheimVillages.Patches
 
         /// <summary>
         ///     After vanilla creates zones for player peers, also create zones
-        ///     around village bed positions so terrain and vegetation load.
+        ///     around village anchor positions so terrain and vegetation load.
         /// </summary>
         [HarmonyPatch(typeof(ZoneSystem), "CreateLocalZones")]
         [HarmonyPatch(new[] { typeof(Vector3) })]

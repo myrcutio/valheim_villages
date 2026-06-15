@@ -209,19 +209,19 @@ namespace ValheimVillages.UI.Tabs
                         return;
                     }
 
-                    var bedPos = ai.GetMemory()?.HomeAnchor ?? ai.Position;
+                    var anchorPos = ai.GetMemory()?.HomeAnchor ?? ai.Position;
 
                     // Bed is per-villager; everything else comes from the
                     // village PoI registry (nearest of the requested type).
                     Vector3 dest;
                     if (type == LocationType.Home)
                     {
-                        dest = bedPos;
+                        dest = anchorPos;
                     }
                     else
                     {
-                        var nearest = VillagePoiRegistry.GetPois(bedPos, type)
-                            .OrderBy(l => Vector3.Distance(bedPos, l.Position))
+                        var nearest = VillagePoiRegistry.GetPois(anchorPos, type)
+                            .OrderBy(l => Vector3.Distance(anchorPos, l.Position))
                             .FirstOrDefault();
                         if (nearest == null)
                         {

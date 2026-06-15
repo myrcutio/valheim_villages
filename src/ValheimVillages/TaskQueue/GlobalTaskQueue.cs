@@ -32,6 +32,9 @@ namespace ValheimVillages.TaskQueue
         // O(1) dedup: tracks pending (Name, SourceId) pairs
         private static readonly HashSet<(string, string)> s_pendingKeys = new();
 
+        // Backoff between re-checks of an ITaskPrecondition handler that isn't ready.
+        private const float ReadinessRecheckSeconds = 1.5f;
+
         // Dead letter queue for tasks that exhausted retries
         private static readonly List<VillagerTask> s_deadLetters = new();
 
@@ -124,6 +127,30 @@ namespace ValheimVillages.TaskQueue
 
                 if (task.NotBefore > 0f && Time.time < task.NotBefore)
                 {
+                    queue.Enqueue(task);
+                    continue;
+                }
+
+                // Precondition gate: a handler may require the engine/world to be in a
+                // particular state before it can run (e.g. hna_partition must not bake
+                // until the village's zones are loaded and their geometry instantiated,
+                // or it commits a graph built from missing colliders). Defer with backoff
+                // and re-enqueue onto the raw queue WITHOUT consuming the pending key or
+                // the allocation — same shape as NotBefore. Bounded by the task timeout
+                // so a task that never becomes ready is dropped rather than spinning.
+                if (TaskHandlerRegistry.Get(task.Name) is ITaskPrecondition precondition &&
+                    !precondition.IsReady(task))
+                {
+                    if (Time.time - task.CreatedAt > task.TimeoutSeconds)
+                    {
+                        Plugin.Log?.LogWarning(
+                            $"[TaskQueue] Task '{task.Name}' for {task.SourceId} timed out waiting " +
+                            $"for preconditions after {Time.time - task.CreatedAt:F1}s; dropping.");
+                        RemovePendingKey(task);
+                        continue;
+                    }
+
+                    task.NotBefore = Time.time + ReadinessRecheckSeconds;
                     queue.Enqueue(task);
                     continue;
                 }

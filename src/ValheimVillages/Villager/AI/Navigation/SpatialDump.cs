@@ -9,7 +9,7 @@ using ValheimVillages.Villages;
 namespace ValheimVillages.Villager.AI.Navigation
 {
     /// <summary>
-    ///     Dumps spatial data (beds, height grid, doors, building pieces) to a JSON file
+    ///     Dumps spatial data (anchors, height grid, doors, building pieces) to a JSON file
     ///     so the HNA partition algorithm can be tested offline with unit tests.
     ///     Run via console command: vv_hna_dump
     /// </summary>
@@ -25,14 +25,14 @@ namespace ValheimVillages.Villager.AI.Navigation
         private const float HeightMarginAbove = 10f;
         private static readonly int GroundMask = LayerMask.GetMask("Default", "static_solid", "terrain", "piece");
 
-        [DevCommand("Dump spatial data (beds, height grid, doors, pieces) to JSON for offline testing",
+        [DevCommand("Dump spatial data (anchors, height grid, doors, pieces) to JSON for offline testing",
             Name = "vv_hna_dump")]
         public static void Dump()
         {
-            var beds = VillagerAIManager.GetAllAnchorPositions();
-            if (beds == null || beds.Count == 0)
+            var anchors = VillagerAIManager.GetAllAnchorPositions();
+            if (anchors == null || anchors.Count == 0)
             {
-                Console.instance?.Print("No villager beds found.");
+                Console.instance?.Print("No villager anchors found.");
                 return;
             }
 
@@ -49,16 +49,16 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
             else
             {
-                minX = maxX = beds[0].x;
-                minZ = maxZ = beds[0].z;
+                minX = maxX = anchors[0].x;
+                minZ = maxZ = anchors[0].z;
             }
 
-            foreach (var bed in beds)
+            foreach (var anchor in anchors)
             {
-                if (bed.x - ScanRadius < minX) minX = bed.x - ScanRadius;
-                if (bed.z - ScanRadius < minZ) minZ = bed.z - ScanRadius;
-                if (bed.x + ScanRadius > maxX) maxX = bed.x + ScanRadius;
-                if (bed.z + ScanRadius > maxZ) maxZ = bed.z + ScanRadius;
+                if (anchor.x - ScanRadius < minX) minX = anchor.x - ScanRadius;
+                if (anchor.z - ScanRadius < minZ) minZ = anchor.z - ScanRadius;
+                if (anchor.x + ScanRadius > maxX) maxX = anchor.x + ScanRadius;
+                if (anchor.z + ScanRadius > maxZ) maxZ = anchor.z + ScanRadius;
             }
 
             var originX = minX;
@@ -69,12 +69,12 @@ namespace ValheimVillages.Villager.AI.Navigation
             var sb = new StringBuilder();
             sb.Append("{\n");
 
-            sb.Append("  \"beds\": [\n");
-            for (var i = 0; i < beds.Count; i++)
+            sb.Append("  \"anchors\": [\n");
+            for (var i = 0; i < anchors.Count; i++)
             {
-                var b = beds[i];
+                var b = anchors[i];
                 sb.Append($"    [{b.x:F2}, {b.y:F2}, {b.z:F2}]");
-                sb.Append(i < beds.Count - 1 ? ",\n" : "\n");
+                sb.Append(i < anchors.Count - 1 ? ",\n" : "\n");
             }
 
             sb.Append("  ],\n");
@@ -90,7 +90,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             sb.Append("  \"heightGrid\": [\n");
             var mask = GroundMask != 0 ? GroundMask : ~0;
-            var refHeights = GatherReferenceHeights(beds);
+            var refHeights = GatherReferenceHeights(anchors);
 
             for (var iz = 0; iz < cellCountZ; iz++)
             for (var ix = 0; ix < cellCountX; ix++)
@@ -177,14 +177,14 @@ namespace ValheimVillages.Villager.AI.Navigation
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             File.WriteAllText(path, sb.ToString());
             Console.instance?.Print(
-                $"HNA spatial dump written to {path} ({beds.Count} beds, {cellCountX}x{cellCountZ} grid, {doorIdx} doors, {pieceIdx} pieces)");
+                $"HNA spatial dump written to {path} ({anchors.Count} anchors, {cellCountX}x{cellCountZ} grid, {doorIdx} doors, {pieceIdx} pieces)");
             Plugin.Log?.LogInfo($"[Region] Spatial dump: {path}");
         }
 
-        private static float[] GatherReferenceHeights(List<Vector3> beds)
+        private static float[] GatherReferenceHeights(List<Vector3> anchors)
         {
             var heights = new HashSet<int>();
-            foreach (var b in beds)
+            foreach (var b in anchors)
             {
                 var lo = Mathf.FloorToInt((b.y - HeightMarginBelow) / HeightStep) * (int)HeightStep;
                 var hi = Mathf.CeilToInt((b.y + HeightMarginAbove) / HeightStep) * (int)HeightStep;

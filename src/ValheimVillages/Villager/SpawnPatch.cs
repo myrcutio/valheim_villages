@@ -41,7 +41,7 @@ namespace ValheimVillages.Villager
         }
 
         /// <summary>
-        ///     Instantiate and fully configure a villager NPC at <paramref name="bedPos" />:
+        ///     Instantiate and fully configure a villager NPC at <paramref name="anchorPos" />:
         ///     identity + faction, dialog, native-component stripping, our component stack,
         ///     and the <c>vv_record_id</c> / <c>vv_home_position</c> stamps. Resolves the
         ///     authoritative record — mints a fresh Alive one when <paramref name="record" />
@@ -51,7 +51,7 @@ namespace ValheimVillages.Villager
         /// </summary>
         internal static GameObject SpawnVillagerNpc(
             VillagerDef villagerDef, string villagerType, string villagerPrefab,
-            Vector3 bedPos, ref VillagerRecord record, string contextVillageId = null)
+            Vector3 anchorPos, ref VillagerRecord record, string contextVillageId = null)
         {
             var prefab = ZNetScene.instance?.GetPrefab(villagerPrefab);
             if (prefab == null)
@@ -60,7 +60,7 @@ namespace ValheimVillages.Villager
                 return null;
             }
 
-            var npcObject = Object.Instantiate(prefab, bedPos + Vector3.up * 0.7f, Quaternion.identity);
+            var npcObject = Object.Instantiate(prefab, anchorPos + Vector3.up * 0.7f, Quaternion.identity);
             if (npcObject == null)
             {
                 Plugin.Log?.LogError("Failed to instantiate NPC");
@@ -126,7 +126,7 @@ namespace ValheimVillages.Villager
             {
                 record = VillagerRecordTable.Create(
                     villagerType, villagerDef.displayName,
-                    villageId, bedPos, RecordStatus.Alive, npcZdoId);
+                    villageId, anchorPos, RecordStatus.Alive, npcZdoId);
                 if (record == null)
                 {
                     Plugin.Log?.LogError("Failed to mint villager record; aborting spawn");
@@ -139,16 +139,15 @@ namespace ValheimVillages.Villager
                 // Revive: re-activate the existing record and re-link the fresh NPC.
                 record.Status = RecordStatus.Alive;
                 record.NpcZdoId = npcZdoId;
-                record.HomeAnchor = bedPos;
+                record.HomeAnchor = anchorPos;
             }
 
             npcZnetView.GetZDO().Set("vv_record_id", record.RecordId);
             npcZnetView.GetZDO().Set(Village.IdKey, villageId);
-            npcZnetView.GetZDO().Set("vv_home_position", bedPos);
-            // Persist to the world save (ZDOMan only writes Persistent ZDOs).
+            npcZnetView.GetZDO().Set("vv_home_position", anchorPos);
+            // Persist to the world save. ZDOMan.GetSaveClone writes every Persistent ZDO
+            // regardless of owner, so this flag alone is sufficient (no ownership transfer).
             npcZnetView.GetZDO().Persistent = true;
-            if (ZNet.instance != null && ZNet.instance.IsDedicated())
-                npcZnetView.GetZDO().SetOwner(ZNet.GetUID());
 
             // Strip native AI/interaction components; our VillagerAI/VillagerTalk/VillagerInteract
             // replace them. This also unregisters the native BaseAI RPCs ("Alert" etc.) and detaches

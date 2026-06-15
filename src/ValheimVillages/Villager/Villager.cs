@@ -25,7 +25,7 @@ namespace ValheimVillages.Villager
             }
         }
 
-        // TODO: move the prefab and bed tracking to this holder instead
+        // TODO: move the prefab and anchor tracking to this holder instead
         public void Awake()
         {
             nView = GetComponent<ZNetView>();

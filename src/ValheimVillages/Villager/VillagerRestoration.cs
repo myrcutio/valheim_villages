@@ -1,6 +1,4 @@
-using System.Collections.Generic;
 using UnityEngine;
-using ValheimVillages.Attributes;
 using ValheimVillages.Schemas;
 using ValheimVillages.UI.Interaction;
 using ValheimVillages.Villager.AI.Navigation;
@@ -18,8 +16,6 @@ namespace ValheimVillages.Villager
     /// </summary>
     public static class VillagerRestoration
     {
-        private static readonly HashSet<string> s_restoredIds = new();
-
         /// <summary>
         ///     Restore villager state from ZDO using VillagerRegistry for definition lookup.
         ///     Strips native AI/talk/tame components and ensures all mod components are present.
@@ -47,7 +43,11 @@ namespace ValheimVillages.Villager
             if (record == null) return false;
             var recordId = record.RecordId;
 
-            if (s_restoredIds.Contains(recordId)) return false;
+            // Idempotency is per-GameObject, not per-record: a portal/zone round-trip
+            // destroys the Dvergr GameObject and re-instantiates a fresh one for the same
+            // record, which must be re-grafted. Skip only when THIS object already carries
+            // our components (RestoreComponents below is also individually idempotent).
+            if (go.GetComponent<Villager>() != null) return false;
 
             var typeStr = record.Type;
             var def = VillagerRegistry.Get(typeStr);
@@ -66,8 +66,6 @@ namespace ValheimVillages.Villager
             RestoreIdentity(go, def);
             RestoreComponents(go, recordId, typeStr);
             Dialog.ConfigureDialog(go, def);
-
-            s_restoredIds.Add(recordId);
 
             Plugin.Log?.LogInfo(
                 $"[VillagerRestoration] Restored {def.displayName} ({typeStr}) at {go.transform.position}");
@@ -101,18 +99,18 @@ namespace ValheimVillages.Villager
             }
 
             var legacyName = zdo.GetString("vv_villager_name");
-            var bedPos = zdo.GetVec3("vv_home_position", Vector3.zero);
+            var anchorPos = zdo.GetVec3("vv_home_position", Vector3.zero);
             // Resolve (never mint) the village: stamped id, else existing graph coverage,
             // else registry-anchor proximity. A legacy villager that resolves to no village
             // is NOT migrated (villages are created only at a registry station).
             var stamped = zdo.GetString(Village.IdKey);
             var villageId = !string.IsNullOrEmpty(stamped)
                 ? stamped
-                : (VillageRegistry.GetVillageCovering(bedPos) ?? VillageRegistry.FindNearAnchor(bedPos))?.VillageId;
+                : (VillageRegistry.GetVillageCovering(anchorPos) ?? VillageRegistry.FindNearAnchor(anchorPos))?.VillageId;
             if (string.IsNullOrEmpty(villageId))
             {
                 Plugin.Log?.LogWarning(
-                    $"[VillagerRestoration] legacy villager '{legacyName}' ({legacyType}) at {bedPos} " +
+                    $"[VillagerRestoration] legacy villager '{legacyName}' ({legacyType}) at {anchorPos} " +
                     "resolves to no village; not migrating (villages are created only at a registry station).");
                 return null;
             }
@@ -120,7 +118,7 @@ namespace ValheimVillages.Villager
             var record = VillagerRecordTable.Create(
                 legacyType,
                 string.IsNullOrEmpty(legacyName) ? legacyType : legacyName,
-                villageId, bedPos, RecordStatus.Alive, zdo.m_uid);
+                villageId, anchorPos, RecordStatus.Alive, zdo.m_uid);
             if (record == null) return null;
 
             zdo.Set("vv_record_id", record.RecordId);
@@ -128,12 +126,6 @@ namespace ValheimVillages.Villager
             Plugin.Log?.LogInfo(
                 $"[VillagerRestoration] Migrated legacy villager '{legacyName}' ({legacyType}) -> record {record.RecordId}");
             return record;
-        }
-
-        [RegisterCleanup]
-        public static void ClearTracking()
-        {
-            s_restoredIds.Clear();
         }
 
         /// <summary>

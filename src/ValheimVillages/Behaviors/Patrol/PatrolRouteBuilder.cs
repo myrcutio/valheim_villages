@@ -108,7 +108,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 // unverified route. The caller (PatrolStateMachine) treats an empty
                 // result as "not ready" and retries on a later tick, once the mesh
                 // settles. This is the invariant: a COMPLETED patrol route never
-                // contains a vertex unreachable from the bed.
+                // contains a vertex unreachable from the anchor.
                 if (!TrySampleAnchor(navAnchor.Value, out var anchor, out var filter))
                     return result; // empty — discovery retries when the navmesh is ready
 
@@ -121,7 +121,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 if (dropped > 0)
                     Plugin.Log?.LogWarning(
                         $"[PatrolRoute] Dropped {dropped} vertex/vertices unreachable from the " +
-                        $"bed (wall-junction geometry or graph link the navmesh doesn't honor)");
+                        $"anchor (wall-junction geometry or graph link the navmesh doesn't honor)");
             }
             else
             {
@@ -267,7 +267,7 @@ namespace ValheimVillages.Behaviors.Patrol
         }
 
         /// <summary>
-        ///     Build the villager-agent query filter and snap the anchor (bed) onto
+        ///     Build the villager-agent query filter and snap the anchor (anchor) onto
         ///     the agent navmesh. Returns false when the agent isn't registered or
         ///     the navmesh isn't baked yet — callers then skip reachability checks.
         /// </summary>

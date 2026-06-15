@@ -67,12 +67,12 @@ namespace ValheimVillages.Villager.AI
                 var ai = kv.Value;
                 if (ai == null) continue;
 
-                var bed = ai.m_homeAnchor;
+                var anchor = ai.m_homeAnchor;
                 var containers = Work.ContainerScanner.FindNearbyContainers(
-                    bed, Settings.WorkSettings.ChestScanRadius);
+                    anchor, Settings.WorkSettings.ChestScanRadius);
                 var orders = Work.ContainerScanner.FindAllWorkOrders(containers, ai.VillagerType);
                 sb.AppendLine(
-                    $"- {ai.NpcName} [{ai.VillagerType}] bed=({bed.x:F0},{bed.z:F0}) " +
+                    $"- {ai.NpcName} [{ai.VillagerType}] anchor=({anchor.x:F0},{anchor.z:F0}) " +
                     $"containers={containers.Count} orders={orders.Count}");
                 foreach (var o in orders)
                 {
@@ -100,7 +100,7 @@ namespace ValheimVillages.Villager.AI
             sb.AppendLine($"    pos=({pos.x:F1},{pos.y:F1},{pos.z:F1})  state={CurrentState}  " +
                           $"paused={IsPaused} lingering={IsLingering} casual={IsCasualTravel}");
             sb.AppendLine($"    region@pos={region ?? "UNRESOLVED"}  " +
-                          $"bed=({m_homeAnchor.x:F1},{m_homeAnchor.y:F1},{m_homeAnchor.z:F1})");
+                          $"anchor=({m_homeAnchor.x:F1},{m_homeAnchor.y:F1},{m_homeAnchor.z:F1})");
 
             if (m_currentWaypoint != null)
             {

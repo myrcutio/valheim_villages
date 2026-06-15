@@ -45,7 +45,7 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        ///     Get unique bed positions for every villager in the world. Reads
+        ///     Get unique anchor positions for every villager in the world. Reads
         ///     authoritatively from <c>ZDOMan.m_objectsByID</c>: each villager NPC ZDO
         ///     (identified by the new <c>vv_record_id</c> back-reference or the legacy
         ///     <c>vv_villager_type</c> tag) carries a persistent <c>vv_home_position</c>.
@@ -54,7 +54,7 @@ namespace ValheimVillages.Villager.AI
         ///     cleared on reload).
         ///     Returns an empty list if <c>ZDOMan</c> isn't yet alive — callers
         ///     should treat that as "world not ready" and either retry or abort.
-        ///     No fallback to in-memory state: that path was masking missing-bed
+        ///     No fallback to in-memory state: that path was masking missing-anchor
         ///     bugs (e.g. villagers unloaded across reload) by silently using a
         ///     stale subset.
         /// </summary>
@@ -70,8 +70,8 @@ namespace ValheimVillages.Villager.AI
             {
                 if (zdo == null) continue;
                 // A villager NPC has either the new record back-reference or the legacy
-                // type tag. (Record carrier ZDOs also have vv_record_id but no bed
-                // position, so the zero-bed check below excludes them.)
+                // type tag. (Record carrier ZDOs also have vv_record_id but no anchor
+                // position, so the zero-anchor check below excludes them.)
                 var isVillager = !string.IsNullOrEmpty(zdo.GetString("vv_record_id"))
                                  || !string.IsNullOrEmpty(zdo.GetString("vv_villager_type"));
                 if (!isVillager) continue;

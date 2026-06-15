@@ -107,7 +107,7 @@ namespace ValheimVillages.Dev
             var deleted = 0;
             foreach (var zdo in toDelete)
             {
-                // DestroyZDO only acts for the owner; claim first (mirrors VillagerRecordTable.Delete).
+                // DestroyZDO only acts for the ZDO's owner; claim it first.
                 if (!zdo.IsOwner()) zdo.SetOwner(sessionId);
 
                 var nview = scene != null ? scene.FindInstance(zdo) : null;
@@ -140,7 +140,7 @@ namespace ValheimVillages.Dev
         /// <summary>
         ///     Reason label if the ZDO is village/villager state, else null. Specific
         ///     checks precede the generic vv_-prefix bucket so the summary is legible
-        ///     (record/registry/bed hashes are themselves vv_ prefabs).
+        ///     (record/registry/anchor hashes are themselves vv_ prefabs).
         /// </summary>
         private static string ClassifyForDeletion(ZDO zdo, HashSet<int> vvHashes, int recordHash, int registryHash)
         {

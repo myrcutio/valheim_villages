@@ -120,7 +120,7 @@ namespace ValheimVillages.Behaviors.Tidy
 
         /// <summary>
         ///     Walk to a world target via the village-graph approach resolver
-        ///     (bed-anchored, hull-checked) — the same path crafting uses to reach
+        ///     (anchor-anchored, hull-checked) — the same path crafting uses to reach
         ///     chests/stations. NavTo's generic snap fails for objects sitting on
         ///     their own collider (chests), producing an unreachable "red" path.
         /// </summary>

@@ -24,8 +24,8 @@ using ValheimVillages.Villager.AI.Pathfinding;
 [assembly: AssemblyCompany("Myrcutio")]
 [assembly: AssemblyProduct("ValheimVillages")]
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
-[assembly: AssemblyVersion("0.1.0")]
-[assembly: AssemblyFileVersion("0.1.0")]
+[assembly: AssemblyVersion("0.1.1")]
+[assembly: AssemblyFileVersion("0.1.1")]
 [assembly: InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
@@ -35,7 +35,7 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "0.1.1";
 
         private static bool _recipeRefreshEnqueued;
         private static bool _regionPartitionEnqueued;
@@ -63,9 +63,10 @@ namespace ValheimVillages
         ///     touched (≈ when ScriptEngine loaded this assembly). Because a hot
         ///     reload loads a brand-new assembly, this field is re-initialized on
         ///     every reload — so a dev command that prints it advancing confirms
-        ///     the reload pipeline fired. See <c>vv_reloadinfo</c>.
+        ///     the reload pipeline fired. See <c>vv_reloadinfo</c>. UTC so it's
+        ///     comparable across processes/hosts in different local zones.
         /// </summary>
-        public static readonly DateTime AssemblyLoadedAt = DateTime.Now;
+        public static readonly DateTime AssemblyLoadedAt = DateTime.UtcNow;
 
         /// <summary>True if the most recent load was a hot reload (world already up).</summary>
         public static bool LastLoadWasHotReload { get; private set; }

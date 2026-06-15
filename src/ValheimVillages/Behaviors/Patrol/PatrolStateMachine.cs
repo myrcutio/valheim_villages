@@ -150,13 +150,13 @@ namespace ValheimVillages.Behaviors.Patrol
             if (!string.IsNullOrEmpty(fromZdo)) return fromZdo;
             // No stamped id (legacy guard). Resolve by EXISTING graph coverage only —
             // never mint here: a read/discovery path must not fabricate a village ZDO.
-            // If nothing covers the bed, return null so the caller's
+            // If nothing covers the anchor, return null so the caller's
             // FindById(null)?.Graph yields null and patrol takes its no-graph branch.
             var byPos = VillageRegistry.GetVillageAt(m_ai.Memory.HomeAnchor);
             if (byPos != null) return byPos.VillageId;
             Plugin.Log?.LogWarning(
                 $"[Patrol:{m_villager?.VillagerName}] guard has no vv_village_id and no village " +
-                $"covers its bed {m_ai.Memory.HomeAnchor}; waiting for a partition (not minting).");
+                $"covers its anchor {m_ai.Memory.HomeAnchor}; waiting for a partition (not minting).");
             return null;
         }
 
@@ -177,7 +177,7 @@ namespace ValheimVillages.Behaviors.Patrol
                 if (!m_hnaPartitionRequested)
                 {
                     m_hnaPartitionRequested = true;
-                    var bedPos = m_ai.Memory.HomeAnchor;
+                    var anchorPos = m_ai.Memory.HomeAnchor;
                     Plugin.Log?.LogInfo($"[Patrol:{m_villager.VillagerName}] HNA graph unavailable, requesting hna_partition build");
                     GlobalTaskQueue.Enqueue(new VillagerTask
                     {
@@ -188,8 +188,8 @@ namespace ValheimVillages.Behaviors.Patrol
                         Attributes = new Dictionary<string, string>
                         {
                             { "village_id", villageId },
-                            { "anchor_x", bedPos.x.ToString("F2", CultureInfo.InvariantCulture) },
-                            { "anchor_z", bedPos.z.ToString("F2", CultureInfo.InvariantCulture) },
+                            { "anchor_x", anchorPos.x.ToString("F2", CultureInfo.InvariantCulture) },
+                            { "anchor_z", anchorPos.z.ToString("F2", CultureInfo.InvariantCulture) },
                         },
                     });
                 }

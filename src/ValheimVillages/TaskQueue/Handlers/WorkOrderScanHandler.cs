@@ -35,8 +35,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                 string.IsNullOrEmpty(villagerType))
                 return TaskResult.Fail("Missing villager_type");
 
-            if (!TaskAttributeParser.TryParsePosition(task.Attributes, "home", out var bedPos))
-                return TaskResult.Fail("Missing or invalid bed position");
+            if (!TaskAttributeParser.TryParsePosition(task.Attributes, "home", out var anchorPos))
+                return TaskResult.Fail("Missing or invalid anchor position");
 
             // Look up the VillagerAI to access memory
             if (!VillagerAIManager.ActiveVillagers.TryGetValue(villagerId, out var ai))
@@ -44,9 +44,9 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             // Find containers
             var containers = ContainerScanner.FindNearbyContainers(
-                bedPos, WorkSettings.ChestScanRadius);
+                anchorPos, WorkSettings.ChestScanRadius);
 
-            if (containers.Count == 0) return TaskResult.Fail("No containers found near bed");
+            if (containers.Count == 0) return TaskResult.Fail("No containers found near anchor");
 
             // Find all matching work orders and try each until one can be fulfilled
             var allMatches = ContainerScanner.FindAllWorkOrders(containers, villagerType);
@@ -55,13 +55,13 @@ namespace ValheimVillages.TaskQueue.Handlers
                 // No work orders to do: ACK so the queue continues (no retry/dead-letter).
                 return TaskResult.Ok();
 
-            if (!VillageStationRegistry.HasVillageFor(bedPos))
+            if (!VillageStationRegistry.HasVillageFor(anchorPos))
             {
                 // No village registered yet — transient bootstrap state (e.g. partition hasn't
                 // completed after world load / hot reload). Don't surface as a Tasks-tab rejection;
                 // the next scan in WorkScanInterval seconds will retry once the village exists.
                 Plugin.Log?.LogInfo(
-                    $"[WorkOrderScan] {ai.NpcName} deferring scan — no village registered yet at bed {bedPos}");
+                    $"[WorkOrderScan] {ai.NpcName} deferring scan — no village registered yet at anchor {anchorPos}");
                 return TaskResult.Ok();
             }
 
@@ -187,13 +187,13 @@ namespace ValheimVillages.TaskQueue.Handlers
                 if (physicalStation == "cookingstation")
                 {
                     if (VillageStationRegistry.TryFindStation<CookingStation>(
-                            bedPos, s => StationFinder.IsCookingStationReady(s), out var pos, out var station))
+                            anchorPos, s => StationFinder.IsCookingStationReady(s), out var pos, out var station))
                     {
                         stationPos = pos;
                         cookingStationRef = station;
                     }
                     else if (VillageStationRegistry.TryFindStation<CookingStation>(
-                                 bedPos, null, out pos, out station))
+                                 anchorPos, null, out pos, out station))
                     {
                         if (StationFuelHelper.DiagnoseFuelNeed(station, out var need)
                             && StationFuelHelper.FindFuelInContainers(containers, need.FuelItemPrefab, out var fc))
@@ -222,7 +222,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                          && StationFinder.GetSmelterPrefab(physicalStation) != null)
                 {
                     if (VillageStationRegistry.TryFindStation<Smelter>(
-                            bedPos,
+                            anchorPos,
                             s => s != null && PrefabNameMatches(s.gameObject.name, physicalStation),
                             out var pos,
                             out var smelter))
@@ -265,7 +265,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
                 else
                 {
-                    if (VillageStationRegistry.TryFindStation<CraftingStation>(bedPos,
+                    if (VillageStationRegistry.TryFindStation<CraftingStation>(anchorPos,
                             cs => cs.m_name == match.StationName, out var pos, out _))
                         stationPos = pos;
                     else

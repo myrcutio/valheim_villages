@@ -13,7 +13,7 @@ namespace ValheimVillages.Villager.Records
     /// <summary>
     ///     Authoritative identity/lifecycle record for one villager, backed by a
     ///     free-standing persistent ZDO (the <c>vv_villager_record</c> carrier). Owns
-    ///     the villager's type/name/status/village/bed/egg-prefab so identity survives
+    ///     the villager's type/name/status/village/anchor/egg-prefab so identity survives
     ///     independently of the NPC GameObject (which carries only a <c>vv_record_id</c>
     ///     back-reference). This is the source of truth the registry roster reads from.
     /// </summary>

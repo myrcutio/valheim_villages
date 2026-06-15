@@ -5,7 +5,7 @@ namespace ValheimVillages.Settings
     /// </summary>
     public static class VillagerSettings
     {
-        /// <summary>Maximum distance from bed that NPC will wander.</summary>
+        /// <summary>Maximum distance from anchor that NPC will wander.</summary>
         public const float MaxWanderRange = 200f;
 
         /// <summary>Radius to check for nearby POIs while wandering.</summary>
@@ -92,7 +92,7 @@ namespace ValheimVillages.Settings
         ///     corners were supposed to route around. 1.0m is the smallest
         ///     window that still lets the agent register "arrived at node"
         ///     when geometry pads the approach: agent radius (~0.5m) plus a
-        ///     typical piece collider radius (~0.4m for chests / beds / small
+        ///     typical piece collider radius (~0.4m for chests / anchors / small
         ///     columns) means the agent's CENTER physically can't get closer
         ///     than ~0.9m to a node placed at the obstacle's position. A
         ///     tighter threshold leaves the node unpoppable; 1.0m gives a
@@ -136,7 +136,7 @@ namespace ValheimVillages.Settings
 
         /// <summary>
         ///     Hard timeout: seconds since last successful waypoint arrival before
-        ///     the guard is teleported back to their bed as a safety reset.
+        ///     the guard is teleported back to their anchor as a safety reset.
         /// </summary>
         public const float PatrolHardStuckTimeoutSeconds = 60f;
 
@@ -268,7 +268,7 @@ namespace ValheimVillages.Settings
         public const float MinDistanceFromKnown = 25f;
 
         /// <summary>
-        ///     Maximum distance from bed when picking an exploration target.
+        ///     Maximum distance from anchor when picking an exploration target.
         ///     Should be less than MaxWanderRange to stay safe.
         /// </summary>
         public const float MaxExplorationRange = 250f;
@@ -292,7 +292,7 @@ namespace ValheimVillages.Settings
         /// <summary>Radius to scan for chests containing work orders (meters).</summary>
         public const float ChestScanRadius = 20f;
 
-        /// <summary>Radius (from a villager's bed) to scan for stray ground
+        /// <summary>Radius (from a villager's anchor) to scan for stray ground
         /// drops to haul into chests (meters).</summary>
         public const float HaulScanRadius = 32f;
 
@@ -319,7 +319,7 @@ namespace ValheimVillages.Settings
         public const float WorkStuckTimeoutSeconds = 30f;
 
         /// <summary>
-        ///     Radius (from a carpenter's bed) to scan for damaged structures to
+        ///     Radius (from a carpenter's anchor) to scan for damaged structures to
         ///     repair (meters). Sized to cover a whole village from its anchor.
         /// </summary>
         public const float RepairScanRadius = 40f;
@@ -329,7 +329,7 @@ namespace ValheimVillages.Settings
     ///     Configuration settings for villager combat (CombatBehavior).
     ///     Engagement model: defend-on-detection. A combat-capable villager
     ///     engages hostiles that enter its guard zone (a radius around its home
-    ///     post / bed) and disengages — returning to patrol — once the zone is
+    ///     post / anchor) and disengages — returning to patrol — once the zone is
     ///     clear or the target flees past the leash.
     /// </summary>
     public static class CombatSettings
@@ -343,7 +343,7 @@ namespace ValheimVillages.Settings
         public const float DetectionRadius = 25f;
 
         /// <summary>
-        ///     Guard zone radius, measured from the villager's bed (home post).
+        ///     Guard zone radius, measured from the villager's anchor (home post).
         ///     Hostiles outside this radius are ignored, and an engaged target
         ///     that moves beyond it is dropped — the villager will not be lured
         ///     across the map. Keep comfortably larger than a typical patrol

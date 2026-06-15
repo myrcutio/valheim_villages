@@ -6,7 +6,7 @@ namespace ValheimVillages.Diagnostics
 {
     /// <summary>
     ///     Where to point the camera for a deterministic, generalizable village
-    ///     screenshot. The anchor is derived from the active seed bed position so
+    ///     screenshot. The anchor is derived from the active seed anchor position so
     ///     PNG framing stays aligned with the sidecar JSON across captures and
     ///     across different villages — no hard-coded coordinates.
     ///
@@ -18,10 +18,10 @@ namespace ValheimVillages.Diagnostics
     internal static class CaptureAnchor
     {
         /// <summary>
-        ///     Vertical clearance (m) added above the seed-bed Y. 45m comfortably
+        ///     Vertical clearance (m) added above the seed-anchor Y. 45m comfortably
         ///     frames a typical Meadows village (~35×35m) with the player camera's
         ///     default FOV — confirmed empirically against the current test
-        ///     village whose passive PNG was captured at ~46m above bed-Y. Bump
+        ///     village whose passive PNG was captured at ~46m above anchor-Y. Bump
         ///     this if a future village is too large to fit.
         ///
         ///     A plain const for now to match the surrounding settings idiom
@@ -32,7 +32,7 @@ namespace ValheimVillages.Diagnostics
 
         /// <summary>
         ///     Resolved anchor pose. Pos/Yaw/Pitch are only meaningful when
-        ///     <see cref="HasAnchor"/> is true; in the no-seed-bed case the
+        ///     <see cref="HasAnchor"/> is true; in the no-seed-anchor case the
         ///     caller should fall back to a passive capture rather than guess
         ///     coordinates (per the project-wide "no silent fallbacks" rule).
         /// </summary>
@@ -56,14 +56,14 @@ namespace ValheimVillages.Diagnostics
             public static Result NoAnchor(string reason) =>
                 new Result(false, Vector3.zero, 0f, 0f, reason);
 
-            public static Result From(Vector3 bedPos) =>
-                new Result(true, bedPos + Vector3.up * VerticalClearance, 0f, 90f, null);
+            public static Result From(Vector3 anchorPos) =>
+                new Result(true, anchorPos + Vector3.up * VerticalClearance, 0f, 90f, null);
 
             /// <summary>
             ///     Anchor at an arbitrary world position with a caller-provided
             ///     vertical clearance. Used for incident captures where the
             ///     anchor is a villager pos or destination pos rather than a
-            ///     seed bed, and the framing scale wants to be tighter (10m)
+            ///     seed anchor, and the framing scale wants to be tighter (10m)
             ///     than the village-overview default. Pos/Yaw/Pitch follow the
             ///     same convention as <see cref="From(Vector3)"/>.
             /// </summary>
@@ -81,36 +81,36 @@ namespace ValheimVillages.Diagnostics
         }
 
         /// <summary>
-        ///     Resolve the anchor pose against the seed bed nearest to
+        ///     Resolve the anchor pose against the seed anchor nearest to
         ///     <paramref name="preferNear"/>. When <paramref name="preferNear"/>
-        ///     is null, picks the first registered bed (single-village case is
+        ///     is null, picks the first registered anchor (single-village case is
         ///     trivial; multi-village resolution is left to A3's optional
         ///     village-id argument on the <c>vv_capture</c> console command).
         ///
-        ///     Returns <see cref="Result.NoAnchor"/> when no seed bed is
+        ///     Returns <see cref="Result.NoAnchor"/> when no seed anchor is
         ///     registered — the calling capture path should log + degrade to a
         ///     passive snapshot rather than substitute fabricated coordinates.
         /// </summary>
         public static Result Resolve(Vector3? preferNear = null)
         {
-            List<Vector3> beds;
+            List<Vector3> anchors;
             try
             {
-                beds = VillagerAIManager.GetAllAnchorPositions();
+                anchors = VillagerAIManager.GetAllAnchorPositions();
             }
             catch
             {
-                return Result.NoAnchor("VillagerAIManager threw resolving beds");
+                return Result.NoAnchor("VillagerAIManager threw resolving anchors");
             }
 
-            if (beds == null || beds.Count == 0)
-                return Result.NoAnchor("no seed beds registered");
+            if (anchors == null || anchors.Count == 0)
+                return Result.NoAnchor("no seed anchors registered");
 
-            if (preferNear == null) return Result.From(beds[0]);
+            if (preferNear == null) return Result.From(anchors[0]);
 
-            var bestBed = beds[0];
+            var bestAnchor = anchors[0];
             var bestDistSq = float.MaxValue;
-            foreach (var b in beds)
+            foreach (var b in anchors)
             {
                 var dx = b.x - preferNear.Value.x;
                 var dz = b.z - preferNear.Value.z;
@@ -118,18 +118,18 @@ namespace ValheimVillages.Diagnostics
                 if (d < bestDistSq)
                 {
                     bestDistSq = d;
-                    bestBed = b;
+                    bestAnchor = b;
                 }
             }
 
-            return Result.From(bestBed);
+            return Result.From(bestAnchor);
         }
 
         /// <summary>
         ///     Resolve the anchor pose against a caller-supplied world position
         ///     with a caller-supplied vertical clearance. Used by the incident
         ///     recorder to anchor at villager pos and destination pos
-        ///     independently. Yaw=0, pitch=90 matches the seed-bed overload so
+        ///     independently. Yaw=0, pitch=90 matches the seed-anchor overload so
         ///     PNG framing semantics stay consistent across capture trigger
         ///     types.
         /// </summary>

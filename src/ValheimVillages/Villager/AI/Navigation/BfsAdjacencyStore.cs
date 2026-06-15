@@ -55,7 +55,7 @@ namespace ValheimVillages.Villager.AI.Navigation
     /// <summary>
     ///     Snapshot of the cross-kind BFS adjacency graph and seed set from the
     ///     most recent partition. Persisted so diagnostic commands like
-    ///     vv_bfs_trace can compute and highlight paths back to bed seeds
+    ///     vv_bfs_trace can compute and highlight paths back to anchor seeds
     ///     without re-running the partition.
     ///     Populated by <c>RegionPartitionHandler.RecordCrossKindAdjacency</c>.
     ///     Cleared on hot reload via <see cref="RegisterCleanupAttribute" />.

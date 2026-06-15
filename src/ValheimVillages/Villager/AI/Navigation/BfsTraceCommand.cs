@@ -9,7 +9,7 @@ using ValheimVillages.Villager.AI.Pathfinding;
 namespace ValheimVillages.Villager.AI.Navigation
 {
     /// <summary>
-    ///     Dev command: highlight the shortest path back to a bed seed from a
+    ///     Dev command: highlight the shortest path back to a anchor seed from a
     ///     target region, via the cross-kind BFS adjacency graph stored in
     ///     <see cref="BfsAdjacencyStore" />. Useful for diagnosing why a region
     ///     the user thinks shouldn't be reachable IS reachable (some piece
@@ -20,7 +20,7 @@ namespace ValheimVillages.Villager.AI.Navigation
     /// </summary>
     internal static class BfsTraceCommand
     {
-        [DevCommand("Highlight BFS path from region (or player) to bed seed. Args: [regionId | off]",
+        [DevCommand("Highlight BFS path from region (or player) to anchor seed. Args: [regionId | off]",
             Name = "vv_bfs_trace")]
         public static void Trace(Terminal.ConsoleEventArgs args)
         {

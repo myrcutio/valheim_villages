@@ -380,7 +380,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             float bMinX = pos.x - 40f, bMaxX = pos.x + 40f;
             float bMinZ = pos.z - 40f, bMaxZ = pos.z + 40f;
 
-            var beds = VillagerAIManager.GetAllAnchorPositions()
+            var anchors = VillagerAIManager.GetAllAnchorPositions()
                        ?? new List<Vector3>();
             const float anchorRadius = 30f;
             const float anchorR2 = anchorRadius * anchorRadius;
@@ -423,9 +423,9 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (bnds) passBounds++;
 
                 var near = false;
-                foreach (var bed in beds)
+                foreach (var anchor in anchors)
                 {
-                    float dx = c.x - bed.x, dz = c.z - bed.z;
+                    float dx = c.x - anchor.x, dz = c.z - anchor.z;
                     if (dx * dx + dz * dz <= anchorR2)
                     {
                         near = true;
@@ -480,7 +480,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 $"  totals (of {total}): " +
                 $"bounds={passBounds} dist={passDist} agent[0.5]={pass05} agent[1.0]={pass10} agent[2.0]={pass20} " +
                 $"steep_ok={passSteep} capsule_ok={passBlocked}");
-            sb.AppendLine($"  beds in scene: {beds.Count}");
+            sb.AppendLine($"  anchors in scene: {anchors.Count}");
         }
 
         private static void ReportRegionGraph(StringBuilder sb, Vector3 pos)

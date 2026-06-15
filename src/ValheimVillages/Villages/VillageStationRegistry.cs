@@ -11,7 +11,7 @@ namespace ValheimVillages.Villages
     /// <summary>
     ///     Per-village cache of crafting/cooking/smelter station instances inside each
     ///     registered VillageArea polygon. Replaces per-villager LOS discovery for stations:
-    ///     villagers query this registry by their bed position and get back stations from
+    ///     villagers query this registry by their anchor position and get back stations from
     ///     their containing village.
     /// </summary>
     public static class VillageStationRegistry
@@ -244,7 +244,7 @@ namespace ValheimVillages.Villages
         ///     Resolve a world-space target (station, chest, anything) to a position the villager
         ///     can actually reach: walk the village's HNA lookup-grid cells in order of XZ
         ///     distance to the target, return the first cell that has a complete NavMesh path
-        ///     from <paramref name="pathSource"/> (the villager's current or bed position).
+        ///     from <paramref name="pathSource"/> (the villager's current or anchor position).
         ///     <para>This is the SINGLE entry point for "where should the villager actually walk
         ///     to reach this thing?" Used by station lookup AND container-target navigation in
         ///     CraftingWorkflow — same rules everywhere, so when one path fails the diagnostic
@@ -276,7 +276,7 @@ namespace ValheimVillages.Villages
 
         /// <summary>
         ///     Max vertical gap (m) when snapping the path source onto the HNA
-        ///     graph — keeps a ground-floor bed from snapping to an upper-floor
+        ///     graph — keeps a ground-floor anchor from snapping to an upper-floor
         ///     cell at the same XZ. Slightly wider than one HeightBucketSize (2m).
         /// </summary>
         private const float PathSourceSnapMaxY = 3f;
@@ -331,16 +331,16 @@ namespace ValheimVillages.Villages
             }
 
             // Snap the path source onto the graph before planning. The usual
-            // source is a bed, which sits on a cell the HNA prune carved out
-            // for the bed/obstacle footprint — PointToRegionId is null there,
+            // source is a anchor, which sits on a cell the HNA prune carved out
+            // for the anchor/obstacle footprint — PointToRegionId is null there,
             // so the corridor planner can't seed a start cell and reports
             // EVERY target unreachable (a blacksmith concludes "no smelter in
             // the village"). The nearest lookup cell is the floor the villager
-            // actually stands on next to the bed.
+            // actually stands on next to the anchor.
             //
             // Constrain the snap to the source's height: TryFindNearestLookupCell
             // ranks by XZ distance and ignores Y, so in a multi-storey building a
-            // ground-floor bed would otherwise snap UP to an upper-floor cell at
+            // ground-floor anchor would otherwise snap UP to an upper-floor cell at
             // the same XZ — and then only that upper floor is reachable, sending
             // every approach to the wrong level.
             Vector3 pathStart;
@@ -385,8 +385,8 @@ namespace ValheimVillages.Villages
                     // where it currently stands is decided at execution time by
                     // NavTo (snap onto the navmesh + let the agent path, abandon
                     // if genuinely blocked), NOT pre-validated here with a
-                    // complete-path-from-bed query. That pre-check produced false
-                    // "unreachable" (e.g. blacksmith → smelter) whenever the bed
+                    // complete-path-from-anchor query. That pre-check produced false
+                    // "unreachable" (e.g. blacksmith → smelter) whenever the anchor
                     // had no precomputed corridor to the station, even though the
                     // station was right there with a perfectly good approach.
                     //
@@ -483,34 +483,34 @@ namespace ValheimVillages.Villages
             Plugin.Log?.LogInfo(msg);
         }
 
-        [DevCommand("Dump cached village stations + HNA approach resolution for each villager bed",
+        [DevCommand("Dump cached village stations + HNA approach resolution for each villager anchor",
             Name = "vv_stations")]
         public static void DumpStations()
         {
             var sb = new System.Text.StringBuilder();
-            var beds = Villager.AI.VillagerAIManager.GetAllAnchorPositions();
-            sb.AppendLine($"[vv_stations] {beds.Count} bed(s); {s_stationsByVillage.Count} village(s) cached");
+            var anchors = Villager.AI.VillagerAIManager.GetAllAnchorPositions();
+            sb.AppendLine($"[vv_stations] {anchors.Count} anchor(s); {s_stationsByVillage.Count} village(s) cached");
 
-            foreach (var bed in beds)
+            foreach (var anchor in anchors)
             {
-                if (!TryGetVillage(bed, out var key))
+                if (!TryGetVillage(anchor, out var key))
                 {
-                    sb.AppendLine($"  bed=({bed.x:F1},{bed.y:F1},{bed.z:F1}) → NO containing village");
+                    sb.AppendLine($"  anchor=({anchor.x:F1},{anchor.y:F1},{anchor.z:F1}) → NO containing village");
                     continue;
                 }
 
                 var list = s_stationsByVillage.TryGetValue(key, out var stations) ? stations : null;
-                sb.AppendLine($"  bed=({bed.x:F1},{bed.y:F1},{bed.z:F1}) → village {key}: " +
+                sb.AppendLine($"  anchor=({anchor.x:F1},{anchor.y:F1},{anchor.z:F1}) → village {key}: " +
                               $"{(list?.Count ?? 0)} station(s)");
                 if (list != null)
                     foreach (var comp in list)
                     {
                         if (comp == null) continue;
                         var p = comp.transform.position;
-                        var approached = TryResolveApproach(p, bed, out var approach);
+                        var approached = TryResolveApproach(p, anchor, out var approach);
                         sb.AppendLine(
                             $"    [{comp.GetType().Name}] {comp.gameObject.name} " +
-                            $"@ ({p.x:F1},{p.y:F1},{p.z:F1}) dist={Vector3.Distance(bed, p):F1}m " +
+                            $"@ ({p.x:F1},{p.y:F1},{p.z:F1}) dist={Vector3.Distance(anchor, p):F1}m " +
                             $"approach={(approached ? $"({approach.x:F1},{approach.y:F1},{approach.z:F1})" : "UNREACHABLE")}");
                     }
             }

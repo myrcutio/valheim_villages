@@ -29,13 +29,13 @@ namespace ValheimVillages.Villager.AI.Navigation
                 return;
             }
 
-            var beds = VillagerAIManager.GetAllAnchorPositions();
-            var bedPos = beds != null && beds.Count > 0 ? beds[0] : Vector3.zero;
+            var anchors = VillagerAIManager.GetAllAnchorPositions();
+            var anchorPos = anchors != null && anchors.Count > 0 ? anchors[0] : Vector3.zero;
 
-            var graph = Villages.Entity.VillageRegistry.GraphAt(bedPos);
+            var graph = Villages.Entity.VillageRegistry.GraphAt(anchorPos);
             if (graph == null || !graph.IsAvailable)
             {
-                Console.instance?.Print("No graph near bed position.");
+                Console.instance?.Print("No graph near anchor position.");
                 return;
             }
 
@@ -52,7 +52,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.Append("{\n");
             sb.Append($"  \"cellSize\": {RegionGraph.CellSize:F2},\n");
             sb.Append($"  \"regionCount\": {graph.RegionCount},\n");
-            sb.Append($"  \"bedPosition\": [{bedPos.x:F2}, {bedPos.y:F2}, {bedPos.z:F2}],\n");
+            sb.Append($"  \"anchorPosition\": [{anchorPos.x:F2}, {anchorPos.y:F2}, {anchorPos.z:F2}],\n");
 
             sb.Append("  \"boundaryCells\": [\n");
             for (var i = 0; i < cells.Count; i++)

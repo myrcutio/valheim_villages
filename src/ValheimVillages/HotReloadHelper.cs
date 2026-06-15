@@ -293,13 +293,13 @@ namespace ValheimVillages
                                  || !string.IsNullOrEmpty(zdo.GetString("vv_villager_type"));
                 if (!isVillager) continue;
 
-                // Get bed position from ZDO
-                var bedPos = zdo.GetVec3("vv_home_position", Vector3.zero);
-                if (bedPos == Vector3.zero)
+                // Get anchor position from ZDO
+                var anchorPos = zdo.GetVec3("vv_home_position", Vector3.zero);
+                if (anchorPos == Vector3.zero)
                 {
                     Plugin.Log?.LogWarning(
                         $"[HotReload] NPC at {nview.transform.position} " +
-                        "has no bed position stored, skipping");
+                        "has no anchor position stored, skipping");
                     continue;
                 }
 

@@ -16,7 +16,7 @@ namespace ValheimVillages.TaskQueue.Handlers
     ///     eagerly migrate legacy villagers — NPC ZDOs carrying the old
     ///     <c>vv_villager_type</c> tag but no <c>vv_record_id</c> — by minting a
     ///     record and stamping the back-reference. Per-NPC restore also migrates
-    ///     lazily; this makes the whole roster (and nav's bed enumeration) consistent
+    ///     lazily; this makes the whole roster (and nav's anchor enumeration) consistent
     ///     up front. Priority: High.
     /// </summary>
     [RegisterTaskHandler]
@@ -51,17 +51,17 @@ namespace ValheimVillages.TaskQueue.Handlers
             {
                 var type = zdo.GetString("vv_villager_type");
                 var name = zdo.GetString("vv_villager_name");
-                var bedPos = zdo.GetVec3("vv_home_position", Vector3.zero);
+                var anchorPos = zdo.GetVec3("vv_home_position", Vector3.zero);
                 // Resolve (never mint) the village; skip migration if none resolves
                 // (villages are created only at a registry station).
                 var stamped = zdo.GetString(Village.IdKey);
                 var villageId = !string.IsNullOrEmpty(stamped)
                     ? stamped
-                    : (VillageRegistry.GetVillageCovering(bedPos) ?? VillageRegistry.FindNearAnchor(bedPos))?.VillageId;
+                    : (VillageRegistry.GetVillageCovering(anchorPos) ?? VillageRegistry.FindNearAnchor(anchorPos))?.VillageId;
                 if (string.IsNullOrEmpty(villageId))
                 {
                     Plugin.Log?.LogWarning(
-                        $"[villager_record_index] legacy villager '{name}' ({type}) at {bedPos} resolves to " +
+                        $"[villager_record_index] legacy villager '{name}' ({type}) at {anchorPos} resolves to " +
                         "no village; not migrating.");
                     continue;
                 }
@@ -69,28 +69,28 @@ namespace ValheimVillages.TaskQueue.Handlers
                 var record = VillagerRecordTable.Create(
                     type,
                     string.IsNullOrEmpty(name) ? type : name,
-                    villageId, bedPos, RecordStatus.Alive, zdo.m_uid);
+                    villageId, anchorPos, RecordStatus.Alive, zdo.m_uid);
                 if (record == null) continue;
                 zdo.Set("vv_record_id", record.RecordId);
                 zdo.Set(Village.IdKey, villageId);
                 migrated++;
             }
 
-            // Prune bogus Alive records whose NPC vanished (hot-reload artifacts, or
-            // villagers removed without a clean death) so the roster reflects reality.
-            var pruned = VillagerRecordTable.Reconcile();
+            // Audit (never delete) Alive records whose NPC vanished — an orphan is a
+            // loud invariant error to investigate, not a silent prune.
+            var orphans = VillagerRecordTable.AuditOrphans();
 
             var total = VillagerRecordTable.EnumerateAll().Count();
             Plugin.Log?.LogInfo(
-                $"[villager_record_index] records={total} migrated={migrated} pruned={pruned}");
+                $"[villager_record_index] records={total} migrated={migrated} orphans={orphans}");
             activityLog.Record(task.SourceId, TaskName, "index",
-                $"records={total} migrated={migrated} pruned={pruned}");
+                $"records={total} migrated={migrated} orphans={orphans}");
 
             return TaskResult.Ok(new Dictionary<string, string>
             {
                 { "records_total", total.ToString() },
                 { "migrated", migrated.ToString() },
-                { "pruned", pruned.ToString() },
+                { "orphans", orphans.ToString() },
             });
         }
     }

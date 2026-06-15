@@ -30,16 +30,16 @@ namespace ValheimVillages.TaskQueue.Handlers
             int existingCount)
         {
             var outputItem = match.ItemPrefabName;
-            var bedPos = ai.HomeAnchor;
+            var anchorPos = ai.HomeAnchor;
 
             // HARVEST FIRST: a ready crop in the village is harvestable work on its
             // own — it does NOT need a farm location. A grown crop is a Pickable_X
             // that no longer registers as a Farm PoI, so gating harvest on farm
             // detection (as planting does, below) would miss exactly the crops
-            // that are ready. Anchor the scan on the bed (village centre) so the
+            // that are ready. Anchor the scan on the anchor (village centre) so the
             // farmer's wandering doesn't move it out of range.
             var harvestTarget = HarvestHelper.FindNearestHarvestableCrop(
-                bedPos, outputItem, HarvestHelper.HarvestScanRadius);
+                anchorPos, outputItem, HarvestHelper.HarvestScanRadius);
 
             if (harvestTarget != null)
             {
@@ -59,11 +59,11 @@ namespace ValheimVillages.TaskQueue.Handlers
                 };
             }
 
-            // PLANTING needs a farm location. Find a Farm PoI nearest the bed, or
+            // PLANTING needs a farm location. Find a Farm PoI nearest the anchor, or
             // fall back to cultivated ground (terrain Heightmap, not a discoverable
             // object). No farm location and no ready crop -> nothing to do.
-            var farmLoc = VillagePoiRegistry.GetPois(bedPos, LocationType.Farm)
-                .OrderBy(l => Vector3.Distance(bedPos, l.Position))
+            var farmLoc = VillagePoiRegistry.GetPois(anchorPos, LocationType.Farm)
+                .OrderBy(l => Vector3.Distance(anchorPos, l.Position))
                 .FirstOrDefault();
 
             Vector3 farmPosition;
@@ -73,7 +73,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             }
             else
             {
-                var cultivatedPos = FindCultivatedGroundNearAnchor(bedPos);
+                var cultivatedPos = FindCultivatedGroundNearAnchor(anchorPos);
                 if (!cultivatedPos.HasValue)
                 {
                     Plugin.Log?.LogDebug(
@@ -134,11 +134,11 @@ namespace ValheimVillages.TaskQueue.Handlers
         }
 
         /// <summary>
-        ///     Search for cultivated ground in a spiral pattern around the bed.
+        ///     Search for cultivated ground in a spiral pattern around the anchor.
         ///     Cultivated ground is a Heightmap property, not a discoverable object,
         ///     so normal POI discovery can't find it.
         /// </summary>
-        private static Vector3? FindCultivatedGroundNearAnchor(Vector3 bedPos)
+        private static Vector3? FindCultivatedGroundNearAnchor(Vector3 anchorPos)
         {
             const float maxRadius = 30f;
             const float step = 3f;
@@ -149,7 +149,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 for (var i = 0; i < steps; i++)
                 {
                     var angle = 2f * Mathf.PI * i / steps;
-                    var candidate = bedPos + new Vector3(
+                    var candidate = anchorPos + new Vector3(
                         Mathf.Cos(angle) * r, 0f, Mathf.Sin(angle) * r);
 
                     // Snap to terrain height

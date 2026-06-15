@@ -183,7 +183,7 @@ namespace ValheimVillages.Behaviors.Combat
         {
             var me = m_ai.Character;
             var myPos = m_ai.Position;
-            var bed = m_ai.HomeAnchor;
+            var anchor = m_ai.HomeAnchor;
             var detectSq = CombatSettings.DetectionRadius * CombatSettings.DetectionRadius;
             var leashSq = CombatSettings.LeashRadius * CombatSettings.LeashRadius;
 
@@ -196,11 +196,11 @@ namespace ValheimVillages.Behaviors.Combat
                 if (!BaseAI.IsEnemy(me, c)) continue;
 
                 var cp = c.transform.position;
-                if ((cp - bed).sqrMagnitude > leashSq) continue; // stay near home
+                if ((cp - anchor).sqrMagnitude > leashSq) continue; // stay near home
 
                 var dsq = (cp - myPos).sqrMagnitude;
                 var nearMe = dsq <= detectSq;
-                if (!nearMe && !ThreatensVillage(cp, bed)) continue;
+                if (!nearMe && !ThreatensVillage(cp, anchor)) continue;
 
                 if (dsq < bestSq)
                 {
@@ -215,10 +215,10 @@ namespace ValheimVillages.Behaviors.Combat
         /// <summary>
         ///     True if <paramref name="enemyPos"/> is within
         ///     <see cref="CombatSettings.VillageThreatRadius"/> of any active villager
-        ///     whose home is in this guard's village (bed within the leash). Lets a
+        ///     whose home is in this guard's village (anchor within the leash). Lets a
         ///     guard respond to a threat menacing another NPC.
         /// </summary>
-        private static bool ThreatensVillage(Vector3 enemyPos, Vector3 guardBed)
+        private static bool ThreatensVillage(Vector3 enemyPos, Vector3 guardAnchor)
         {
             var sameVillageSq = CombatSettings.LeashRadius * CombatSettings.LeashRadius;
             var threatSq = CombatSettings.VillageThreatRadius * CombatSettings.VillageThreatRadius;
@@ -226,7 +226,7 @@ namespace ValheimVillages.Behaviors.Combat
             {
                 var v = kv.Value;
                 if (v == null) continue;
-                if ((v.HomeAnchor - guardBed).sqrMagnitude > sameVillageSq) continue;
+                if ((v.HomeAnchor - guardAnchor).sqrMagnitude > sameVillageSq) continue;
                 if ((enemyPos - v.Position).sqrMagnitude <= threatSq) return true;
             }
 

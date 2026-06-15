@@ -21,7 +21,7 @@ namespace ValheimVillages.Villager.Records
         /// </summary>
         public static VillagerRecord Create(
             string type, string name, string villageKey,
-            Vector3 bedPos, RecordStatus status, ZDOID npcZdoId)
+            Vector3 anchorPos, RecordStatus status, ZDOID npcZdoId)
         {
             var zdoMan = ZDOMan.instance;
             if (zdoMan == null)
@@ -30,17 +30,15 @@ namespace ValheimVillages.Villager.Records
                 return null;
             }
 
-            var zdo = zdoMan.CreateNewZDO(bedPos, RecordPrefabFactory.RecordPrefabHash);
+            var zdo = zdoMan.CreateNewZDO(anchorPos, RecordPrefabFactory.RecordPrefabHash);
             // CreateNewZDO does NOT persist the prefab hash onto the ZDO (it only uses it
             // for a portal check) — set it explicitly so GetPrefab() returns the carrier
             // hash, which is how EnumerateAll finds records and how ZNetScene instantiates
             // the carrier clone.
             zdo.SetPrefab(RecordPrefabFactory.RecordPrefabHash);
+            // ZDOMan.GetSaveClone writes every Persistent ZDO regardless of owner, so this
+            // flag alone makes the record survive a world save/reload (ownership is irrelevant).
             zdo.Persistent = true;
-            // On a dedicated server the host must own the record ZDO so it's written to
-            // the world .db (same fix SpawnPatch applies to villager ZDOs).
-            if (ZNet.instance != null && ZNet.instance.IsDedicated())
-                zdo.SetOwner(ZNet.GetUID());
 
             var id = Guid.NewGuid().ToString();
             zdo.Set(VillagerRecord.IdKey, id);
@@ -50,7 +48,7 @@ namespace ValheimVillages.Villager.Records
                 Type = type,
                 Name = name,
                 Village = villageKey,
-                HomeAnchor = bedPos,
+                HomeAnchor = anchorPos,
                 Status = status,
                 NpcZdoId = npcZdoId,
                 EggPrefab = "",
@@ -117,60 +115,46 @@ namespace ValheimVillages.Villager.Records
             Plugin.Log?.LogInfo($"[VillagerRecordTable] Record {recordId} -> {status}");
         }
 
-        /// <summary>Permanently destroy a record's carrier ZDO.</summary>
-        public static bool Delete(VillagerRecord rec)
-        {
-            var zdoMan = ZDOMan.instance;
-            if (zdoMan == null || rec?.Zdo == null) return false;
-
-            var zdo = rec.Zdo;
-            // DestroyZDO only acts for the ZDO's owner; claim it first.
-            if (!zdo.IsOwner())
-                zdo.SetOwner(ZDOMan.GetSessionID());
-            zdoMan.DestroyZDO(zdo);
-            Plugin.Log?.LogInfo($"[VillagerRecordTable] Deleted record {rec.RecordId}");
-            return true;
-        }
-
-        public static bool Delete(string recordId)
-        {
-            var rec = FindById(recordId);
-            if (rec == null)
-            {
-                Plugin.Log?.LogWarning($"[VillagerRecordTable] Delete: record {recordId} not found");
-                return false;
-            }
-
-            return Delete(rec);
-        }
-
         /// <summary>
-        ///     Prune bogus <see cref="RecordStatus.Alive" /> records whose linked NPC
-        ///     ZDO no longer exists — e.g. a villager removed without a clean death, or
-        ///     a hot-reload artifact minted before death detection worked. Dead/Egg
-        ///     records legitimately have no live NPC and are never pruned. (An Alive
-        ///     villager that's merely unloaded still has its NPC ZDO in ZDOMan, so it
-        ///     is NOT pruned.) Returns the number removed.
+        ///     Audit for <see cref="RecordStatus.Alive" /> records whose linked NPC ZDO
+        ///     no longer exists in the world and log each as a loud error. An orphan is a
+        ///     real invariant violation to investigate — NOT something to silently delete
+        ///     or paper over. This method NEVER mutates or removes a record; only explicit
+        ///     player actions may change records.
+        ///     <para>
+        ///         Reliable after world load: <see cref="ZDOMan.Load" /> populates
+        ///         <c>m_objectsByID</c> with every persisted ZDO, so a null lookup here
+        ///         means the NPC is genuinely gone — not merely in an unloaded zone.
+        ///     </para>
+        ///     Returns the number of orphans found.
         /// </summary>
-        public static int Reconcile()
+        public static int AuditOrphans()
         {
             var zdoMan = ZDOMan.instance;
             if (zdoMan == null) return 0;
 
-            var stale = new List<VillagerRecord>();
+            var orphans = 0;
             foreach (var rec in EnumerateAll())
             {
                 if (rec.Status != RecordStatus.Alive) continue;
                 var npc = rec.NpcZdoId;
                 if (npc == ZDOID.None) continue;
-                if (zdoMan.GetZDO(npc) == null) stale.Add(rec);
+                if (zdoMan.GetZDO(npc) != null) continue;
+
+                orphans++;
+                Plugin.Log?.LogError(
+                    $"[VillagerRecordTable] ORPHANED Alive record {rec.RecordId} " +
+                    $"(type={rec.Type} name={rec.Name} village={rec.Village}): its linked NPC " +
+                    $"ZDO {npc} no longer exists in the world. The record was left INTACT — this " +
+                    "is an invariant violation, not a cue to auto-delete. Investigate why the NPC " +
+                    "vanished (link broken on reload, removed without a clean death, etc.).");
             }
 
-            foreach (var rec in stale) Delete(rec);
-            if (stale.Count > 0)
-                Plugin.Log?.LogInfo(
-                    $"[VillagerRecordTable] Reconcile pruned {stale.Count} orphaned Alive record(s)");
-            return stale.Count;
+            if (orphans > 0)
+                Plugin.Log?.LogError(
+                    $"[VillagerRecordTable] {orphans} orphaned Alive record(s) detected (see errors " +
+                    "above). Records were NOT modified.");
+            return orphans;
         }
 
         /// <summary>

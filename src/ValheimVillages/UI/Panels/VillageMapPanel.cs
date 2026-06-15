@@ -13,7 +13,7 @@ namespace ValheimVillages.UI.Panels
     ///     villager type, so the map faithfully represents where the villager can
     ///     operate (and surfaces any coverage holes / boundary-detection issues)
     ///     rather than a per-type derived shape. A patroller's route, the villager,
-    ///     the bed, gates, and task pins are drawn as overlays on top.
+    ///     the anchor, gates, and task pins are drawn as overlays on top.
     /// </summary>
     public static class VillageMapPanel
     {
@@ -34,8 +34,8 @@ namespace ValheimVillages.UI.Panels
             var ai = villager.AI;
             if (ai == null) return null;
 
-            var bed = ai.HomeAnchor;
-            var graph = Villages.Entity.VillageRegistry.GraphAt(bed);
+            var anchor = ai.HomeAnchor;
+            var graph = Villages.Entity.VillageRegistry.GraphAt(anchor);
             if (graph == null) return null; // no village graph here — no map to draw
 
             // Source of truth for the operable area: the graph's lookup cells.
@@ -47,7 +47,7 @@ namespace ValheimVillages.UI.Panels
 
             return PatrolMapRenderer.Render(
                 waypoints,
-                bed,
+                anchor,
                 villagerPos,
                 cells,
                 cellSize: RegionGraph.LookupCellSize,
@@ -63,8 +63,8 @@ namespace ValheimVillages.UI.Panels
             VillagerBehaviorBridge villager,
             IReadOnlyList<(Vector3 position, Color color)> pins)
         {
-            var bed = villager.AI?.HomeAnchor ?? Vector3.zero;
-            var graph = Villages.Entity.VillageRegistry.GraphAt(bed);
+            var anchor = villager.AI?.HomeAnchor ?? Vector3.zero;
+            var graph = Villages.Entity.VillageRegistry.GraphAt(anchor);
             var gates = graph?.GetGates();
             if (gates == null || gates.Count == 0) return pins;
 

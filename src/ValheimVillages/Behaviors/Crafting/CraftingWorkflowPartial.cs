@@ -39,7 +39,7 @@ namespace ValheimVillages.Behaviors.Crafting
             }
 
             SubState = substate;
-            // We already resolved a station-aware approach above (bed-anchored
+            // We already resolved a station-aware approach above (anchor-anchored
             // village + hull check), so skip NavTo's generic snap and route the
             // state change + path/agent reset through the single entry point.
             return m_ai.NavTo(approach, BehaviorState.Working, targetDescription,
