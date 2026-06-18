@@ -5,9 +5,9 @@ using ValheimVillages.Attributes;
 using ValheimVillages.Schemas;
 using ValheimVillages.UI.Core;
 using ValheimVillages.Villager;
-using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Records;
 using ValheimVillages.Villager.Registry;
+using ValheimVillages.Villages;
 
 namespace ValheimVillages.UI.Tabs.Registry
 {
@@ -91,13 +91,37 @@ namespace ValheimVillages.UI.Tabs.Registry
             // the slot-31 flood can't seed from. Resolve a walkable seed just outside the
             // station footprint first; that point becomes both the spawn position and the
             // persisted home (and therefore the navmesh-discovery flood seed).
-            var spawnPos = context.RegistryPosition;
-            if (RegistrySeedResolver.TryResolveWalkableSeed(context.RegistryPosition, out var seed))
-                spawnPos = seed;
-            else
-                Plugin.Log?.LogWarning(
-                    $"[AddTab] No walkable seed near registry {context.RegistryPosition}; " +
-                    "spawning at the anchor (region graph may degenerate).");
+            // Spawn ON the village (slot-31) graph: resolve an HNA-valid, approachable
+            // cell beside the registry — the surface the villager actually walks on,
+            // Y-banded so a roofed registry resolves to its own floor and never the
+            // structure above. The seed is resolved against the village's anchor triad
+            // (founder-connected), NOT the registry island the registry anchor sits on.
+            // No fallback by design: if the village is missing/invalid or the seed can't
+            // be resolved (graph not yet settled, registry walled off, fewer than 3
+            // triad anchors, etc.) abort loudly rather than dump the villager on the raw
+            // anchor for the EnsureAgent warp to teleport upward.
+            var village = Villages.Entity.VillageRegistry.FindById(context.VillageId);
+            if (village == null || village.IsInvalid)
+            {
+                Plugin.Log?.LogError(
+                    $"[AddTab] Village '{context.VillageId}' is missing or invalid; " +
+                    $"aborting recruit of {name}.");
+                Player.m_localPlayer?.Message(
+                    MessageHud.MessageType.Center, $"Failed to recruit {name} (village invalid)");
+                return;
+            }
+
+            if (!Villages.Entity.VillageRegistry.TryResolveVillagerSeed(
+                    village, context.RegistryPosition, out var spawnPos))
+            {
+                Plugin.Log?.LogError(
+                    "[AddTab] No reachable spawn location near registry " +
+                    $"({context.RegistryPosition.x:F1},{context.RegistryPosition.y:F1},{context.RegistryPosition.z:F1}); " +
+                    $"aborting recruit of {name}.");
+                Player.m_localPlayer?.Message(
+                    MessageHud.MessageType.Center, $"Failed to recruit {name} (no reachable spot)");
+                return;
+            }
 
             VillagerRecord record = null;
             var prefab = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : "DvergerMage";

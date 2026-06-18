@@ -8,6 +8,7 @@ using UnityEngine.Rendering;
 using ValheimVillages.Attributes;
 using ValheimVillages.TaskQueue.Handlers;
 using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Villager.AI.Pathfinding
 {
@@ -56,6 +57,7 @@ namespace ValheimVillages.Villager.AI.Pathfinding
         private static readonly Color ColorPartial = Color.yellow;
         private static readonly Color ColorNoPath = Color.red;
         private static readonly Color ColorTarget = new(1f, 0.4f, 0f); // orange
+        private static readonly Color ColorAnchorMarker = new(1f, 0.84f, 0f); // golden
 
         private Material m_lineMaterial;
 
@@ -103,7 +105,10 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             }
 
             if (s_showTriangulation)
+            {
                 DrawTriangulation();
+                DrawVillageAnchors();
+            }
 
             if (DebugPolyline.Count > 0)
                 DrawDebugPolyline();
@@ -437,6 +442,76 @@ namespace ValheimVillages.Villager.AI.Pathfinding
                     GL.Vertex(t.V0 + off);
                 }
             }
+
+            GL.End();
+        }
+
+        /// <summary>
+        ///     Draw a rotating golden diamond at every village anchor (founder + triad)
+        ///     while the triangulation overlay is active. Pulls anchors live from the
+        ///     <see cref="VillageRegistry" />; unset anchors are skipped.
+        /// </summary>
+        private void DrawVillageAnchors()
+        {
+            foreach (var village in VillageRegistry.EnumerateAll())
+            {
+                if (village == null) continue;
+
+                if (village.TryGetAnchor(VillageAnchor.Founder, out var founder))
+                    DrawAnchorDiamond(founder);
+
+                for (var i = 0; i < VillageAnchor.Triad.Length; i++)
+                    if (village.TryGetAnchor(VillageAnchor.Triad[i], out var triad))
+                        DrawAnchorDiamond(triad);
+            }
+        }
+
+        /// <summary>
+        ///     Spinning octahedral "diamond" marker at waist height: a top + bottom vertex
+        ///     joined to 4 equatorial vertices that rotate about the Y axis over time so the
+        ///     marker visibly spins. Drawn with the shared GL.LINES idiom.
+        /// </summary>
+        private static void DrawAnchorDiamond(Vector3 anchorPos)
+        {
+            const float waistHeight = 1.0f;
+            const float radius = 0.5f;
+            const float spinDegPerSec = 90f;
+
+            var center = anchorPos + Vector3.up * waistHeight;
+            var top = center + Vector3.up * radius;
+            var bottom = center - Vector3.up * radius;
+
+            // Spin the equatorial ring about Y over time.
+            var angle = Time.time * spinDegPerSec * Mathf.Deg2Rad;
+            var cos = Mathf.Cos(angle);
+            var sin = Mathf.Sin(angle);
+
+            // 4 equatorial vertices, rotated each frame (45deg spacing -> read as a diamond).
+            var e0 = center + new Vector3(cos, 0f, sin) * radius;
+            var e1 = center + new Vector3(-sin, 0f, cos) * radius;
+            var e2 = center + new Vector3(-cos, 0f, -sin) * radius;
+            var e3 = center + new Vector3(sin, 0f, -cos) * radius;
+
+            GL.Begin(GL.LINES);
+            GL.Color(ColorAnchorMarker);
+
+            // Top apex to each equatorial vertex.
+            GL.Vertex(top); GL.Vertex(e0);
+            GL.Vertex(top); GL.Vertex(e1);
+            GL.Vertex(top); GL.Vertex(e2);
+            GL.Vertex(top); GL.Vertex(e3);
+
+            // Bottom apex to each equatorial vertex.
+            GL.Vertex(bottom); GL.Vertex(e0);
+            GL.Vertex(bottom); GL.Vertex(e1);
+            GL.Vertex(bottom); GL.Vertex(e2);
+            GL.Vertex(bottom); GL.Vertex(e3);
+
+            // Equatorial ring.
+            GL.Vertex(e0); GL.Vertex(e1);
+            GL.Vertex(e1); GL.Vertex(e2);
+            GL.Vertex(e2); GL.Vertex(e3);
+            GL.Vertex(e3); GL.Vertex(e0);
 
             GL.End();
         }

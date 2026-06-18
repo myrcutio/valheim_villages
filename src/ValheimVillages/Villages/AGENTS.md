@@ -16,7 +16,7 @@ village boundaries, and wall/door detection for patrol discovery.
 Villages/
   VillageAreaManager.cs                -- Static manager: RegisterArea, UnregisterArea, IsInsideAnyVillage, bounds, TryGetContainingVillageKey
   VillageArea.cs                       -- Single village area from patrol polygon; point-in-polygon check
-  VillageStationRegistry.cs            -- Per-village cache of crafting/cooking/smelter stations; TryFindStation, TryResolveApproach (HNA-valid)
+  VillageStationRegistry.cs            -- Per-village cache of crafting/cooking/smelter stations; TryFindStation (approach resolution is VillagerMovement.TryResolveApproach)
   VillagePoiRegistry.cs                -- Per-village cache of idle/comfort PoIs (fire/table/chair/farm); GetPois by position
   EnemyAvoidancePatch.cs               -- Harmony prefix on BaseAI.RandomMovement; nudges enemies away from villages
   WallDetection.cs                     -- IsWallPiece, IsWallCollider, RaycastForWall, RaycastForFarthestWall

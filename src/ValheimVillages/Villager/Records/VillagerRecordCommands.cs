@@ -138,19 +138,35 @@ namespace ValheimVillages.Villager.Records
             var pos = Player.m_localPlayer != null ? Player.m_localPlayer.transform.position : Vector3.zero;
             // Resolve (never mint) an existing village at the player. Villages are created
             // only by placing a registry station, so dev-recruit requires standing in one.
-            var villageId = (Villages.Entity.VillageRegistry.GetVillageCovering(pos)
-                             ?? Villages.Entity.VillageRegistry.FindNearAnchor(pos))?.VillageId;
-            if (string.IsNullOrEmpty(villageId))
+            var village = Villages.Entity.VillageRegistry.GetVillageCovering(pos)
+                          ?? Villages.Entity.VillageRegistry.FindNearAnchor(pos);
+            if (village == null)
             {
                 Print("[vv_recruit] no village here — place a registry station first (villages are minted only there)");
                 return;
             }
 
+            if (village.IsInvalid)
+            {
+                Print($"[vv_recruit] village {village.VillageId} is invalid (no connected anchor triad); aborting.");
+                return;
+            }
+
+            // Spawn ON the village (slot-31) graph: resolve an HNA-valid, approachable
+            // cell at the player, seeded against the village's founder-connected anchor
+            // triad (not the player's island). No fallback by design — fail loudly if the
+            // player isn't on a settled village graph rather than spawning off-mesh.
+            if (!Villages.Entity.VillageRegistry.TryResolveVillagerSeed(village, pos, out var spawnPos))
+            {
+                Print($"[vv_recruit] no reachable spawn location at {pos}; aborting.");
+                return;
+            }
+
             var prefab = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : "DvergerMage";
             VillagerRecord rec = null;
-            var npc = VillagerSpawner.SpawnVillagerNpc(def, def.type, prefab, pos, ref rec, villageId);
+            var npc = VillagerSpawner.SpawnVillagerNpc(def, def.type, prefab, spawnPos, ref rec, village.VillageId);
             Print(npc != null
-                ? $"[vv_recruit] recruited {def.type} at {pos} into village {villageId}"
+                ? $"[vv_recruit] recruited {def.type} at {spawnPos} into village {village.VillageId}"
                 : "[vv_recruit] failed");
         }
 

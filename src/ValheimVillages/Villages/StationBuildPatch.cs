@@ -38,10 +38,17 @@ namespace ValheimVillages.Villages
             if (!string.IsNullOrEmpty(registryZdo.GetString(Village.IdKey))) return; // already linked
 
             var pos = registryZdo.GetPosition();
+            // Founder = the placing player's position captured ONCE, here at mint, threaded
+            // into Create via GetOrCreateAt. SetCreator runs only on a real placement, so
+            // m_localPlayer is the placer; fall back to the anchor if absent (dedicated host).
+            var founderPos = Player.m_localPlayer != null
+                ? Player.m_localPlayer.transform.position
+                : pos;
             // A registry INSIDE an existing village's graph joins it; otherwise this is a
             // new village (GetOrCreateAt re-links a re-placed registry by anchor, else mints).
             // This registry-placement path is the ONLY place a village is created.
-            var village = VillageRegistry.GetVillageCovering(pos) ?? VillageRegistry.GetOrCreateAt(pos);
+            var village = VillageRegistry.GetVillageCovering(pos)
+                          ?? VillageRegistry.GetOrCreateAt(pos, founderPos);
             if (village == null) return;
 
             registryZdo.Set(Village.IdKey, village.VillageId);

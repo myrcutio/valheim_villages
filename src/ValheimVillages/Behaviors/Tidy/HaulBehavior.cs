@@ -6,6 +6,7 @@ using ValheimVillages.Interfaces;
 using ValheimVillages.Schemas;
 using ValheimVillages.Settings;
 using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Work;
 using ValheimVillages.Villages;
 using Object = UnityEngine.Object;
@@ -126,8 +127,8 @@ namespace ValheimVillages.Behaviors.Tidy
         /// </summary>
         private bool TryWalk(Vector3 target, string label)
         {
-            if (!VillageStationRegistry.TryResolveApproach(
-                    target, m_ai.Position, out var approach, m_ai.HomeAnchor))
+            if (!VillagerMovement.TryResolveApproach(
+                    target, m_ai.Position, null, out var approach))
                 return false;
 
             return m_ai.NavTo(approach, BehaviorState.Traveling, label,

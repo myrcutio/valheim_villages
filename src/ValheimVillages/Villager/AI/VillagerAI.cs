@@ -208,6 +208,17 @@ namespace ValheimVillages.Villager.AI
 
         private void OnDestroy()
         {
+            // DIAGNOSTIC (Bug 6): is OnDestroy a reliable place to flip the record to
+            // Dead? It fires on death AND on unload/zone-change, so log identity +
+            // isDead/health + the call site to see what actually triggers it.
+            var ch = Character;
+            Plugin.Log?.LogWarning(
+                $"[VillagerAI] OnDestroy: name='{m_villagerName}' id={UniqueId} " +
+                $"pos=({Position.x:F1},{Position.y:F1},{Position.z:F1}) " +
+                $"isDead={(ch != null ? ch.IsDead().ToString() : "n/a")} " +
+                $"hp={(ch != null ? ch.GetHealth().ToString("F1") : "n/a")}\n" +
+                $"call site:\n{System.Environment.StackTrace}");
+
             try
             {
                 var zdo = GetComponent<ZNetView>()?.GetZDO();
@@ -950,6 +961,31 @@ namespace ValheimVillages.Villager.AI
             Plugin.Log?.LogWarning(
                 $"[AI:{m_villagerName}] Rescue: pathing couldn't free it; teleported home to " +
                 $"({dest.x:F1},{dest.y:F1},{dest.z:F1}).");
+        }
+
+        /// <summary>
+        ///     Recall this villager to its registry station: relocate it to an
+        ///     HNA-valid approach beside <paramref name="stationPos" /> on the village
+        ///     (slot-31) graph, warp the advisory agent there, and drop to Idle so it
+        ///     re-evaluates behaviors from the station. Uses the same Y-aware approach
+        ///     resolver as spawn, so it can't land on a roof/upper floor. Returns false
+        ///     (and does NOT move the villager) when no reachable approach resolves —
+        ///     we never teleport into a non-walkable spot.
+        /// </summary>
+        public bool Recall(Vector3 stationPos)
+        {
+            if (!VillagerMovement.TryResolveApproach(stationPos, stationPos, null, out var dest))
+                return false;
+
+            transform.position = dest;
+            if (m_navAgent != null && m_navAgent.isOnNavMesh)
+                m_navAgent.Warp(dest);
+            // SetState(Idle) clears the stale path, resets recovery/stall timers, and
+            // lets the behavior loop re-select from the station next tick.
+            SetState(BehaviorState.Idle);
+            Plugin.Log?.LogInfo(
+                $"[AI:{m_villagerName}] Recalled to station at ({dest.x:F1},{dest.y:F1},{dest.z:F1}).");
+            return true;
         }
 
         /// <summary>

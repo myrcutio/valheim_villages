@@ -1,7 +1,8 @@
 using System.Collections.Generic;
-using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.Attributes;
+using ValheimVillages.Villager.Records;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Villager.AI
 {
@@ -45,50 +46,54 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
-        ///     Get unique anchor positions for every villager in the world. Reads
-        ///     authoritatively from <c>ZDOMan.m_objectsByID</c>: each villager NPC ZDO
-        ///     (identified by the new <c>vv_record_id</c> back-reference or the legacy
-        ///     <c>vv_villager_type</c> tag) carries a persistent <c>vv_home_position</c>.
-        ///     Survives villager GameObject unload (out-of-range, teleported) and
-        ///     hot reloads (the in-memory <see cref="ActiveVillagers" /> dict is
+        ///     Get unique anchor positions across the world from DURABLE truth — the
+        ///     union of (a) every <see cref="Village.AnchorPositions" /> for each village
+        ///     in <see cref="VillageRegistry.EnumerateAll" /> and (b) every alive
+        ///     <see cref="VillagerRecord.HomeAnchor" /> in <see cref="VillagerRecordTable" />
+        ///     (records whose <see cref="VillagerRecord.Status" /> is
+        ///     <see cref="RecordStatus.Alive" />). Both sources hydrate from their backing
+        ///     ZDOs, so the result is independent of whether any NPC GameObject is
+        ///     instantiated/loaded — it survives villager unload (out-of-range, teleported)
+        ///     and hot reloads (the in-memory <see cref="ActiveVillagers" /> dict is
         ///     cleared on reload).
-        ///     Returns an empty list if <c>ZDOMan</c> isn't yet alive — callers
-        ///     should treat that as "world not ready" and either retry or abort.
-        ///     No fallback to in-memory state: that path was masking missing-anchor
-        ///     bugs (e.g. villagers unloaded across reload) by silently using a
-        ///     stale subset.
+        ///     Positions are deduplicated within ~1m and exact <see cref="Vector3.zero" />
+        ///     is skipped.
+        ///     Returns an empty list if <c>ZDOMan</c> isn't yet alive — both the village
+        ///     registry and the record table treat "world not ready" as no entries, so
+        ///     callers should treat an empty result as "world not ready" and either retry
+        ///     or abort. No fallback to in-memory state.
         /// </summary>
         public static List<Vector3> GetAllAnchorPositions()
         {
             var list = new List<Vector3>();
-            var zdoMan = ZDOMan.instance;
-            if (zdoMan == null) return list;
-            var objectsByID = Traverse.Create(zdoMan)
-                .Field<Dictionary<ZDOID, ZDO>>("m_objectsByID").Value;
-            if (objectsByID == null) return list;
-            foreach (var zdo in objectsByID.Values)
-            {
-                if (zdo == null) continue;
-                // A villager NPC has either the new record back-reference or the legacy
-                // type tag. (Record carrier ZDOs also have vv_record_id but no anchor
-                // position, so the zero-anchor check below excludes them.)
-                var isVillager = !string.IsNullOrEmpty(zdo.GetString("vv_record_id"))
-                                 || !string.IsNullOrEmpty(zdo.GetString("vv_villager_type"));
-                if (!isVillager) continue;
-                var pos = zdo.GetVec3("vv_home_position", Vector3.zero);
-                if (pos == Vector3.zero) continue;
-                var duplicate = false;
-                foreach (var existing in list)
-                    if ((existing - pos).sqrMagnitude < 1f)
-                    {
-                        duplicate = true;
-                        break;
-                    }
 
-                if (!duplicate) list.Add(pos);
+            foreach (var village in VillageRegistry.EnumerateAll())
+            {
+                if (village == null) continue;
+                foreach (var pos in village.AnchorPositions)
+                    AddUnique(list, pos);
+            }
+
+            foreach (var record in VillagerRecordTable.EnumerateAll())
+            {
+                if (record == null || record.Status != RecordStatus.Alive) continue;
+                AddUnique(list, record.HomeAnchor);
             }
 
             return list;
+        }
+
+        /// <summary>
+        ///     Add <paramref name="pos" /> to <paramref name="list" /> unless it is exact
+        ///     <see cref="Vector3.zero" /> or within ~1m of an existing entry.
+        /// </summary>
+        private static void AddUnique(List<Vector3> list, Vector3 pos)
+        {
+            if (pos == Vector3.zero) return;
+            foreach (var existing in list)
+                if ((existing - pos).sqrMagnitude < 1f)
+                    return;
+            list.Add(pos);
         }
 
         /// <summary>

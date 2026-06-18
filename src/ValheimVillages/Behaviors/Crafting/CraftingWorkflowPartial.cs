@@ -31,8 +31,8 @@ namespace ValheimVillages.Behaviors.Crafting
             // been bumped off the graph, its current position may resolve to no
             // village (or the wrong one), but its home village is always known.
             // Current position is still the path start (2nd arg).
-            if (!VillageStationRegistry.TryResolveApproach(
-                    target, m_ai.Position, out var approach, m_ai.HomeAnchor))
+            if (!VillagerMovement.TryResolveApproach(
+                    target, m_ai.Position, null, out var approach))
             {
                 AbandonWork($"no HNA-valid approach to {targetDescription} @ ({target.x:F1},{target.y:F1},{target.z:F1})");
                 return false;

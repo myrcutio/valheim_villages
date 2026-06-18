@@ -1,7 +1,7 @@
 using UnityEngine;
 using ValheimVillages.Schemas;
-using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Registry;
+using ValheimVillages.Villages;
 
 namespace ValheimVillages.Villager.Records
 {
@@ -79,17 +79,36 @@ namespace ValheimVillages.Villager.Records
                 return false;
             }
 
-            // Snap to a walkable seed near the anchor (the registry). This becomes the
-            // spawn position AND the persisted home (SpawnVillagerNpc writes anchorPos onto
-            // the record), so the villager lands inside the village and the partition
-            // seeds from a reachable cell instead of a stale, now-outside home.
-            var spawnPos = rawAnchor;
-            if (RegistrySeedResolver.TryResolveWalkableSeed(rawAnchor, out var seed))
-                spawnPos = seed;
-            else
-                Plugin.Log?.LogWarning(
-                    $"[Revive] No walkable seed near anchor ({rawAnchor.x:F1},{rawAnchor.y:F1},{rawAnchor.z:F1}) " +
-                    $"for '{record.Name}'; reviving at the anchor as-is.");
+            // Resolve the owning village from the record so the spawn seed is found
+            // against its founder-connected anchor triad, not the (possibly island)
+            // revive anchor itself.
+            var village = Villages.Entity.VillageRegistry.FindById(record.Village);
+            if (village == null || village.IsInvalid)
+            {
+                error = "owning village is missing or invalid";
+                Plugin.Log?.LogError(
+                    $"[Revive] Village '{record.Village}' for '{record.Name}' is missing or invalid; " +
+                    "aborting revive.");
+                return false;
+            }
+
+            // Resolve an HNA-valid, approachable cell on the village (slot-31) graph
+            // beside the anchor — the surface the villager actually walks on, Y-banded
+            // so a roofed registry resolves to its own floor and not the structure
+            // above. The seed is resolved against the village's anchor triad. This
+            // becomes the spawn position AND the persisted home. No fallback by design:
+            // if it fails (graph not settled, anchor now outside a rebuilt village, etc.)
+            // surface a loud error and refuse the revive rather than drop the villager on
+            // the raw anchor for the EnsureAgent warp to teleport upward.
+            if (!Villages.Entity.VillageRegistry.TryResolveVillagerSeed(village, rawAnchor, out var spawnPos))
+            {
+                error = "no reachable spawn location near the revive anchor";
+                Plugin.Log?.LogError(
+                    "[Revive] No reachable spawn location near anchor " +
+                    $"({rawAnchor.x:F1},{rawAnchor.y:F1},{rawAnchor.z:F1}) for '{record.Name}'; " +
+                    "aborting revive.");
+                return false;
+            }
 
             var prefabName = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : DefaultPrefab;
 

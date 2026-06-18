@@ -68,7 +68,7 @@ namespace ValheimVillages.Settings
         ///     and the explore adapter's "do I need to travel?" check. This is
         ///     the moment a work interaction fires (roast/smelt/deposit), so it
         ///     doubles as the "allowable distance" from a station: the approach
-        ///     already sits ~1.5m off the prefab pivot (MinApproachStandoffXZ),
+        ///     already sits ~1.5m off the prefab pivot (VillagerMovement.TryResolveApproach's offset probes),
         ///     and the villager interacts as soon as it's within this radius of
         ///     that approach. At 2m a villager would roast/deposit from up to
         ///     ~3.5-4m out; 1m keeps it right at the station (~1.5-2.5m). The

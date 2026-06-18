@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using ValheimVillages.Attributes;
 using ValheimVillages.UI.Core;
+using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.Records;
 
 namespace ValheimVillages.UI.Tabs.Registry
@@ -63,13 +64,43 @@ namespace ValheimVillages.UI.Tabs.Registry
                 };
 
             var r = m_alive[selectedIndex];
-            return new TabDetailDataUI
+            var detail = new TabDetailDataUI
             {
                 Title = r.Name,
                 Description =
                     $"Type: <color=#FFA13C>{r.Type}</color>\n" +
                     $"Status: <color=#6FCF6F>Alive</color>",
             };
+
+            // Recall: bring the villager back to this station. If there is no active
+            // villager to recall (it was killed/lost without the record updating —
+            // an orphaned Alive record), transition it to Dead so the Revive workflow
+            // can restore it. Record id == VillagerAI.UniqueId.
+            detail.ActionText = "Recall";
+            var recordId = r.RecordId;
+            var name = r.Name;
+            var stationPos = context.RegistryPosition;
+            detail.OnAction = () =>
+            {
+                if (VillagerAIManager.ActiveVillagers.TryGetValue(recordId, out var ai) && ai != null)
+                {
+                    Player.m_localPlayer?.Message(
+                        MessageHud.MessageType.Center,
+                        ai.Recall(stationPos)
+                            ? $"{name} recalled"
+                            : $"Cannot recall {name} (no reachable spot at the station)");
+                }
+                else
+                {
+                    // No villager in the world to recall — mark fallen so Revive can fix it.
+                    VillagerRecordTable.SetStatus(recordId, RecordStatus.Dead);
+                    Player.m_localPlayer?.Message(
+                        MessageHud.MessageType.Center,
+                        $"{name} not found — marked fallen. Use Revive to restore.");
+                }
+            };
+
+            return detail;
         }
     }
 }

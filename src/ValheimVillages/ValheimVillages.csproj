@@ -7,6 +7,7 @@
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 
         <R2ModmanProfile>valheim-modding</R2ModmanProfile>
+        <R2ModmanReleaseProfile>valheim-server</R2ModmanReleaseProfile>
 
         <!-- Paths - adjust if needed -->
         <ValheimDir>$(HOME)/.local/share/Steam/steamapps/common/Valheim</ValheimDir>
@@ -17,7 +18,7 @@
 
         <!-- Output path switches based on HotReload setting -->
         <OutputPath Condition="'$(HotReload)' == 'true'">$(BepInExDir)/scripts/</OutputPath>
-        <OutputPath Condition="'$(HotReload)' != 'true'">$(BepInExDir)/plugins/ValheimVillages/</OutputPath>
+        <OutputPath Condition="'$(HotReload)' != 'true'">$(R2ModmanReleaseProfile)/plugins/ValheimVillages/</OutputPath>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     </PropertyGroup>
 

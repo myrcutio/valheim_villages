@@ -67,9 +67,15 @@ namespace ValheimVillages.TaskQueue.Handlers
             if (ZNet.instance == null || ZNetScene.instance == null ||
                 ZoneSystem.instance == null || ZDOMan.instance == null)
                 return false;
-            if (!VillagerAgentType.IsRegistered) return false;
+            // Self-bootstrap the villager agent slot (31). EnsureRegistered only needs the
+            // Pathfinding singleton — not a spawned villager — and is idempotent, so a
+            // registry-only village (no villager to trigger registration via
+            // VillagerAI.Awake) can still bake. Without this the partition a fresh registry
+            // needs defers forever: IsRegistered stays false with zero villagers, yet the
+            // graph is itself the prerequisite for spawning the first one.
+            if (!VillagerAgentType.EnsureRegistered()) return false;
 
-            var anchors = FilterAnchorsByTask(VillagerAIManager.GetAllAnchorPositions(), task);
+            var anchors = FilterAnchorsByTask(CollectSeedAnchors(), task);
             // No anchors yet => nothing to partition. Let Handle() run and no-op (it
             // returns no_anchors and never bakes) rather than defer indefinitely.
             if (anchors == null || anchors.Count == 0) return true;
@@ -120,7 +126,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             // enqueue — the graph is stable while the task waits in the queue.
             VillageNavLock.RequestHold(NavRebuildSettleSeconds);
 
-            var allAnchors = VillagerAIManager.GetAllAnchorPositions();
+            var allAnchors = CollectSeedAnchors();
             var anchors = FilterAnchorsByTask(allAnchors, task);
             // Snap each home/seed to a walkable, capsule-clear cell before it drives the
             // bake elevation and the Pass-1 reachability flood. A registry-anchored home
@@ -445,6 +451,14 @@ namespace ValheimVillages.TaskQueue.Handlers
             // then publish the area/caches from the village. This replaces the old
             // per-guard PatrolPersistence.SaveHnaGraph write.
             village.SaveGraph();
+
+            // Now that the graph is rebuilt + saved, create/repair/validate the village's
+            // self-healing anchor triad (3 walkable, mutually connected, founder-reachable
+            // points near the registry). Idempotent and cheap on the already-valid path.
+            // Must run AFTER SaveGraph (so the navmesh/graph reflect the committed state)
+            // and BEFORE RefreshFromVillage (so the area/caches publish from a valid triad).
+            VillageRegistry.EnsureAnchorTriad(village);
+
             VillageAreaManager.RefreshFromVillage(village);
 
             // The boundary may have grown or shrunk (e.g. the player walled off a
@@ -595,6 +609,33 @@ namespace ValheimVillages.TaskQueue.Handlers
                 Plugin.Log?.LogInfo(
                     $"[Region] Snapped {moved}/{anchors.Count} village seed(s) onto walkable cells near their anchor.");
             return snapped;
+        }
+
+        /// <summary>
+        ///     Seed anchors the partition builds around: every villager home position
+        ///     (<see cref="VillagerAIManager.GetAllAnchorPositions" />) PLUS every durable
+        ///     village's registry anchor (<see cref="Village.Anchor" />). The registry
+        ///     anchors are what let a freshly-placed registry — a village with no villagers
+        ///     yet — bake its region graph, which is the prerequisite for spawning its
+        ///     first villager. Without them the anchor list is empty for a registry-only
+        ///     village and the partition no-ops at no_anchors_or_areas. Deduped against
+        ///     villager homes (1 m²) so a registry co-located with a villager home isn't
+        ///     counted twice. Returns a fresh list (GetAllAnchorPositions already does).
+        /// </summary>
+        private static List<Vector3> CollectSeedAnchors()
+        {
+            var anchors = VillagerAIManager.GetAllAnchorPositions();
+            foreach (var village in VillageRegistry.EnumerateAll())
+            {
+                var a = village.Anchor;
+                if (a == Vector3.zero) continue;
+                var duplicate = false;
+                foreach (var existing in anchors)
+                    if ((existing - a).sqrMagnitude < 1f) { duplicate = true; break; }
+                if (!duplicate) anchors.Add(a);
+            }
+
+            return anchors;
         }
 
         private static List<Vector3> FilterAnchorsByTask(List<Vector3> allAnchors, VillagerTask task)

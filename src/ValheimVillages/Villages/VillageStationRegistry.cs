@@ -34,6 +34,87 @@ namespace ValheimVillages.Villages
         // no hard-coded prefab/type list.
         private static readonly Dictionary<Type, bool> s_conversionTypeCache = new();
 
+        /// <summary>
+        ///     Durable station metadata persisted on the village ZDO under
+        ///     <see cref="Village.StationsKey" />. Full XYZ position (no truncation) plus
+        ///     the station's clean prefab name. The live <see cref="Component" /> is a
+        ///     disposable projection resolved on demand from <see cref="Position" />.
+        /// </summary>
+        private readonly struct StationEntry
+        {
+            public readonly Vector3 Position;
+            public readonly string PrefabName;
+
+            public StationEntry(Vector3 position, string prefabName)
+            {
+                Position = position;
+                PrefabName = prefabName ?? "";
+            }
+        }
+
+        // Same delimited framing as VillageAnchorPersistence: records separated by
+        // RecordSep, fields by FieldSep, full XYZ with the round-trip ("R") float format
+        // under InvariantCulture. Prefab names are sanitized of the delimiters.
+        private const char StationFieldSep = '|';
+        private const char StationRecordSep = ';';
+
+        private static string SerializeStations(IEnumerable<StationEntry> entries)
+        {
+            if (entries == null) return "";
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var sb = new System.Text.StringBuilder();
+            var first = true;
+            foreach (var e in entries)
+            {
+                if (!first) sb.Append(StationRecordSep);
+                first = false;
+                sb.Append(e.Position.x.ToString("R", inv)).Append(StationFieldSep)
+                    .Append(e.Position.y.ToString("R", inv)).Append(StationFieldSep)
+                    .Append(e.Position.z.ToString("R", inv)).Append(StationFieldSep)
+                    .Append(SanitizeStationName(e.PrefabName));
+            }
+
+            return sb.ToString();
+        }
+
+        private static bool RestoreStations(string data, List<StationEntry> outEntries)
+        {
+            outEntries.Clear();
+            if (string.IsNullOrEmpty(data)) return false;
+
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var records = data.Split(StationRecordSep);
+            foreach (var record in records)
+            {
+                if (string.IsNullOrEmpty(record)) continue;
+                var f = record.Split(StationFieldSep);
+                if (f.Length < 4) continue;
+                if (!float.TryParse(f[0], System.Globalization.NumberStyles.Float, inv, out var x)) continue;
+                if (!float.TryParse(f[1], System.Globalization.NumberStyles.Float, inv, out var y)) continue;
+                if (!float.TryParse(f[2], System.Globalization.NumberStyles.Float, inv, out var z)) continue;
+                outEntries.Add(new StationEntry(new Vector3(x, y, z), f[3]));
+            }
+
+            return outEntries.Count > 0;
+        }
+
+        private static string SanitizeStationName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "";
+            return name.Replace(StationFieldSep, '_').Replace(StationRecordSep, '_');
+        }
+
+        /// <summary>Clean prefab name for a station GameObject, stripping the Unity
+        /// "(Clone)" suffix so persisted names match prefab names.</summary>
+        private static string CleanPrefabName(GameObject go)
+        {
+            if (go == null) return "";
+            var n = go.name;
+            if (string.IsNullOrEmpty(n)) return "";
+            var idx = n.IndexOf("(Clone)", StringComparison.Ordinal);
+            return idx >= 0 ? n.Substring(0, idx) : n;
+        }
+
         private static bool HasConversionField(Type t)
         {
             if (s_conversionTypeCache.TryGetValue(t, out var has)) return has;
@@ -55,6 +136,15 @@ namespace ValheimVillages.Villages
         {
             station = null;
             if (go == null) return false;
+
+            // Villager NPCs (Dverger/DvergerMage(Clone)) carry our Villager component on
+            // the GameObject or somewhere up the parent chain, and the native Dvergr
+            // crossbow/workbench colliders would otherwise classify them as stations. A
+            // carrier of Villager or VillagerStation is NEVER a station — bail before any
+            // CraftingStation/m_conversion probe. The registry station has no Villager
+            // component, so it still classifies normally.
+            if (go.GetComponentInParent<ValheimVillages.Villager.Villager>() != null) return false;
+            if (go.GetComponentInParent<ValheimVillages.Villager.Station.VillagerStation>() != null) return false;
 
             var cs = go.GetComponentInParent<CraftingStation>();
             if (cs != null) { station = cs; return true; }
@@ -165,6 +255,21 @@ namespace ValheimVillages.Villages
 
             s_stationsByVillage[area.VillageId] = found;
 
+            // Persist station metadata onto the village ZDO so stations survive a
+            // save/reload and can be re-resolved on demand before any physics rescan.
+            var village = VillageRegistry.FindById(area.VillageId);
+            if (village != null)
+            {
+                var entries = new List<StationEntry>(found.Count);
+                foreach (var comp in found)
+                {
+                    if (comp == null) continue;
+                    entries.Add(new StationEntry(comp.transform.position, CleanPrefabName(comp.gameObject)));
+                }
+
+                village.SetBlob(Village.StationsKey, SerializeStations(entries));
+            }
+
             if (Plugin.Log != null)
             {
                 Plugin.Log.LogInfo(
@@ -177,6 +282,52 @@ namespace ValheimVillages.Villages
                         $"  [{comp.GetType().Name}] {comp.gameObject.name} @ ({p.x:F1},{p.y:F1},{p.z:F1})");
                 }
             }
+        }
+
+        /// <summary>~radius (m) of the OverlapSphere used to resolve a persisted station
+        /// position back to its live Component after load.</summary>
+        private const float StationResolveRadius = 2f;
+
+        /// <summary>
+        ///     Ensure a live station list exists for <paramref name="villageKey" />. When the
+        ///     in-memory cache is missing/empty (e.g. right after world load, before any
+        ///     physics rescan), hydrate it from the durable ZDO blob: read the persisted
+        ///     station positions and resolve each back to its live <see cref="Component" />
+        ///     via a small <see cref="Physics.OverlapSphere" /> filtered through the (fixed)
+        ///     <see cref="TryClassifyStation" />. The components are disposable projections
+        ///     of the durable positions; the periodic <see cref="RefreshFor" /> rescan stays
+        ///     the authority. No-op when a non-empty live list already exists.
+        /// </summary>
+        private static void EnsureHydrated(string villageKey)
+        {
+            if (string.IsNullOrEmpty(villageKey)) return;
+            if (s_stationsByVillage.TryGetValue(villageKey, out var existing) && existing != null && existing.Count > 0)
+                return;
+
+            var village = VillageRegistry.FindById(villageKey);
+            if (village == null) return;
+
+            var entries = new List<StationEntry>();
+            if (!RestoreStations(village.GetBlob(Village.StationsKey), entries)) return;
+
+            var resolved = new List<Component>(entries.Count);
+            var seen = new HashSet<Component>();
+            foreach (var entry in entries)
+            {
+                var hits = Physics.OverlapSphere(entry.Position, StationResolveRadius);
+                foreach (var col in hits)
+                {
+                    if (col == null || col.gameObject == null) continue;
+                    if (!TryClassifyStation(col.gameObject, out var station)) continue;
+                    if (!seen.Add(station)) continue;
+                    resolved.Add(station);
+                }
+            }
+
+            s_stationsByVillage[villageKey] = resolved;
+            Plugin.Log?.LogInfo(
+                $"[VillageStationRegistry] {villageKey}: hydrated {resolved.Count}/{entries.Count} " +
+                "station(s) from ZDO blob");
         }
 
         /// <summary>Remove a village's station cache (called on UnregisterArea).</summary>
@@ -205,6 +356,7 @@ namespace ValheimVillages.Villages
             component = null;
 
             if (!TryGetVillage(position, out var villageKey)) return false;
+            EnsureHydrated(villageKey);
             if (!s_stationsByVillage.TryGetValue(villageKey, out var list)) return false;
 
             T best = null;
@@ -225,7 +377,7 @@ namespace ValheimVillages.Villages
 
             if (best == null) return false;
 
-            if (!TryResolveApproach(best.transform.position, position, out var approach))
+            if (!VillagerMovement.TryResolveApproach(best.transform.position, position, null, out var approach))
             {
                 Plugin.Log?.LogDebug(
                     $"[VillageStationRegistry] {villageKey}: no HNA-valid approach to {best.gameObject.name} " +
@@ -240,220 +392,6 @@ namespace ValheimVillages.Villages
             return true;
         }
 
-        /// <summary>
-        ///     Resolve a world-space target (station, chest, anything) to a position the villager
-        ///     can actually reach: walk the village's HNA lookup-grid cells in order of XZ
-        ///     distance to the target, return the first cell that has a complete NavMesh path
-        ///     from <paramref name="pathSource"/> (the villager's current or anchor position).
-        ///     <para>This is the SINGLE entry point for "where should the villager actually walk
-        ///     to reach this thing?" Used by station lookup AND container-target navigation in
-        ///     CraftingWorkflow — same rules everywhere, so when one path fails the diagnostic
-        ///     applies to all the others too.</para>
-        ///     <para>Lookup-grid cells (not region centroids) are the canonical HNA positions
-        ///     that round-trip through PointToRegionId. Centroids are geometric averages and
-        ///     can land in buckets the lookup grid never indexed.</para>
-        ///     <para>No fallback. If no lookup cell in the path-source's village is reachable
-        ///     AND close to the target, returns false. The caller must abandon the work, not
-        ///     dispatch toward an unreachable position.</para>
-        /// </summary>
-        /// <summary>
-        ///     Minimum XZ distance between the resolved approach and the target.
-        ///     The HNA lookup grid can land a "navigable" cell directly on top
-        ///     of a station's pivot — and NavMesh.CalculatePath will happily
-        ///     compute a straight-line path to it because polygon connectivity
-        ///     exists, but the agent capsule physically can't traverse through
-        ///     the station's own collider. Forcing a 1.5m stand-off ensures the
-        ///     resolved approach is genuinely *next to* the obstacle, not *at*
-        ///     it. Still inside station RPC interaction range (~2m), so AddFuel
-        ///     etc. still fire once the agent arrives.
-        ///     <para>Confirmed by incident bundle 002_Blacksmith_stall_escape
-        ///     (May 2026): target=(-2276.5, 39, 1300.5) resolved to approach
-        ///     with same XZ, path[0]=same XZ; agent stalled 2.16m short
-        ///     because the straight-line capsule path grazed the smelter
-        ///     body.</para>
-        /// </summary>
-        private const float MinApproachStandoffXZ = 1.5f;
-
-        /// <summary>
-        ///     Max vertical gap (m) when snapping the path source onto the HNA
-        ///     graph — keeps a ground-floor anchor from snapping to an upper-floor
-        ///     cell at the same XZ. Slightly wider than one HeightBucketSize (2m).
-        /// </summary>
-        private const float PathSourceSnapMaxY = 3f;
-
-        /// <summary>
-        ///     Max XZ distance (m) an approach cell may sit from the target. A
-        ///     work approach should be right next to the station/chest; this also
-        ///     bounds the capsule/path validation so an unreachable target can't
-        ///     make the search walk the whole lookup grid.
-        /// </summary>
-        private const float ApproachMaxXzDist = 10f;
-
-        /// <summary>
-        ///     Max vertical gap (m) an approach cell may sit from the target —
-        ///     ~one storey. Lookup-cell candidates are ranked by XZ distance and
-        ///     ignore Y, so without this a cell directly below/above the target
-        ///     (e.g. terrain ~10m under an elevated floor) could win and the
-        ///     villager would interact with the chest/station through the floor
-        ///     from another level (observed: a deposit from ~10m below). The
-        ///     interaction itself (deposit / RPC) ignores distance, so the
-        ///     approach is the only place to enforce "same level".
-        /// </summary>
-        private const float ApproachMaxYDelta = 3f;
-
-        /// <summary>Diagnostic breakdown of the most recent TryResolveApproach call (vv_approach).</summary>
-        public static string LastApproachDiag = "(none)";
-
-        /// <param name="villageAnchor">
-        ///     Position used to select the VILLAGE/graph (defaults to
-        ///     <paramref name="pathSource" /> when null). Pass the villager's BED
-        ///     here: the village a villager works in is defined by its home, not
-        ///     by wherever it's physically standing. Without this a villager
-        ///     bumped off the graph (its current position outside every village
-        ///     polygon) resolves to "no village" / the wrong nearest village and
-        ///     can't look up its own stations — leaving it stuck. The current
-        ///     position is still used as the path START (snapped onto the chosen
-        ///     graph).
-        /// </param>
-        public static bool TryResolveApproach(
-            Vector3 target, Vector3 pathSource, out Vector3 approach, Vector3? villageAnchor = null)
-        {
-            approach = Vector3.zero;
-            var anchor = villageAnchor ?? pathSource;
-            // GetVillageAt resolves by graph coverage first (PointToRegionId), then
-            // nearest — so it already handles the "anchor just outside the polygon but
-            // still on the navmesh" case the old polygon-membership lookup special-cased.
-            var graph = VillageRegistry.GetVillageAt(anchor)?.Graph;
-            if (graph == null)
-            {
-                LastApproachDiag = $"no graph for source ({pathSource.x:F1},{pathSource.y:F1},{pathSource.z:F1})";
-                return false;
-            }
-
-            // Snap the path source onto the graph before planning. The usual
-            // source is a anchor, which sits on a cell the HNA prune carved out
-            // for the anchor/obstacle footprint — PointToRegionId is null there,
-            // so the corridor planner can't seed a start cell and reports
-            // EVERY target unreachable (a blacksmith concludes "no smelter in
-            // the village"). The nearest lookup cell is the floor the villager
-            // actually stands on next to the anchor.
-            //
-            // Constrain the snap to the source's height: TryFindNearestLookupCell
-            // ranks by XZ distance and ignores Y, so in a multi-storey building a
-            // ground-floor anchor would otherwise snap UP to an upper-floor cell at
-            // the same XZ — and then only that upper floor is reachable, sending
-            // every approach to the wrong level.
-            Vector3 pathStart;
-            var snapped = true;
-            if (!graph.TryFindNearestLookupCell(pathSource,
-                    cell => Mathf.Abs(cell.y - pathSource.y) <= PathSourceSnapMaxY,
-                    out pathStart, out _))
-            {
-                // Nothing at the source's height — fall back to nearest at any
-                // height (degenerate, but better than refusing to path).
-                snapped = false;
-                if (!graph.TryFindNearestLookupCell(pathSource, null, out pathStart, out _))
-                    pathStart = pathSource;
-            }
-
-            var minStandoffSq = MinApproachStandoffXZ * MinApproachStandoffXZ;
-            var considered = 0;
-            var levelPass = 0;
-            var standoffPass = 0;
-            var losPass = 0;
-            var ok = graph.TryFindNearestLookupCell(
-                target,
-                candidate =>
-                {
-                    considered++;
-                    // Same vertical level only — reject candidates more than ~one
-                    // storey above/below the target so the villager can't approach
-                    // (and then interact with) a chest/station from another floor.
-                    if (Mathf.Abs(candidate.y - target.y) > ApproachMaxYDelta) return false;
-                    levelPass++;
-                    // Stand-off check next — cheaper than the path query and
-                    // the dominant reason candidates near a station get
-                    // rejected.
-                    var dx = candidate.x - target.x;
-                    var dz = candidate.z - target.z;
-                    if (dx * dx + dz * dz < minStandoffSq) return false;
-                    standoffPass++;
-                    // No per-source path check. A same-level standoff cell with
-                    // a clear line of sight to the station IS a valid approach
-                    // position — and a valid approach position means the station
-                    // is reachable. Whether THIS villager can route to it from
-                    // where it currently stands is decided at execution time by
-                    // NavTo (snap onto the navmesh + let the agent path, abandon
-                    // if genuinely blocked), NOT pre-validated here with a
-                    // complete-path-from-anchor query. That pre-check produced false
-                    // "unreachable" (e.g. blacksmith → smelter) whenever the anchor
-                    // had no precomputed corridor to the station, even though the
-                    // station was right there with a perfectly good approach.
-                    //
-                    // LOS still matters: it rejects cells on the wrong side of a
-                    // wall or a different floor (a ceiling/floor blocks the
-                    // diagonal ray), so the resolved approach is genuinely next
-                    // to and on the same level as the station.
-                    if (!HasClearLineToStation(candidate, target)) return false;
-                    losPass++;
-                    return true;
-                },
-                out approach,
-                out _,
-                ApproachMaxXzDist);
-
-            LastApproachDiag =
-                $"src=({pathSource.x:F1},{pathSource.y:F1},{pathSource.z:F1}) snap={(snapped ? "y" : "fallback")} " +
-                $"pathStart=({pathStart.x:F1},{pathStart.y:F1},{pathStart.z:F1}) " +
-                $"tgt=({target.x:F1},{target.y:F1},{target.z:F1}) " +
-                $"considered={considered} levelPass={levelPass} standoffPass={standoffPass} losPass={losPass} " +
-                $"result={(ok ? $"({approach.x:F1},{approach.y:F1},{approach.z:F1})" : "FAIL")}";
-            return ok;
-        }
-
-        /// <summary>Layers that block a villager↔station sightline (walls, floors, terrain).</summary>
-        private static readonly int s_losMask =
-            LayerMask.GetMask("Default", "static_solid", "piece", "terrain");
-
-        /// <summary>
-        ///     True when nothing solid sits between the approach point and the
-        ///     station at interaction height. Casts at ~chest height and stops a
-        ///     short pad before the station so the station's OWN collider doesn't
-        ///     register as an obstruction. A wall (vertical) blocks the ray; a
-        ///     different-floor station makes the ray climb into the intervening
-        ///     floor/ceiling and blocks too — so this also enforces "same level".
-        /// </summary>
-        private static bool HasClearLineToStation(Vector3 approach, Vector3 station)
-        {
-            const float eyeHeight = 1.2f;   // villager/station interaction height
-
-            var from = approach + Vector3.up * eyeHeight;
-            var to = station + Vector3.up * eyeHeight;
-            var delta = to - from;
-            var dist = delta.magnitude;
-            if (dist < 0.01f) return true; // adjacent — trivially usable
-            var dir = delta / dist;
-
-            // RaycastAll the FULL segment and ignore the station's OWN collider.
-            // A fixed stand-off pad can't clear a large station: the charcoal
-            // kiln's collider is ~5-6m wide, so a ray toward its centre stopped
-            // 1.5m short still dead-ends inside the kiln's own body and reads as
-            // "blocked" from every approach (losPass=0). Instead, a hit whose
-            // bounds contain the target IS the station itself (the thing we're
-            // walking to) — not an obstruction between us and it — so skip it.
-            // Any OTHER solid hit along the segment is a real wall / floor /
-            // different piece and genuinely blocks the sightline.
-            var hits = Physics.RaycastAll(from, dir, dist, s_losMask,
-                QueryTriggerInteraction.Ignore);
-            foreach (var h in hits)
-            {
-                if (h.collider == null) continue;
-                if (h.collider.bounds.Contains(station)) continue; // the station's own body
-                return false; // a real obstruction between approach and station
-            }
-
-            return true;
-        }
 
         [DevCommand("Diagnose HNA approach resolution to a target from a source (default player). " +
                     "Usage: vv_approach <tx> <tz> [<sx> <sz>]", Name = "vv_approach")]
@@ -477,8 +415,8 @@ namespace ValheimVillages.Villages
             var groundT = ZoneSystem.instance != null
                 ? ZoneSystem.instance.GetGroundHeight(new Vector3(tx, 0f, tz)) : 0f;
             var target = new Vector3(tx, groundT, tz);
-            var ok = TryResolveApproach(target, src, out var approach);
-            var msg = $"[vv_approach] ok={ok} approach=({approach.x:F1},{approach.y:F1},{approach.z:F1})\n  {LastApproachDiag}";
+            var ok = VillagerMovement.TryResolveApproach(target, src, null, out var approach);
+            var msg = $"[vv_approach] ok={ok} approach=({approach.x:F1},{approach.y:F1},{approach.z:F1})";
             global::Console.instance?.Print(msg);
             Plugin.Log?.LogInfo(msg);
         }
@@ -499,6 +437,7 @@ namespace ValheimVillages.Villages
                     continue;
                 }
 
+                EnsureHydrated(key);
                 var list = s_stationsByVillage.TryGetValue(key, out var stations) ? stations : null;
                 sb.AppendLine($"  anchor=({anchor.x:F1},{anchor.y:F1},{anchor.z:F1}) → village {key}: " +
                               $"{(list?.Count ?? 0)} station(s)");
@@ -507,7 +446,7 @@ namespace ValheimVillages.Villages
                     {
                         if (comp == null) continue;
                         var p = comp.transform.position;
-                        var approached = TryResolveApproach(p, anchor, out var approach);
+                        var approached = VillagerMovement.TryResolveApproach(p, anchor, null, out var approach);
                         sb.AppendLine(
                             $"    [{comp.GetType().Name}] {comp.gameObject.name} " +
                             $"@ ({p.x:F1},{p.y:F1},{p.z:F1}) dist={Vector3.Distance(anchor, p):F1}m " +

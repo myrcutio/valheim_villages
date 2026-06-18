@@ -85,6 +85,15 @@ namespace ValheimVillages.Items
 
             Plugin.Log?.LogInfo(
                 $"Registered {_prefabs.Count} custom items in ObjectDB (purged {purged} dead entries)");
+
+            // ZNetScene.Awake can fire BEFORE this runs on a world load (observed:
+            // "Registered 0 prefabs in ZNetScene" — _prefabs was empty/destroyed at that point),
+            // so the prefabs end up in ObjectDB but never in ZNetScene, and ZNetScene.GetPrefab(...)
+            // returns null (symptom: "Failed to create work order"). Register into ZNetScene here too
+            // whenever it's available so creation and ZNetScene registration are order-independent.
+            // RegisterAllInZNetScene is idempotent.
+            if (ZNetScene.instance != null)
+                RegisterAllInZNetScene(ZNetScene.instance);
         }
 
         /// <summary>

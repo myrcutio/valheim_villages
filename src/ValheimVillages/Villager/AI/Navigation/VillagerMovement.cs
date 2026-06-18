@@ -100,6 +100,10 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
 
+        /// <summary>Block layers for the anchor clearance capsule (terrain excluded — only
+        /// structures/pieces count, so a point on open terrain passes).</summary>
+        private static readonly int s_clearanceMask = LayerMask.GetMask("Default", "static_solid", "piece");
+
         /// <summary>
         ///     Find the nearest reachable point on the villager NavMesh within
         ///     <paramref name="maxRadius"/> of <paramref name="target"/>. Use this for stations
@@ -109,7 +113,8 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     Returns true and writes the approach point on success; returns false (and leaves
         ///     <paramref name="approachPoint"/> = target) when nothing walkable is found within radius.
         /// </summary>
-        public static bool TryFindReachableApproach(Vector3 target, float maxRadius, out Vector3 approachPoint)
+        public static bool TryFindReachableApproach(
+            Vector3 target, float maxRadius, out Vector3 approachPoint, float minClearance = 0f)
         {
             approachPoint = target;
             if (!VillagerAgentType.IsRegistered) return false;
@@ -121,6 +126,20 @@ namespace ValheimVillages.Villager.AI.Navigation
             };
 
             if (!NavMesh.SamplePosition(target, out var hit, maxRadius, filter)) return false;
+
+            // Clearance gate (anchor sampling): require room for a body of radius minClearance
+            // (2-3x a humanoid) so anchors land on open ground, never on a cramped sliver like a
+            // station top. A vertical capsule of that radius at the sampled point must be clear of
+            // structure/piece colliders (terrain excluded). A station top is rejected because the
+            // station's own piece colliders fall inside the capsule; open terrain passes.
+            if (minClearance > 0f)
+            {
+                var p0 = hit.position + Vector3.up * 0.3f;
+                var p1 = hit.position + Vector3.up * 1.8f;
+                if (Physics.CheckCapsule(p0, p1, minClearance, s_clearanceMask, QueryTriggerInteraction.Ignore))
+                    return false;
+            }
+
             approachPoint = hit.position;
             return true;
         }
@@ -142,7 +161,8 @@ namespace ValheimVillages.Villager.AI.Navigation
             Vector3 target,
             Vector3 pathSource,
             System.Func<Vector3, bool> hullPredicate,
-            out Vector3 approach)
+            out Vector3 approach,
+            float minClearance = 0f)
         {
             approach = target;
             var probes = s_probeOffsets;
@@ -150,7 +170,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             for (var i = 0; i < probes.Length; i++)
             {
                 var probe = target + probes[i];
-                if (!TryFindReachableApproach(probe, ApproachProbeRadius, out var hit)) continue;
+                if (!TryFindReachableApproach(probe, ApproachProbeRadius, out var hit, minClearance)) continue;
                 if (hullPredicate != null && !hullPredicate(hit)) continue;
                 if (!TryFindCompletePath(pathSource, hit, pathBuffer)) continue;
                 approach = hit;

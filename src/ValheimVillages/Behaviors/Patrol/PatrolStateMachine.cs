@@ -165,7 +165,8 @@ namespace ValheimVillages.Behaviors.Patrol
             var villageId = GetVillageId();
             // The graph is owned by the durable village (hydrated at load by
             // village_index, rebuilt by the partition). No per-guard ZDO restore.
-            var graph = VillageRegistry.FindById(villageId)?.Graph;
+            var village = VillageRegistry.FindById(villageId);
+            var graph = village?.Graph;
 
             // No graph yet: enqueue the partition task (once) and wait. This is the
             // ONLY condition that warrants a partition — an available graph that
@@ -197,8 +198,14 @@ namespace ValheimVillages.Behaviors.Patrol
                 return;
             }
 
+            // Self-heal legacy villagers whose HomeAnchor sits on the disconnected
+            // registry island: resolve a connected seed against the village's anchor
+            // triad for route-building only. Do NOT persist/mutate the record.
+            var seed = VillageRegistry.TryResolveVillagerSeed(village, m_ai.Memory.HomeAnchor, out var s)
+                ? s
+                : m_ai.Memory.HomeAnchor;
             var routePoints = PatrolRouteBuilder.Build(
-                graph.GetBoundaryCells(), m_ai.Memory.HomeAnchor);
+                graph.GetBoundaryCells(), seed);
             if (routePoints.Count >= 3)
             {
                 m_patrolWaypoints = routePoints

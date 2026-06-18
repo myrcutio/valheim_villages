@@ -18,6 +18,10 @@ namespace ValheimVillages.Abilities.SpawnBlock
         private static readonly List<int> s_disabledSpawnerIndices = new();
         private static List<SpawnSystem.SpawnData> s_lastSpawners;
 
+        // Extra buffer (m) beyond the village boundary that still counts as the
+        // protected no-spawn zone, so enemies can't spawn right up against the wall.
+        private const float SpawnBlockMargin = 10f;
+
         /// <summary>
         ///     Prefix: if this is NOT an event spawn, check if we should suppress spawning
         ///     by temporarily filtering the spawn list to remove spawners whose spawn position
@@ -135,7 +139,7 @@ namespace ValheimVillages.Abilities.SpawnBlock
                     Mathf.Sin(angle) * spawnDist
                 );
 
-                if (VillageAreaManager.IsInsideAnyVillage(samplePos))
+                if (VillageAreaManager.IsNearAnyVillage(samplePos, SpawnBlockMargin))
                     insideCount++;
             }
 

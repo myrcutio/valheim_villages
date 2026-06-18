@@ -39,8 +39,20 @@ namespace ValheimVillages.Behaviors.Combat
         private static readonly int s_losMask =
             LayerMask.GetMask("Default", "static_solid", "piece", "terrain");
 
+        // Combat starts at full priority (preempts everything) and halves each time
+        // it fails to path to the target AND has no line of sight, so a guard that
+        // can neither reach nor see an enemy (e.g. one outside the walls) decays out
+        // of control instead of camping the nearest wall. Regaining LOS resets it.
+        private const int BasePriority = 100;
+
+        // Patrol's priority. Once combat decays to/below this it yields control (the
+        // behavior list is sorted once at creation, so we emulate the demotion in
+        // WantsControl rather than by re-ordering).
+        private const int YieldBelowPriority = 30;
+
         private readonly VillagerAI m_ai;
 
+        private int m_priority = BasePriority;
         private float m_lastAttackTime;
         private float m_lastRepathTime;
         private float m_lastScanTime;
@@ -65,26 +77,45 @@ namespace ValheimVillages.Behaviors.Combat
 
         public string Tag => "combat";
 
-        // Above patrol(30)/craft(50)/tidy(60): combat preempts everything while a
-        // hostile is in the guard zone.
-        public int Priority => 100;
+        // Dynamic: BasePriority(100) while engaging; halves on pathing failure
+        // without LOS; resets to 100 on regained LOS. Above patrol(30)/craft(50)/
+        // tidy(60) until it decays below YieldBelowPriority and yields.
+        public int Priority => m_priority;
 
         public bool WantsControl(BehaviorContext ctx)
         {
             if (!HasUsableWeapon())
                 return false;
 
-            // Keep control while a live target is still in the guard zone.
-            if (IsValidTarget(m_target))
-                return true;
+            // Acquire/keep a target. A fresh target is engaged at full priority.
+            if (!IsValidTarget(m_target))
+            {
+                if (Time.time - m_lastScanTime < CombatSettings.TargetRescanInterval)
+                    return false;
+                m_lastScanTime = Time.time;
+                m_target = AcquireTarget();
+                if (m_target == null)
+                    return false;
+                m_priority = BasePriority;
+            }
 
-            // Otherwise scan for a fresh target on a throttle.
-            if (Time.time - m_lastScanTime < CombatSettings.TargetRescanInterval)
+            // Regaining line of sight restores full priority, so the guard re-engages
+            // even after combat had decayed and yielded control back to patrol.
+            var h = m_ai.Humanoid;
+            if (h != null && HasLineOfSight(h))
+                m_priority = BasePriority;
+
+            // Decayed to/below patrol's priority: yield so the guard returns to patrol
+            // instead of camping a target it can neither reach nor see. Keep m_target
+            // so a regained LOS flips us back to BasePriority and re-engages.
+            if (m_priority <= YieldBelowPriority)
+            {
+                if (m_ai.CurrentState == BehaviorState.Alarmed)
+                    m_ai.SetState(BehaviorState.Idle);
                 return false;
-            m_lastScanTime = Time.time;
+            }
 
-            m_target = AcquireTarget();
-            return m_target != null;
+            return true;
         }
 
         public void Update(float dt)
@@ -122,14 +153,21 @@ namespace ValheimVillages.Behaviors.Combat
             // Trust the native weapon's AI-tuned attack range (a real ranged value
             // for the crossbow), with a small floor.
             var range = Mathf.Max(2f, weapon.m_shared.m_aiAttackRange);
+            var los = HasLineOfSight(humanoid);
+            if (los) m_priority = BasePriority; // clear shot in sight -> full commitment
+
             if (dist > range)
             {
-                Repath(targetPos); // out of range — close in (path routes around walls)
+                // Out of range — close in (path routes around walls). If we can
+                // neither reach the target nor see it, decay priority so we eventually
+                // yield to patrol instead of grinding toward an unreachable enemy.
+                var reachable = Repath(targetPos);
+                if (reachable == false && !los) DecayPriority();
                 return;
             }
 
             // In range. Only fire with a clear shot — never shoot through a wall.
-            if (HasLineOfSight(humanoid))
+            if (los)
             {
                 m_losDest = null;
                 m_losSearchFails = 0;
@@ -290,13 +328,35 @@ namespace ValheimVillages.Behaviors.Combat
                 m_lastAttackTime = Time.time;
         }
 
-        private void Repath(Vector3 dest)
+        // Returns true if a complete agent path to dest exists, false if not,
+        // null when throttled (no path attempt this tick — caller shouldn't decay).
+        private bool? Repath(Vector3 dest)
         {
-            if (Time.time - m_lastRepathTime < CombatSettings.ChaseRepathInterval) return;
+            if (Time.time - m_lastRepathTime < CombatSettings.ChaseRepathInterval) return null;
             m_lastRepathTime = Time.time;
+            var reachable = TargetReachable(dest);
             // snapToApproach:false — chase a moving target directly; NavTo still
             // lands the point on the agent navmesh so the mover can follow it.
             m_ai.NavTo(dest, BehaviorState.Alarmed, "engage", snapToApproach: false);
+            return reachable;
+        }
+
+        /// <summary>Halve combat priority (floored at 1) on a pathing failure with no LOS.</summary>
+        private void DecayPriority()
+        {
+            m_priority = Mathf.Max(1, m_priority / 2);
+        }
+
+        /// <summary>True when a complete villager-agent path exists from here to <paramref name="dest"/>.</summary>
+        private bool TargetReachable(Vector3 dest)
+        {
+            if (!VillagerAgentType.IsRegistered) return false;
+            var filter = AgentFilter();
+            if (!NavMesh.SamplePosition(m_ai.Position, out var from, 3f, filter)) return false;
+            if (!NavMesh.SamplePosition(dest, out var to, 3f, filter)) return false;
+            var path = new NavMeshPath();
+            NavMesh.CalculatePath(from.position, to.position, filter, path);
+            return path.status == NavMeshPathStatus.PathComplete;
         }
 
         // --- line of sight -------------------------------------------------
@@ -337,6 +397,9 @@ namespace ValheimVillages.Behaviors.Combat
             {
                 m_losDest = null;
                 m_losSearchFails++;
+                // No reachable firing spot and (by this branch) no LOS — a pathing
+                // failure: decay priority so we eventually yield to patrol.
+                DecayPriority();
             }
         }
 

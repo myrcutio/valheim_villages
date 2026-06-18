@@ -55,10 +55,11 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         // Per-phantom-category counts from the most recent bake. The phantoms
         // are appended to s_pieceSources in this order: door first, then bed,
-        // then outside-cell. With these counts vv_bake_audit can label each
-        // phantom by category from its sequential index.
+        // then fire, then outside-cell. With these counts vv_bake_audit can
+        // label each phantom by category from its sequential index.
         private static int s_lastDoorPhantoms;
         private static int s_lastBedPhantoms;
+        private static int s_lastFirePhantoms;
         private static int s_lastOutsidePhantoms;
 
         /// <summary>Read-only view of the terrain bake's NavMeshBuildSource list (diagnostic use).</summary>
@@ -76,7 +77,10 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <summary>Phantom bed blockers from the most recent bake (second slice of phantom tail).</summary>
         public static int LastBedPhantoms => s_lastBedPhantoms;
 
-        /// <summary>Phantom outside-cell blockers from the most recent bake (third slice of phantom tail).</summary>
+        /// <summary>Phantom fire blockers from the most recent bake (third slice of phantom tail).</summary>
+        public static int LastFirePhantoms => s_lastFirePhantoms;
+
+        /// <summary>Phantom outside-cell blockers from the most recent bake (fourth slice of phantom tail).</summary>
         public static int LastOutsidePhantoms => s_lastOutsidePhantoms;
 
         private static readonly int s_terrainMask = LayerMask.GetMask("terrain");
@@ -290,6 +294,15 @@ namespace ValheimVillages.Villager.AI.Navigation
             var phantomBeds = AddBedBlockers(pieceSources, bounds);
             result.BedsBlocked = phantomBeds;
 
+            // Carve the flame footprint of every campfire/hearth/bonfire so the
+            // bake never produces walkable navmesh ON the fire and villagers
+            // never path over or stand in flames. Same ModifierBox NotWalkable
+            // pattern as the bed blockers. Margin is kept small (0.25m XZ) so the
+            // floor/cooking-approach cells immediately NEXT TO a hearth stay
+            // walkable — a cook must still be able to stand beside it.
+            var phantomFires = AddFireBlockers(pieceSources, bounds);
+            result.FiresBlocked = phantomFires;
+
             // Compute outside cells via a pre-bake perimeter flood (uses
             // Physics.CheckBox on the piece layer + ZoneSystem.GetGroundHeight,
             // doesn't require any NavMesh data), then append phantom
@@ -308,10 +321,13 @@ namespace ValheimVillages.Villager.AI.Navigation
             s_pieceSources.Clear();
             s_pieceSources.AddRange(pieceSources);
             // Doors are no longer phantom-blocked (doorways bake walkable); only
-            // bed + outside-cell phantoms remain at the tail of pieceSources.
-            s_piecePhantomCount = phantomBeds + phantomOutside;
+            // bed + fire + outside-cell phantoms remain at the tail of
+            // pieceSources, appended in that order (matches the s_last*Phantoms
+            // slicing vv_bake_audit relies on).
+            s_piecePhantomCount = phantomBeds + phantomFires + phantomOutside;
             s_lastDoorPhantoms = 0;
             s_lastBedPhantoms = phantomBeds;
+            s_lastFirePhantoms = phantomFires;
             s_lastOutsidePhantoms = phantomOutside;
             result.PieceSourceCount = pieceSources.Count;
 
@@ -741,6 +757,126 @@ namespace ValheimVillages.Villager.AI.Navigation
             return added;
         }
 
+        /// <summary>
+        ///     Append a phantom <c>NotWalkable</c> box over the FLAME footprint of
+        ///     every campfire/hearth/bonfire (<see cref="Fireplace" />) in bounds,
+        ///     so the bake never produces walkable navmesh on the fire and the
+        ///     planner routes around it — villagers never path over or stand in
+        ///     flames. Same ModifierBox NotWalkable approach as
+        ///     <see cref="AddBedBlockers" /> and <see cref="AddOutsideCellBlockers" />.
+        ///
+        ///     Footprint resolution (most authoritative first):
+        ///     1. The child <see cref="EffectArea" /> whose <c>m_type</c> carries the
+        ///        <c>Burning</c> flag — its own trigger Collider's world AABB is
+        ///        exactly the burn hazard volume the game itself registers (see
+        ///        EffectArea.Awake: it stores <c>m_collider.bounds</c> into the
+        ///        static Burning-area list). This is the real flame footprint.
+        ///     2. Failing that, the Fireplace's own Collider bounds.
+        ///     3. Failing that, a box of radius <c>m_igniteCapsuleRadius</c> centred
+        ///        on the fireplace (guarded &gt; 0 — only ignite-capable fires set it).
+        ///     A fireplace with no resolvable footprint is skipped with a debug log
+        ///     (no silent zero-size box).
+        ///
+        ///     The carve is the footprint + a SMALL margin (0.25m XZ) so the floor
+        ///     and cooking-approach cells immediately next to a hearth stay walkable
+        ///     (a cook must still be able to stand beside it).
+        /// </summary>
+        private static int AddFireBlockers(List<NavMeshBuildSource> sources, Bounds bounds)
+        {
+            var added = 0;
+            var allFireplaces = Object.FindObjectsByType<Fireplace>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var fireplace in allFireplaces)
+            {
+                if (fireplace == null || fireplace.transform == null) continue;
+                if (!bounds.Contains(fireplace.transform.position)) continue;
+
+                if (!TryResolveFlameBounds(fireplace, out var flame))
+                {
+                    Plugin.Log?.LogDebug(
+                        $"[NavMeshBake] fire blocker skipped (no footprint) at " +
+                        $"{fireplace.transform.position}");
+                    continue;
+                }
+
+                // XZ margin small so adjacent work/approach cells stay walkable.
+                const float xzMargin = 0.25f;
+                // Vertical span: carve from just below the flame footprint base
+                // (down to floor level where the agent's navmesh sits) up over the
+                // flame top, mirroring the bed blocker's botPad/topPad reasoning —
+                // the walkable navmesh under a fire is generated at FLOOR level, so
+                // the carve must reach below the footprint base to actually remove
+                // it.
+                const float botPad = 0.6f;
+                const float topPad = 0.4f;
+                var botY = flame.min.y - botPad;
+                var topY = flame.max.y + topPad;
+                sources.Add(new NavMeshBuildSource
+                {
+                    shape = NavMeshBuildSourceShape.ModifierBox,
+                    size = new Vector3(flame.size.x + xzMargin, topY - botY, flame.size.z + xzMargin),
+                    transform = Matrix4x4.TRS(
+                        new Vector3(flame.center.x, (botY + topY) * 0.5f, flame.center.z),
+                        Quaternion.identity,
+                        Vector3.one),
+                    area = 1, // NotWalkable
+                });
+                added++;
+            }
+
+            Plugin.Log?.LogInfo($"[NavMeshBake] fire blockers: {added}");
+            return added;
+        }
+
+        /// <summary>
+        ///     Resolve the flame/hazard footprint of a fireplace as a world-space
+        ///     AABB. See <see cref="AddFireBlockers" /> for the resolution order and
+        ///     why the Burning <see cref="EffectArea" /> is preferred. Returns false
+        ///     (no resolvable footprint) when none of the three sources are
+        ///     available — caller skips and logs.
+        /// </summary>
+        private static bool TryResolveFlameBounds(Fireplace fireplace, out Bounds flame)
+        {
+            flame = default;
+
+            // 1) The Burning EffectArea's own trigger collider bounds — the exact
+            //    volume the game registers as the burn hazard (EffectArea.Awake
+            //    pushes m_collider.bounds into s_BurningAreas for any area whose
+            //    m_type has the Burning flag).
+            var areas = fireplace.GetComponentsInChildren<EffectArea>(true);
+            foreach (var area in areas)
+            {
+                if (area == null) continue;
+                if ((area.m_type & EffectArea.Type.Burning) == EffectArea.Type.None) continue;
+                var areaCol = area.GetComponent<Collider>();
+                if (areaCol == null) continue;
+                flame = areaCol.bounds;
+                return true;
+            }
+
+            // 2) The fireplace's own collider bounds.
+            var fireCol = fireplace.GetComponentInChildren<Collider>();
+            if (fireCol != null)
+            {
+                flame = fireCol.bounds;
+                return true;
+            }
+
+            // 3) A box sized to the ignite-capsule radius centred on the
+            //    fireplace. Only ignite-capable fires set m_igniteCapsuleRadius
+            //    (> 0, see Fireplace.Awake which gates UpdateIgnite on it); guard
+            //    so we never emit a degenerate zero-size box.
+            var r = fireplace.m_igniteCapsuleRadius;
+            if (r > 0f)
+            {
+                var c = fireplace.transform.position;
+                flame = new Bounds(c, new Vector3(2f * r, 2f * r, 2f * r));
+                return true;
+            }
+
+            return false;
+        }
+
         private static int AddOutsideCellBlockers(
             List<NavMeshBuildSource> sources,
             HashSet<long> outsideCells,
@@ -988,6 +1124,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             s_piecePhantomCount = 0;
             s_lastDoorPhantoms = 0;
             s_lastBedPhantoms = 0;
+            s_lastFirePhantoms = 0;
             s_lastOutsidePhantoms = 0;
         }
 
@@ -998,6 +1135,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int DoorsBlocked;
             public int DoorPiecesDropped;
             public int BedsBlocked;
+            public int FiresBlocked;
             public int OutsideCellsBlocked;
             public int OutsideCellsCount;
             public float DurationMs;
