@@ -764,10 +764,24 @@ namespace ValheimVillages.Villager.AI
         ///     character's transform — we only read its steering. agentTypeID is
         ///     slot 31 (the village bake).
         /// </summary>
+        /// <summary>
+        ///     Public entry point for [RequireAgent]-driven setup: create this villager's
+        ///     advisory agent now that the agent infrastructure is ready. No-op if the
+        ///     agent already exists or the bake/registration isn't ready yet (EnsureAgent
+        ///     re-checks). Kept distinct from the lazy per-tick call so a one-shot
+        ///     infra-ready kick can warm idle villagers without waiting for them to move.
+        /// </summary>
+        public void EnsureAgentReady() => EnsureAgent();
+
         private void EnsureAgent()
         {
             if (m_navAgent != null) return;
-            if (!VillagerAgentType.IsRegistered) return;
+            // RequireAgent gate: never create the agent before BOTH the slot-31 type is
+            // registered AND a slot-31 bake is installed. Creating it earlier yields a
+            // null/off-mesh agent — a villager that reports a route but never moves. The
+            // per-frame movement tick re-calls this, so it self-heals the moment the bake
+            // lands (no separate retry needed for owned, moving villagers).
+            if (!Navigation.NavMeshBakeManager.AgentReady) return;
 
             m_navAgent = gameObject.GetComponent<NavMeshAgent>()
                          ?? gameObject.AddComponent<NavMeshAgent>();

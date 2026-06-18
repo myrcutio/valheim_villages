@@ -144,6 +144,30 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
+        ///     [RequireAgent] one-shot: once the slot-31 agent type is registered AND a
+        ///     slot-31 bake is installed, create + warp the advisory NavMeshAgent on every
+        ///     active villager. Without this, an idle (non-moving) villager never builds
+        ///     its agent until it next wants to move, and a villager whose bake completed
+        ///     after it stopped moving stays agent-less; either way it can't be steered or
+        ///     seen by RVO avoidance. The per-tick EnsureAgent handles ongoing creation;
+        ///     this is the infra-ready kick that closes the load-time gap. Idempotent
+        ///     (EnsureAgentReady no-ops when the agent already exists).
+        /// </summary>
+        [RequireAgent]
+        public static void EnsureActiveVillagerAgents()
+        {
+            var count = 0;
+            foreach (var ai in ActiveVillagers.Values)
+            {
+                if (ai == null) continue;
+                ai.EnsureAgentReady();
+                count++;
+            }
+
+            Plugin.Log?.LogInfo($"[VillagerAIManager] [RequireAgent] warmed {count} villager agent(s)");
+        }
+
+        /// <summary>
         ///     Clear all registrations (e.g. on world unload).
         /// </summary>
         [RegisterCleanup]

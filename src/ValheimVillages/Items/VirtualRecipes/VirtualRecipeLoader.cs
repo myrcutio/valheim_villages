@@ -96,14 +96,24 @@ namespace ValheimVillages.Items.VirtualRecipes
         }
 
         /// <summary>
-        ///     When ZNetScene becomes available, add cooking- AND smelter-
-        ///     discovered recipes for any station with the matching
-        ///     recipe:cooking or recipe:smelter tag. Both discovery sources
-        ///     need ZNetScene populated with the relevant prefabs before
+        ///     Add cooking- AND smelter-discovered recipes for any station with the
+        ///     matching recipe:cooking or recipe:smelter tag. Both discovery sources need
+        ///     ObjectDB populated AND ZNetScene populated with the relevant prefabs before
         ///     they can enumerate conversions.
+        ///     <para>
+        ///     [RequireObjectDB]: deferred until ObjectDB is alive (which guarantees
+        ///     <see cref="RegisterAll" /> ran from the ObjectDB.Awake postfix, so
+        ///     <c>_registeredRecipes</c> is populated) and ZNetScene exists. Previously
+        ///     called eagerly from the ZNetScene.Awake patch with <c>ObjectDB.instance</c>;
+        ///     when ZNetScene.Awake won the race against ObjectDB.Awake that argument was
+        ///     null / recipes weren't registered yet, so this bailed and cooking + smelter
+        ///     recipes were silently lost for the whole session with no retry.
+        ///     </para>
         /// </summary>
-        public static void RegisterCookingRecipesIfNeeded(ObjectDB objectDB)
+        [RequireObjectDB]
+        public static void RegisterCookingRecipesIfNeeded()
         {
+            var objectDB = ObjectDB.instance;
             if (objectDB?.m_recipes == null || _registeredRecipes.Count == 0) return;
 
             foreach (var kv in VillagerRegistry.Definitions)

@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
+using ValheimVillages.Schemas;
 using ValheimVillages.TaskQueue;
+using ValheimVillages.TaskQueue.Handlers;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Tabs;
 using ValheimVillages.Villager.AI;
@@ -26,6 +29,18 @@ namespace ValheimVillages.Attributes
         private static readonly HashSet<string> s_modObjectNames = new();
         private static readonly List<(string Name, string Description)> s_devCommands = new();
 
+        // Static parameterless methods marked [RequireObjectDB] / [RequireAgent], keyed by
+        // "Type.FullName.Method". Populated during ScanAndRegister; enqueued/invoked as
+        // deferred tasks once their respective precondition (ObjectDB alive / agent infra
+        // ready) is satisfied.
+        private static readonly Dictionary<string, MethodInfo> s_requireObjectDb = new();
+        private static readonly Dictionary<string, MethodInfo> s_requireAgent = new();
+
+        // [RequireAgent] depends on the slot-31 bake, which is itself deferred until the
+        // village's zones load and piece colliders instantiate — far later than ObjectDB.
+        // Give these tasks room rather than letting the default 30s timeout drop them mid-load.
+        private const float RequireAgentTimeoutSeconds = 180f;
+
         /// <summary>
         ///     Master entry point. Scans the assembly for all registration attributes
         ///     and wires up the discovered types/methods.
@@ -43,6 +58,8 @@ namespace ValheimVillages.Attributes
 
             RegisterDevCommands(assembly);
             RegisterTaskHandlers(assembly);
+            DiscoverAnnotatedMethods<RequireObjectDBAttribute>(assembly, s_requireObjectDb);
+            DiscoverAnnotatedMethods<RequireAgentAttribute>(assembly, s_requireAgent);
             RegisterAbilities(assembly);
             RegisterPassives(assembly);
             RegisterTabs(assembly);
@@ -85,6 +102,101 @@ namespace ValheimVillages.Attributes
                         $"{type.Name}.{method.Name}: expected (ObjectDB) parameter");
             }
         }
+
+        #endregion
+
+        #region Deferred precondition tasks ([RequireObjectDB] / [RequireAgent])
+
+        /// <summary>
+        ///     Discover every static parameterless method marked <typeparamref name="TAttr" />
+        ///     and cache it by "Type.FullName.Method". Discovery only — tasks are enqueued
+        ///     separately once a world is loading. Skips (with a warning) any annotated method
+        ///     that takes parameters.
+        /// </summary>
+        private static void DiscoverAnnotatedMethods<TAttr>(
+            Assembly assembly, Dictionary<string, MethodInfo> into) where TAttr : Attribute
+        {
+            into.Clear();
+            foreach (var type in assembly.GetTypes())
+            foreach (var method in type.GetMethods(
+                         BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (method.GetCustomAttribute<TAttr>() == null) continue;
+
+                if (method.GetParameters().Length != 0)
+                {
+                    Plugin.Log?.LogWarning(
+                        $"[AttributeScanner] Skipping [{typeof(TAttr).Name}] on " +
+                        $"{type.Name}.{method.Name}: must be parameterless");
+                    continue;
+                }
+
+                into[$"{type.FullName}.{method.Name}"] = method;
+            }
+
+            Plugin.Log?.LogDebug(
+                $"[AttributeScanner] Discovered {into.Count} [{typeof(TAttr).Name}] methods");
+        }
+
+        /// <summary>
+        ///     Invoke the cached method registered under <paramref name="key" />. Returns
+        ///     false if no method is registered (e.g. a hot-reload re-scan dropped it). Any
+        ///     exception the method throws propagates to the task queue, which retries then
+        ///     dead-letters.
+        /// </summary>
+        private static bool InvokeAnnotated(Dictionary<string, MethodInfo> from, string key)
+        {
+            if (!from.TryGetValue(key, out var method))
+                return false;
+
+            method.Invoke(null, null);
+            Plugin.Log?.LogInfo($"[AttributeScanner] Ran {key}");
+            return true;
+        }
+
+        /// <summary>
+        ///     Enqueue one high-priority deferred task per [RequireObjectDB] method.
+        ///     Idempotent: the queue dedups on (Name, SourceId), so calling this from both
+        ///     the ZNetScene.Awake patch and the hot-reload path is safe. Each task is held
+        ///     by <see cref="RequireObjectDBHandler" />'s precondition until ObjectDB is alive.
+        /// </summary>
+        public static void EnqueueObjectDBDependentTasks()
+        {
+            foreach (var key in s_requireObjectDb.Keys)
+                GlobalTaskQueue.Enqueue(new VillagerTask
+                {
+                    Name = RequireObjectDBHandler.TaskNameConst,
+                    SourceId = key,
+                    Priority = TaskPriority.High,
+                    TimeoutSeconds = TaskSettings.DefaultTimeoutSeconds,
+                    Attributes = new Dictionary<string, string>(),
+                });
+        }
+
+        /// <summary>
+        ///     Enqueue one high-priority deferred task per [RequireAgent] method. Held by
+        ///     <see cref="RequireAgentHandler" />'s precondition until the slot-31 agent type
+        ///     is registered AND a slot-31 bake is installed. Longer timeout than the ObjectDB
+        ///     cohort because the bake completes much later in a world load.
+        /// </summary>
+        public static void EnqueueAgentDependentTasks()
+        {
+            foreach (var key in s_requireAgent.Keys)
+                GlobalTaskQueue.Enqueue(new VillagerTask
+                {
+                    Name = RequireAgentHandler.TaskNameConst,
+                    SourceId = key,
+                    Priority = TaskPriority.High,
+                    TimeoutSeconds = RequireAgentTimeoutSeconds,
+                    Attributes = new Dictionary<string, string>(),
+                });
+        }
+
+        /// <summary>Invoke the [RequireObjectDB] method registered under <paramref name="key" />.</summary>
+        public static bool InvokeRequireObjectDB(string key) => InvokeAnnotated(s_requireObjectDb, key);
+
+        /// <summary>Invoke the [RequireAgent] method registered under <paramref name="key" />.</summary>
+        public static bool InvokeRequireAgent(string key) => InvokeAnnotated(s_requireAgent, key);
 
         #endregion
 

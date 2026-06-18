@@ -125,8 +125,12 @@ namespace ValheimVillages
             if (isHotReload && ZNetScene.instance != null)
             {
                 Log.LogInfo("Hot reload — re-registering prefabs in ZNetScene");
-                ItemFactory.RegisterAllInZNetScene(ZNetScene.instance);
-                PieceFactory.RegisterAllInZNetScene(ZNetScene.instance);
+                // ItemFactory + PieceFactory registration runs via deferred [RequireObjectDB]
+                // tasks (ObjectDB is already alive on hot reload, so they execute next tick).
+                AttributeScanner.EnqueueObjectDBDependentTasks();
+                // [RequireAgent] setup runs once the slot-31 bake is installed; on hot reload
+                // a prior bake is usually still live, so these execute promptly too.
+                AttributeScanner.EnqueueAgentDependentTasks();
                 Villager.Records.RecordPrefabFactory.RegisterInZNetScene(ZNetScene.instance);
                 Villages.Entity.VillagePrefabFactory.RegisterInZNetScene(ZNetScene.instance);
 

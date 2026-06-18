@@ -48,6 +48,8 @@ namespace ValheimVillages.UI.Tabs.Registry
 
         public List<TabListItemUI> GetListItems(RegistryContext context)
         {
+            if (!RegistryTabLoading.VillageReady(context)) return RegistryTabLoading.ListItems();
+
             if (m_types.Count == 0) RefreshTypes();
             var items = new List<TabListItemUI>();
             foreach (var def in m_types)
@@ -61,6 +63,8 @@ namespace ValheimVillages.UI.Tabs.Registry
 
         public TabDetailDataUI GetDetail(int selectedIndex, RegistryContext context)
         {
+            if (!RegistryTabLoading.VillageReady(context)) return RegistryTabLoading.Detail();
+
             if (selectedIndex < 0 || selectedIndex >= m_types.Count)
                 return null;
 

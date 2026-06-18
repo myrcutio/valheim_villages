@@ -138,6 +138,17 @@ namespace ValheimVillages.Villager.AI.Navigation
         public static bool HasBakedData => Holder.HasAny;
 
         /// <summary>
+        ///     The "RequireAgent" readiness check: villager NavMesh agents can only be
+        ///     set up once the slot-31 agent type is registered with Pathfinding AND a
+        ///     slot-31 bake has successfully completed and is installed. Until BOTH hold,
+        ///     agent creation must defer — creating one earlier yields a null or off-mesh
+        ///     agent (a villager that reports a state/route but never moves). Consumed by
+        ///     <see cref="VillagerAgentType" />-dependent setup (VillagerAI.EnsureAgent)
+        ///     and the [RequireAgent] task precondition.
+        /// </summary>
+        public static bool AgentReady => VillagerAgentType.IsRegistered && HasBakedData;
+
+        /// <summary>
         ///     Snapshot of the source list used by the most recent bake (terrain
         ///     + piece concatenated). Diagnostics-only; per-kind callers should
         ///     use <see cref="GetSources" />.

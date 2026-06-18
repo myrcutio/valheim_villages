@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
+using ValheimVillages.Attributes;
 using ValheimVillages.UI.Interaction;
 using Object = UnityEngine.Object;
 
@@ -32,6 +33,20 @@ namespace ValheimVillages.Items
         private const float TopY = 0.83f; // tabletop surface height in piece-local space
 
         private static GameObject _registryPrefab;
+
+        /// <summary>
+        ///     Deferred entry point: registers the registry piece once ObjectDB is alive.
+        ///     <see cref="AddToHammerTable" /> needs the Hammer item (and its build PieceTable)
+        ///     to exist in ObjectDB, and <see cref="ConfigurePiece" /> reads Wood/Resin for the
+        ///     build cost — none of which are present when ZNetScene.Awake wins the race against
+        ///     ObjectDB.Awake. Annotating this [RequireObjectDB] defers it until both are ready,
+        ///     so the recipe always lands in the build menu (was silently dropped before).
+        /// </summary>
+        [RequireObjectDB]
+        public static void RegisterDeferred()
+        {
+            RegisterAllInZNetScene(ZNetScene.instance);
+        }
 
         /// <summary>
         ///     Ensure the registry prefab exists, then register it in ZNetScene and the
