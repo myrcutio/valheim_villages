@@ -11,25 +11,21 @@
 
         <!-- Paths - adjust if needed -->
         <ValheimDir>$(HOME)/.local/share/Steam/steamapps/common/Valheim</ValheimDir>
-        <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles/$(R2ModmanProfile)/BepInEx</BepInExDir>
+        <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles</BepInExDir>
 
-        <!-- Hot reload: set to 'true' to output to scripts folder for F6 reload -->
-        <HotReload>true</HotReload>
-
-        <!-- Output path switches based on HotReload setting -->
-        <OutputPath Condition="'$(HotReload)' == 'true'">$(BepInExDir)/scripts/</OutputPath>
-        <OutputPath Condition="'$(HotReload)' != 'true'">$(R2ModmanReleaseProfile)/plugins/ValheimVillages/</OutputPath>
+        <OutputPath>$(BepInExDir)/$(R2ModmanProfile)/BepInEx/scripts/</OutputPath>
+        <OutputPath>$(BepInExDir)/$(R2ModmanReleaseProfile)/BepInEx/plugins/ValheimVillages/</OutputPath>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     </PropertyGroup>
 
     <!-- BepInEx and Harmony -->
     <ItemGroup>
         <Reference Include="BepInEx">
-            <HintPath>$(BepInExDir)/core/BepInEx.dll</HintPath>
+            <HintPath>$(BepInExDir)/$(R2ModmanProfile)/BepInEx/core/BepInEx.dll</HintPath>
             <Private>false</Private>
         </Reference>
         <Reference Include="0Harmony">
-            <HintPath>$(BepInExDir)/core/0Harmony.dll</HintPath>
+            <HintPath>$(BepInExDir)/$(R2ModmanProfile)/BepInEx/core/0Harmony.dll</HintPath>
             <Private>false</Private>
         </Reference>
     </ItemGroup>
