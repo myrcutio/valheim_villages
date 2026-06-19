@@ -66,14 +66,22 @@ namespace ValheimVillages.TaskQueue.Handlers
         {
             if (ZNet.instance == null || ZNetScene.instance == null ||
                 ZoneSystem.instance == null || ZDOMan.instance == null)
+            {
+                ReadyDiag("engine singletons not ready");
                 return false;
+            }
+
             // Self-bootstrap the villager agent slot (31). EnsureRegistered only needs the
             // Pathfinding singleton — not a spawned villager — and is idempotent, so a
             // registry-only village (no villager to trigger registration via
             // VillagerAI.Awake) can still bake. Without this the partition a fresh registry
             // needs defers forever: IsRegistered stays false with zero villagers, yet the
             // graph is itself the prerequisite for spawning the first one.
-            if (!VillagerAgentType.EnsureRegistered()) return false;
+            if (!VillagerAgentType.EnsureRegistered())
+            {
+                ReadyDiag("villager agent slot (31) not registered");
+                return false;
+            }
 
             var anchors = FilterAnchorsByTask(CollectSeedAnchors(), task);
             // No anchors yet => nothing to partition. Let Handle() run and no-op (it
@@ -84,26 +92,63 @@ namespace ValheimVillages.TaskQueue.Handlers
             foreach (var anchor in anchors)
             {
                 var zone = ZoneSystem.GetZone(anchor);
-                if (!ZoneSystem.instance.IsZoneLoaded(zone)) return false;
+                if (!ZoneSystem.instance.IsZoneLoaded(zone))
+                {
+                    ReadyDiag($"zone {zone.x},{zone.y} NOT LOADED for anchor " +
+                              $"({anchor.x:F0},{anchor.y:F0},{anchor.z:F0}) of {anchors.Count} total");
+                    return false;
+                }
 
                 // Every piece-layer object in the sector must be instantiated, i.e.
                 // object streaming for the village footprint is complete (guards the
                 // observed PieceSources=0 / partially-streamed case). Terrain rides
                 // along with the loaded zone (heightmap), so no separate probe — which
                 // also avoids assuming the village sits at terrain height.
-                if (!SectorBakeGeometryInstantiated(zone, area)) return false;
+                if (!SectorBakeGeometryInstantiated(zone, area, anchor, out var missing))
+                {
+                    ReadyDiag($"piece not instantiated in zone {zone.x},{zone.y} near anchor " +
+                              $"({anchor.x:F0},{anchor.y:F0},{anchor.z:F0}): prefab={missing}");
+                    return false;
+                }
             }
 
             return true;
         }
 
-        /// <summary>
-        ///     True when every bake-relevant (piece-layer) ZDO in the sector has a live
-        ///     <see cref="ZNetView" /> — the deterministic "objects done streaming"
-        ///     signal.
-        /// </summary>
-        private static bool SectorBakeGeometryInstantiated(Vector2i zone, int area)
+        // DIAGNOSTIC: throttled log of the gate that's deferring the partition. IsReady is
+        // polled ~every 1.5s per pending task, so throttle to keep the log readable.
+        private static float s_lastReadyDiag;
+
+        private static void ReadyDiag(string reason)
         {
+            var now = Time.realtimeSinceStartup;
+            if (now - s_lastReadyDiag < 2f) return;
+            s_lastReadyDiag = now;
+            Plugin.Log?.LogInfo($"[PartitionReady] deferring hna_partition: {reason}");
+        }
+
+        /// <summary>
+        ///     True when every bake-relevant (piece-layer) ZDO <i>within the village's bake
+        ///     footprint</i> (XZ box of ±<see cref="RegionBuildRadius" /> around
+        ///     <paramref name="anchor" />) has a live <see cref="ZNetView" /> — the
+        ///     deterministic "the geometry the bake will read is done streaming" signal.
+        ///     On false, <paramref name="missingPrefab" /> names the first un-instantiated
+        ///     piece prefab (for diagnostics).
+        ///
+        ///     <para>
+        ///     The footprint scope is deliberate: <see cref="NavMeshBakeManager.BakeVillage" />
+        ///     only reads colliders within the anchor bounds, and the sector (zone +
+        ///     <c>m_activeArea</c> neighbours) is far larger. Natural world objects on these
+        ///     layers (rocks/trees) at the sector periphery may never instantiate unless the
+        ///     player walks to them — gating on those blocked the partition forever
+        ///     (observed: a dormant <c>Rock_4</c> at the zone edge). We only wait on what the
+        ///     bake actually covers.
+        ///     </para>
+        /// </summary>
+        private static bool SectorBakeGeometryInstantiated(
+            Vector2i zone, int area, Vector3 anchor, out string missingPrefab)
+        {
+            missingPrefab = null;
             s_readinessScratch.Clear();
             ZDOMan.instance.FindSectorObjects(zone, area, 0, s_readinessScratch);
             foreach (var zdo in s_readinessScratch)
@@ -112,7 +157,20 @@ namespace ValheimVillages.TaskQueue.Handlers
                 var prefab = ZNetScene.instance.GetPrefab(zdo.GetPrefab());
                 if (prefab == null) continue;
                 if (((1 << prefab.layer) & s_pieceLayerMask) == 0) continue;
-                if (ZNetScene.instance.FindInstance(zdo) == null) return false;
+
+                // Only gate on objects inside the bake footprint (anchor ± RegionBuildRadius,
+                // XZ). Distant natural geometry at the sector edge isn't baked and won't all
+                // instantiate, so it must not block readiness.
+                var p = zdo.GetPosition();
+                if (Mathf.Abs(p.x - anchor.x) > RegionBuildRadius ||
+                    Mathf.Abs(p.z - anchor.z) > RegionBuildRadius)
+                    continue;
+
+                if (ZNetScene.instance.FindInstance(zdo) == null)
+                {
+                    missingPrefab = prefab.name;
+                    return false;
+                }
             }
 
             return true;

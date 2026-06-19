@@ -401,7 +401,7 @@ namespace ValheimVillages.Behaviors.Crafting
             var outputPos = smelter.m_outputPoint != null
                 ? smelter.m_outputPoint.position
                 : smelter.transform.position;
-            const float searchRadius = 10f;
+            const float searchRadius = 7f;
 
             var outputPrefab = m_context.WorkOrder?.ItemPrefabName;
             if (string.IsNullOrEmpty(outputPrefab)) return 0;

@@ -80,6 +80,9 @@ namespace ValheimVillages
             LastLoadWasHotReload = isHotReload;
             DebugLog.BeginCycle(isHotReload);
             RegionGraphPersistence.LogAction = msg => Log.LogInfo(msg);
+            // Bind config-backed settings early (PrimaryMode persists across hot reloads /
+            // restarts; a plain static reset to false on every reload).
+            Scheduling.SchedulerSettings.BindConfig(Config);
             Log.LogInfo($"{PluginName} v{PluginVersion} loading...");
 
             // Clean up any previous patches with our GUID (hot reload support)
@@ -266,7 +269,7 @@ namespace ValheimVillages
             }
 
             // Debounced HNA rebuild on structural changes (piece placed/removed)
-            const float hnaRebuildDebounce = 10f;
+            const float hnaRebuildDebounce = 3f;
             if (PieceChangePatch.IsDirty &&
                 Time.realtimeSinceStartup - PieceChangePatch.LastStructureChangeTime > hnaRebuildDebounce)
             {

@@ -4,6 +4,7 @@ using ValheimVillages.Attributes;
 using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Schemas;
+using ValheimVillages.Scheduling;
 using ValheimVillages.Settings;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Navigation;
@@ -20,9 +21,9 @@ namespace ValheimVillages.Behaviors.Tidy
     ///     Tag: "tidy", Priority: 60.
     /// </summary>
     [RegisterBehavior("tidy")]
-    public class TidyBehavior : IBehavior
+    public class TidyBehavior : IBehavior, IDirectedBehavior
     {
-        private const float ScanInterval = 10f;
+        private const float ScanInterval = 4f;
         private const float ItemPickupRadius = 3f;
         private readonly VillagerAI m_ai;
         private bool m_active;
@@ -39,12 +40,49 @@ namespace ValheimVillages.Behaviors.Tidy
 
         public bool WantsControl(BehaviorContext ctx)
         {
+            // In PrimaryMode the scheduler owns target selection — act only on an
+            // assignment, never self-discover.
+            if (SchedulerSettings.PrimaryMode) return m_active || m_targetStation != null;
+
             if (m_active) return true;
 
             if (Time.time - m_lastScanTime < ScanInterval) return false;
             m_lastScanTime = Time.time;
 
             return FindDirtyStation();
+        }
+
+        // --- IDirectedBehavior: scheduler-assigned execution (PrimaryMode) ---
+
+        public bool CanExecute(TaskKind kind) => kind == TaskKind.CookRescue;
+
+        public bool AssignmentActive => m_active || m_targetStation != null;
+
+        public bool BeginAssignment(CandidateTask task)
+        {
+            var station = FindStationNear(task.Position);
+            if (station == null) return false; // nothing actionable (no Done/burnt item)
+            m_targetStation = station;
+            return true;
+        }
+
+        /// <summary>Nearest cooking station near a point that has a Done/burnt item to clear.</summary>
+        private static CookingStation FindStationNear(Vector3 pos)
+        {
+            CookingStation best = null;
+            var bestSq = float.MaxValue;
+            foreach (var s in PhysicsHelper.GetAllInRadius<CookingStation>(pos, ItemPickupRadius * 2f))
+            {
+                if (s == null || !HasDoneOrBurntItems(s)) continue;
+                var d = (s.transform.position - pos).sqrMagnitude;
+                if (d < bestSq)
+                {
+                    bestSq = d;
+                    best = s;
+                }
+            }
+
+            return best;
         }
 
         public void Update(float dt)

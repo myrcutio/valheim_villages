@@ -297,7 +297,7 @@ namespace ValheimVillages.Settings
         public const float HaulScanRadius = 32f;
 
         /// <summary>Time spent at crafting station per craft cycle (seconds).</summary>
-        public const float CraftDuration = 5f;
+        public const float CraftDuration = 2.5f;
 
         /// <summary>How often to re-scan for work when idle (seconds).</summary>
         public const float WorkScanInterval = 6f;
@@ -307,16 +307,16 @@ namespace ValheimVillages.Settings
         ///     Wider than the normal ArrivalThreshold because physical colliders on
         ///     furniture can prevent NPCs from getting within 1m.
         /// </summary>
-        public const float WorkArrivalThreshold = 2.5f;
+        public const float WorkArrivalThreshold = 2.7f;
 
         /// <summary>How often to poll the cooking station when waiting for food to finish (seconds).</summary>
-        public const float WaitingPollInterval = 3f;
+        public const float WaitingPollInterval = 1.5f;
 
         /// <summary>Extra seconds to wait after cook time before checking/removing (buffer for game to set Done).</summary>
         public const float CookingDoneGraceSeconds = 1.5f;
 
         /// <summary>Seconds without reaching the work destination (within 2m 3D) before giving up and trying something else.</summary>
-        public const float WorkStuckTimeoutSeconds = 30f;
+        public const float WorkStuckTimeoutSeconds = 20f;
 
         /// <summary>
         ///     Radius (from a carpenter's anchor) to scan for damaged structures to
@@ -396,20 +396,20 @@ namespace ValheimVillages.Settings
         ///     distance. Smaller than the guard detection radius so guards react
         ///     first / from further out.
         /// </summary>
-        public const float FleeDangerRadius = 16f;
+        public const float FleeDangerRadius = 8f;
 
         /// <summary>
         ///     Hysteresis: a fleeing non-combatant only calms once the nearest
         ///     hostile is beyond this (larger than <see cref="FleeDangerRadius"/>),
         ///     so it doesn't flicker in/out of panic at the boundary.
         /// </summary>
-        public const float FleeClearRadius = 24f;
+        public const float FleeClearRadius = 16f;
 
         /// <summary>
         ///     How far a non-combatant runs from the threat when there is no guard
         ///     on the roster to flee toward.
         /// </summary>
-        public const float FleeDistance = 14f;
+        public const float FleeDistance = 12f;
 
         /// <summary>Eye/muzzle height (m) the guard's line-of-sight ray is cast from / to.</summary>
         public const float LosEyeHeight = 1.5f;

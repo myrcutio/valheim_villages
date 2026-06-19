@@ -45,6 +45,32 @@ namespace ValheimVillages.Villager.AI
         // Composable behaviors (populated by BehaviorFactory from NPC definition)
         private List<IBehavior> m_behaviors = new();
 
+        /// <summary>
+        ///     Tags of the behaviors this villager has — its "capabilities" for the
+        ///     reranker scheduler (a repair task is only eligible for a villager whose
+        ///     behavior set includes "repair", a cook-rescue only for "tidy", etc.).
+        /// </summary>
+        public IEnumerable<string> BehaviorTags
+        {
+            get
+            {
+                foreach (var b in m_behaviors)
+                    yield return b.Tag;
+            }
+        }
+
+        /// <summary>
+        ///     First directed behavior that can execute the given task kind, or null.
+        ///     Used by the scheduler dispatcher in PrimaryMode.
+        /// </summary>
+        public IDirectedBehavior FindDirectedBehavior(Scheduling.TaskKind kind)
+        {
+            foreach (var b in m_behaviors)
+                if (b is IDirectedBehavior d && d.CanExecute(kind))
+                    return d;
+            return null;
+        }
+
         private VillagerWaypoint m_currentWaypoint;
         private DoorHandler m_doorHandler;
 
@@ -335,14 +361,65 @@ namespace ValheimVillages.Villager.AI
                 {
                     var ctx = new BehaviorContext();
                     var handled = false;
-                    foreach (var b in m_behaviors)
-                        if (b.WantsControl(ctx))
+
+                    if (Scheduling.SchedulerSettings.PrimaryMode)
+                    {
+                        // 1. Reactive behaviors (combat/flee/alarm) still preempt the
+                        // scheduler — a villager must never ignore a threat to go repair.
+                        foreach (var b in m_behaviors)
                         {
-                            ActiveBehavior = b;
-                            b.Update(dt);
-                            handled = true;
-                            break;
+                            if (b.Priority < Scheduling.SchedulerSettings.ReactivePriorityFloor) continue;
+                            if (b.WantsControl(ctx))
+                            {
+                                ActiveBehavior = b;
+                                b.Update(dt);
+                                handled = true;
+                                break;
+                            }
                         }
+
+                        // 2. Scheduler is the primary work selector: assign + run the
+                        // matching directed behavior. Outranks routine self-discovered work.
+                        if (!handled)
+                        {
+                            var directed = Scheduling.SchedulerDispatcher.AssignIfIdle(this);
+                            if (directed is IBehavior db && db.WantsControl(ctx))
+                            {
+                                ActiveBehavior = db;
+                                db.Update(dt);
+                                handled = true;
+                            }
+                        }
+
+                        // 3. Routine work the scheduler doesn't own yet (craft/farming/
+                        // patrol/haul). Directed behaviors are skipped here — in
+                        // PrimaryMode they ONLY run via the dispatcher above, never by
+                        // self-discovery.
+                        if (!handled)
+                            foreach (var b in m_behaviors)
+                            {
+                                if (b.Priority >= Scheduling.SchedulerSettings.ReactivePriorityFloor) continue;
+                                if (b is IDirectedBehavior) continue;
+                                if (b.WantsControl(ctx))
+                                {
+                                    ActiveBehavior = b;
+                                    b.Update(dt);
+                                    handled = true;
+                                    break;
+                                }
+                            }
+                    }
+                    else
+                    {
+                        foreach (var b in m_behaviors)
+                            if (b.WantsControl(ctx))
+                            {
+                                ActiveBehavior = b;
+                                b.Update(dt);
+                                handled = true;
+                                break;
+                            }
+                    }
 
                     // No behavior wanted control — the villager is idle. Trigger
                     // work scanning here (this used to live in the always-on
@@ -352,6 +429,12 @@ namespace ValheimVillages.Villager.AI
                     if (!handled)
                     {
                         ActiveBehavior = null;
+
+                        // Log-only observation when the scheduler is NOT the primary
+                        // driver (PrimaryMode off) — logs the pick it would make.
+                        if (!Scheduling.SchedulerSettings.PrimaryMode)
+                            Scheduling.SchedulerObserver.Observe(this);
+
                         if (CurrentState != BehaviorState.Working)
                             GetWorkScanner()?.TryScanForWork();
                         if (CurrentState != BehaviorState.Idle)
@@ -1186,12 +1269,23 @@ namespace ValheimVillages.Villager.AI
             // TryFindPathCustom) on the very next tick after the behavior
             // assigns its new target.
             var arrCtx = new BehaviorContext();
-            foreach (var b in m_behaviors)
-                if (b.WantsControl(arrCtx))
-                {
-                    b.OnArrival(dt);
-                    break;
-                }
+            // Deliver OnArrival to the behavior that actually drove the move (the one
+            // selection set as ActiveBehavior), not merely the first that WantsControl —
+            // otherwise a higher-priority self-discovering behavior can intercept a
+            // directed/assigned behavior's arrival. Fall back to the scan if none is set.
+            if (ActiveBehavior != null)
+            {
+                ActiveBehavior.OnArrival(dt);
+            }
+            else
+            {
+                foreach (var b in m_behaviors)
+                    if (b.WantsControl(arrCtx))
+                    {
+                        b.OnArrival(dt);
+                        break;
+                    }
+            }
         }
 
         #endregion

@@ -72,7 +72,7 @@ namespace ValheimVillages.Villager.Station
             Station.m_craftRequireRoof = false;
             Station.m_craftRequireFire = false;
             Station.m_showBasicRecipies = false;
-            Station.m_useDistance = 10f;
+            Station.m_useDistance = 7f;
             Station.m_useAnimation = 0;
             Station.m_areaMarker = null;
             Station.m_inUseObject = null;

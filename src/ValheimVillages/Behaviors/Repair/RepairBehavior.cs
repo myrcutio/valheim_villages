@@ -5,6 +5,7 @@ using ValheimVillages.Attributes;
 using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Schemas;
+using ValheimVillages.Scheduling;
 using ValheimVillages.Settings;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Pathfinding;
@@ -27,7 +28,7 @@ namespace ValheimVillages.Behaviors.Repair
     ///     orders). Tag: "repair", Priority: 35 (below craft, above patrol).</para>
     /// </summary>
     [RegisterBehavior("repair")]
-    public class RepairBehavior : IBehavior
+    public class RepairBehavior : IBehavior, IDirectedBehavior
     {
         private const float ScanInterval = 8f;
         private const float MaxLegSeconds = 20f;
@@ -78,6 +79,10 @@ namespace ValheimVillages.Behaviors.Repair
 
         public bool WantsControl(BehaviorContext ctx)
         {
+            // In PrimaryMode the scheduler owns target selection — act only on an
+            // assignment (m_active set by BeginAssignment), never self-discover.
+            if (SchedulerSettings.PrimaryMode) return m_active;
+
             if (m_active) return true;
 
             // Only start when idle so we never interrupt active work (crafting).
@@ -88,6 +93,48 @@ namespace ValheimVillages.Behaviors.Repair
             m_lastScanTime = Time.time;
 
             return FindDamaged();
+        }
+
+        // --- IDirectedBehavior: scheduler-assigned execution (PrimaryMode) ---
+
+        public bool CanExecute(TaskKind kind) => kind == TaskKind.RepairPiece;
+
+        public bool AssignmentActive => m_active;
+
+        public bool BeginAssignment(CandidateTask task)
+        {
+            // The assigned task carries the piece position; resolve the actual damaged
+            // structure there (the on-arrival sweep repairs the whole cluster anyway).
+            var wnt = FindDamagedNear(task.Position);
+            if (wnt == null) return false;
+            if (!TryResolveReachableApproach(wnt.transform.position, out var approach)) return false;
+
+            m_target = wnt;
+            m_approach = approach;
+            m_active = true;
+            m_navIssued = false;
+            m_legDeadline = Time.time + MaxLegSeconds;
+            return true;
+        }
+
+        /// <summary>Nearest still-damaged structure within repair range of a point.</summary>
+        private static WearNTear FindDamagedNear(Vector3 pos)
+        {
+            WearNTear best = null;
+            var bestSq = float.MaxValue;
+            foreach (var wnt in PhysicsHelper.GetAllInRadius<WearNTear>(pos, RepairRange))
+            {
+                if (!IsValid(wnt)) continue;
+                if (wnt.GetHealthPercentage() >= DamagedThreshold) continue;
+                var d = (wnt.transform.position - pos).sqrMagnitude;
+                if (d < bestSq)
+                {
+                    bestSq = d;
+                    best = wnt;
+                }
+            }
+
+            return best;
         }
 
         public void Update(float dt)

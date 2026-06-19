@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Behaviors.Farming
 {
@@ -25,6 +27,12 @@ namespace ValheimVillages.Behaviors.Farming
             EnsureSpaceMask();
             var plantSpacing = Mathf.Max(growRadius * 2f, 1.5f);
 
+            // Resolve the village shell once so we never pick a spot outside the walls — a
+            // spot past the palisade strands the farmer trying to path to it. A null /
+            // unclassified graph means "don't filter" (never block farming where we can't
+            // classify the hull).
+            var shellGraph = VillageRegistry.GraphAt(center);
+
             DebugLog.Append("PlantingHelper.cs:FindPlantingPosition", "Spacing check start",
                 new Dictionary<string, object>
                 {
@@ -44,6 +52,12 @@ namespace ValheimVillages.Behaviors.Farming
                     if (!GetTerrainHeight(candidate, out var height))
                         continue;
                     candidate.y = height;
+
+                    // Plant only inside the village shell (boundary cells included);
+                    // reject outside-the-wall cultivated ground.
+                    if (shellGraph != null && shellGraph.HasClassification &&
+                        VillageShell.IsOutside(shellGraph, candidate))
+                        continue;
 
                     if (!IsCultivated(candidate))
                         continue;

@@ -168,7 +168,7 @@ namespace ValheimVillages.Items
                 station.m_craftRequireRoof = false;
                 station.m_craftRequireFire = false;
                 station.m_showBasicRecipies = false;
-                station.m_useDistance = 10f;
+                station.m_useDistance = 7f;
                 station.m_useAnimation = 0;
                 station.m_areaMarker = null;
                 station.m_inUseObject = null;
