@@ -55,7 +55,7 @@ Requires [BepInExPack Valheim](https://thunderstore.io/c/valheim/p/denikson/BepI
     - added better controller support for navigating tabs, particularly on steam deck
 
 ### Known Issues
-
+If you are looking here you probably 
   - the villagers use dverger prefabs for animations, and sometimes a race condition on load fails to clean up the old prefab while still creating a new one, leading to very confused dwarves wandering your village
   - navmeshes are really hard
     - there are many, many edge cases that the villagers may not be able to properly navigate.  in particular this is a problem with shallow stairs and low gaps between floors.  to best avoid these, use wide stairs and ramps, and lots of clearance between floors and terrain.  if it's not handicap accessible, it will probably prove a problem for a villager.

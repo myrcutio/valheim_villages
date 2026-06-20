@@ -19,9 +19,13 @@ namespace ValheimVillages.Villager.AI.Navigation
     ///     `BuildNavMeshData` for slot 31, and `AddNavMeshData` so that queries
     ///     against slot 31 (RegionBuilder, NavMeshLinkPlacer, patrol) return real
     ///     triangles instead of misses.
-    ///     One bake per `hna_partition` run; the previous instance is removed
-    ///     before the next add so NavMesh data does not accumulate. Hot reload
-    ///     cleanup via `[RegisterCleanup]`.
+    ///     One bake instance PER VILLAGE, keyed by village id: re-baking a village
+    ///     replaces only its own instance, so multiple villages' navmeshes coexist
+    ///     (Unity unions NavMeshData of the same agent type). This is required on a
+    ///     dedicated server, which keeps every village's zone loaded and must hold a
+    ///     navmesh for all of them at once (it owns/simulates villagers everywhere).
+    ///     A client typically holds only the village whose zone is loaded near the
+    ///     player. Hot reload cleanup via `[RegisterCleanup]`.
     /// </summary>
     public static class NavMeshBakeManager
     {
@@ -134,8 +138,11 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
         }
 
-        /// <summary>Whether any bake is currently active.</summary>
+        /// <summary>Whether any village bake is currently active.</summary>
         public static bool HasBakedData => Holder.HasAny;
+
+        /// <summary>Whether a navmesh is currently baked and installed for <paramref name="villageId" />.</summary>
+        public static bool HasVillage(string villageId) => Holder.HasVillage(villageId ?? "");
 
         /// <summary>
         ///     The "RequireAgent" readiness check: villager NavMesh agents can only be
@@ -184,11 +191,13 @@ namespace ValheimVillages.Villager.AI.Navigation
         private const float NavMeshBakeMaxClimb = 0.2f;
 
         /// <summary>
-        ///     Bake a fresh NavMesh for the villager agent over <paramref name="bounds" />.
-        ///     Two passes (terrain + piece) both register into slot 31; queries
-        ///     union the results. Removes any previous bakes first.
+        ///     Bake a fresh NavMesh for the villager agent over <paramref name="bounds" />,
+        ///     installed under <paramref name="villageId" />. Two passes (terrain + piece)
+        ///     both register into slot 31; queries union the results. Replaces only THIS
+        ///     village's prior instance (if any) — other villages' navmeshes are left
+        ///     intact so they coexist (needed for a dedicated server holding all villages).
         /// </summary>
-        public static BakeResult BakeVillage(Bounds bounds)
+        public static BakeResult BakeVillage(Bounds bounds, string villageId)
         {
             var result = new BakeResult();
             var sw = Stopwatch.StartNew();
@@ -201,10 +210,9 @@ namespace ValheimVillages.Villager.AI.Navigation
                 return result;
             }
 
-            // Remove all previous bake tiles to avoid accumulating data across
-            // partition runs. Routed through the holder so a hot-reloaded
-            // assembly correctly clears the prior assembly's instances.
-            Holder.RemoveAll();
+            // NOTE: we do NOT RemoveAll() here — that would wipe every OTHER village's
+            // navmesh on a server that holds them all. This village's own prior instance
+            // is replaced atomically by Holder.SetForVillage() at the end of the bake.
 
             // Settings is a local struct copy; modifying it here shapes the
             // baked topology without affecting slot 31's registered agent
@@ -363,7 +371,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             {
                 var data = NavMeshBuilder.BuildNavMeshData(
                     settings, combinedSources, bounds, Vector3.zero, Quaternion.identity);
-                if (data != null) Holder.SetCombined(NavMesh.AddNavMeshData(data));
+                if (data != null) Holder.SetForVillage(villageId ?? "", NavMesh.AddNavMeshData(data));
             }
 
             pieceSw.Stop();
@@ -1171,37 +1179,71 @@ namespace ValheimVillages.Villager.AI.Navigation
     /// </summary>
     internal class NavMeshBakeHolder : MonoBehaviour
     {
-        // The single combined villager NavMeshData instance. Lives here (on the
-        // DontDestroyOnLoad holder) rather than in NavMeshBakeManager's statics so
-        // a hot-reloaded assembly can find this holder by name and Remove the PRIOR
-        // assembly's instance (via OnDestroy) before installing a fresh one —
-        // otherwise stale NavMesh data stacks layer-on-layer across reloads.
-        private NavMeshDataInstance m_combined;
+        // One combined villager NavMeshData instance PER VILLAGE, keyed by village id.
+        // Lives here (on the DontDestroyOnLoad holder) rather than in NavMeshBakeManager's
+        // statics so a hot-reloaded assembly can find this holder by name and Remove the
+        // PRIOR assembly's instances (via OnDestroy) before installing fresh ones —
+        // otherwise stale NavMesh data stacks layer-on-layer across reloads. Multiple
+        // entries coexist (Unity unions NavMeshData of the same agent type), so a
+        // dedicated server can hold every village's navmesh at once.
+        private readonly Dictionary<string, NavMeshDataInstance> m_byVillage = new();
 
-        internal bool HasAny => m_combined.valid;
+        internal bool HasAny
+        {
+            get
+            {
+                foreach (var inst in m_byVillage.Values)
+                    if (inst.valid)
+                        return true;
+                return false;
+            }
+        }
+
+        internal bool HasVillage(string villageId)
+        {
+            return villageId != null
+                   && m_byVillage.TryGetValue(villageId, out var inst)
+                   && inst.valid;
+        }
 
         private void OnDestroy()
         {
-            if (m_combined.valid)
-            {
-                m_combined.Remove();
-                Plugin.Log?.LogInfo(
-                    "[NavMeshBakeHolder] OnDestroy: removed orphaned NavMesh instance");
-            }
+            var removed = 0;
+            foreach (var inst in m_byVillage.Values)
+                if (inst.valid)
+                {
+                    inst.Remove();
+                    removed++;
+                }
 
-            m_combined = default;
+            m_byVillage.Clear();
+            if (removed > 0)
+                Plugin.Log?.LogInfo(
+                    $"[NavMeshBakeHolder] OnDestroy: removed {removed} orphaned NavMesh instance(s)");
         }
 
-        internal void SetCombined(NavMeshDataInstance instance)
+        /// <summary>Install <paramref name="instance" /> for <paramref name="villageId" />,
+        /// replacing (removing) any prior instance for that same village only.</summary>
+        internal void SetForVillage(string villageId, NavMeshDataInstance instance)
         {
-            RemoveAll();
-            m_combined = instance;
+            if (m_byVillage.TryGetValue(villageId, out var prev) && prev.valid)
+                prev.Remove();
+            m_byVillage[villageId] = instance;
+        }
+
+        internal void RemoveVillage(string villageId)
+        {
+            if (!m_byVillage.TryGetValue(villageId, out var inst)) return;
+            if (inst.valid) inst.Remove();
+            m_byVillage.Remove(villageId);
         }
 
         internal void RemoveAll()
         {
-            if (m_combined.valid) m_combined.Remove();
-            m_combined = default;
+            foreach (var inst in m_byVillage.Values)
+                if (inst.valid)
+                    inst.Remove();
+            m_byVillage.Clear();
         }
     }
 }

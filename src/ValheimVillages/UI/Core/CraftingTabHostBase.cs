@@ -15,12 +15,10 @@ namespace ValheimVillages.UI.Core
     ///     <see cref="RegistryTabManager" /> with a <see cref="RegistryContext" />.
     ///     Content rendering lives in the partial in VillagerTabRenderer.cs.
     /// </summary>
-    public abstract partial class CraftingTabHostBase<TSubject> : MonoBehaviour
+    public abstract partial class CraftingTabHostBase<TSubject, TSelf> : MonoBehaviour
+        where TSelf : CraftingTabHostBase<TSubject, TSelf>
     {
         private const float UpdateInterval = 1f;
-
-        /// <summary>Children we snapshot-hid when a custom tab is active.</summary>
-        private readonly Dictionary<Transform, bool> m_childSnapshot = new();
 
         private readonly List<GameObject> m_clonedButtons = new();
 
@@ -39,6 +37,18 @@ namespace ValheimVillages.UI.Core
         protected float m_lastUpdateTime;
         protected string m_headerName;
 
+        /// <summary>
+        ///     Native Craft/Upgrade tab interactable flags captured at setup. Valheim
+        ///     encodes the active tab as the non-interactable button (InCraftTab() ==
+        ///     !m_tabCraft.interactable); we drive cloned tabs that flip these via
+        ///     OnTab*Pressed, so teardown restores the snapshot to give the player's own
+        ///     crafting back the tab it was on.
+        /// </summary>
+        private bool m_savedTabCraftInteractable;
+
+        private bool m_savedTabUpgradeInteractable;
+        private bool m_savedTabStateValid;
+
         /// <summary>Injected RawImage for displaying a map texture in the description panel.</summary>
         private GameObject m_mapImageObject;
 
@@ -51,6 +61,56 @@ namespace ValheimVillages.UI.Core
 
         /// <summary>Whether a subject is bound (replaces the old m_villager null-guard).</summary>
         protected abstract bool HasSubject { get; }
+
+        /// <summary>Clear the bound subject on deactivation (subclass-owned field).</summary>
+        protected abstract void ClearSubject();
+
+        #region Singleton Lifecycle
+
+        /// <summary>
+        ///     The single live host instance per concrete subclass. Each closed
+        ///     generic (villager vs registry) gets its own static field, so the two
+        ///     tab hosts never collide. The boilerplate below (create/activate/
+        ///     deactivate/register) used to be duplicated verbatim in each manager.
+        /// </summary>
+        protected static TSelf s_instance;
+
+        protected static TSelf EnsureInstance()
+        {
+            if (s_instance != null) return s_instance;
+            var go = new GameObject(typeof(TSelf).Name);
+            s_instance = go.AddComponent<TSelf>();
+            DontDestroyOnLoad(go);
+            return s_instance;
+        }
+
+        /// <summary>Shared activation: subclasses bind their subject, then call this.</summary>
+        protected void ActivateCore(bool hasCraftingRecipes, string headerName)
+        {
+            m_active = true;
+            m_hasCraftingRecipes = hasCraftingRecipes;
+            m_lastUpdateTime = Time.time;
+            m_headerName = headerName;
+            SetupTabHandler();
+        }
+
+        protected static void DeactivateInstance()
+        {
+            if (s_instance == null) return;
+            foreach (var t in s_instance.m_tabs) t.OnDeselected();
+            s_instance.m_active = false;
+            s_instance.ClearSubject();
+            s_instance.RestoreCraftingPanel();
+            s_instance.TeardownTabHandler();
+        }
+
+        protected static void RegisterTabInstance(ITabContent<TSubject> tab)
+        {
+            EnsureInstance();
+            s_instance.m_tabs.Add(tab);
+        }
+
+        #endregion
 
         #region Lifecycle
 
@@ -106,6 +166,21 @@ namespace ValheimVillages.UI.Core
             var gui = InventoryGui.instance;
             if (gui == null) return;
 
+            // A non-crafter villager/registry isn't a crafting station: hide the
+            // native station icon + level header every frame. UpdateRecipe re-derives
+            // them from the virtual station each frame (it runs per-frame, unlike the
+            // event-driven UpdateCraftingPanel), so this must re-apply here. The name
+            // label is separately overridden to the villager/registry type below.
+            // (Replaces the old whole-panel CanvasGroup hide in VillagerCraftingPatch,
+            // which also blanked the Info/Debug content rendered into m_crafting.)
+            if (!m_hasCraftingRecipes)
+            {
+                if (gui.m_craftingStationIcon != null)
+                    gui.m_craftingStationIcon.gameObject.SetActive(false);
+                if (gui.m_craftingStationLevelRoot != null)
+                    gui.m_craftingStationLevelRoot.gameObject.SetActive(false);
+            }
+
             // Native UpdateCraftingPanel re-activates the real Upgrade tab button
             // (and its RTrigger hint glyph) whenever the Orders/craft tab is
             // active. We drive tabs via clones, so force the native tab buttons
@@ -124,7 +199,6 @@ namespace ValheimVillages.UI.Core
             UpdateSelectionVisuals();
             CraftingStationPatch.HideWorkOrderButton();
             PopulateDescription(gui, m_tabs[ci]);
-            ReapplyChildHiding(gui);
             if (!string.IsNullOrEmpty(m_headerName))
                 VillagerUIFactory.SetCraftingStationName(gui, m_headerName);
         }
@@ -143,6 +217,17 @@ namespace ValheimVillages.UI.Core
             var gui = InventoryGui.instance;
             var tabParent = gui?.m_tabCraft?.transform.parent;
             if (tabParent == null) return;
+
+            // Snapshot the player's current vanilla tab state before we drive clones
+            // (which flip these flags via OnTab*Pressed). Restored on teardown so the
+            // next vanilla station opens on the tab the player last used — not stuck on
+            // Upgrade. The active tab is the non-interactable one.
+            if (gui.m_tabCraft != null && gui.m_tabUpgrade != null)
+            {
+                m_savedTabCraftInteractable = gui.m_tabCraft.interactable;
+                m_savedTabUpgradeInteractable = gui.m_tabUpgrade.interactable;
+                m_savedTabStateValid = true;
+            }
 
             CleanupOrphanedTabObjects(tabParent);
 
@@ -272,15 +357,21 @@ namespace ValheimVillages.UI.Core
 
             var gui = InventoryGui.instance;
             if (gui == null) return;
-            // Restore the player's native tabs to their normal clickable state.
-            // We hid them (SetActive(false)) and drove clones instead; leaving them
-            // non-interactable here leaks into the player's own crafting menu (the
-            // Upgrade tab goes dead until a relog). Valheim re-derives the correct
-            // per-recipe interactability when the player next opens a station.
+            // Re-show the native tabs (we hid them and drove clones instead) and restore
+            // the exact interactable flags we captured at setup. Setting BOTH to true
+            // (the old code) is an invalid state — InCraftTab() == !m_tabCraft.interactable
+            // then reads false, so the next vanilla station the player opens is stuck on
+            // the Upgrade tab. Restoring the snapshot returns them to their last vanilla tab.
             gui.m_tabCraft?.gameObject.SetActive(true);
             gui.m_tabUpgrade?.gameObject.SetActive(true);
-            if (gui.m_tabCraft != null) gui.m_tabCraft.interactable = true;
-            if (gui.m_tabUpgrade != null) gui.m_tabUpgrade.interactable = true;
+            if (m_savedTabStateValid)
+            {
+                if (gui.m_tabCraft != null)
+                    gui.m_tabCraft.interactable = m_savedTabCraftInteractable;
+                if (gui.m_tabUpgrade != null)
+                    gui.m_tabUpgrade.interactable = m_savedTabUpgradeInteractable;
+                m_savedTabStateValid = false;
+            }
         }
 
         private static void CleanupOrphanedTabObjects(Transform tabParent)
@@ -401,8 +492,10 @@ namespace ValheimVillages.UI.Core
             var ci = index - m_firstCustomTabIndex;
             if (ci >= 0 && ci < m_tabs.Count)
             {
-                HideCraftingChildren();
                 m_selectedListIndex = -1;
+                // Force a list rebuild for the new tab — the previous tab's elements are
+                // still in m_listElements, so the change-detection must not short-circuit.
+                m_renderedListSignature = null;
                 m_tabs[ci].OnSelected(CurrentSubject);
                 RefreshCustomContent(ci);
             }

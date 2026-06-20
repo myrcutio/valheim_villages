@@ -100,7 +100,7 @@ namespace ValheimVillages.Villager.Records
             // if it fails (graph not settled, anchor now outside a rebuilt village, etc.)
             // surface a loud error and refuse the revive rather than drop the villager on
             // the raw anchor for the EnsureAgent warp to teleport upward.
-            if (!Villages.Entity.VillageRegistry.TryResolveVillagerSeed(village, rawAnchor, out var spawnPos))
+            if (!Villages.Entity.VillageRegistry.TryResolveVillagerSeed(village, rawAnchor, out _))
             {
                 error = "no reachable spawn location near the revive anchor";
                 Plugin.Log?.LogError(
@@ -110,21 +110,16 @@ namespace ValheimVillages.Villager.Records
                 return false;
             }
 
-            var prefabName = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : DefaultPrefab;
-
-            // SpawnVillagerNpc re-activates the record in place (Status->Alive, re-link NPC).
-            var r = record;
-            var npc = VillagerSpawner.SpawnVillagerNpc(def, record.Type, prefabName, spawnPos, ref r);
-            if (npc == null)
-            {
-                error = "failed to spawn villager";
-                return false;
-            }
+            // Spawn on the HOST so the revived NPC is server-owned from birth (a client-spawned
+            // NPC handed to the server despawns). The host re-resolves the seed near the anchor
+            // against its own navmesh and re-activates the record (Status->Alive, re-link NPC).
+            // Passing the record id makes the host reuse this record rather than mint a new one.
+            VillagerRecruitRpc.RequestSpawn(record.Type, village.VillageId, rawAnchor, record.RecordId);
 
             s_lastReviveTime = Time.time;
             Plugin.Log?.LogInfo(
-                $"[Revive] Revived '{record.Name}' ({record.Type}) record {record.RecordId} at " +
-                $"({spawnPos.x:F1},{spawnPos.y:F1},{spawnPos.z:F1})");
+                $"[Revive] Requested host-authoritative revive of '{record.Name}' ({record.Type}) " +
+                $"record {record.RecordId} near ({rawAnchor.x:F1},{rawAnchor.y:F1},{rawAnchor.z:F1})");
             return true;
         }
     }

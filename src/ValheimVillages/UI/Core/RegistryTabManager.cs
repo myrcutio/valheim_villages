@@ -12,13 +12,13 @@ namespace ValheimVillages.UI.Core
     ///     shown — the first custom tab (Roster) is the default.
     /// </summary>
     [RegisterModObject("RegistryTabManager")]
-    public class RegistryTabManager : CraftingTabHostBase<RegistryContext>
+    public class RegistryTabManager : CraftingTabHostBase<RegistryContext, RegistryTabManager>
     {
-        private static RegistryTabManager s_instance;
         private RegistryContext m_context;
 
         protected override RegistryContext CurrentSubject => m_context;
         protected override bool HasSubject => m_context != null;
+        protected override void ClearSubject() => m_context = null;
 
         /// <summary>
         ///     Whether the registry UI is currently driving the shared crafting panel.
@@ -32,35 +32,11 @@ namespace ValheimVillages.UI.Core
         {
             EnsureInstance();
             s_instance.m_context = context;
-            s_instance.m_active = true;
-            s_instance.m_hasCraftingRecipes = false;
-            s_instance.m_lastUpdateTime = Time.time;
-            s_instance.m_headerName = "Village Registry";
-            s_instance.SetupTabHandler();
+            s_instance.ActivateCore(false, "Village Registry");
         }
 
-        public static void Deactivate()
-        {
-            if (s_instance == null) return;
-            foreach (var t in s_instance.m_tabs) t.OnDeselected();
-            s_instance.m_active = false;
-            s_instance.m_context = null;
-            s_instance.RestoreCraftingPanel();
-            s_instance.TeardownTabHandler();
-        }
+        public static void Deactivate() => DeactivateInstance();
 
-        public static void RegisterTab(IRegistryTabUI tab)
-        {
-            EnsureInstance();
-            s_instance.m_tabs.Add(tab);
-        }
-
-        private static void EnsureInstance()
-        {
-            if (s_instance != null) return;
-            var go = new GameObject("RegistryTabManager");
-            s_instance = go.AddComponent<RegistryTabManager>();
-            DontDestroyOnLoad(go);
-        }
+        public static void RegisterTab(IRegistryTabUI tab) => RegisterTabInstance(tab);
     }
 }

@@ -27,12 +27,6 @@ namespace ValheimVillages.Scheduling
         {
             if (config == null) return;
 
-            // A ScriptEngine hot-reload can hand the reloaded plugin a ConfigFile that has
-            // NOT yet loaded the persisted .cfg from disk; Bind would then apply the default
-            // (false) and SAVE it over the persisted value — which is why a reload reset
-            // PrimaryMode to false. Force a disk read first so the saved value survives.
-            config.Reload();
-
             s_primaryMode ??= config.Bind("Scheduler", "PrimaryMode", false,
                 "When true the dual-encoder scheduler is the PRIMARY work selector: it " +
                 "dispatches scheduler-owned tasks (repair, cook-rescue) by directing the " +

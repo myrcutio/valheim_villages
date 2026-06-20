@@ -280,7 +280,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 new Vector3(minX, bakeMinY - bakeYPadding, minZ),
                 new Vector3(maxX, bakeMaxY + bakeYPadding, maxZ));
 
-            var bakeResult = NavMeshBakeManager.BakeVillage(bakeBounds);
+            var bakeResult = NavMeshBakeManager.BakeVillage(bakeBounds, villageKey);
             DebugLog.Event("NavMeshBake", "village_bake",
                 ("success", bakeResult.Success),
                 ("sources", bakeResult.SourceCount),
@@ -696,17 +696,48 @@ namespace ValheimVillages.TaskQueue.Handlers
             return anchors;
         }
 
+        /// <summary>
+        ///     Scope the world-wide seed-anchor list down to a SINGLE village's cluster
+        ///     so a partition never spans more than one village. Critical for multi-
+        ///     village worlds: <see cref="IsReady" /> requires every scoped anchor's
+        ///     zone loaded, and <see cref="CollectSeedAnchors" /> returns ALL villages'
+        ///     anchors. A second village 350 m away can never have its zone loaded while
+        ///     the player/server is at the first, so an unscoped (whole-world) partition
+        ///     deferred on that distant zone forever and was eventually dropped — no
+        ///     graph ever built for ANY village. Scoping to one village removes that
+        ///     coupling: each village bakes/builds/persists its own graph independently.
+        ///     <para>The scope center is the task's explicit anchor (patrol-requested
+        ///     partitions stamp anchor_x/anchor_z); for an anchor-less global task
+        ///     (structure-change rebuild, <c>vv_repartition</c>) we resolve the village
+        ///     at the first seed so the rebuild still targets exactly one village. A
+        ///     single-village world is unaffected — every anchor is inside the one
+        ///     cluster.</para>
+        /// </summary>
         private static List<Vector3> FilterAnchorsByTask(List<Vector3> allAnchors, VillagerTask task)
         {
             if (allAnchors == null || allAnchors.Count == 0) return allAnchors;
-            if (task?.Attributes == null ||
-                !task.Attributes.TryGetValue("anchor_x", out var axStr) ||
-                !task.Attributes.TryGetValue("anchor_z", out var azStr))
-                return allAnchors;
 
-            if (!float.TryParse(axStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var anchorX) ||
-                !float.TryParse(azStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var anchorZ))
-                return allAnchors;
+            float anchorX, anchorZ;
+            if (task?.Attributes != null &&
+                task.Attributes.TryGetValue("anchor_x", out var axStr) &&
+                task.Attributes.TryGetValue("anchor_z", out var azStr) &&
+                float.TryParse(axStr, NumberStyles.Float, CultureInfo.InvariantCulture, out anchorX) &&
+                float.TryParse(azStr, NumberStyles.Float, CultureInfo.InvariantCulture, out anchorZ))
+            {
+                // Explicit scope center from the requesting villager's anchor.
+            }
+            else
+            {
+                // No explicit anchor (global rebuild): still scope to ONE village so a
+                // distant village's unloaded zone can't block this partition. Center on
+                // the resolved village's anchor, falling back to the first seed.
+                var target = ResolveVillage(task, allAnchors);
+                var center = target != null && target.Anchor != Vector3.zero
+                    ? target.Anchor
+                    : allAnchors[0];
+                anchorX = center.x;
+                anchorZ = center.z;
+            }
 
             var r2 = VillageClusterRadius * VillageClusterRadius;
             var filtered = new List<Vector3>();
@@ -717,11 +748,11 @@ namespace ValheimVillages.TaskQueue.Handlers
             }
 
             Plugin.Log?.LogInfo(
-                $"[Region] Filtered anchors by anchor ({anchorX:F0},{anchorZ:F0}): " +
+                $"[Region] Scoped anchors to village near ({anchorX:F0},{anchorZ:F0}): " +
                 $"{filtered.Count}/{allAnchors.Count} within {VillageClusterRadius}m");
             if (filtered.Count == 0)
                 Plugin.Log?.LogWarning(
-                    $"[Region] No anchors within {VillageClusterRadius}m of anchor ({anchorX:F0},{anchorZ:F0})");
+                    $"[Region] No anchors within {VillageClusterRadius}m of ({anchorX:F0},{anchorZ:F0})");
             return filtered;
         }
 

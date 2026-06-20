@@ -4,7 +4,7 @@ Keywords: UI, user interface, tab, info tab, debug tab, InfoTab, DebugTab, Villa
 VillagerUIFactory, IVillagerTab, IListPanel, IContextMenu, RegisterTab, RegisterListPanel, RegisterContextMenu,
 VillagerInteract, VillagerBehaviorBridge, interaction, hover text, crafting UI, InventoryGui, work order menu,
 WorkOrderMenu, WorkOrderMenuBuilder, context menu, list panel, patrol status, patrol map, PatrolStatusPanel,
-PatrolMapRenderer, VillageMapPanel, DialogPatches, VillagerCraftingPatch, TMPro, crafting panel, tab switching
+PatrolMapRenderer, VillageMapPanel, DialogPatches, CraftingStationPatch, TMPro, crafting panel, tab switching
 
 ## Purpose
 
@@ -36,7 +36,6 @@ UI/
     VillageMapPanel.cs                 -- [RegisterListPanel("villagemap", "debug")] patrol map and "Remap" action
   Patches/
     DialogPatches.cs                   -- Patches Character.GetHoverText, Tameable.Interact, InventoryGui.Hide, NpcTalk
-    VillagerCraftingPatch.cs           -- Hides crafting panel for non-crafters via CanvasGroup.alpha
   ContextMenus/
     WorkOrderMenu.cs                   -- [RegisterModObject] popup for work order min/max quota configuration
     WorkOrderMenuBuilder.cs            -- Builds WorkOrderMenu hierarchy via VillagerUIFactory
@@ -62,7 +61,9 @@ UI/
 - `VillagerInteract.Interact()` (E key) pauses NPC, sets crafting station, calls `VillagerTabManager.Activate()`.
 - `DialogPatches` applied via `Harmony.PatchAll()`: patches `Character.GetHoverText`, `Tameable.Interact`,
   `InventoryGui.Hide`, `NpcTalk.RandomTalk`.
-- `VillagerCraftingPatch` applied via `Harmony.PatchAll()`: hides crafting panel for non-crafters.
+- Crafting-panel integration is a single Harmony patch, `Items/WorkOrders/CraftingStationPatch`, over
+  `InventoryGui.UpdateCraftingPanel`/`Update`/`Hide` (the Order button + gamepad focus nav). Non-crafter
+  station-header hiding lives in `CraftingTabHostBase.LateUpdate`, not a standalone patch.
 
 ## Integration
 

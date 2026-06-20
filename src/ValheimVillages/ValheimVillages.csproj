@@ -14,7 +14,7 @@
         <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles</BepInExDir>
 
         <OutputPath>$(BepInExDir)/$(R2ModmanProfile)/BepInEx/scripts/</OutputPath>
-        <OutputPath>$(BepInExDir)/$(R2ModmanReleaseProfile)/BepInEx/plugins/ValheimVillages/</OutputPath>
+        <OutputPath>$(BepInExDir)/$(R2ModmanReleaseProfile)/BepInEx/plugins/idontunderstand-ValheimVillages/ValheimVillages/</OutputPath>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     </PropertyGroup>
 

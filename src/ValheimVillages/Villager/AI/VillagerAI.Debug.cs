@@ -1,8 +1,10 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villager.Records;
 
 namespace ValheimVillages.Villager.AI
 {
@@ -14,25 +16,98 @@ namespace ValheimVillages.Villager.AI
     /// </summary>
     public partial class VillagerAI
     {
-        [DevCommand("List active villagers with AI state, target, path status, and resolved region",
+        [DevCommand(
+            "List villagers from the authoritative record table (all statuses), annotated " +
+            "with live-instance presence; full AI/path/region detail under each loaded instance",
             Name = "vv_get_villagers")]
         public static void DumpVillagers()
         {
-            var villagers = VillagerAIManager.ActiveVillagers;
+            // Make the in-memory instance count honest before we report it.
+            var pruned = VillagerAIManager.PruneTombstones();
+
+            // The record table — NOT the in-memory AI dict — is the row set, so this now
+            // agrees with vv_records (same store) and includes Dead/Egg/away villagers,
+            // each annotated with where its NPC actually is right now.
+            var records = VillagerRecordTable.EnumerateAll()
+                .OrderBy(r => r.Village)
+                .ThenBy(r => r.Name)
+                .ToList();
+
             var sb = new StringBuilder();
             var navHold = Navigation.VillageNavLock.IsHeld
                 ? $" [nav hold {Navigation.VillageNavLock.SecondsRemaining:F1}s — rebuild settle]"
                 : "";
-            sb.AppendLine($"[vv_get_villagers] {villagers.Count} active villager(s):{navHold}");
-            foreach (var kv in villagers)
+            sb.AppendLine(
+                $"[vv_get_villagers] {VillagerLiveness.PeerLabel()} {records.Count} villager record(s); " +
+                $"live-instance annotated{navHold}");
+
+            foreach (var r in records)
             {
-                if (kv.Value == null)
+                var presence = VillagerLiveness.Resolve(r);
+                var warn = presence == LivePresence.Missing ? " ⚠ORPHAN" : "";
+                sb.AppendLine(
+                    $"- {r.Name} [{r.Type}] status={r.Status} " +
+                    $"presence={VillagerLiveness.Tag(presence)}{warn} id={r.RecordId}");
+
+                // Only a record with a live local instance gets the full runtime block.
+                if (presence == LivePresence.Live
+                    && VillagerAIManager.ActiveVillagers.TryGetValue(r.RecordId, out var ai)
+                    && ai != null)
+                    ai.AppendDebug(sb);
+            }
+
+            sb.AppendLine(
+                $"  in-memory AI instances on this peer: {VillagerAIManager.ActiveVillagers.Count}" +
+                (pruned > 0 ? $" ({pruned} null tombstone(s) pruned)" : ""));
+
+            Console.instance?.Print(sb.ToString());
+            Plugin.Log?.LogInfo(sb.ToString());
+        }
+
+        [DevCommand("Dump each villager's AI event ring — state changes / target sets / path recomputes with timestamps. The transition timeline that polling vv_get_villagers aliases past.",
+            Name = "vv_ai_events")]
+        public static void DumpAiEvents()
+        {
+            const int MaxPerVillager = 40;
+            var now = Time.time;
+            var sb = new StringBuilder();
+            sb.AppendLine($"[vv_ai_events] now={now:F1}s — last {MaxPerVillager} events/villager (oldest first, time shown as age):");
+
+            foreach (var kv in VillagerAIManager.ActiveVillagers)
+            {
+                var ai = kv.Value;
+                if (ai == null) continue;
+
+                sb.AppendLine($"- {ai.NpcName} [{ai.VillagerType}] state={ai.CurrentState}");
+
+                // Large lookback → the whole buffer; trim to the most recent N below.
+                var events = ai.EventRing.Snapshot(now, 100000f);
+                if (events.Count == 0)
                 {
-                    sb.AppendLine($"- <null> id={kv.Key}");
+                    sb.AppendLine("    (no events recorded)");
                     continue;
                 }
 
-                kv.Value.AppendDebug(sb);
+                for (var i = System.Math.Max(0, events.Count - MaxPerVillager); i < events.Count; i++)
+                {
+                    var ev = events[i];
+                    var age = now - ev.TimeSec;
+                    switch (ev.Kind)
+                    {
+                        case Diagnostics.AiEventRing.EventKind.StateChange:
+                            sb.AppendLine($"    -{age,6:F1}s  STATE   {ev.Detail}");
+                            break;
+                        case Diagnostics.AiEventRing.EventKind.TargetSet:
+                            sb.AppendLine(
+                                $"    -{age,6:F1}s  TARGET  {ev.Detail} -> " +
+                                $"({ev.PosA.x:F1},{ev.PosA.y:F1},{ev.PosA.z:F1})");
+                            break;
+                        case Diagnostics.AiEventRing.EventKind.PathRecompute:
+                            sb.AppendLine(
+                                $"    -{age,6:F1}s  PATH    {ev.Detail} corners={ev.IntA}");
+                            break;
+                    }
+                }
             }
 
             Console.instance?.Print(sb.ToString());
@@ -96,11 +171,28 @@ namespace ValheimVillages.Villager.AI
             try { region = Villages.Entity.VillageRegistry.GraphAt(pos)?.PointToRegionId(pos); }
             catch { /* graph not built / not ready */ }
 
-            sb.AppendLine($"- {NpcName} [{VillagerType}] id={UniqueId}");
+            // Header line ("- Name [Type] status= presence= id=") is printed by the caller
+            // (DumpVillagers) from the record; this block is the live runtime detail under it.
             sb.AppendLine($"    pos=({pos.x:F1},{pos.y:F1},{pos.z:F1})  state={CurrentState}  " +
                           $"paused={IsPaused} lingering={IsLingering} casual={IsCasualTravel}");
             sb.AppendLine($"    region@pos={region ?? "UNRESOLVED"}  " +
                           $"anchor=({m_homeAnchor.x:F1},{m_homeAnchor.y:F1},{m_homeAnchor.z:F1})");
+
+            if (!IsSettled)
+                sb.AppendLine(
+                    "    settling: holding for spawn preconditions (on village graph + ready agent)");
+
+            // ZDO ownership: BaseAI.UpdateAI bails (returns false → whole tick,
+            // including the movement step, is skipped) when this instance is NOT
+            // the owner. On the dedicated server, isOwner=False means the server
+            // handed the villager to the player's client and can't simulate it.
+            var znv = GetComponent<ZNetView>();
+            var zdo = znv != null ? znv.GetZDO() : null;
+            if (zdo != null)
+                sb.AppendLine($"    zdo: owner={zdo.GetOwner()} session={ZDOMan.GetSessionID()} " +
+                              $"isOwner={zdo.IsOwner()} valid={znv.IsValid()}");
+            else
+                sb.AppendLine("    zdo: <no zdo>");
 
             if (m_currentWaypoint != null)
             {

@@ -27,9 +27,18 @@ namespace ValheimVillages.Villager.Records
             else
                 records = VillagerRecordTable.EnumerateAll().ToList();
 
-            Print($"[vv_records] {records.Count} record(s){(filter != null ? $" (filter: {filter})" : "")}");
+            Print($"[vv_records] {VillagerLiveness.PeerLabel()} {records.Count} record(s)" +
+                  $"{(filter != null ? $" (filter: {filter})" : "")}");
+            Print("  legend: live=loaded here · away=elsewhere/unloaded · missing=NPC ZDO gone (orphan) · " +
+                  "unlinked=no NPC link · ?=can't tell (client). npc= is a stored back-link, not a liveness probe.");
             foreach (var r in records)
-                Print($"  {r.Status,-5} {r.Name} ({r.Type})  village={r.Village}  id={r.RecordId}  npc={r.NpcZdoId}");
+            {
+                var presence = VillagerLiveness.Resolve(r);
+                var warn = presence == LivePresence.Missing ? " ⚠ORPHAN" : "";
+                Print(
+                    $"  {r.Status,-5} {r.Name} ({r.Type})  village={r.Village}  " +
+                    $"live={VillagerLiveness.Tag(presence)}{warn}  id={r.RecordId}  npc={r.NpcZdoId}");
+            }
         }
 
         [DevCommand("Kill nearest active villager (or by record id) to test the death->Dead flow",
@@ -156,18 +165,16 @@ namespace ValheimVillages.Villager.Records
             // cell at the player, seeded against the village's founder-connected anchor
             // triad (not the player's island). No fallback by design — fail loudly if the
             // player isn't on a settled village graph rather than spawning off-mesh.
-            if (!Villages.Entity.VillageRegistry.TryResolveVillagerSeed(village, pos, out var spawnPos))
+            if (!Villages.Entity.VillageRegistry.TryResolveVillagerSeed(village, pos, out _))
             {
                 Print($"[vv_recruit] no reachable spawn location at {pos}; aborting.");
                 return;
             }
 
-            var prefab = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : "DvergerMage";
-            VillagerRecord rec = null;
-            var npc = VillagerSpawner.SpawnVillagerNpc(def, def.type, prefab, spawnPos, ref rec, village.VillageId);
-            Print(npc != null
-                ? $"[vv_recruit] recruited {def.type} at {spawnPos} into village {village.VillageId}"
-                : "[vv_recruit] failed");
+            // Spawn on the HOST (server-owned from birth); the host re-resolves the seed near
+            // the player position against its own navmesh. recordId empty = fresh recruit.
+            VillagerRecruitRpc.RequestSpawn(def.type, village.VillageId, pos, "");
+            Print($"[vv_recruit] requested {def.type} into village {village.VillageId} (host-authoritative spawn)");
         }
 
         [DevCommand("Revive a fallen villager by record id: vv_revive <id>", Name = "vv_revive")]

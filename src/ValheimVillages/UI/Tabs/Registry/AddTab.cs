@@ -116,7 +116,7 @@ namespace ValheimVillages.UI.Tabs.Registry
             }
 
             if (!Villages.Entity.VillageRegistry.TryResolveVillagerSeed(
-                    village, context.RegistryPosition, out var spawnPos))
+                    village, context.RegistryPosition, out _))
             {
                 Plugin.Log?.LogError(
                     "[AddTab] No reachable spawn location near registry " +
@@ -127,15 +127,13 @@ namespace ValheimVillages.UI.Tabs.Registry
                 return;
             }
 
-            VillagerRecord record = null;
-            var prefab = !string.IsNullOrEmpty(def.preferredPrefab) ? def.preferredPrefab : "DvergerMage";
-            // Recruited AT this registry → belongs to this registry's village (already
-            // minted at placement). Pass its id so the spawn resolves it without minting.
-            var npc = VillagerSpawner.SpawnVillagerNpc(def, def.type, prefab, spawnPos, ref record, context.VillageId);
+            // Authoritative spawn happens on the HOST so the villager is server-owned from
+            // birth — a villager created client-side and handed to the server despawns. The
+            // checks above are client-side UX gating; the host re-resolves the seed against
+            // ITS navmesh near the registry. recordId empty = fresh recruit.
+            VillagerRecruitRpc.RequestSpawn(def.type, context.VillageId, context.RegistryPosition, "");
 
-            Player.m_localPlayer?.Message(
-                MessageHud.MessageType.Center,
-                npc != null ? $"Recruited {name}" : $"Failed to recruit {name}");
+            Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Recruiting {name}…");
         }
 
         private static Sprite ResolveItemIcon(string itemPrefab)

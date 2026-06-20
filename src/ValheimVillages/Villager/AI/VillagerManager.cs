@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Attributes;
+using ValheimVillages.TaskQueue.Handlers;
 using ValheimVillages.Villager.Records;
 using ValheimVillages.Villages.Entity;
 
@@ -26,6 +27,12 @@ namespace ValheimVillages.Villager.AI
             if (ai == null || string.IsNullOrEmpty(ai.UniqueId)) return;
             ActiveVillagers[ai.UniqueId] = ai;
             Plugin.Log?.LogInfo($"[VillagerAIManager] Registered villager {ai.UniqueId} (active)");
+
+            // Gate this villager's autonomous behavior behind a deferred precondition task
+            // (on village graph + agent ready), retried with backoff by the queue — no
+            // per-frame race. The villager holds in place until the task flips its settled
+            // flag. Deduped per (handler, recordId), so re-registration is safe.
+            VillagerSettleHandler.Enqueue(ai.UniqueId);
         }
 
         /// <summary>
@@ -43,6 +50,31 @@ namespace ValheimVillages.Villager.AI
         {
             if (ai != null)
                 Unregister(ai.UniqueId);
+        }
+
+        /// <summary>
+        ///     Remove entries whose <see cref="VillagerAI" /> value is Unity-fake-null — the
+        ///     GameObject was destroyed without <c>OnDestroy</c> running its Unregister, so a
+        ///     dead reference lingers and inflates the live count. Scoped STRICTLY to null
+        ///     values: never removes a live instance, never touches records. Idempotent —
+        ///     <see cref="RegisterActive" /> re-adds on the next Awake if the villager reloads.
+        ///     Returns the number pruned.
+        /// </summary>
+        public static int PruneTombstones()
+        {
+            List<string> dead = null;
+            foreach (var kv in ActiveVillagers)
+            {
+                if (kv.Value != null) continue;
+                (dead ??= new List<string>()).Add(kv.Key);
+            }
+
+            if (dead == null) return 0;
+            foreach (var id in dead)
+                ActiveVillagers.Remove(id);
+
+            Plugin.Log?.LogInfo($"[VillagerAIManager] Pruned {dead.Count} null villager tombstone(s)");
+            return dead.Count;
         }
 
         /// <summary>

@@ -40,6 +40,17 @@ namespace ValheimVillages.Villages.Entity
         public ZDO Zdo => m_zdo;
         public bool IsValid => m_zdo != null && !string.IsNullOrEmpty(VillageId);
 
+        /// <summary>
+        ///     True only on the peer that OWNS this village's carrier ZDO — the host
+        ///     (see <c>VillageOwnership</c>). Authoritative graph/anchor writes are gated on
+        ///     this: a write via <c>ZDO.Set</c> bumps the carrier's DataRevision and, on a
+        ///     client, is pushed to the host where a DataRevision-newer blob would clobber the
+        ///     host's authoritative graph. The ownership patch keeps the host the sole owner,
+        ///     so clients read/hydrate the blob locally but never persist over it. Reads are
+        ///     unaffected; the partition that produces the graph is also enqueued host-only.
+        /// </summary>
+        private bool CanPersist => m_zdo != null && m_zdo.IsOwner();
+
         public string VillageId => m_zdo.GetString(IdKey);
 
         public Vector3 Anchor
@@ -47,6 +58,7 @@ namespace ValheimVillages.Villages.Entity
             get => m_zdo.GetVec3(AnchorKey, Vector3.zero);
             set
             {
+                if (!CanPersist) return;
                 m_zdo.Set(AnchorKey, value);
                 m_zdo.Persistent = true;
             }
@@ -64,6 +76,7 @@ namespace ValheimVillages.Villages.Entity
             get => m_zdo.GetInt(InvalidKey, 0) != 0;
             set
             {
+                if (!CanPersist) return;
                 m_zdo.Set(InvalidKey, value ? 1 : 0);
                 m_zdo.Persistent = true;
             }
@@ -134,7 +147,10 @@ namespace ValheimVillages.Villages.Entity
             }
 
             // Blob present but unparseable (legacy/corrupt). Clear it so we don't
-            // re-parse it every load; the next partition rebuilds + re-saves.
+            // re-parse it every load; the next partition rebuilds + re-saves. Only the
+            // owning host persists — a client just leaves its local graph null and waits
+            // for the host's rebuilt blob to replicate.
+            if (!CanPersist) return;
             Plugin.Log?.LogInfo(
                 $"[Village] Wiping unparseable graph blob for village {VillageId} " +
                 $"(bytes={data.Length}); will rebuild on next partition");
@@ -146,6 +162,7 @@ namespace ValheimVillages.Villages.Entity
         public void SaveGraph()
         {
             if (m_graph == null || !m_graph.IsAvailable) return;
+            if (!CanPersist) return; // only the owning host persists the authoritative graph blob
             m_zdo.Set(GraphKey, RegionGraphPersistence.Serialize(m_graph));
             m_zdo.Persistent = true;
         }
@@ -189,6 +206,7 @@ namespace ValheimVillages.Villages.Entity
         /// <summary>Upsert an anchor by name and persist the whole list to the ZDO.</summary>
         public void SetAnchor(string name, Vector3 pos)
         {
+            if (!CanPersist) return; // host-authoritative; clients receive anchors via replication
             if (!m_anchorsHydrated) HydrateAnchorsFromZdo();
 
             var entry = new VillageAnchor(name, pos);
@@ -226,6 +244,9 @@ namespace ValheimVillages.Villages.Entity
             if (legacy == Vector3.zero) return;
 
             m_anchors.Add(new VillageAnchor(VillageAnchor.Registry, legacy));
+            // Keep the migrated anchor in memory on every peer (so reads resolve it), but
+            // only the owning host persists it back — clients receive it via replication.
+            if (!CanPersist) return;
             m_zdo.Set(AnchorsKey, VillageAnchorPersistence.Serialize(m_anchors));
             m_zdo.Persistent = true;
             Plugin.Log?.LogInfo(
@@ -235,9 +256,10 @@ namespace ValheimVillages.Villages.Entity
         /// <summary>Generic ZDO string read (for WS3 station blob, etc.).</summary>
         public string GetBlob(string key) => m_zdo.GetString(key);
 
-        /// <summary>Generic ZDO string write; marks the ZDO persistent.</summary>
+        /// <summary>Generic ZDO string write; marks the ZDO persistent. Host-authoritative.</summary>
         public void SetBlob(string key, string value)
         {
+            if (!CanPersist) return;
             m_zdo.Set(key, value);
             m_zdo.Persistent = true;
         }

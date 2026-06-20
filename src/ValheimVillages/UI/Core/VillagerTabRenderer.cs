@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 using RawImage = UnityEngine.UI.RawImage;
@@ -11,7 +12,8 @@ namespace ValheimVillages.UI.Core
     ///     Partial class — see CraftingTabHostBase.cs for lifecycle and tab switching.
     ///     (Shared by VillagerTabManager and RegistryTabManager.)
     /// </summary>
-    public abstract partial class CraftingTabHostBase<TSubject>
+    public abstract partial class CraftingTabHostBase<TSubject, TSelf>
+        where TSelf : CraftingTabHostBase<TSubject, TSelf>
     {
         private const string ListItemPrefix = "VV_ListItem_";
         private Vector2? m_savedListRootAnchorMax;
@@ -20,6 +22,14 @@ namespace ValheimVillages.UI.Core
         private Vector2? m_savedListRootAnchorMin;
 
         private Vector2? m_savedListRootPivot;
+
+        /// <summary>
+        ///     Signature of the list items last rendered into the recipe pane. Lets
+        ///     <see cref="RefreshCustomContent" /> skip the destroy-and-rebuild when the
+        ///     content is unchanged. Reset to null (force a rebuild) on tab switch and on
+        ///     <see cref="RestoreCraftingPanel" />.
+        /// </summary>
+        private string m_renderedListSignature;
 
         #region Custom Content (populates native RecipeList + Decription)
 
@@ -30,13 +40,49 @@ namespace ValheimVillages.UI.Core
 
             var tab = m_tabs[ci];
             var items = tab.GetListItems(CurrentSubject) ?? new List<TabListItemUI>();
-            PopulateRecipeList(gui, items);
 
-            if (m_selectedListIndex < 0 && items.Count > 0)
+            // Only rebuild the buttons when the rendered content actually changes.
+            // RefreshCustomContent runs on a timer (and on tab switch); destroying and
+            // recreating the recipe elements every tick made custom lists (villager /
+            // registry) flicker and dropped clicks that landed on a rebuild frame. The
+            // signature covers everything we render (name + icon), so an unchanged
+            // signature means the existing buttons are already correct. The selection
+            // highlight and description still refresh below without touching the buttons.
+            var signature = ComputeListSignature(items);
+            if (signature != m_renderedListSignature)
+            {
+                PopulateRecipeList(gui, items);
+                m_renderedListSignature = signature;
+            }
+
+            if (m_selectedListIndex < 0 && m_listElements.Count > 0)
                 m_selectedListIndex = 0;
+            if (m_selectedListIndex >= m_listElements.Count)
+                m_selectedListIndex = m_listElements.Count - 1;
 
             UpdateSelectionVisuals();
             PopulateDescription(gui, tab);
+        }
+
+        /// <summary>
+        ///     A value signature of everything the recipe pane renders per item (name +
+        ///     icon identity). GetListItems hands back fresh objects each call, so we
+        ///     compare by value, not reference.
+        /// </summary>
+        private static string ComputeListSignature(List<TabListItemUI> items)
+        {
+            var sb = new StringBuilder(items.Count * 24);
+            foreach (var item in items)
+            {
+                // Length-prefix the name so it can't collide with the delimiters,
+                // whatever characters the name itself contains.
+                var name = item?.TabName ?? "";
+                sb.Append(name.Length).Append(':').Append(name);
+                sb.Append('@').Append(item?.Icon != null ? item.Icon.GetInstanceID() : 0);
+                sb.Append(';');
+            }
+
+            return sb.ToString();
         }
 
         private void PopulateRecipeList(InventoryGui gui, List<TabListItemUI> items)
@@ -179,10 +225,8 @@ namespace ValheimVillages.UI.Core
         /// </summary>
         private void ApplyTabAction(InventoryGui gui, TabDetailDataUI detail)
         {
-            #region deletewhendone
             if (gui.m_craftButton == null) return;
-            #endregion
-            
+
             var hasAction = detail?.OnAction != null;
 
             // The native craft button is irrelevant on a custom tab — hide it (without
@@ -302,23 +346,43 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>
-        ///     Hide crafting-specific children inside the Decription panel.
+        ///     Names of children inside the Decription panel to hide while a custom
+        ///     tab is active (no recipe is selected, so they'd show stale content).
+        /// </summary>
+        private static readonly string[] s_descSubElementsToHide =
+        {
+            "SelectVariant", "CraftType", "UpgradePanel", "UpradePanel",
+            "OLD_QualityPanel", "requirements",
+        };
+
+        /// <summary>
+        ///     Original activeSelf of the Decription sub-elements we hid, so
+        ///     RestoreCraftingPanel can put them back when we leave the custom tab.
+        ///     Critical for "requirements" (the ingredients row): native
+        ///     SetupRequirementList only toggles the individual entries, never the
+        ///     parent container — so without this restore the ingredients row stays
+        ///     gone on the Craft/Upgrade tabs after visiting a custom tab.
+        /// </summary>
+        private readonly Dictionary<GameObject, bool> m_descSubSnapshot = new();
+
+        /// <summary>
+        ///     Hide crafting-specific children inside the Decription panel,
+        ///     snapshotting their prior active state once so it can be restored.
         ///     ("Decription" is Valheim's actual misspelled object name.)
         /// </summary>
-        private static void HideDescriptionSubElements(InventoryGui gui)
+        private void HideDescriptionSubElements(InventoryGui gui)
         {
             var desc = gui.m_crafting?.Find("Decription");
             if (desc == null) return;
 
-            string[] toHide =
-            {
-                "SelectVariant", "CraftType", "UpgradePanel", "UpradePanel",
-                "OLD_QualityPanel", "requirements",
-            };
-            foreach (var name in toHide)
+            foreach (var name in s_descSubElementsToHide)
             {
                 var child = desc.Find(name);
-                if (child != null) child.gameObject.SetActive(false);
+                if (child == null) continue;
+                var go = child.gameObject;
+                if (!m_descSubSnapshot.ContainsKey(go))
+                    m_descSubSnapshot[go] = go.activeSelf;
+                go.SetActive(false);
             }
         }
 
@@ -349,40 +413,9 @@ namespace ValheimVillages.UI.Core
                 child.gameObject.SetActive(ours.Contains(child.gameObject));
         }
 
-        /// <summary>
-        ///     Re-hide crafting children that Valheim may re-show each frame.
-        /// </summary>
-        private void ReapplyChildHiding(InventoryGui gui)
-        {
-            if (gui?.m_crafting == null) return;
-            foreach (Transform child in gui.m_crafting)
-                if (s_craftingChildrenToHide.Contains(child.name))
-                    child.gameObject.SetActive(false);
-        }
-
         #endregion
 
         #region Crafting Panel Hide / Restore
-
-        /// <summary>
-        ///     Names of direct children of m_crafting to hide on custom tabs.
-        /// </summary>
-        private static readonly HashSet<string> s_craftingChildrenToHide = new();
-
-        private void HideCraftingChildren()
-        {
-            if (m_childSnapshot.Count > 0) return;
-
-            var gui = InventoryGui.instance;
-            if (gui?.m_crafting == null) return;
-
-            foreach (Transform child in gui.m_crafting)
-            {
-                m_childSnapshot[child] = child.gameObject.activeSelf;
-                if (s_craftingChildrenToHide.Contains(child.name))
-                    child.gameObject.SetActive(false);
-            }
-        }
 
         protected void RestoreCraftingPanel()
         {
@@ -394,6 +427,7 @@ namespace ValheimVillages.UI.Core
             }
 
             m_listElements.Clear();
+            m_renderedListSignature = null;
 
             if (m_mapImageObject != null)
             {
@@ -408,10 +442,12 @@ namespace ValheimVillages.UI.Core
                 RestoreListRootLayout(gui.m_recipeListRoot);
             }
 
-            foreach (var kvp in m_childSnapshot)
+            // Re-activate the Decription sub-elements we hid (notably the
+            // "requirements" ingredients row, which native never re-activates).
+            foreach (var kvp in m_descSubSnapshot)
                 if (kvp.Key != null)
-                    kvp.Key.gameObject.SetActive(kvp.Value);
-            m_childSnapshot.Clear();
+                    kvp.Key.SetActive(kvp.Value);
+            m_descSubSnapshot.Clear();
 
             // Our cloned action button is the custom-tab surface; hide it and hand the
             // native craft button back. We never mutated the native button's listeners,

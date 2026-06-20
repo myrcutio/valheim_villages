@@ -105,10 +105,19 @@ namespace ValheimVillages.Dev
             var sessionId = ZDOMan.GetSessionID();
             var scene = ZNetScene.instance;
             var deleted = 0;
+            var skippedNotOwned = 0;
             foreach (var zdo in toDelete)
             {
-                // DestroyZDO only acts for the ZDO's owner; claim it first.
+                // DestroyZDO only acts for the ZDO's owner; claim it first. Village carriers
+                // are pinned to the host (VillagerZDOOwnershipPatch) — on a connected client
+                // the claim is vetoed, so we cannot own (and therefore cannot destroy) them.
+                // Don't silently no-op: count and report so the wipe is run on the server.
                 if (!zdo.IsOwner()) zdo.SetOwner(sessionId);
+                if (!zdo.IsOwner())
+                {
+                    skippedNotOwned++;
+                    continue;
+                }
 
                 var nview = scene != null ? scene.FindInstance(zdo) : null;
                 if (nview != null && nview.gameObject != null)
@@ -134,6 +143,11 @@ namespace ValheimVillages.Dev
 
             sb.AppendLine(
                 $"  → deleted {deleted} ZDO(s), removed {itemsRemoved} item(s); in-memory caches cleared.");
+            if (skippedNotOwned > 0)
+                sb.AppendLine(
+                    $"  ⚠ {skippedNotOwned} village ZDO(s) are host-owned and could NOT be deleted from a " +
+                    "client (ownership is pinned to the host). Run vv_drop_all_state on the SERVER console " +
+                    "to wipe them.");
             Print(sb.ToString());
         }
 

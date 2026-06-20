@@ -21,6 +21,19 @@ namespace ValheimVillages.Patches
             var zdo = __instance.GetZDO();
             if (zdo == null) return;
 
+            // Host asserts SOLE ownership of village entities the instant their ZDO is
+            // instantiated. This is required (not just a latency optimisation): a dedicated
+            // server's reference position is the world origin, so ReleaseNearbyZDOS never
+            // reaches a distant village on its own — without this, a client-recruited
+            // villager / client-placed registry / village carrier stays client-owned after
+            // a restart, a disconnect, or whenever no player stands in the village. Runs for
+            // EVERY carrier kind (village/record/registry/villager), so it must precede the
+            // record/player early-returns below. Idempotent (owner check), client = no-op.
+            if (VillageOwnership.IsServerAuthority()
+                && VillageOwnership.IsVillageZdo(zdo)
+                && zdo.GetOwner() != ZDOMan.GetSessionID())
+                zdo.SetOwner(ZDOMan.GetSessionID());
+
             // This postfix runs for EVERY ZNetView.Awake, so it must never act on the
             // wrong object. Two exclusions before the (intentionally broad) key check:
             //   - the record-carrier ZDO shares the vv_record_id key with real villagers;

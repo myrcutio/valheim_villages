@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using BepInEx;
@@ -18,14 +19,15 @@ using ValheimVillages.Testing;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.AI.Pathfinding;
+using ValheimVillages.Villages.Entity;
 
 [assembly: AssemblyTitle("Valheim Villages")]
 [assembly: AssemblyDescription("A village-building and NPC management mod for Valheim")]
 [assembly: AssemblyCompany("Myrcutio")]
 [assembly: AssemblyProduct("ValheimVillages")]
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
-[assembly: AssemblyVersion("0.1.1")]
-[assembly: AssemblyFileVersion("0.1.1")]
+[assembly: AssemblyVersion("0.1.2")]
+[assembly: AssemblyFileVersion("0.1.2")]
 [assembly: InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
@@ -35,12 +37,18 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.1.1";
+        public const string PluginVersion = "0.1.2";
 
         private static bool _recipeRefreshEnqueued;
-        private static bool _regionPartitionEnqueued;
         private static bool _recordIndexEnqueued;
         private static bool _villageIndexEnqueued;
+
+        /// <summary>Throttle (realtime seconds) for the per-village navmesh-bake sweep in Update.</summary>
+        private static float _lastBakeSweep;
+
+        /// <summary>villageId → realtime when its hna_partition was last enqueued by the bake
+        /// sweep, so we don't spam the queue while a bake is in flight / settling.</summary>
+        private static readonly Dictionary<string, float> _villageBakeEnqueuedAt = new();
 
         /// <summary>
         ///     <see cref="Time.realtimeSinceStartup" /> at the moment a hot reload
@@ -152,10 +160,11 @@ namespace ValheimVillages
                 // polygon scope have time to establish before we sample world
                 // state.
                 _hotReloadAt = Time.realtimeSinceStartup;
-                _regionPartitionEnqueued = false;
+                _villageBakeEnqueuedAt.Clear();
+                _lastBakeSweep = 0f;
                 _recordIndexEnqueued = false;
                 _villageIndexEnqueued = false;
-                Log.LogInfo("Hot reload — armed hna_partition (will fire 5s after settle)");
+                Log.LogInfo("Hot reload — armed per-village navmesh bake sweep (will fire 5s after settle)");
             }
 
             Log.LogInfo($"{PluginName} loaded successfully!");
@@ -193,6 +202,10 @@ namespace ValheimVillages
 
         private void Update()
         {
+            // Register the server-authoritative villager-spawn RPC handler on the current
+            // ZRoutedRpc (recreated per world session). Cheap no-op once registered.
+            Villager.VillagerRecruitRpc.EnsureRegistered();
+
             // After world load, enqueue one low-priority recheck of discovered recipes (cultivator + cooking)
             if (!_recipeRefreshEnqueued &&
                 ObjectDB.instance != null &&
@@ -213,7 +226,11 @@ namespace ValheimVillages
 
             // After world load, index/migrate villager records once (mints records for
             // legacy villagers that predate the record table so the roster + nav see them).
+            // Host-only: minting/migrating is an authoritative write — a client minting a
+            // record would create a client-owned (and possibly duplicate) carrier. Clients
+            // receive records via ZDO replication.
             if (!_recordIndexEnqueued &&
+                ZNet.instance != null && ZNet.instance.IsServer() &&
                 ObjectDB.instance != null &&
                 ZNetScene.instance != null &&
                 Time.realtimeSinceStartup > 3f)
@@ -250,32 +267,69 @@ namespace ValheimVillages
                 Log?.LogDebug("[Valheim Villages] Enqueued village_index (post–world load)");
             }
 
-            // Enqueue HNA partition (low priority) so village region graph is built without overwhelming other tasks
-            if (!_regionPartitionEnqueued &&
-                ObjectDB.instance != null &&
-                ZNetScene.instance != null &&
-                Time.realtimeSinceStartup > _hotReloadAt + 5f)
+            // Proactive PER-VILLAGE navmesh bake sweep. The region GRAPH replicates via the
+            // village ZDO blob, but the Unity navmesh is a per-peer runtime structure that is
+            // NOT replicated — so a villager that already HAS a graph (hydrated from the blob)
+            // still cannot path until its village has been baked on THIS peer. The patrol's
+            // "graph missing -> request partition" trigger therefore never fires on a peer that
+            // received the graph by replication; we must bake proactively here.
+            //
+            // Runs on BOTH peers, gated by zone-loaded: a dedicated server keeps every village
+            // zone loaded (VillageZoneLoadingPatch) so it bakes them ALL (the multi-instance
+            // holder keeps them coexisting); a client only has the player's village zone loaded
+            // so it bakes just that one (which it needs for recruit seed resolution).
+            if (ObjectDB.instance != null && ZNetScene.instance != null && ZoneSystem.instance != null &&
+                Time.realtimeSinceStartup > _hotReloadAt + 5f &&
+                Time.realtimeSinceStartup - _lastBakeSweep > 2f)
             {
-                _regionPartitionEnqueued = true;
-                GlobalTaskQueue.Enqueue(new VillagerTask
-                {
-                    Name = "hna_partition",
-                    SourceId = "system",
-                    Priority = TaskPriority.Low,
-                    TimeoutSeconds = TaskSettings.DefaultTimeoutSeconds,
-                    Attributes = new Dictionary<string, string>(),
-                });
-                Log?.LogInfo("[Valheim Villages] Enqueued hna_partition (low priority)");
-            }
+                _lastBakeSweep = Time.realtimeSinceStartup;
 
-            // Debounced HNA rebuild on structural changes (piece placed/removed)
-            const float hnaRebuildDebounce = 3f;
-            if (PieceChangePatch.IsDirty &&
-                Time.realtimeSinceStartup - PieceChangePatch.LastStructureChangeTime > hnaRebuildDebounce)
-            {
-                PieceChangePatch.IsDirty = false;
-                _regionPartitionEnqueued = false;
-                Log?.LogInfo("[Valheim Villages] Structure change detected, will re-enqueue hna_partition");
+                // A structural change (piece placed/removed) invalidates the affected bake; force
+                // a re-bake of every loaded village this sweep (debounced). Determining the exact
+                // village is not worth the coupling for the handful of villages a world holds.
+                var structureDirty = PieceChangePatch.IsDirty &&
+                    Time.realtimeSinceStartup - PieceChangePatch.LastStructureChangeTime > 3f;
+                if (structureDirty)
+                {
+                    PieceChangePatch.IsDirty = false;
+                    Log?.LogInfo("[Valheim Villages] Structure change detected, re-baking loaded village(s)");
+                }
+
+                foreach (var village in VillageRegistry.EnumerateAll())
+                {
+                    var id = village.VillageId;
+                    if (string.IsNullOrEmpty(id)) continue;
+                    var anchor = village.Anchor;
+                    if (anchor == Vector3.zero) continue;
+                    if (!ZoneSystem.instance.IsZoneLoaded(ZoneSystem.GetZone(anchor))) continue;
+
+                    // Skip villages already baked on this peer unless a structure change
+                    // invalidated them. (Re-bake retries every ~15s while a village stays
+                    // un-baked, e.g. its zone is still streaming.)
+                    if (!structureDirty)
+                    {
+                        if (NavMeshBakeManager.HasVillage(id)) continue;
+                        if (_villageBakeEnqueuedAt.TryGetValue(id, out var last) &&
+                            Time.realtimeSinceStartup - last < 15f) continue;
+                    }
+
+                    _villageBakeEnqueuedAt[id] = Time.realtimeSinceStartup;
+                    GlobalTaskQueue.Enqueue(new VillagerTask
+                    {
+                        Name = "hna_partition",
+                        SourceId = "system",
+                        Priority = TaskPriority.Low,
+                        TimeoutSeconds = TaskSettings.DefaultTimeoutSeconds,
+                        Attributes = new Dictionary<string, string>
+                        {
+                            { "village_id", id },
+                            { "anchor_x", anchor.x.ToString("F2", CultureInfo.InvariantCulture) },
+                            { "anchor_z", anchor.z.ToString("F2", CultureInfo.InvariantCulture) },
+                        },
+                    });
+                    Log?.LogInfo($"[Valheim Villages] Enqueued hna_partition for village {id} " +
+                                 $"(baked={NavMeshBakeManager.HasVillage(id)}, structureDirty={structureDirty})");
+                }
             }
 
             GlobalTaskQueue.ProcessBatch();

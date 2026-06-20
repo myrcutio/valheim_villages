@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Recipe lists on villager and Village Registry panels flickering, and
+  occasionally ignoring a click. The custom tab lists were torn down and rebuilt
+  on every refresh; they now rebuild only when their contents actually change.
+- A vanilla crafting station opening on the wrong tab (stuck on Upgrade) after
+  you had just talked to a villager. The villager UI now restores the game's
+  crafting tabs to the state they were in before it took over.
+
+## [0.1.2] - 2026-06-18
+
 ## [0.1.1] - 2026-06-14
 
 ### Fixed

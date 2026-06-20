@@ -234,9 +234,15 @@ namespace ValheimVillages.Villager.AI
 
         private void OnDestroy()
         {
-            // DIAGNOSTIC (Bug 6): is OnDestroy a reliable place to flip the record to
-            // Dead? It fires on death AND on unload/zone-change, so log identity +
-            // isDead/health + the call site to see what actually triggers it.
+            // OnDestroy fires on death AND on unload/zone-change, so it must NOT flip the
+            // record to Dead — that would wrongly kill villagers that merely streamed out of
+            // range. Confirmed in-world death is handled separately by VillagerDeathPatch
+            // (Character.OnDeath, which fires only on actual death). This block stays a
+            // diagnostic. NOTE: ch.IsDead()/health below are unreliable for a Humanoid (it
+            // doesn't override Character.IsDead, which returns false unconditionally, and
+            // GetHealth reads the already-nulled ZDO after a real death). The real death-vs-
+            // eviction discriminator is the ZDO validity/ownership in the DespawnRecorder
+            // block below: a true death has already run ResetZDO -> invalid/null ZDO.
             var ch = Character;
             Plugin.Log?.LogWarning(
                 $"[VillagerAI] OnDestroy: name='{m_villagerName}' id={UniqueId} " +
@@ -244,6 +250,21 @@ namespace ValheimVillages.Villager.AI
                 $"isDead={(ch != null ? ch.IsDead().ToString() : "n/a")} " +
                 $"hp={(ch != null ? ch.GetHealth().ToString("F1") : "n/a")}\n" +
                 $"call site:\n{System.Environment.StackTrace}");
+
+            // Queryable capture (vv_despawns) — the dedicated server's log isn't readable
+            // over MCP. Records the GameObject-destroy with owner/valid so we can tell a
+            // true ZDO destroy (also captured at ZDOMan.DestroyZDO) from an out-of-area
+            // instance removal (this entry present, no matching ZDO DESTROY entry).
+            {
+                var nv = GetComponent<ZNetView>();
+                var z = nv != null ? nv.GetZDO() : null;
+                Dev.DespawnRecorder.Record(
+                    $"GO DESTROY (VillagerAI.OnDestroy) name='{m_villagerName}' id={UniqueId} " +
+                    $"pos=({Position.x:F1},{Position.y:F1},{Position.z:F1}) " +
+                    $"isDead={(ch != null ? ch.IsDead().ToString() : "n/a")} " +
+                    $"valid={(z != null && z.IsValid())} owner={(z != null ? z.GetOwner() : 0)} " +
+                    $"isOwner={(z != null && z.IsOwner())} isServer={(ZNet.instance != null && ZNet.instance.IsServer())}");
+            }
 
             try
             {
@@ -263,7 +284,47 @@ namespace ValheimVillages.Villager.AI
             Memory.HomeAnchor = m_homeAnchor;
         }
 
+        /// <summary>Whether the spawn-settle gate has released (autonomous behaviors enabled).</summary>
+        public bool IsSettled => m_settled;
+
+        /// <summary>
+        ///     True once the villager is standing on a baked village graph with a ready
+        ///     agent — the precondition the spawn-settle gate waits on. Read (polled) by
+        ///     <see cref="TaskQueue.Handlers.VillagerSettleHandler" />; side-effect free.
+        /// </summary>
+        public bool PreconditionsSettled()
+        {
+            if (m_homeAnchor == Vector3.zero) return false;        // broken/zombie villager
+            if (m_navAgent == null || !m_navAgent.isOnNavMesh) return false; // agent not on mesh yet
+            try
+            {
+                var region = Villages.Entity.VillageRegistry.GraphAt(transform.position)
+                    ?.PointToRegionId(transform.position);
+                return !string.IsNullOrEmpty(region);             // resolves to a region on a village graph
+            }
+            catch
+            {
+                return false; // graph not built / not ready
+            }
+        }
+
+        /// <summary>
+        ///     Release the spawn-settle gate; called by the <c>villager_settle</c> task once
+        ///     its preconditions are ready. Idempotent.
+        /// </summary>
+        public void MarkSettled(string reason)
+        {
+            if (m_settled) return;
+            m_settled = true;
+            Plugin.Log?.LogInfo($"[AI:{m_villagerName}] spawn-settled — {reason}; behaviors enabled.");
+        }
+
         private bool m_warnedNoHome;
+
+        // Spawn-settle gate: false until the deferred `villager_settle` task confirms this
+        // villager is on its village graph with a ready agent. While false, UpdateAI holds
+        // the villager in place so a first-tick behavior (e.g. flee) can't eject it.
+        private bool m_settled;
 
         public override bool UpdateAI(float dt)
         {
@@ -320,6 +381,21 @@ namespace ValheimVillages.Villager.AI
             // a villager stranded off the village mesh walks itself back over
             // terrain before anything else gets to act on the un-pathable position.
             if (TryOffMeshRescue(dt)) return true;
+
+            // Spawn-settle gate: hold this villager's autonomous behavior (flee/combat/
+            // work/patrol) until the deferred `villager_settle` task confirms it is on its
+            // village graph with a ready agent, then flips m_settled. Reuses the task-queue
+            // precondition/backoff machinery (same as [RequireAgent]) so there is no
+            // per-frame race — the villager just waits. Off-mesh rescue (above) still runs so
+            // a slightly-off-mesh spawn recovers; here we ensure the agent exists each tick
+            // (so the precondition can observe on-mesh) and hold position otherwise, so a
+            // first-tick FleeBehavior can't path the fresh villager off-graph before it settles.
+            if (!m_settled)
+            {
+                EnsureAgentReady();
+                StopMoving();
+                return true;
+            }
 
             // Shared PoIs are discovered at the village level now; the only
             // per-villager thing left to sample is the comfort the villager

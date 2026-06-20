@@ -10,8 +10,20 @@ using ValheimVillages.UI.Core;
 namespace ValheimVillages.Items.WorkOrders
 {
     /// <summary>
-    ///     Adds a small "Order" button next to the Craft button in crafting
-    ///     station UIs. Creates a work order scroll in the player's inventory.
+    ///     The single Harmony patch over Valheim's crafting panel. Adds a small
+    ///     "Order" button next to (or replacing) the Craft button in station UIs and
+    ///     creates a work-order scroll in the player's inventory.
+    ///
+    ///     Note on timing: <see cref="InventoryGui.UpdateCraftingPanel" /> is NOT a
+    ///     per-frame method — Valheim calls it only on discrete events (panel open,
+    ///     item move, tab/craft press), so our postfix there decides button layout and
+    ///     which buttons exist. But native UpdateRecipe (the real per-frame method)
+    ///     re-activates the Craft button every idle frame (InventoryGui.cs: m_craftTimer
+    ///     &lt; 0 → m_craftButton.SetActive(true)). State that must survive frames —
+    ///     re-hiding Craft wherever Order replaces it — is therefore re-applied in the
+    ///     <c>Update</c> postfix, which also drives gamepad focus nav. Non-crafter
+    ///     station-header hiding lives in
+    ///     <see cref="UI.Core.CraftingTabHostBase{TSubject,TSelf}" />.LateUpdate.
     /// </summary>
     [HarmonyPatch]
     public static class CraftingStationPatch
@@ -48,9 +60,17 @@ namespace ValheimVillages.Items.WorkOrders
         // Craft button corruption repair:
         // Previous builds incorrectly set sizeDelta.x = rect.width (the
         // rendered width) on a stretch-anchored button, compounding the
-        // width each hot-reload. We detect and fix this every frame.
+        // width each hot-reload. We snapshot the clean value once and re-pin it on
+        // every UpdateCraftingPanel event (idempotent, so event timing is enough).
         private static Vector2 _cleanCraftSizeDelta;
         private static bool _cleanSizeDeltaSaved;
+
+        // Craft button's native (clean) horizontal anchors, captured alongside
+        // the clean sizeDelta. The Order button shares this row at the right 1/4,
+        // so we shrink Craft to the left 3/4 by anchor and restore from these when
+        // Order isn't shown (the player's normal crafting reuses the same button).
+        private static Vector2 _cleanCraftAnchorMin;
+        private static Vector2 _cleanCraftAnchorMax;
 
         private static Dictionary<string, string> s_stationWorkOrderMap;
 
@@ -187,6 +207,13 @@ namespace ValheimVillages.Items.WorkOrders
         [HarmonyPostfix]
         public static void UpdateFocusNavPostfix(InventoryGui __instance)
         {
+            // Native UpdateRecipe (which ran earlier this frame, before this postfix)
+            // re-activates the Craft button every idle frame. Where Order replaces Craft
+            // (virtual station), re-hide Craft here so it doesn't reappear behind Order
+            // and — with a gamepad — spuriously re-engage the Craft/Order focus nav.
+            if (_orderReplacesCraft && __instance.m_craftButton != null)
+                __instance.m_craftButton.gameObject.SetActive(false);
+
             if (!FocusNavActive(__instance))
             {
                 // Preserve focus through a transient craft (the Craft button is
@@ -368,6 +395,11 @@ namespace ValheimVillages.Items.WorkOrders
             {
                 _cleanSizeDeltaSaved = true;
 
+                // Snapshot the native horizontal anchors before we ever split the
+                // row, so RestoreCraftButtonWidth can hand the full width back.
+                _cleanCraftAnchorMin = craftRect.anchorMin;
+                _cleanCraftAnchorMax = craftRect.anchorMax;
+
                 if (isStretch && craftRect.sizeDelta.x > 10f)
                 {
                     // Corrupted: stretch-anchored buttons should have
@@ -495,19 +527,27 @@ namespace ValheimVillages.Items.WorkOrders
         }
 
         /// <summary>
-        ///     True while the Order button stands in for the Craft button (virtual
-        ///     villager/registry station). Native <see cref="InventoryGui" />.UpdateRecipe
-        ///     re-activates the Craft button every idle frame, so a per-frame postfix
-        ///     uses this to re-hide it (visibility itself is set on UpdateCraftingPanel
-        ///     events). False when Order is stacked above Craft (physical station).
+        ///     True while the Order button stands in for the Craft button at a virtual
+        ///     station (same slot, no direct crafting). Native UpdateRecipe re-activates
+        ///     the Craft button every idle frame, so <see cref="UpdateFocusNavPostfix" />
+        ///     re-hides it per frame while this is set. Which buttons exist is decided on
+        ///     UpdateCraftingPanel events; this flag carries that decision to the per-frame
+        ///     postfix. False at physical stations, where Craft and Order sit side by side
+        ///     and Craft should stay visible.
         /// </summary>
         private static bool _orderReplacesCraft;
 
         private static void UpdateButtonVisibility(InventoryGui gui)
         {
             _orderReplacesCraft = false;
-            
+
             if (_workOrderButton == null || gui.m_craftButton == null) return;
+
+            // Hand the craft button its full width back every frame; the physical
+            // work-order branch below re-splits the row when Order is shown. This
+            // keeps every other path (registry/custom tab/upgrade/no-order) at the
+            // native full-width craft button.
+            RestoreCraftButtonWidth(gui);
 
             // The Village Registry shares this crafting panel but has no work orders
             // (its "$vv_village_registry" station only hosts the Roster/Add/Revive
@@ -555,9 +595,10 @@ namespace ValheimVillages.Items.WorkOrders
 
             if (isVirtual)
             {
-                // Virtual station: replace Craft with Order (same slot, native look).
-                // _orderReplacesCraft drives the per-frame re-hide of the Craft button
-                // (UpdateRecipe re-activates it every idle frame).
+                // Virtual station: Order replaces Craft in the same slot. Native
+                // UpdateRecipe re-activates Craft every idle frame, so flag it for the
+                // per-frame re-hide in UpdateFocusNavPostfix; this SetActive(false) only
+                // covers the current frame.
                 _orderReplacesCraft = true;
                 gui.m_craftButton.gameObject.SetActive(false);
                 _workOrderButton.SetActive(true);
@@ -595,32 +636,63 @@ namespace ValheimVillages.Items.WorkOrders
             if (btn != null) btn.interactable = true;
         }
 
+        /// <summary>Order/Craft split: Order takes the right quarter of the row.</summary>
+        private const float OrderRowFraction = 0.25f;
+
+        /// <summary>Half the gap between Craft and Order, as a fraction of the row.</summary>
+        private const float OrderRowHalfGap = 0.02f;
+
         /// <summary>
-        ///     Position the work order button identical to the craft button in size,
-        ///     stacked directly above it with a small gap (for physical stations).
+        ///     Restore the craft button to its native full-row width. Called every
+        ///     frame before the work-order branch decides whether to re-split, so the
+        ///     player's normal crafting (and every non-order path) keeps full width.
+        /// </summary>
+        private static void RestoreCraftButtonWidth(InventoryGui gui)
+        {
+            if (!_cleanSizeDeltaSaved) return;
+            var craftRect = gui.m_craftButton?.GetComponent<RectTransform>();
+            if (craftRect == null) return;
+            craftRect.anchorMin = _cleanCraftAnchorMin;
+            craftRect.anchorMax = _cleanCraftAnchorMax;
+        }
+
+        /// <summary>
+        ///     Lay Craft and Order side by side on a single row (for physical
+        ///     stations): Craft fills the left 3/4, Order the right 1/4, with a small
+        ///     gap between. Previously Order was stacked above Craft, where it
+        ///     overlapped the ingredients/requirements list.
+        ///
+        ///     The split is driven by anchors (not sizeDelta): the craft button is
+        ///     stretch-anchored and RepairCraftButtonIfCorrupted pins its sizeDelta
+        ///     every frame, so an anchor-based split is the one that survives.
         /// </summary>
         private static void PositionWorkOrderButton(InventoryGui gui)
         {
             if (gui?.m_craftButton == null || _workOrderButton == null) return;
+            if (!_cleanSizeDeltaSaved) return;
 
             var craftRect = gui.m_craftButton.GetComponent<RectTransform>();
             var woRect = _workOrderButton.GetComponent<RectTransform>();
             if (craftRect == null || woRect == null) return;
 
-            // Match craft button layout so Order looks identical
-            woRect.anchorMin = craftRect.anchorMin;
-            woRect.anchorMax = craftRect.anchorMax;
+            var minX = _cleanCraftAnchorMin.x;
+            var maxX = _cleanCraftAnchorMax.x;
+            var span = maxX - minX;
+            var split = maxX - span * OrderRowFraction;
+
+            // Craft: left 3/4 of the row (clean anchors, narrowed on the right).
+            craftRect.anchorMin = _cleanCraftAnchorMin;
+            craftRect.anchorMax = new Vector2(
+                split - span * OrderRowHalfGap, _cleanCraftAnchorMax.y);
+
+            // Order: right 1/4, same row/height/pivot/scale as Craft.
+            woRect.anchorMin = new Vector2(
+                split + span * OrderRowHalfGap, craftRect.anchorMin.y);
+            woRect.anchorMax = new Vector2(maxX, craftRect.anchorMax.y);
             woRect.pivot = craftRect.pivot;
             woRect.sizeDelta = craftRect.sizeDelta;
             woRect.localScale = craftRect.localScale;
-
-            const float gap = 6f;
-            var craftHeight = craftRect.rect.height;
-            var woHeight = woRect.rect.height;
-            // Place Order button center above Craft button center
-            woRect.anchoredPosition = new Vector2(
-                craftRect.anchoredPosition.x,
-                craftRect.anchoredPosition.y + craftHeight * 0.5f + gap + woHeight * 0.5f);
+            woRect.anchoredPosition = new Vector2(0f, craftRect.anchoredPosition.y);
 
             var btn = _workOrderButton.GetComponent<Button>();
             if (btn != null) btn.interactable = true;
