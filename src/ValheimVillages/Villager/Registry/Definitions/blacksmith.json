@@ -39,7 +39,9 @@
     "$vv_blacksmith"
   ],
   "behaviors": [
-    "craft"
+    "craft",
+    "tidy",
+    "haul"
   ],
   "tags": [
     "tab:info",

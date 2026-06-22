@@ -4,6 +4,7 @@ using System.Reflection;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Villager.AI.Work;
 using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Villages
@@ -346,6 +347,28 @@ namespace ValheimVillages.Villages
         ///     Look up a station of type T matching the filter inside the village containing the position.
         ///     Returns the nearest match by position when multiple satisfy the filter.
         /// </summary>
+        /// <summary>
+        ///     Total items currently cooking across all of the village's cooking stations
+        ///     (each occupied slot is one pending output). The scheduler counts these toward
+        ///     a cooking work order's quota: without it, several villagers pipeline raw input
+        ///     onto the stations while the deposited output count is still under the cap
+        ///     (cooking takes time), overshooting MaxQuantity. Conservative — counts every
+        ///     occupied slot regardless of recipe, so unrelated player cooking can only make
+        ///     a villager stop early, never overproduce.
+        /// </summary>
+        public static int CountCookingOutputInFlight(Vector3 position)
+        {
+            if (!TryGetVillage(position, out var villageKey)) return 0;
+            EnsureHydrated(villageKey);
+            if (!s_stationsByVillage.TryGetValue(villageKey, out var list)) return 0;
+
+            var total = 0;
+            foreach (var comp in list)
+                if (comp is CookingStation cs)
+                    total += StationFinder.CountOccupiedSlots(cs);
+            return total;
+        }
+
         public static bool TryFindStation<T>(
             Vector3 position,
             Func<T, bool> filter,

@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
+using HarmonyLib;
 using UnityEngine;
 using UnityEngine.UI;
 using ValheimVillages.Attributes;
@@ -36,6 +38,10 @@ namespace ValheimVillages.UI.ContextMenus
 
         // Backing data
         private int m_minimum = 1;
+
+        // The quota values as loaded from the record, so SaveToItem only sends a real change.
+        private int m_loadedMinimum = 1;
+        private int m_loadedMaximum = 10;
         private GameObject m_panelRoot;
         private string m_stationDisplay = "";
         private GameObject m_stationLabel;
@@ -253,6 +259,17 @@ namespace ValheimVillages.UI.ContextMenus
             if (m_panelRoot != null) m_panelRoot.SetActive(false);
 
             if (item == null) return;
+
+            // Remove the host-owned record first (host-authoritative), then the UI handle token.
+            var station = GetData(item, "wo_station", "");
+            var itemPrefab = GetData(item, "wo_item", "");
+            if (!string.IsNullOrEmpty(station) && !string.IsNullOrEmpty(itemPrefab))
+            {
+                var village = ResolveVillage();
+                if (village != null)
+                    Villager.WorkOrderConfigRpc.RequestDelete(village.VillageId, station, itemPrefab);
+            }
+
             var inv = FindInventory(item);
             if (inv != null && inv.RemoveItem(item))
                 Player.m_localPlayer?.Message(
@@ -343,14 +360,26 @@ namespace ValheimVillages.UI.ContextMenus
             var stationRaw = GetData(item, "wo_station", "Unknown");
             m_stationDisplay = FormatStationName(stationRaw);
 
-            m_minimum = int.TryParse(
-                GetData(item, "wo_min", "1"), out var min)
-                ? min
-                : 1;
-            m_maximum = int.TryParse(
-                GetData(item, "wo_max", "10"), out var max)
-                ? max
-                : 10;
+            // Quota is host-authoritative now (Fix C) — read it from the village record, not the
+            // token. Resolve the village at the player (FindNearAnchor is graph-independent so it
+            // works on a client). Fall back to the token's legacy values only for an un-migrated
+            // token with no record entry yet.
+            var itemPrefab = GetData(item, "wo_item", "");
+            var village = ResolveVillage();
+            if (village != null && !string.IsNullOrEmpty(itemPrefab)
+                && village.TryGetWorkOrder(stationRaw, itemPrefab, out var entry))
+            {
+                m_minimum = entry.Min;
+                m_maximum = entry.Max;
+            }
+            else
+            {
+                m_minimum = int.TryParse(GetData(item, "wo_min", "1"), out var min) ? min : 1;
+                m_maximum = int.TryParse(GetData(item, "wo_max", "10"), out var max) ? max : 10;
+            }
+
+            m_loadedMinimum = m_minimum;
+            m_loadedMaximum = m_maximum;
 
             var rawItemName = GetData(item, "wo_item_name", "");
             m_itemDisplay = string.IsNullOrEmpty(rawItemName)
@@ -358,24 +387,56 @@ namespace ValheimVillages.UI.ContextMenus
                 : Localization.instance.Localize(rawItemName);
         }
 
+        /// <summary>
+        ///     Resolve the village at the editing player — graph coverage if available, else the
+        ///     graph-independent nearest-anchor lookup (works on a client without the region
+        ///     graph). Same pattern as the recruit flow.
+        /// </summary>
+        private static Villages.Entity.Village ResolveVillage()
+        {
+            var pos = Player.m_localPlayer != null ? Player.m_localPlayer.transform.position : Vector3.zero;
+            return Villages.Entity.VillageRegistry.GetVillageCovering(pos)
+                   ?? Villages.Entity.VillageRegistry.FindNearAnchor(pos);
+        }
+
         private void SaveToItem()
         {
             if (m_currentItem == null) return;
 
-            if (m_currentItem.m_customData == null)
-                m_currentItem.m_customData =
-                    new Dictionary<string, string>();
+            // Only push an actual change. Closing without editing must NOT re-send the loaded
+            // value — if it was read a hair before the host's edit replicated, re-sending would
+            // clobber the player's real edit (the observed revert).
+            if (m_minimum == m_loadedMinimum && m_maximum == m_loadedMaximum) return;
 
-            m_currentItem.m_customData["wo_min"] = m_minimum.ToString();
-            m_currentItem.m_customData["wo_max"] = m_maximum.ToString();
-            m_currentItem.m_customData["wo_range"] =
-                $"{m_minimum}-{m_maximum}";
+            var station = GetData(m_currentItem, "wo_station", "");
+            var itemPrefab = GetData(m_currentItem, "wo_item", "");
+            if (string.IsNullOrEmpty(station) || string.IsNullOrEmpty(itemPrefab))
+            {
+                Plugin.Log?.LogWarning("[WorkOrderMenu] token missing wo_station/wo_item; quota not saved.");
+                return;
+            }
 
-            // Update tooltip description if shared data is per-instance
+            // Update the tooltip locally for immediate feedback (client-side display only).
             if (m_currentItem.m_shared != null)
                 m_currentItem.m_shared.m_description =
                     $"{m_itemDisplay} ({m_minimum}-{m_maximum})" +
                     "\nRight-click to change settings.";
+
+            // Quota is host-authoritative (Fix C): route the edit through the host RPC instead of
+            // writing the chest token. The old PersistEdit path (mutate m_customData ->
+            // Inventory.Changed -> owner-gated Container.Save) lost the ownership race against the
+            // farmers (and the open-chest SetOwner flip) and got clobbered. No token write here.
+            var village = ResolveVillage();
+            if (village == null)
+            {
+                Player.m_localPlayer?.Message(
+                    MessageHud.MessageType.Center, "No village here — work order quota not saved");
+                return;
+            }
+
+            Villager.WorkOrderConfigRpc.RequestSet(
+                village.VillageId, station, itemPrefab,
+                GetData(m_currentItem, "wo_item_name", ""), m_minimum, m_maximum);
         }
 
         private static string GetData(

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Items;
 using ValheimVillages.Schemas;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Villager.AI.Work
 {
@@ -11,16 +12,33 @@ namespace ValheimVillages.Villager.AI.Work
     public static class ContainerScanner
     {
         /// <summary>
-        ///     Find all Container components within the given radius of a position.
+        ///     Find all live Container network objects within the given radius of a position.
+        ///     <para>The source of truth is <c>UnityEngine.Object.FindObjectsOfType&lt;Container&gt;()</c>
+        ///     — the same authoritative enumeration of instantiated, ZNetView-backed network objects
+        ///     that the <c>printnetobj</c> console command uses — NOT a <see cref="PhysicsHelper" />
+        ///     <c>OverlapSphere</c> collider query. OverlapSphere is unreliable on a headless dedicated
+        ///     server (its physics/collider state diverges from clients), which made the server
+        ///     enumerate phantom chests and read stale work orders while the client saw the real set.
+        ///     Results are filtered to objects holding a valid ZDO and deduped by ZDO id, so a single
+        ///     networked chest is counted exactly once on every peer.</para>
         /// </summary>
         public static List<Container> FindNearbyContainers(Vector3 center, float radius)
         {
             var result = new List<Container>();
-            foreach (var container in PhysicsHelper.GetAllInRadius<Container>(center, radius))
+            var seen = new HashSet<ZDOID>();
+            var sqrRadius = radius * radius;
+
+            foreach (var container in UnityEngine.Object.FindObjectsOfType<Container>())
             {
-                if (container == null || result.Contains(container)) continue;
+                if (container == null) continue;
+
                 var nview = container.GetComponent<ZNetView>();
-                if (nview == null || nview.GetZDO() == null) continue;
+                var zdo = nview != null ? nview.GetZDO() : null;
+                if (zdo == null) continue; // skip objects without a live networked ZDO
+
+                if ((container.transform.position - center).sqrMagnitude > sqrRadius) continue;
+                if (!seen.Add(zdo.m_uid)) continue; // collapse duplicate instances sharing one ZDO
+
                 result.Add(container);
             }
 
@@ -28,90 +46,73 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        ///     Scan containers for all work orders that match the NPC's station type.
-        ///     Caller should try each in turn until one passes full validation (recipe, ingredients, station).
+        ///     All work-order configs for <paramref name="village" /> that
+        ///     <paramref name="villagerType" /> can work. Reads the host-owned village record
+        ///     (Fix C) — config no longer lives on chest tokens, so it can't be clobbered by the
+        ///     chest's ownership churn. The returned <see cref="WorkOrderMatch" /> carries no
+        ///     ItemData/SourceContainer; the scan handler picks a deterministic deposit chest by
+        ///     proximity. Completion is still measured by scanning chests (see CountAcrossContainers).
         /// </summary>
-        public static List<WorkOrderMatch> FindAllWorkOrders(List<Container> containers, string villagerType)
+        public static List<WorkOrderMatch> FindAllWorkOrders(Village village, string villagerType)
         {
             var matches = new List<WorkOrderMatch>();
-            foreach (var container in containers)
+            if (village == null) return matches;
+
+            foreach (var entry in village.WorkOrders)
             {
-                var inventory = container.GetInventory();
-                if (inventory == null) continue;
+                if (string.IsNullOrEmpty(entry.Station)) continue;
+                if (!StationMatcher.CanWorkStation(villagerType, entry.Station)) continue;
+                if (string.IsNullOrEmpty(entry.Item)) continue;
 
-                var allItems = inventory.GetAllItems();
-                Plugin.Log?.LogDebug(
-                    $"[ContainerScan] Checking container '{container.m_name}' " +
-                    $"at {container.transform.position} with {allItems.Count} items");
-
-                foreach (var item in allItems)
+                matches.Add(new WorkOrderMatch
                 {
-                    if (item?.m_customData == null) continue;
-
-                    var prefabName = item.m_dropPrefab?.name ?? "null";
-                    var isWO = IsWorkOrderItem(item);
-
-                    if (!isWO) continue;
-
-                    Plugin.Log?.LogDebug(
-                        $"[ContainerScan] Found work order item: {prefabName}, " +
-                        $"customData keys=[{string.Join(",", item.m_customData.Keys)}]");
-
-                    // Check station compatibility
-                    if (!item.m_customData.TryGetValue("wo_station", out var station))
-                    {
-                        Plugin.Log?.LogDebug(
-                            "[ContainerScan] Work order missing wo_station");
-                        continue;
-                    }
-
-                    if (!StationMatcher.CanWorkStation(villagerType, station))
-                    {
-                        Plugin.Log?.LogDebug(
-                            $"[ContainerScan] Station '{station}' not compatible " +
-                            $"with villager type {villagerType}");
-                        continue;
-                    }
-
-                    // Must have an item target
-                    if (!item.m_customData.TryGetValue("wo_item", out var itemPrefab))
-                    {
-                        Plugin.Log?.LogDebug(
-                            "[ContainerScan] Work order missing wo_item field " +
-                            "(was this created before the update?)");
-                        continue;
-                    }
-
-                    if (string.IsNullOrEmpty(itemPrefab))
-                    {
-                        Plugin.Log?.LogDebug(
-                            "[ContainerScan] Work order has empty wo_item");
-                        continue;
-                    }
-
-                    int min = 1, max = 10;
-                    if (item.m_customData.TryGetValue("wo_min", out var minStr))
-                        int.TryParse(minStr, out min);
-                    if (item.m_customData.TryGetValue("wo_max", out var maxStr))
-                        int.TryParse(maxStr, out max);
-
-                    Plugin.Log?.LogDebug(
-                        "[ContainerScan] Work order matched! " +
-                        $"item={itemPrefab}, station={station}, qty={min}-{max}");
-
-                    matches.Add(new WorkOrderMatch
-                    {
-                        SourceContainer = container,
-                        ItemData = item,
-                        ItemPrefabName = itemPrefab,
-                        StationName = station,
-                        MinQuantity = min,
-                        MaxQuantity = max,
-                    });
-                }
+                    ItemData = null, // config no longer rides a chest token
+                    SourceContainer = null, // deposit chest is chosen by the scan from proximity
+                    ItemPrefabName = entry.Item,
+                    StationName = entry.Station,
+                    MinQuantity = entry.Min,
+                    MaxQuantity = entry.Max,
+                });
             }
 
             return matches;
+        }
+
+        /// <summary>
+        ///     The authoritative Max quota for a (station, item) order from the host-owned village
+        ///     record near <paramref name="pos" /> (Fix C). Falls back to <paramref name="tokenMax" />
+        ///     (the legacy chest-token value) only when no village/record entry resolves — e.g. an
+        ///     un-migrated or orphaned token.
+        /// </summary>
+        public static int ResolveOrderMax(string station, string itemPrefab, Vector3 pos, int tokenMax)
+        {
+            var village = VillageRegistry.GetVillageCovering(pos) ?? VillageRegistry.FindNearAnchor(pos);
+            if (village != null && !string.IsNullOrEmpty(station) && !string.IsNullOrEmpty(itemPrefab)
+                && village.TryGetWorkOrder(station, itemPrefab, out var entry))
+                return entry.Max;
+            return tokenMax;
+        }
+
+        /// <summary>
+        ///     Nearest container to a point — the deterministic deposit/scan chest now that the
+        ///     work-order token no longer carries its source chest. Null only if the list is empty.
+        /// </summary>
+        public static Container FindNearestContainer(List<Container> containers, Vector3 pos)
+        {
+            Container best = null;
+            var bestSq = float.MaxValue;
+            foreach (var c in containers)
+            {
+                if (c == null) continue;
+                var d = (c.transform.position - pos).sqrMagnitude;
+                if (d < bestSq)
+                {
+                    bestSq = d;
+                    best = c;
+                }
+            }
+
+            return best;
         }
 
         /// <summary>
@@ -176,18 +177,47 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
+        ///     Ensure the local peer owns the container's ZDO before a villager mutates
+        ///     it. Villagers run on the server; a chest the player has open is
+        ///     client-owned, and <see cref="Container" />.Save() is owner-gated — so
+        ///     without this the villager's add/remove would touch only the server's local
+        ///     copy, get reverted on the next ZDO sync, and never show up for the player.
+        ///     Claiming (a no-op when already owner) makes the villager act AS the owner,
+        ///     so the change persists to the ZDO and replicates to every peer — including
+        ///     a player viewing the chest live.
+        /// </summary>
+        public static void EnsureOwnership(Container container)
+        {
+            if (container == null) return;
+            var nview = container.GetComponent<ZNetView>();
+            if (nview != null && nview.IsValid() && !nview.IsOwner())
+                nview.ClaimOwnership();
+        }
+
+        /// <summary>
         ///     Remove ingredients from their source containers.
         ///     Matches by prefab name (m_dropPrefab.name), not m_shared.m_name.
         /// </summary>
         public static bool RemoveIngredients(List<IngredientSource> sources)
         {
+            // Claim every source, then VERIFY all are fully stocked, THEN remove.
+            // Verifying before removing makes this atomic: if any ingredient ran out
+            // between the scan and the villager's arrival (player/another villager took
+            // it), we remove nothing and return false so the caller aborts — instead of
+            // silently removing 0 and letting the workflow fabricate a held item /
+            // conjure a station input from ingredients that aren't there.
+            foreach (var source in sources)
+                EnsureOwnership(source.Container);
+
             foreach (var source in sources)
             {
                 var inv = source.Container?.GetInventory();
-                if (inv == null) return false;
-
-                RemoveByPrefab(inv, source.PrefabName, source.Amount);
+                if (inv == null || CountByPrefab(inv, source.PrefabName) < source.Amount)
+                    return false;
             }
+
+            foreach (var source in sources)
+                RemoveByPrefab(source.Container.GetInventory(), source.PrefabName, source.Amount);
 
             return true;
         }
@@ -212,6 +242,7 @@ namespace ValheimVillages.Villager.AI.Work
         /// </summary>
         public static bool TryDepositItem(Container container, string prefabName, int amount)
         {
+            EnsureOwnership(container);
             if (!CanAcceptItem(container, prefabName, amount)) return false;
 
             var prefab = ZNetScene.instance?.GetPrefab(prefabName);
@@ -245,11 +276,12 @@ namespace ValheimVillages.Villager.AI.Work
         /// </summary>
         public static bool TryDepositItemData(Container container, ItemDrop.ItemData item)
         {
+            EnsureOwnership(container);
             if (!CanAcceptItemData(container, item)) return false;
             return container.GetInventory().AddItem(item);
         }
 
-        private static bool IsWorkOrderItem(ItemDrop.ItemData item)
+        public static bool IsWorkOrderItem(ItemDrop.ItemData item)
         {
             var prefabName = item?.m_dropPrefab?.name;
             if (string.IsNullOrEmpty(prefabName)) return false;

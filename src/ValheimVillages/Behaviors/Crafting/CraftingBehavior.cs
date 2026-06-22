@@ -25,8 +25,10 @@ namespace ValheimVillages.Behaviors.Crafting
         private WorkOrderContext m_context;
         private float m_lastScanTime;
 
-        // Tracks whether a scan task has been enqueued and is pending
+        // Tracks whether a scan task has been enqueued and is pending, plus the wall-clock
+        // deadline by which its callback must have fired (mirrors the enqueued task timeout).
         private bool m_scanPending;
+        private float m_scanDeadline;
 
         public CraftingBehavior(Villager.Villager villagerInstance)
         {
@@ -53,6 +55,32 @@ namespace ValheimVillages.Behaviors.Crafting
         internal void SetWorkNote(string note) => LastWorkNote = note;
 
         public bool IsWorking => SubState != WorkSubState.Idle || (FarmingBehavior?.IsWorking ?? false);
+
+        /// <summary>
+        ///     True while a work_order_scan enqueued by <see cref="TryScanForWork" /> is still in
+        ///     flight (work starts asynchronously in its callback). Self-expires after the task
+        ///     timeout: GlobalTaskQueue DROPS a timed-out task WITHOUT firing the callback that
+        ///     clears <c>m_scanPending</c>, so without this guard a dropped scan would pin the flag
+        ///     true forever — blocking every future scan and (via CraftingBehaviorAdapter's directed
+        ///     assignment) holding the scheduler claim. Reading it past the deadline clears the flag
+        ///     and logs loud, freeing the next scan.
+        /// </summary>
+        public bool ScanPending
+        {
+            get
+            {
+                if (m_scanPending && Time.time > m_scanDeadline)
+                {
+                    m_scanPending = false;
+                    Plugin.Log?.LogWarning(
+                        $"[WorkScan:{LogName}] scan timed out (no callback within " +
+                        $"{TaskSettings.DefaultTimeoutSeconds:F0}s); clearing pending.");
+                    SetWorkNote($"scan timed out @ t={Time.time:F0}");
+                }
+
+                return m_scanPending;
+            }
+        }
 
         /// <summary>Current item prefab name being crafted (from crafting context or farming behavior).</summary>
         public string CurrentItemPrefab =>
@@ -98,7 +126,7 @@ namespace ValheimVillages.Behaviors.Crafting
         public bool TryScanForWork(bool ignoreScanInterval = false)
         {
             if (IsWorking) return false;
-            if (m_scanPending) return false;
+            if (ScanPending) return false;
             if (m_villager.VillagerType == "villager") return false;
             if (!ignoreScanInterval && Time.time - m_lastScanTime < WorkSettings.WorkScanInterval) return false;
 
@@ -110,6 +138,9 @@ namespace ValheimVillages.Behaviors.Crafting
                 $"VillagerType={m_villager.VillagerType}, HomeAnchor=({bp.x:F2},{bp.y:F2},{bp.z:F2})");
 
             m_scanPending = true;
+            // Mirror the enqueued task's timeout so ScanPending self-expires if the queue drops
+            // the scan without firing its callback (the +1s keeps expiry just after the drop).
+            m_scanDeadline = Time.time + TaskSettings.DefaultTimeoutSeconds + 1f;
 
             GlobalTaskQueue.Enqueue(new VillagerTask
             {

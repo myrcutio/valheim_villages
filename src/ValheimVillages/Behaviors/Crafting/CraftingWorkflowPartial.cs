@@ -595,7 +595,17 @@ namespace ValheimVillages.Behaviors.Crafting
             }
 
             var singleSource = new List<IngredientSource> { source };
-            ContainerScanner.RemoveIngredients(singleSource);
+            // Only record the held item if the withdrawal actually took the full amount.
+            // If the ingredient ran out since the scan, RemoveIngredients removes nothing
+            // and returns false — abort rather than fabricate a held item we never got
+            // (which would later be loaded onto the station, manifesting output from
+            // ingredients that aren't there). AbandonWork rolls back any earlier pickups.
+            if (!ContainerScanner.RemoveIngredients(singleSource))
+            {
+                AbandonWork($"ingredient {source.PrefabName} no longer available");
+                return;
+            }
+
             // Track this pickup as in-transit (see fuel branch + AbandonWork
             // rollback for the why).
             m_context.HeldItems.Add(new HeldItem

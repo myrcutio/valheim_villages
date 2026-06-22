@@ -140,6 +140,10 @@ namespace ValheimVillages.Dev
             BfsAdjacencyStore.Clear();
             RegionBuilder.ClearCachedState();
             GlobalTaskQueue.Clear();
+            // Also drop every installed slot-31 NavMeshData. The bake holder is NOT a ZDO
+            // cache, so deleting village ZDOs above leaves the baked Unity navmesh resident —
+            // a "clean slate" that still has stray/stale walkable surface. Remove it too.
+            NavMeshBakeManager.Clear();
 
             sb.AppendLine(
                 $"  → deleted {deleted} ZDO(s), removed {itemsRemoved} item(s); in-memory caches cleared.");

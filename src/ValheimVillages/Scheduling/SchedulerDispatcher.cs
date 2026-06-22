@@ -61,6 +61,7 @@ namespace ValheimVillages.Scheduling
                     s_lastScan[villageId] = now;
                     CookRescueProducer.Scan(village, village.Anchor, now);
                     RepairTaskProducer.Scan(village, village.Anchor, now);
+                    CraftWorkProducer.Scan(village, village.Anchor, now);
                 }
 
                 var tasks = TaskBoard.Tasks(villageId, now);

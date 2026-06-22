@@ -64,6 +64,31 @@ namespace ValheimVillages.Villager.AI
             Plugin.Log?.LogInfo(sb.ToString());
         }
 
+        /// <summary>
+        ///     Runtime toggle for the off-mesh rescue (strand detection → walk-home →
+        ///     teleport escalation) in <see cref="TryOffMeshRescue" />. Defaults OFF for the
+        ///     current experiment (isolate whether the rescue itself contributes to villager
+        ///     displacement). The anchor LEASH is a separate path and stays active.
+        ///     Static field, so it resets to this default on each reload.
+        /// </summary>
+        public static bool OffMeshRescueEnabled = false;
+
+        [DevCommand(
+            "Toggle the villager off-mesh rescue (strand→walk-home→teleport). Usage: vv_rescue [on|off]",
+            Name = "vv_rescue")]
+        public static void ToggleRescue(Terminal.ConsoleEventArgs args)
+        {
+            var arg = args.Length > 1 ? args[1].ToLowerInvariant() : null;
+            if (arg == "on") OffMeshRescueEnabled = true;
+            else if (arg == "off") OffMeshRescueEnabled = false;
+            else OffMeshRescueEnabled = !OffMeshRescueEnabled;
+
+            var msg = $"[vv_rescue] off-mesh rescue {(OffMeshRescueEnabled ? "ENABLED" : "DISABLED")} " +
+                      "(anchor leash unaffected)";
+            Console.instance?.Print(msg);
+            Plugin.Log?.LogInfo(msg);
+        }
+
         [DevCommand("Dump each villager's AI event ring — state changes / target sets / path recomputes with timestamps. The transition timeline that polling vv_get_villagers aliases past.",
             Name = "vv_ai_events")]
         public static void DumpAiEvents()
@@ -145,10 +170,13 @@ namespace ValheimVillages.Villager.AI
                 var anchor = ai.m_homeAnchor;
                 var containers = Work.ContainerScanner.FindNearbyContainers(
                     anchor, Settings.WorkSettings.ChestScanRadius);
-                var orders = Work.ContainerScanner.FindAllWorkOrders(containers, ai.VillagerType);
+                var village = Villages.Entity.VillageRegistry.GetVillageAt(anchor);
+                var orders = Work.ContainerScanner.FindAllWorkOrders(village, ai.VillagerType);
+                var vid = village != null ? village.VillageId : "(none)";
+                var owns = village?.Zdo != null && village.Zdo.IsOwner();
                 sb.AppendLine(
                     $"- {ai.NpcName} [{ai.VillagerType}] anchor=({anchor.x:F0},{anchor.z:F0}) " +
-                    $"containers={containers.Count} orders={orders.Count}");
+                    $"village={vid} owns={owns} containers={containers.Count} orders={orders.Count}");
                 foreach (var o in orders)
                 {
                     var produced = Work.ContainerScanner.CountAcrossContainers(containers, o.ItemPrefabName);
@@ -158,6 +186,88 @@ namespace ValheimVillages.Villager.AI
                 }
             }
 
+            Console.instance?.Print(sb.ToString());
+            Plugin.Log?.LogInfo(sb.ToString());
+        }
+
+        /// <summary>
+        ///     Migrate legacy in-chest work-order tokens into the host-owned village record
+        ///     (Fix C seed). Host-only — the village carrier is host-owned so UpsertWorkOrder
+        ///     no-ops on a client. Fail-loud per token whose village can't be resolved (no
+        ///     auto-create). Idempotent: skips any (station,item) already present in the record,
+        ///     so a re-run never resets a player's edited quota back to the token's original.
+        /// </summary>
+        [DevCommand("Migrate legacy in-chest work-order tokens into the host-owned village record (Fix C). Host-only.",
+            Name = "vv_migrate_workorders")]
+        public static void MigrateWorkOrders()
+        {
+            if (ZNet.instance == null || !ZNet.instance.IsServer())
+            {
+                Console.instance?.Print(
+                    "[vv_migrate_workorders] Run on the SERVER — the host owns the village record.");
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("[vv_migrate_workorders]");
+            int tokens = 0, migrated = 0, skipped = 0, unresolved = 0;
+
+            foreach (var c in Object.FindObjectsByType<Container>(FindObjectsSortMode.None))
+            {
+                if (c == null) continue;
+                var inv = c.GetInventory();
+                if (inv == null) continue;
+
+                foreach (var item in inv.GetAllItems())
+                {
+                    if (!Work.ContainerScanner.IsWorkOrderItem(item)) continue;
+                    if (item.m_customData == null) continue;
+                    tokens++;
+
+                    item.m_customData.TryGetValue("wo_station", out var station);
+                    item.m_customData.TryGetValue("wo_item", out var orderItem);
+                    item.m_customData.TryGetValue("wo_item_name", out var itemName);
+                    var p = c.transform.position;
+
+                    if (string.IsNullOrEmpty(station) || string.IsNullOrEmpty(orderItem))
+                    {
+                        sb.AppendLine($"  SKIP token with empty station/item @ ({p.x:F0},{p.z:F0})");
+                        unresolved++;
+                        continue;
+                    }
+
+                    int min = 1, max = 10;
+                    if (item.m_customData.TryGetValue("wo_min", out var minStr)) int.TryParse(minStr, out min);
+                    if (item.m_customData.TryGetValue("wo_max", out var maxStr)) int.TryParse(maxStr, out max);
+
+                    var village = Villages.Entity.VillageRegistry.GetVillageAt(p);
+                    if (village == null)
+                    {
+                        sb.AppendLine(
+                            $"  UNRESOLVED village for {orderItem}@{station} @ ({p.x:F0},{p.z:F0}) — skipped (no auto-create)");
+                        unresolved++;
+                        continue;
+                    }
+
+                    // Idempotent: never overwrite an existing record entry — a re-run must not
+                    // reset a player's edited quota back to the token's stale original value.
+                    if (village.TryGetWorkOrder(station, orderItem, out _))
+                    {
+                        sb.AppendLine($"  skip {orderItem}@{station} — already in record (village {village.VillageId})");
+                        skipped++;
+                        continue;
+                    }
+
+                    village.UpsertWorkOrder(
+                        new Villages.Entity.WorkOrderEntry(station, orderItem, itemName ?? "", min, max));
+                    migrated++;
+                    sb.AppendLine(
+                        $"  migrated {orderItem} x[{min}-{max}] station={station} -> village {village.VillageId}");
+                }
+            }
+
+            sb.AppendLine(
+                $"  => {tokens} token(s), {migrated} migrated, {skipped} already-present, {unresolved} unresolved.");
             Console.instance?.Print(sb.ToString());
             Plugin.Log?.LogInfo(sb.ToString());
         }

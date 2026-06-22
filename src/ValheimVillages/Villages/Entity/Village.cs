@@ -23,6 +23,7 @@ namespace ValheimVillages.Villages.Entity
         public const string GraphKey = "vv_village_graph"; // string — v4 serialized RegionGraph blob
         public const string AnchorsKey = "vv_village_anchors"; // string — serialized named-anchor list
         public const string StationsKey = "vv_village_stations"; // string — serialized station metadata (reserved for WS3)
+        public const string WorkOrdersKey = "vv_village_workorders"; // string — serialized work-order config list (Fix C)
         public const string InvalidKey = "vv_village_invalid"; // int 0/1 — village failed triad validation (recruit blocked)
 
         private readonly ZDO m_zdo;
@@ -31,6 +32,10 @@ namespace ValheimVillages.Villages.Entity
 
         private readonly List<VillageAnchor> m_anchors = new();
         private bool m_anchorsHydrated;
+
+        private readonly List<WorkOrderEntry> m_workOrders = new();
+        private bool m_workOrdersHydrated;
+        private uint m_workOrdersRevision;
 
         public Village(ZDO zdo)
         {
@@ -251,6 +256,90 @@ namespace ValheimVillages.Villages.Entity
             m_zdo.Persistent = true;
             Plugin.Log?.LogInfo(
                 $"[Village] Migrated legacy anchor -> '{VillageAnchor.Registry}' for village {VillageId}");
+        }
+
+        /// <summary>
+        ///     The village's work-order config records (Fix C), lazily hydrated from the ZDO
+        ///     blob on first access — same pattern as <see cref="Anchors" />. This is the
+        ///     authoritative quota source; the chest token is now only a UI handle. Reads are
+        ///     owner-agnostic; mutations are host-only.
+        /// </summary>
+        public IReadOnlyList<WorkOrderEntry> WorkOrders
+        {
+            get
+            {
+                EnsureWorkOrdersFresh();
+                return m_workOrders;
+            }
+        }
+
+        // Re-hydrate when the carrier's DataRevision has advanced since our last read. The
+        // work-order blob changes whenever the host applies an edit (the RPC), so a one-shot
+        // cache on a CLIENT (and on the host right after its own write) goes stale — the editor
+        // would then read the pre-edit value and re-send it on close, reverting the player's edit.
+        private void EnsureWorkOrdersFresh()
+        {
+            if (m_workOrdersHydrated && (m_zdo == null || m_zdo.DataRevision == m_workOrdersRevision))
+                return;
+            HydrateWorkOrdersFromZdo();
+        }
+
+        private void HydrateWorkOrdersFromZdo()
+        {
+            m_workOrdersHydrated = true;
+            m_workOrdersRevision = m_zdo != null ? m_zdo.DataRevision : 0u;
+            m_workOrders.Clear();
+            WorkOrderPersistence.Restore(m_zdo.GetString(WorkOrdersKey), m_workOrders);
+        }
+
+        public bool TryGetWorkOrder(string station, string item, out WorkOrderEntry entry)
+        {
+            foreach (var o in WorkOrders)
+                if (o.Station == station && o.Item == item)
+                {
+                    entry = o;
+                    return true;
+                }
+
+            entry = default;
+            return false;
+        }
+
+        /// <summary>Host-only: upsert a work order by (station, item) and persist the list.</summary>
+        public void UpsertWorkOrder(WorkOrderEntry entry)
+        {
+            if (!CanPersist) return; // host-authoritative; clients route edits through the RPC
+            EnsureWorkOrdersFresh();
+
+            var found = false;
+            for (var i = 0; i < m_workOrders.Count; i++)
+                if (m_workOrders[i].Station == entry.Station && m_workOrders[i].Item == entry.Item)
+                {
+                    m_workOrders[i] = entry;
+                    found = true;
+                    break;
+                }
+
+            if (!found) m_workOrders.Add(entry);
+
+            m_zdo.Set(WorkOrdersKey, WorkOrderPersistence.Serialize(m_workOrders));
+            m_zdo.Persistent = true;
+        }
+
+        /// <summary>Host-only: remove a work order by (station, item); returns true if one was removed.</summary>
+        public bool RemoveWorkOrder(string station, string item)
+        {
+            if (!CanPersist) return false;
+            EnsureWorkOrdersFresh();
+
+            var removed = m_workOrders.RemoveAll(o => o.Station == station && o.Item == item) > 0;
+            if (removed)
+            {
+                m_zdo.Set(WorkOrdersKey, WorkOrderPersistence.Serialize(m_workOrders));
+                m_zdo.Persistent = true;
+            }
+
+            return removed;
         }
 
         /// <summary>Generic ZDO string read (for WS3 station blob, etc.).</summary>

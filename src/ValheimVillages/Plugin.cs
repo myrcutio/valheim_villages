@@ -26,8 +26,8 @@ using ValheimVillages.Villages.Entity;
 [assembly: AssemblyCompany("Myrcutio")]
 [assembly: AssemblyProduct("ValheimVillages")]
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
-[assembly: AssemblyVersion("0.1.2")]
-[assembly: AssemblyFileVersion("0.1.2")]
+[assembly: AssemblyVersion("0.1.3")]
+[assembly: AssemblyFileVersion("0.1.3")]
 [assembly: InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
@@ -37,7 +37,7 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.1.2";
+        public const string PluginVersion = "0.1.3";
 
         private static bool _recipeRefreshEnqueued;
         private static bool _recordIndexEnqueued;
@@ -205,6 +205,7 @@ namespace ValheimVillages
             // Register the server-authoritative villager-spawn RPC handler on the current
             // ZRoutedRpc (recreated per world session). Cheap no-op once registered.
             Villager.VillagerRecruitRpc.EnsureRegistered();
+            Villager.WorkOrderConfigRpc.EnsureRegistered();
 
             // After world load, enqueue one low-priority recheck of discovered recipes (cultivator + cooking)
             if (!_recipeRefreshEnqueued &&
@@ -336,9 +337,12 @@ namespace ValheimVillages
 
             PathDebugRenderer.AutoEnable();
 
-            // Keep a non-carving NavMeshObstacle on the local player so villager
-            // RVO steers around the player too (the player isn't a NavMeshAgent,
-            // so it's otherwise invisible to their avoidance).
+            // Keep a non-carving NavMeshObstacle on EVERY player so villager RVO
+            // steers around them (a player isn't a NavMeshAgent, so it's otherwise
+            // invisible to their avoidance). Must cover all players, not just the
+            // local one: villagers are server-simulated and a dedicated server has
+            // no local player — the obstacle has to live on the connected players'
+            // server-side ghosts, where the agents actually run.
             Villager.AI.Navigation.PlayerAvoidanceObstacle.Tick();
 
             // Tick Villager.AI.VillagerAI instances (BaseAI path; no MonsterAI)

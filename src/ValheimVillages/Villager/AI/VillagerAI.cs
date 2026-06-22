@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
+using ValheimVillages.Attributes;
 using ValheimVillages.Behaviors;
 using ValheimVillages.Behaviors.Work;
 using ValheimVillages.Enums;
@@ -30,8 +31,6 @@ namespace ValheimVillages.Villager.AI
         ///     without mapping to a different level.
         /// </summary>
         private const float NavToSnapRadius = 2f;
-
-
 
         private NavMeshAgent m_navAgent;
 
@@ -215,6 +214,7 @@ namespace ValheimVillages.Villager.AI
 
                 UniqueId = Villager.uid;
                 m_homeAnchor = Villager.HomeAnchor;
+                m_homeAnchor = Villager.HomeAnchor;
                 VillagerType = Villager.villagerType;
                 m_villagerName = Villager.villagerName;
                 Memory = new VillagerMemory(m_homeAnchor);
@@ -263,7 +263,8 @@ namespace ValheimVillages.Villager.AI
                     $"pos=({Position.x:F1},{Position.y:F1},{Position.z:F1}) " +
                     $"isDead={(ch != null ? ch.IsDead().ToString() : "n/a")} " +
                     $"valid={(z != null && z.IsValid())} owner={(z != null ? z.GetOwner() : 0)} " +
-                    $"isOwner={(z != null && z.IsOwner())} isServer={(ZNet.instance != null && ZNet.instance.IsServer())}");
+                    $"isOwner={(z != null && z.IsOwner())} isServer={(ZNet.instance != null && ZNet.instance.IsServer())}\n" +
+                    $"parent:\n{this.transform.parent}");
             }
 
             try
@@ -279,6 +280,7 @@ namespace ValheimVillages.Villager.AI
             VillagerAIManager.Unregister(this);
         }
 
+        [RequireAgent]
         public void RegisterHome()
         {
             Memory.HomeAnchor = m_homeAnchor;
@@ -295,12 +297,18 @@ namespace ValheimVillages.Villager.AI
         public bool PreconditionsSettled()
         {
             if (m_homeAnchor == Vector3.zero) return false;        // broken/zombie villager
-            if (m_navAgent == null || !m_navAgent.isOnNavMesh) return false; // agent not on mesh yet
+            if (m_navAgent == null || !m_navAgent.isOnNavMesh) return false; // mover not on the mesh yet
+            // Reuse the rescue's notion of "on my village graph" instead of an exact
+            // PointToRegionId membership test. IsStranded resolves the villager's OWN village
+            // graph (by home anchor) and treats an interior lookup-grid hole that can still
+            // agent-path home as fine — which MUST match how the spawn seed was validated
+            // (agent navmesh + complete path). An exact PointToRegionId check would freeze,
+            // forever, any healthy villager whose seed lands on a sub-meter lookup-grid hole
+            // (documented perimeter/eroded cells). A genuinely stranded villager stays unsettled
+            // here AND is recovered by the off-mesh rescue that runs before the gate.
             try
             {
-                var region = Villages.Entity.VillageRegistry.GraphAt(transform.position)
-                    ?.PointToRegionId(transform.position);
-                return !string.IsNullOrEmpty(region);             // resolves to a region on a village graph
+                return !IsStranded();
             }
             catch
             {
@@ -393,9 +401,45 @@ namespace ValheimVillages.Villager.AI
             if (!m_settled)
             {
                 EnsureAgentReady();
+                // Re-warp a created-but-off-mesh advisory agent onto the mesh. EnsureAgent only
+                // warps at creation, so an agent created off-mesh (the [RequireAgent] one-shot
+                // warmed it from a far village, or TeleportHome moved the body but not the
+                // agent) would stay off-mesh forever and the settle precondition (isOnNavMesh)
+                // would never pass — a permanent freeze. Mirrors UpdateAgentMovement's self-heal.
+                if (m_navAgent != null && !m_navAgent.isOnNavMesh
+                    && NavMesh.SamplePosition(transform.position, out var meshHit, 3f, AgentFilter()))
+                    m_navAgent.Warp(meshHit.position);
                 StopMoving();
                 return true;
             }
+
+            // Leash: a settled villager that ends up far from its home anchor — flung onto a
+            // stray/disconnected navmesh limb, knocked back, or driven off by a bad path — is
+            // teleported straight home rather than wandering until it strands off-graph and is
+            // culled. The bake radius is ~30m, so this generous threshold never trips on normal
+            // in-village movement/patrol. (Backstop while the bake-overspill root cause is
+            // instrumented — see NavMeshBake extent logging.)
+            var leashDeltaXz = transform.position - m_homeAnchor;
+            leashDeltaXz.y = 0f; // XZ only — don't count vertical separation (upper floors)
+            if (leashDeltaXz.sqrMagnitude
+                > VillagerSettings.MaxAnchorLeashMeters * VillagerSettings.MaxAnchorLeashMeters)
+            {
+                Plugin.Log?.LogWarning(
+                    $"[AI:{m_villagerName}] Leash: {leashDeltaXz.magnitude:F0}m (XZ) from " +
+                    $"anchor (> {VillagerSettings.MaxAnchorLeashMeters}m) — teleporting home.");
+                TeleportHome();
+                return true;
+            }
+
+            // Advisory-agent avoidance housekeeping — runs EVERY tick, idle or moving.
+            // An idle villager that stops syncing keeps feeding the RVO sim its last
+            // walking velocity (and, advisory-mode, its internal position drifts off at
+            // that velocity), so neighbours steer around a phantom and walk through the
+            // idle villager's real position. Ticking here makes idle villagers report
+            // velocity ≈ 0 at their true spot; UpdateAgentMovement still re-syncs (with
+            // its off-mesh warp) before it steers a moving villager.
+            EnsureAgent();
+            SyncAgentAvoidance();
 
             // Shared PoIs are discovered at the village level now; the only
             // per-villager thing left to sample is the comfort the villager
@@ -511,7 +555,13 @@ namespace ValheimVillages.Villager.AI
                         if (!Scheduling.SchedulerSettings.PrimaryMode)
                             Scheduling.SchedulerObserver.Observe(this);
 
-                        if (CurrentState != BehaviorState.Working)
+                        // Legacy (PrimaryMode off): self-scan for work when idle. In
+                        // PrimaryMode the scheduler owns work-start — crafting/farming run
+                        // only via a CraftWork assignment (CraftingBehaviorAdapter is a
+                        // directed behavior), so self-scanning here would start work behind
+                        // the board's back and double-drive it.
+                        if (!Scheduling.SchedulerSettings.PrimaryMode
+                            && CurrentState != BehaviorState.Working)
                             GetWorkScanner()?.TryScanForWork();
                         if (CurrentState != BehaviorState.Idle)
                             SetState(BehaviorState.Idle);
@@ -986,6 +1036,38 @@ namespace ValheimVillages.Villager.AI
         }
 
         /// <summary>
+        ///     Per-tick advisory-agent housekeeping that MUST run whether or not the
+        ///     villager is currently moving: glue the agent's internal position to the
+        ///     physics character and report the character's REAL horizontal velocity to
+        ///     the local-avoidance (RVO) sim.
+        ///     <para>This used to live only inside <see cref="UpdateAgentMovement" />,
+        ///     which runs only while a villager is walking to a waypoint. An IDLE
+        ///     villager (arrived at its station, working, no waypoint) therefore stopped
+        ///     being ticked and kept feeding the avoidance sim its LAST walking velocity
+        ///     — and in advisory mode (updatePosition off) its internal sim position
+        ///     drifts off at that stale velocity. Every other villager's RVO then sees a
+        ///     phantom moving away from the spot the idle villager is actually standing
+        ///     on, clears that predicted-vacated cell, and walks straight through it.
+        ///     Ticking this every frame makes idle villagers report velocity ≈ 0 at their
+        ///     true position, which is exactly what neighbours' RVO needs to steer around
+        ///     them.</para>
+        ///     Returns true when the agent is live and on-mesh (sync applied).
+        /// </summary>
+        private bool SyncAgentAvoidance()
+        {
+            if (m_navAgent == null || !m_navAgent.isOnNavMesh) return false;
+            m_navAgent.nextPosition = transform.position;
+            if (m_character != null)
+            {
+                var charVel = m_character.GetVelocity();
+                charVel.y = 0f;
+                m_navAgent.velocity = charVel;
+            }
+
+            return true;
+        }
+
+        /// <summary>
         ///     Advisory NavMeshAgent movement: sync the agent to the character's
         ///     real position, let it compute/steer the path to <paramref name="targetPos"/>,
         ///     and feed its desired direction into Valheim's character movement.
@@ -1052,6 +1134,10 @@ namespace ValheimVillages.Villager.AI
         /// </summary>
         private bool TryOffMeshRescue(float dt)
         {
+            // Experiment toggle (vv_rescue). When off, strand detection / walk-home /
+            // teleport-escalation are all skipped; the anchor leash (which calls TeleportHome
+            // directly) is NOT affected.
+            if (!OffMeshRescueEnabled) return false;
             if (!VillagerAgentType.IsRegistered) return false;
 
             var due = Time.time >= m_nextRescueCheck;
@@ -1125,12 +1211,13 @@ namespace ValheimVillages.Villager.AI
         /// </summary>
         private void TeleportHome()
         {
+            if (!OffMeshRescueEnabled) return;
             var dest = m_homeAnchor;
             if (NavMesh.SamplePosition(m_homeAnchor, out var hit, 5f, AgentFilter()))
                 dest = hit.position;
             transform.position = dest;
             if (m_navAgent != null && m_navAgent.isOnNavMesh)
-                m_navAgent.Warp(dest);
+                m_navAgent.transform.Translate(dest);
             Plugin.Log?.LogWarning(
                 $"[AI:{m_villagerName}] Rescue: pathing couldn't free it; teleported home to " +
                 $"({dest.x:F1},{dest.y:F1},{dest.z:F1}).");
@@ -1152,7 +1239,7 @@ namespace ValheimVillages.Villager.AI
 
             transform.position = dest;
             if (m_navAgent != null && m_navAgent.isOnNavMesh)
-                m_navAgent.Warp(dest);
+                m_navAgent.transform.Translate(dest);
             // SetState(Idle) clears the stale path, resets recovery/stall timers, and
             // lets the behavior loop re-select from the station next tick.
             SetState(BehaviorState.Idle);
@@ -1206,25 +1293,11 @@ namespace ValheimVillages.Villager.AI
                 return;
             }
 
-            // Keep the agent's internal position glued to the physics character.
-            if (m_navAgent.isOnNavMesh)
-            {
-                m_navAgent.nextPosition = transform.position;
-                // Feed the character's REAL horizontal velocity to the agent so
-                // local avoidance (RVO) can predict collisions with neighbouring
-                // villagers. In advisory mode the agent doesn't move itself, so
-                // without this every villager looks stationary to the avoidance
-                // sim and it barely steers around them — the hallway/corner
-                // jamming. With true velocities, desiredVelocity (read below)
-                // reflects the avoidance contribution.
-                if (m_character != null)
-                {
-                    var charVel = m_character.GetVelocity();
-                    charVel.y = 0f;
-                    m_navAgent.velocity = charVel;
-                }
-            }
-            else
+            // Keep the agent's internal position glued to the physics character and
+            // feed the character's REAL velocity to the avoidance sim (see
+            // SyncAgentAvoidance — also run every tick for idle villagers so they
+            // don't read as phantoms still moving away from where they stand).
+            if (!SyncAgentAvoidance())
             {
                 // Character drifted off the agent's navmesh — warp it back.
                 if (NavMesh.SamplePosition(transform.position, out var hit, 3f, AgentFilter()))

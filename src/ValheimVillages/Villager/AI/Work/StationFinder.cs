@@ -147,5 +147,26 @@ namespace ValheimVillages.Villager.AI.Work
                     return true;
             return false;
         }
+
+        /// <summary>
+        ///     Number of occupied (non-empty) slots on a cooking station — items currently
+        ///     cooking, each of which becomes one finished output. Reads ZDO slot data,
+        ///     mirroring <see cref="HasFreeSlot" />. Counted as pending output toward a
+        ///     cooking work order's quota so the production pipeline can't overshoot.
+        /// </summary>
+        public static int CountOccupiedSlots(CookingStation station)
+        {
+            if (station == null) return 0;
+            var nview = station.GetComponent<ZNetView>();
+            if (nview == null || nview.GetZDO() == null) return 0;
+
+            var slotCount = station.m_slots != null ? station.m_slots.Length : 0;
+            var zdo = nview.GetZDO();
+            var occupied = 0;
+            for (var i = 0; i < slotCount; i++)
+                if (!string.IsNullOrEmpty(zdo.GetString("slot" + i)))
+                    occupied++;
+            return occupied;
+        }
     }
 }

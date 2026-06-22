@@ -8,6 +8,15 @@ namespace ValheimVillages.Settings
         /// <summary>Maximum distance from anchor that NPC will wander.</summary>
         public const float MaxWanderRange = 200f;
 
+        /// <summary>
+        ///     Hard leash: if a settled villager ends up more than this far (XZ) from its
+        ///     home anchor — flung onto a stray/disconnected navmesh limb, knocked back, or
+        ///     driven off by a bad path — it is teleported home immediately rather than
+        ///     wandering off-village until it strands and despawns. Generous vs the ~30m bake
+        ///     radius so normal in-village movement/patrol never trips it.
+        /// </summary>
+        public const float MaxAnchorLeashMeters = 60f;
+
         /// <summary>Radius to check for nearby POIs while wandering.</summary>
         public const float DiscoveryRadius = 20f;
 
@@ -410,6 +419,16 @@ namespace ValheimVillages.Settings
         ///     on the roster to flee toward.
         /// </summary>
         public const float FleeDistance = 12f;
+
+        /// <summary>
+        ///     Max XZ distance a flee destination may be pulled to snap it onto the fleer's
+        ///     OWN village graph. SafeSpot (myPos + away*FleeDistance) can land off-graph;
+        ///     without this clamp the agent paths across the unioned multi-village navmesh and
+        ///     strands the villager off its village. Generous (> FleeDistance) so a settled,
+        ///     on-graph villager always finds a cell; if even this fails the flee falls back
+        ///     to a cell near the villager's current position.
+        /// </summary>
+        public const float FleeGraphClampRadius = 32f;
 
         /// <summary>Eye/muzzle height (m) the guard's line-of-sight ray is cast from / to.</summary>
         public const float LosEyeHeight = 1.5f;

@@ -44,6 +44,27 @@ namespace ValheimVillages.Patches
         }
 
         /// <summary>
+        ///     Collapse a ZDO list to one entry per ZDO uid in place, preserving order and
+        ///     dropping nulls. Undoes the duplicate appends from overlapping sector sweeps
+        ///     before the list reaches CreateObjects, which would otherwise instantiate a ZDO
+        ///     once per duplicate entry and leave untracked orphan GameObjects.
+        /// </summary>
+        private static void DedupeByUid(List<ZDO> zdos)
+        {
+            var seen = new HashSet<ZDOID>();
+            var write = 0;
+            for (var read = 0; read < zdos.Count; read++)
+            {
+                var zdo = zdos[read];
+                if (zdo == null || !seen.Add(zdo.m_uid)) continue;
+                zdos[write++] = zdo;
+            }
+
+            if (write < zdos.Count)
+                zdos.RemoveRange(write, zdos.Count - write);
+        }
+
+        /// <summary>
         ///     After vanilla creates zones for player peers, also create zones
         ///     around village anchor positions so terrain and vegetation load.
         /// </summary>
@@ -115,6 +136,19 @@ namespace ValheimVillages.Patches
                         continue;
                     ZDOMan.instance.FindSectorObjects(phantomZone, activeArea, 0, nearObjects);
                 }
+
+                // The reference-position sweep and each phantom sweep cover overlapping zone
+                // blocks, so FindSectorObjects appends the SAME ZDO to nearObjects more than
+                // once whenever blocks overlap (e.g. the connected player stands in a phantom
+                // village). Vanilla never hands CreateObjects a list with duplicate ZDOs, and
+                // CreateObjectsSorted only guards on ZDO.Created at COLLECTION time — so two
+                // copies of one not-yet-created ZDO both pass the guard and CreateObject (which
+                // has no re-create guard) runs twice, instantiating two GameObjects for one ZDO.
+                // AddInstance overwrites m_instances with the second; the first is an untracked
+                // orphan that RemoveObjects (it only walks m_instances) can never reap. Its
+                // collider lingers and doubles the slot-31 navmesh bake input near the village.
+                // Restore vanilla's invariant by collapsing nearObjects to one entry per ZDO.
+                DedupeByUid(nearObjects);
 
                 tr.Method("CreateObjects", nearObjects, distantObjects).GetValue();
                 tr.Method("RemoveObjects", nearObjects, distantObjects).GetValue();

@@ -5,6 +5,7 @@ using ValheimVillages.Interfaces;
 using ValheimVillages.Schemas;
 using ValheimVillages.Settings;
 using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.AI.Navigation;
 
 namespace ValheimVillages.Behaviors.Combat
 {
@@ -68,9 +69,26 @@ namespace ValheimVillages.Behaviors.Combat
 
             m_ai.RequestFastReselect(FleeTickSec);
 
+            // Repath — and the non-trivial work that feeds it (village resolve, guard scope,
+            // graph clamp) — only on the repath cadence, not on every 0.1s reselect tick.
+            // During a raid many non-combatants flee at once; doing this 10x/s each was a
+            // measurable hot path. Threat-clear (Calm, above) is still checked at 10Hz, so
+            // reaction to safety stays snappy; only the pathing work is throttled.
+            if (Time.time - m_lastRepathTime < CombatSettings.ChaseRepathInterval)
+                return;
+            m_lastRepathTime = Time.time;
+
             var myPos = m_ai.Position;
             var threatPos = m_threat.transform.position;
-            var guard = FindNearestGuard();
+
+            // Resolve the fleer's OWN village once: scopes the guard search to this village
+            // AND provides the graph the destination is clamped onto, so flee can never send
+            // the villager toward another village's guard or to an off-graph SafeSpot, where
+            // the agent would path across the unioned multi-village navmesh and strand it.
+            var myVillage = Villages.Entity.VillageRegistry.GetVillageAt(m_ai.HomeAnchor);
+            var graph = myVillage?.Graph;
+
+            var guard = FindNearestGuard(graph);
 
             // Only run TO the guard when the guard is FARTHER from the enemy than we
             // are — then running to it moves us away from danger and behind its line.
@@ -90,11 +108,28 @@ namespace ValheimVillages.Behaviors.Combat
                 dest = SafeSpot(myPos, threatPos);
             }
 
-            if (Time.time - m_lastRepathTime >= CombatSettings.ChaseRepathInterval)
+            // Clamp the destination onto the fleer's village graph so the agent never paths
+            // off-village. A same-village guard is already on-graph (no-op); SafeSpot may not
+            // be. If the desired dest is too far from the graph, snap to a cell near the
+            // villager's current position instead — anything on THIS graph beats an off-graph run.
+            if (graph != null)
             {
-                m_lastRepathTime = Time.time;
-                m_ai.NavTo(dest, BehaviorState.Alarmed, "flee", snapToApproach: false);
+                // Scope the clamp to anchor-REACHABLE cells so flee can never target a
+                // disconnected far limb of the raw bake. Validator is null (unconstrained)
+                // when the graph carries no committed classification — e.g. a blob-hydrated
+                // client — so client-side behavior is unchanged.
+                var reachable = graph.HasAnchorReachableClassification
+                    ? (System.Func<Vector3, bool>)graph.IsAnchorReachableCell
+                    : null;
+                if (graph.TryFindNearestLookupCell(dest, reachable, out var onGraph, out _,
+                        CombatSettings.FleeGraphClampRadius))
+                    dest = onGraph;
+                else if (graph.TryFindNearestLookupCell(myPos, reachable, out var hereCell, out _,
+                             CombatSettings.FleeGraphClampRadius))
+                    dest = hereCell;
             }
+
+            m_ai.NavTo(dest, BehaviorState.Alarmed, "flee", snapToApproach: false);
         }
 
         public void OnArrival(float dt)
@@ -141,8 +176,16 @@ namespace ValheimVillages.Behaviors.Combat
             return best;
         }
 
-        /// <summary>Nearest active combatant villager (one that has a <see cref="CombatBehavior"/>), or null.</summary>
-        private VillagerAI FindNearestGuard()
+        /// <summary>
+        ///     Nearest active combatant villager (one with a <see cref="CombatBehavior"/>) in
+        ///     the SAME village as the fleer, or null. Village-scoped so a panicked villager
+        ///     never flees toward a guard in another village (which would path it off its own
+        ///     graph). A guard is in-village when its stable home anchor resolves to a region
+        ///     on the fleer's own <paramref name="graph"/>. If the fleer's graph can't be
+        ///     resolved (<paramref name="graph"/> null), falls back to nearest-overall rather
+        ///     than excluding every guard.
+        /// </summary>
+        private VillagerAI FindNearestGuard(RegionGraph graph)
         {
             var myPos = m_ai.Position;
             VillagerAI best = null;
@@ -152,6 +195,12 @@ namespace ValheimVillages.Behaviors.Combat
                 var v = kv.Value;
                 if (v == null || v == m_ai) continue;
                 if (v.GetBehavior<CombatBehavior>() == null) continue;
+                // Same-village only: a guard counts when its (stable) home anchor resolves to
+                // a region on the fleer's OWN graph — one O(1) lookup-grid hit, vs re-scanning
+                // all world ZDOs per guard (GetVillageAt). When the fleer's graph is
+                // unresolved, fall back to nearest-overall rather than excluding every guard.
+                if (graph != null && graph.PointToRegionId(v.HomeAnchor) == null) continue;
+
                 var dsq = (v.Position - myPos).sqrMagnitude;
                 if (dsq < bestSq)
                 {

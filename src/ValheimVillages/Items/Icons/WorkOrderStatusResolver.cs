@@ -41,9 +41,14 @@ namespace ValheimVillages.Items.Icons
                 || string.IsNullOrEmpty(station))
                 return WorkOrderStatus.Pending;
 
-            var max = 10;
+            var tokenMax = 10;
             if (item.m_customData.TryGetValue("wo_max", out var maxStr))
-                int.TryParse(maxStr, out max);
+                int.TryParse(maxStr, out tokenMax);
+            // Authoritative quota is the host-owned village record (Fix C); fall back to the
+            // token only when we have no position to resolve the village from.
+            var max = containerPos.HasValue
+                ? ContainerScanner.ResolveOrderMax(station, itemPrefab, containerPos.Value, tokenMax)
+                : tokenMax;
 
             // Check if a villager is actively working this exact order
             if (IsBeingWorked(itemPrefab))

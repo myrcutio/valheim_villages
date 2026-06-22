@@ -49,7 +49,9 @@
   "stationName": "",
   "stationIcon": "Wishbone",
   "workStations": [],
-  "behaviors": [],
+  "behaviors": [
+    "wander"
+  ],
   "tags": [
     "teacher:ability",
     "ability:mountainstride",

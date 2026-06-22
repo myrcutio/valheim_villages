@@ -241,6 +241,29 @@ namespace ValheimVillages.Villager.AI.Navigation
         public int LinkCount => m_links.Count;
 
         /// <summary>
+        ///     Whether this graph carries a committed anchor-reachability classification.
+        ///     The building/owning peer (which installs the full raster) does; a
+        ///     blob-hydrated peer may not. When false, <see cref="IsAnchorReachableCell" />
+        ///     imposes no constraint.
+        /// </summary>
+        public bool HasAnchorReachableClassification =>
+            m_hasClassification && m_anchorReachableCellsXz.Count > 0;
+
+        /// <summary>
+        ///     True if the XZ cell at <paramref name="worldPos" /> is in the anchor-reachable
+        ///     set — part of the village's connected core, not a disconnected far limb of the
+        ///     raw bake. Used to scope flee/movement targets. Returns true (unconstrained)
+        ///     when no classification is committed (see <see cref="HasAnchorReachableClassification" />).
+        /// </summary>
+        public bool IsAnchorReachableCell(Vector3 worldPos)
+        {
+            if (!HasAnchorReachableClassification) return true;
+            var gx = Mathf.FloorToInt(worldPos.x / LookupCellSize);
+            var gz = Mathf.FloorToInt(worldPos.z / LookupCellSize);
+            return m_anchorReachableCellsXz.Contains(PackXz(gx, gz));
+        }
+
+        /// <summary>
         ///     The key this graph is registered under in <see cref="s_registry" />.
         ///     Set by <see cref="GetOrCreate" />.
         /// </summary>
@@ -287,9 +310,38 @@ namespace ValheimVillages.Villager.AI.Navigation
             regionId = null;
             if (!m_initialized || m_lookupGrid.Count == 0) return false;
 
-            var ordered = new List<(long key, Vector3 pos, string id, float distSq)>(m_lookupGrid.Count);
             var halfCell = LookupCellSize * 0.5f;
             var halfBucket = HeightBucketSize * 0.5f;
+            var maxDistSq = maxXzDist >= float.MaxValue ? float.MaxValue : maxXzDist * maxXzDist;
+
+            // Fast path: with no validator we only need the single nearest in-radius cell, so
+            // a one-pass min-scan beats allocating + sorting the WHOLE grid. This matters
+            // because hot callers (e.g. the flee graph-clamp) hit this repeatedly. The
+            // alloc+sort path below is kept for validating callers, whose distance-ordered
+            // iteration is what bounds their (potentially expensive) validator calls.
+            if (validator == null)
+            {
+                var bestSq = maxDistSq;
+                var found = false;
+                foreach (var kv in m_lookupGrid)
+                {
+                    UnpackLookup(kv.Key, out var gx, out var gz, out var hb);
+                    var wx = gx * LookupCellSize + halfCell;
+                    var wz = gz * LookupCellSize + halfCell;
+                    var dx = wx - target.x;
+                    var dz = wz - target.z;
+                    var distSq = dx * dx + dz * dz;
+                    if (distSq > bestSq) continue;
+                    bestSq = distSq;
+                    worldPos = new Vector3(wx, hb * HeightBucketSize + halfBucket, wz);
+                    regionId = kv.Value;
+                    found = true;
+                }
+
+                return found;
+            }
+
+            var ordered = new List<(long key, Vector3 pos, string id, float distSq)>(m_lookupGrid.Count);
             foreach (var kv in m_lookupGrid)
             {
                 UnpackLookup(kv.Key, out var gx, out var gz, out var hb);
@@ -308,11 +360,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             // exceeds the cap every remaining one does too — break. Without
             // this, an unreachable target makes a capsule/path-validating
             // caller walk the ENTIRE grid (thousands of full corridor plans).
-            var maxDistSq = maxXzDist >= float.MaxValue ? float.MaxValue : maxXzDist * maxXzDist;
             foreach (var (_, pos, id, distSq) in ordered)
             {
                 if (distSq > maxDistSq) break;
-                if (validator != null && !validator(pos)) continue;
+                if (!validator(pos)) continue;
                 worldPos = pos;
                 regionId = id;
                 return true;

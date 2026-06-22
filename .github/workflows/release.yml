@@ -43,8 +43,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          zip="dist/ValheimVillages-${version}.zip"
+          zip="dist/ValheimVillages-${GITHUB_REF_NAME}.zip"
           if [ ! -f "$zip" ]; then
             echo "Expected ${zip} on the tagged commit, but it is missing." >&2
             echo "Build it locally with scripts/package.sh and commit it under dist/." >&2
@@ -82,8 +81,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          tagversion="${GITHUB_REF_NAME#v}"
-          zip="dist/ValheimVillages-${tagversion}.zip"
+          zip="dist/ValheimVillages-${GITHUB_REF_NAME}.zip"
           if [ ! -f "$zip" ]; then
             echo "Expected ${zip} on the tagged commit, but it is missing." >&2
             echo "Build it locally with scripts/package.sh and commit it under dist/." >&2

@@ -45,7 +45,9 @@
   "stationIcon": "Hammer",
   "workStations": [],
   "behaviors": [
-    "craft"
+    "craft",
+    "tidy",
+    "haul"
   ],
   "tags": [
     "tab:info",

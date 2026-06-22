@@ -13,6 +13,14 @@ namespace ValheimVillages.Scheduling
 
         /// <summary>A placed piece is damaged and needs repair.</summary>
         RepairPiece,
+
+        /// <summary>
+        ///     The villager has crafting/farming work to do (a chest work order below its
+        ///     target, or farm plots needing tending). The actual detect-and-commit lives
+        ///     in <c>CraftingBehavior.TryScanForWork</c>; the producer only flags that a
+        ///     crafter exists so the scheduler offers it the slot.
+        /// </summary>
+        CraftWork,
     }
 
     /// <summary>

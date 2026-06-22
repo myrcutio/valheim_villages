@@ -37,7 +37,7 @@ namespace ValheimVillages.Villager.Records
                 var warn = presence == LivePresence.Missing ? " ⚠ORPHAN" : "";
                 Print(
                     $"  {r.Status,-5} {r.Name} ({r.Type})  village={r.Village}  " +
-                    $"live={VillagerLiveness.Tag(presence)}{warn}  id={r.RecordId}  npc={r.NpcZdoId}");
+                    $"live={VillagerLiveness.Tag(presence)}{warn}  id={r.RecordId}  npc={r.NpcZdoId} home={r.HomeAnchor}");
             }
         }
 

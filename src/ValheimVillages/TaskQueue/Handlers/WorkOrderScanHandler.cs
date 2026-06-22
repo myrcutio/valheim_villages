@@ -10,6 +10,7 @@ using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Work;
 using ValheimVillages.Villages;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.TaskQueue.Handlers
 {
@@ -48,26 +49,42 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             if (containers.Count == 0) return TaskResult.Fail("No containers found near anchor");
 
-            // Find all matching work orders and try each until one can be fulfilled
-            var allMatches = ContainerScanner.FindAllWorkOrders(containers, villagerType);
-
-            if (allMatches == null || allMatches.Count == 0)
-                // No work orders to do: ACK so the queue continues (no retry/dead-letter).
-                return TaskResult.Ok();
-
+            // Resolve the village that OWNS the work-order config (Fix C). The scan runs on the
+            // host, which has the village + graph hydrated. Defer (not fail) if it isn't ready
+            // yet — transient bootstrap state after world load / hot reload.
             if (!VillageStationRegistry.HasVillageFor(anchorPos))
             {
-                // No village registered yet — transient bootstrap state (e.g. partition hasn't
-                // completed after world load / hot reload). Don't surface as a Tasks-tab rejection;
-                // the next scan in WorkScanInterval seconds will retry once the village exists.
                 Plugin.Log?.LogInfo(
                     $"[WorkOrderScan] {ai.NpcName} deferring scan — no village registered yet at anchor {anchorPos}");
                 return TaskResult.Ok();
             }
 
+            var village = VillageRegistry.GetVillageAt(anchorPos);
+            if (village == null)
+            {
+                Plugin.Log?.LogInfo(
+                    $"[WorkOrderScan] {ai.NpcName} deferring scan — village not hydrated at anchor {anchorPos}");
+                return TaskResult.Ok();
+            }
+
+            // Config now lives on the village record, not chest tokens.
+            var allMatches = ContainerScanner.FindAllWorkOrders(village, villagerType);
+            if (allMatches == null || allMatches.Count == 0)
+                // No work orders to do: ACK so the queue continues (no retry/dead-letter).
+                return TaskResult.Ok();
+
+            // The token no longer carries its source chest; pick a deterministic deposit chest
+            // (nearest to the anchor) so output lands consistently and rejection positions are
+            // stable. Completion still scans ALL nearby chests (CountAcrossContainers).
+            var depositChest = ContainerScanner.FindNearestContainer(containers, anchorPos);
+
             var rejections = new List<RejectionRecord>();
             foreach (var match in allMatches)
             {
+                // Config carries no chest; route this order's deposit/capacity/position to the
+                // deterministic deposit chest.
+                match.SourceContainer = depositChest;
+
                 // Check existing output quantity
                 var existingCount = ContainerScanner.CountAcrossContainers(
                     containers, match.ItemPrefabName);
@@ -289,6 +306,30 @@ namespace ValheimVillages.TaskQueue.Handlers
                         WorkOrderPosition = match.SourceContainer.transform.position,
                     });
                     continue;
+                }
+
+                // In-flight quota bound (cooking orders only): items already cooking on the
+                // village's stations are pending output. The earlier check (line ~75) counts
+                // only DEPOSITED output, so with cooking latency several villagers pipeline raw
+                // input onto stations while the deposited count is still under the cap —
+                // overshooting MaxQuantity (observed 49 vs a max of 32). Re-check here, now that
+                // we know it's a cooking order, including what's already on the stations.
+                if (cookingStationRef != null)
+                {
+                    var inFlight = VillageStationRegistry.CountCookingOutputInFlight(anchorPos);
+                    if (existingCount + inFlight >= match.MaxQuantity)
+                    {
+                        rejections.Add(new RejectionRecord
+                        {
+                            ItemPrefab = match.ItemPrefabName,
+                            Station = match.StationName,
+                            PhysicalStation = physicalStation,
+                            Reason = $"Quota met incl. in-flight: {existingCount}+{inFlight}/{match.MaxQuantity}",
+                            IsUnimplemented = false,
+                            WorkOrderPosition = match.SourceContainer.transform.position,
+                        });
+                        continue;
+                    }
                 }
 
                 // For cooking station, remember input item name so we can poll the right slot

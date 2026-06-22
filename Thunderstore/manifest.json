@@ -1,6 +1,6 @@
 {
   "name": "ValheimVillages",
-  "version_number": "0.1.2",
+  "version_number": "0.1.3",
   "website_url": "https://github.com/myrcutio/valheim_villages",
   "description": "Adds villagers who map an enclosed village, find stations and chests, and fulfill work orders from available materials.",
   "dependencies": [

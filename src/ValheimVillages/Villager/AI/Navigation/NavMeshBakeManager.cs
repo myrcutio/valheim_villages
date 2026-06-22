@@ -371,7 +371,11 @@ namespace ValheimVillages.Villager.AI.Navigation
             {
                 var data = NavMeshBuilder.BuildNavMeshData(
                     settings, combinedSources, bounds, Vector3.zero, Quaternion.identity);
-                if (data != null) Holder.SetForVillage(villageId ?? "", NavMesh.AddNavMeshData(data));
+                if (data != null)
+                {
+                    Holder.SetForVillage(villageId ?? "", NavMesh.AddNavMeshData(data));
+                    LogBakedExtent(bounds, villageId);
+                }
             }
 
             pieceSw.Stop();
@@ -392,6 +396,47 @@ namespace ValheimVillages.Villager.AI.Navigation
             sw.Stop();
             result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
             return result;
+        }
+
+        /// <summary>
+        ///     Instrument the ACTUAL slot-31 navmesh extent vs the requested bake
+        ///     <paramref name="bounds" />, to surface bake overspill / disconnected far
+        ///     islands directly (a villager paths on this raw mesh, not the pruned graph).
+        ///     Reports the triangulation AABB and how many verts fall &gt;5m outside the
+        ///     requested XZ box. NOTE: <see cref="NavMesh.CalculateTriangulation" /> unions
+        ///     ALL installed villages' meshes, so with multiple villages the "beyond" count
+        ///     also includes other villages — read it as exact only for a single village.
+        /// </summary>
+        private static void LogBakedExtent(Bounds requested, string villageId)
+        {
+            var tri = NavMesh.CalculateTriangulation();
+            var verts = tri.vertices;
+            if (verts == null || verts.Length == 0) return;
+
+            const float pad = 5f;
+            var min = verts[0];
+            var max = verts[0];
+            var beyond = 0;
+            var maxBeyond = 0f;
+            foreach (var v in verts)
+            {
+                min = Vector3.Min(min, v);
+                max = Vector3.Max(max, v);
+                var dx = Mathf.Max(requested.min.x - v.x, v.x - requested.max.x);
+                var dz = Mathf.Max(requested.min.z - v.z, v.z - requested.max.z);
+                var d = Mathf.Max(dx, dz);
+                if (d > pad)
+                {
+                    beyond++;
+                    if (d > maxBeyond) maxBeyond = d;
+                }
+            }
+
+            Plugin.Log?.LogInfo(
+                $"[NavMeshBake] extent village={villageId} " +
+                $"requested_x={requested.min.x:F0}..{requested.max.x:F0} requested_z={requested.min.z:F0}..{requested.max.z:F0} | " +
+                $"actual_x={min.x:F0}..{max.x:F0} actual_z={min.z:F0}..{max.z:F0} actual_y={min.y:F0}..{max.y:F0} | " +
+                $"verts_beyond_bounds(>{pad}m)={beyond}/{verts.Length} maxBeyond={maxBeyond:F0}m");
         }
 
 

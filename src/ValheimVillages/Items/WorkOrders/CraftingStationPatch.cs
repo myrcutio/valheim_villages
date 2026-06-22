@@ -767,6 +767,19 @@ namespace ValheimVillages.Items.WorkOrders
                 return;
             }
 
+            // Fix C: the quota lives on the host-owned village record. Resolve the village now
+            // (graph-independent FindNearAnchor works on a client) so the order can be registered
+            // there; refuse to create a work order with no village to own it.
+            var villagePos = player.transform.position;
+            var village = Villages.Entity.VillageRegistry.GetVillageCovering(villagePos)
+                          ?? Villages.Entity.VillageRegistry.FindNearAnchor(villagePos);
+            if (village == null)
+            {
+                player.Message(MessageHud.MessageType.Center,
+                    "No village here — place a registry station to create work orders");
+                return;
+            }
+
             var prefab = ZNetScene.instance?.GetPrefab(workOrderName);
             if (prefab == null)
             {
@@ -829,6 +842,11 @@ namespace ValheimVillages.Items.WorkOrders
 
             if (inventory.AddItem(newItemData))
             {
+                // Register the order on the host-owned village record (Fix C). The token is now
+                // just a UI handle; the host record is the authoritative config the scan reads.
+                Villager.WorkOrderConfigRpc.RequestSet(
+                    village.VillageId, station.m_name, itemPrefabName, itemDisplayName, 1, 10);
+
                 player.Message(MessageHud.MessageType.Center,
                     $"Created work order: {localizedName}");
                 WorkOrderTutorial.MaybeShowWorkOrderTutorial(player);

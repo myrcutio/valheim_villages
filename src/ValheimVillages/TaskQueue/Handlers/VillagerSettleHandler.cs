@@ -63,6 +63,15 @@ namespace ValheimVillages.TaskQueue.Handlers
             if (!VillagerAIManager.ActiveVillagers.TryGetValue(task.SourceId, out var ai) || ai == null)
                 return true; // villager gone — let Handle no-op and finish
 
+            // The gate only governs the OWNER's simulation — a non-owner's UpdateAI returns
+            // before the hold, so its settle flag is irrelevant. Villagers are server-
+            // authoritative (owned from birth), so once the ZDO exists, complete the task on
+            // non-owner peers instead of spinning it forever; the owner does the real
+            // precondition gating below.
+            var zdo = ai.GetComponent<ZNetView>()?.GetZDO();
+            if (zdo == null) return false;   // ZDO not attached yet — wait, don't settle blind
+            if (!zdo.IsOwner()) return true; // not ours to settle — complete the task
+
             if (!NavMeshBakeManager.AgentReady) return false; // no slot-31 bake installed yet
             return ai.PreconditionsSettled();
         }

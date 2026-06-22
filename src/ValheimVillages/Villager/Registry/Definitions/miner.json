@@ -51,7 +51,9 @@
   "stationIcon": "Pickaxe",
   "workStations": [],
   "behaviors": [
-    "craft"
+    "craft",
+    "tidy",
+    "haul"
   ],
   "tags": [
     "tab:info",

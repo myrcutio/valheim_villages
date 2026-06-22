@@ -30,6 +30,7 @@ namespace ValheimVillages.Scheduling
             var now = Time.time;
             CookRescueProducer.Scan(village, village.Anchor, now);
             RepairTaskProducer.Scan(village, village.Anchor, now);
+            CraftWorkProducer.Scan(village, village.Anchor, now);
 
             var tasks = TaskBoard.Tasks(village.VillageId, now);
             var (_, settings) = SchedulerModelPersistence.LoadOrCreate(village);

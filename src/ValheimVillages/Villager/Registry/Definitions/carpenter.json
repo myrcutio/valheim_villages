@@ -38,7 +38,9 @@
   ],
   "behaviors": [
     "craft",
-    "repair"
+    "repair",
+    "tidy",
+    "haul"
   ],
   "tags": [
     "tab:info",
