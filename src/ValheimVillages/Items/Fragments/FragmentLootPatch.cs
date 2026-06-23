@@ -1,54 +1,35 @@
-using System.Collections.Generic;
 using HarmonyLib;
-using UnityEngine;
 
 namespace ValheimVillages.Items.Fragments
 {
     /// <summary>
-    ///     Injects ransom note fragments into chest loot tables.
-    ///     Fragments match the biome where the chest is located.
+    ///     Injects biome-appropriate ransom note fragments into chest loot tables. MUST be a
+    ///     PREFIX on Container.Awake: the engine rolls a chest's contents inside Awake
+    ///     (AddDefaultItems → m_defaultItems.GetDropListItems(), gated by the one-shot
+    ///     s_addedDefaultItems ZDO flag). A postfix adds the fragment to m_defaultItems AFTER
+    ///     that roll has happened and the flag is set, so it could never appear — we must
+    ///     extend m_defaultItems BEFORE the original Awake consumes it.
     /// </summary>
     [HarmonyPatch(typeof(Container), "Awake")]
     public static class FragmentLootPatch
     {
         private const float FragmentDropWeight = 0.15f;
 
-        private static Dictionary<Heightmap.Biome, string> s_biomeFragmentMap;
-
         /// <summary>
-        ///     Maps Heightmap.Biome values to fragment item names,
-        ///     derived from ItemFactory.FragmentBiomes.
+        ///     Extend the chest's default-item drop table with this biome's fragment BEFORE
+        ///     the original Awake rolls it into the chest inventory (see class remarks).
         /// </summary>
-        private static Dictionary<Heightmap.Biome, string> BiomeFragmentMap
+        [HarmonyPrefix]
+        public static void Prefix(Container __instance)
         {
-            get
-            {
-                if (s_biomeFragmentMap != null) return s_biomeFragmentMap;
-                s_biomeFragmentMap = new Dictionary<Heightmap.Biome, string>();
-                foreach (var (biomeEnum, key, _, _, _) in ItemFactory.FragmentBiomes)
-                    s_biomeFragmentMap[(Heightmap.Biome)biomeEnum] = $"vv_fragment_{key}";
-                return s_biomeFragmentMap;
-            }
-        }
+            if (__instance.m_defaultItems?.m_drops == null || __instance.m_defaultItems.m_drops.Count == 0)
+                return; // chests carry a default drop table; player-built storage doesn't
 
-        /// <summary>
-        ///     Patch Container.Awake to inject biome-appropriate fragment into chest drop tables.
-        /// </summary>
-        [HarmonyPostfix]
-        public static void Postfix(Container __instance)
-        {
-            if (__instance.m_defaultItems == null || __instance.m_defaultItems.m_drops == null)
+            var fragmentName = BiomeFragments.NameForPosition(__instance.transform.position);
+            if (fragmentName == null)
                 return;
 
-            // Only add to containers that already have loot (chests, not player-built storage)
-            if (__instance.m_defaultItems.m_drops.Count == 0)
-                return;
-
-            var biome = GetBiomeAtPosition(__instance.transform.position);
-            if (!BiomeFragmentMap.TryGetValue(biome, out var fragmentName))
-                return;
-
-            var fragmentPrefab = GetFragmentPrefab(fragmentName);
+            var fragmentPrefab = BiomeFragments.Prefab(fragmentName);
             if (fragmentPrefab == null)
                 return;
 
@@ -68,21 +49,5 @@ namespace ValheimVillages.Items.Fragments
             });
         }
 
-        private static Heightmap.Biome GetBiomeAtPosition(Vector3 position)
-        {
-            var worldGen = WorldGenerator.instance;
-            if (worldGen != null)
-                return worldGen.GetBiome(position);
-
-            return Heightmap.Biome.Meadows;
-        }
-
-        private static GameObject GetFragmentPrefab(string fragmentName)
-        {
-            if (ZNetScene.instance == null)
-                return null;
-
-            return ZNetScene.instance.GetPrefab(fragmentName);
-        }
     }
 }

@@ -64,6 +64,10 @@
             <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.PhysicsModule.dll</HintPath>
             <Private>false</Private>
         </Reference>
+        <Reference Include="UnityEngine.ClothModule">
+            <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.ClothModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
         <Reference Include="UnityEngine.InputLegacyModule">
             <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.InputLegacyModule.dll</HintPath>
             <Private>false</Private>

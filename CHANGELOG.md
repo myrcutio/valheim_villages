@@ -5,6 +5,51 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-23
+
+### Added
+- **Lode Core recruitment economy.** Recruiting and reviving villagers is now
+  earned through exploration instead of being free:
+  - Loot **biome map fragments** out in the world, then combine three fragments
+    from the same biome to **unlock that biome's villager type** for recruitment
+    and reveal a quest marker pointing to a dungeon.
+  - Recover a **Lode Core** from the marked dungeon — the resource that recruiting
+    or reviving a villager spends. A villager that dies drops its Lode Core, so it
+    is recoverable rather than lost.
+  - Fragments decide *which* villager types you can recruit (knowledge); Lode
+    Cores decide *how many* villagers you can field (currency). Unlocks are
+    tracked per player.
+  - Lode Cores cannot be carried through portals.
+  - Recruiting and reviving are atomic — a Lode Core is spent only if a villager
+    actually spawns, and is refunded to you otherwise.
+- The Village Registry's recruit and revive panels now show the Lode Core cost
+  and which villager types you have unlocked.
+- The work-order **Order** button on a crafting station now appears only when you
+  have unlocked a villager type that can work that station, and its tooltip names
+  the type.
+- **Idle villagers relax.** A villager with no work seeks out a cozy spot — such
+  as a hot tub — to relax instead of standing around.
+
+### Changed
+- **Smoother village (re)partition.** Rebuilding a village's navigation graph —
+  which happens on structure changes and on load — caused noticeable hitches.
+  The rebuild now does far less redundant work: per-cell ground heights are
+  cached, and the wall-check flood skips the open ground away from any structure,
+  cutting up to ~45% of the physics and ground-height queries per rebuild with no
+  change to the result. Larger villages benefit the most.
+
+### Developer
+- New `[Region] PartitionProfile` log line reports per-stage timings and
+  native-query counts for each region partition, for diagnosing rebuild cost.
+- `vv_recruit` and `vv_revive` console commands remain free (no Lode Core cost)
+  for testing.
+
+### Upgrade note
+- Recruiting and reviving now require Lode Cores, and recruiting a villager type
+  requires first unlocking it by combining biome fragments. Villagers already
+  living in your world are unaffected — only new recruits and revives draw on the
+  new economy.
+
 ## [0.1.3] 2026-06-22
 
 ### Fixed
@@ -92,6 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rescue quests and map fragments are experimental and largely untested.
 - Away-from-base simulation may stall until the player loads the relevant tile.
 
-[Unreleased]: https://github.com/myrcutio/valheim_villages/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/myrcutio/valheim_villages/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/myrcutio/valheim_villages/compare/v0.1.3...v0.2.0
+[0.1.3]: https://github.com/myrcutio/valheim_villages/compare/v0.1.1...v0.1.3
 [0.1.1]: https://github.com/myrcutio/valheim_villages/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/myrcutio/valheim_villages/releases/tag/v0.1.0

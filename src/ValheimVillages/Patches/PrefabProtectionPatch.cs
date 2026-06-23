@@ -4,7 +4,7 @@ namespace ValheimVillages.Patches
 {
     /// <summary>
     ///     Prevents ItemDrop and ZNetView Awake from running on our template prefabs.
-    ///     Templates have names like "vv_pawn", spawned clones have "vv_pawn(Clone)".
+    ///     Templates have names like "vv_lode_core", spawned clones have "vv_lode_core(Clone)".
     /// </summary>
     [HarmonyPatch(typeof(ItemDrop), "Awake")]
     public static class ItemDropAwakeProtectionPatch

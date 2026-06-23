@@ -58,11 +58,26 @@ namespace ValheimVillages.UI.Interaction
 
             if (InventoryGui.instance == null) return false;
 
+            var villageId = ResolveVillageId();
+
+            // Perimeter-wall requirement, mirroring a workbench refusing to open without a
+            // roof: if the village isn't sealed (the outside flood reaches the registry),
+            // flash a centered message and don't open the panel. Cleared automatically once
+            // the player closes the perimeter (the next rebake re-evaluates the flag).
+            var village = !string.IsNullOrEmpty(villageId)
+                ? VillageRegistry.FindById(villageId)
+                : null;
+            if (village != null && village.NeedsPerimeterWall)
+            {
+                player.Message(MessageHud.MessageType.Center, "Village registry needs a perimeter wall");
+                return false;
+            }
+
             // Open the crafting GUI scoped to the registry station, then inject the
             // Roster/Add/Revive tabs. activeGroup 3 is the crafting tab.
             player.SetCraftingStation(station);
             InventoryGui.instance.Show(null, 3);
-            RegistryTabManager.Activate(new RegistryContext(transform.position, ResolveVillageId()));
+            RegistryTabManager.Activate(new RegistryContext(transform.position, villageId));
             ActiveRegistry = this;
             return true;
         }

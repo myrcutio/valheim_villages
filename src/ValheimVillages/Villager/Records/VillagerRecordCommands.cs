@@ -173,7 +173,7 @@ namespace ValheimVillages.Villager.Records
 
             // Spawn on the HOST (server-owned from birth); the host re-resolves the seed near
             // the player position against its own navmesh. recordId empty = fresh recruit.
-            VillagerRecruitRpc.RequestSpawn(def.type, village.VillageId, pos, "");
+            VillagerRecruitRpc.RequestSpawn(def.type, village.VillageId, pos, "", paid: false);
             Print($"[vv_recruit] requested {def.type} into village {village.VillageId} (host-authoritative spawn)");
         }
 

@@ -25,6 +25,8 @@ namespace ValheimVillages.Enums
         Animals, // Tame animal locations
         CraftStation, // Crafting stations (Forge, Workbench, etc.)
         CookingStation, // Cooking stations (CookingStation, Cauldron, etc.)
+        HotTub, // Hot tub / bathtub — warm, cozy relax spot. Appended (not reordered) so
+                // existing persisted LocationType integer values stay stable.
     }
 
     /// <summary>

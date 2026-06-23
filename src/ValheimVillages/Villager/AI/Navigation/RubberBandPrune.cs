@@ -264,8 +264,24 @@ namespace ValheimVillages.Villager.AI.Navigation
             // Pass 1 flood now lives in the pure PerimeterOutsideFlood helper;
             // here we inject terrain cell heights and the piece-layer wall gate
             // (augmented with the geometric gate seal above).
+            // Memoize the per-cell flood height: PerimeterOutsideFlood queries
+            // cellY once per incident edge (~3x/cell), and for a cell with no
+            // region GetCellY falls through to a ZoneSystem.GetGroundHeight
+            // raycast — so every revisit of an unpopulated cell re-raycast it
+            // (~15k raycasts/partition measured). A cache scoped to THIS flood
+            // (so it can't go stale across partitions / terraforming, and never
+            // pollutes the xzMaxY geometry-presence maps) collapses that to one
+            // resolve per unique cell.
+            var cellYCache = new Dictionary<long, float>();
             var outsideCells = PerimeterOutsideFlood(gxMin, gzMin, gxMax, gzMax,
-                (gx, gz) => GetCellY(gx, gz, xzMaxYTerrain, cell),
+                (gx, gz) =>
+                {
+                    var ck = XzKey(gx, gz);
+                    if (cellYCache.TryGetValue(ck, out var cachedY)) return cachedY;
+                    var cy = GetCellY(gx, gz, xzMaxYTerrain, cell);
+                    cellYCache[ck] = cy;
+                    return cy;
+                },
                 (ax, az, bx, bz, ya, yb) =>
                     WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
                     || GateBlocksStep(ax, az, bx, bz, cell, gateSeals),
@@ -1153,11 +1169,30 @@ namespace ValheimVillages.Villager.AI.Navigation
             // blockers and the HNA partition agree on the village hull.
             var gateSeals = GatherGateSeals(
                 bounds.min.x, bounds.min.z, bounds.max.x, bounds.max.z);
+            // Memoize per-cell heightmap raycasts: PerimeterOutsideFlood probes
+            // each cell's Y once per incident edge, and (unlike Apply's Pass 1)
+            // every cell here falls straight to a ZoneSystem.GetGroundHeight
+            // raycast — no baked centroids exist yet at bake time. A cache scoped
+            // to this flood collapses the repeated raycasts to one per unique cell
+            // (this flood is the measured ~55ms bake_outside_flood stage, and it
+            // runs again over the hull in VillagePoiRegistry.RefreshFor). Result
+            // is identical: GetGroundHeight is pure in (x,z) for a single flood.
+            var wallCells = BuildWallNearCells(
+                bounds.min.x, bounds.min.z, bounds.max.x, bounds.max.z, cell, pieceMask);
+            var cellYCache = new Dictionary<long, float>();
             return PerimeterOutsideFlood(gxMin, gzMin, gxMax, gzMax,
-                (gx, gz) => ZoneSystem.instance.GetGroundHeight(
-                    new Vector3(gx * cell + half, 0f, gz * cell + half)),
+                (gx, gz) =>
+                {
+                    var ck = XzKey(gx, gz);
+                    if (cellYCache.TryGetValue(ck, out var cachedY)) return cachedY;
+                    var cy = ZoneSystem.instance.GetGroundHeight(
+                        new Vector3(gx * cell + half, 0f, gz * cell + half));
+                    cellYCache[ck] = cy;
+                    return cy;
+                },
                 (ax, az, bx, bz, ya, yb) =>
-                    WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
+                    (wallCells.Contains(XzKey(ax, az)) || wallCells.Contains(XzKey(bx, bz)))
+                    && WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
                     || GateBlocksStep(ax, az, bx, bz, cell, gateSeals),
                 out _);
         }
@@ -1286,7 +1321,46 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (ZoneSystem.instance == null) return 0f;
             var wx = gx * cell + cell * 0.5f;
             var wz = gz * cell + cell * 0.5f;
+            PartitionProfile.GetGroundHeight++;
             return ZoneSystem.instance.GetGroundHeight(new Vector3(wx, 0f, wz));
+        }
+
+        // Broad-phase prefilter for the perimeter flood's per-edge wall probe.
+        // PerimeterOutsideFlood calls WallBlocks on EVERY edge it examines —
+        // including the thousands in open terrain far from any wall, each paying a
+        // full Physics.OverlapBox broadphase only to find nothing. This marks every
+        // XZ cell whose neighbourhood contains a piece-layer collider (one
+        // bounds-wide OverlapBox + the colliders' AABB footprints, +1 cell margin,
+        // full Y so elevation never matters). An edge whose BOTH cells are absent
+        // from this set cannot have a collider inside its waist box, so the flood
+        // treats it as open WITHOUT probing — collapsing the OverlapBox storm to
+        // just the wall-frontier edges. Conservative: collider.bounds is the world
+        // AABB and the margin covers straddling, so a real wall is never skipped
+        // (result-identical to probing every edge).
+        private static HashSet<long> BuildWallNearCells(
+            float minX, float minZ, float maxX, float maxZ, float cell, int mask)
+        {
+            var wallCells = new HashSet<long>();
+            if (mask == 0) return wallCells;
+            var center = new Vector3((minX + maxX) * 0.5f, 0f, (minZ + maxZ) * 0.5f);
+            var ext = new Vector3(
+                (maxX - minX) * 0.5f + cell, 5000f, (maxZ - minZ) * 0.5f + cell);
+            var hits = Physics.OverlapBox(center, ext, Quaternion.identity, mask,
+                QueryTriggerInteraction.Ignore);
+            foreach (var col in hits)
+            {
+                if (col == null) continue;
+                var b = col.bounds;
+                var cgx0 = Mathf.FloorToInt(b.min.x / cell) - 1;
+                var cgz0 = Mathf.FloorToInt(b.min.z / cell) - 1;
+                var cgx1 = Mathf.FloorToInt(b.max.x / cell) + 1;
+                var cgz1 = Mathf.FloorToInt(b.max.z / cell) + 1;
+                for (var gx = cgx0; gx <= cgx1; gx++)
+                for (var gz = cgz0; gz <= cgz1; gz++)
+                    wallCells.Add(XzKey(gx, gz));
+            }
+
+            return wallCells;
         }
 
         private static bool WallBlocks(int gxA, int gzA, int gxB, int gzB,
@@ -1311,6 +1385,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             ComputeWaistProbeBox(gxA, gzA, gxB, gzB, floorY, cell,
                 out var center, out var halfExtents);
+            PartitionProfile.OverlapBox++;
             var count = Physics.OverlapBoxNonAlloc(center, halfExtents,
                 s_waistProbeBuf, Quaternion.identity, mask,
                 QueryTriggerInteraction.Ignore);

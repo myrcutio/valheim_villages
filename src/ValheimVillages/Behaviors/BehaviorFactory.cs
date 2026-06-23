@@ -27,6 +27,7 @@ namespace ValheimVillages.Behaviors
             { "repair", ai => new RepairBehavior(ai) },
             { "haul", ai => new HaulBehavior(ai) },
             { "wander", ai => new Wander.WanderBehavior(ai) },
+            { "relax", ai => new Relax.RelaxBehavior(ai) },
         };
 
         /// <summary>

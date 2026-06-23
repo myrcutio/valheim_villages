@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 using ValheimVillages.Attributes;
+using ValheimVillages.Items.Fragments;
 using ValheimVillages.Items.Icons;
 using ValheimVillages.Villager.Registry;
 using Object = UnityEngine.Object;
@@ -191,36 +192,32 @@ namespace ValheimVillages.Items
         /// </summary>
         private static void GenerateRegistryItems(List<ItemDefinition> definitions)
         {
-            // Generic pawn (random villager type)
+            // Generic recruitment currency. A "Lode Core" — a brightly shining core
+            // dropped at rescue sites, spent at the registry to recruit/revive a villager,
+            // and returned when a villager dies. Non-teleportable (treated like metal): you
+            // have to physically carry it home. Cloned from the Surtling core so it already
+            // reads as a glowing core; retinted to a cool glow in ApplyItemDefinition.
             AddIfMissing(definitions, new ItemDefinition
             {
-                name = "vv_pawn",
+                name = "vv_lode_core",
                 source = "clone",
-                basePrefab = "DragonEgg",
-                displayName = "Villager",
-                description = "A villager packaged for transport.",
-                maxStackSize = 1,
-                weight = 10f,
-                itemType = "pawn",
+                basePrefab = "SurtlingCore",
+                displayName = "Lode Core",
+                description = "A brightly shining core wrested from the deep. The village registry " +
+                              "can bind one into a living villager — and a fallen villager leaves theirs " +
+                              "behind. Too dense with raw essence to pass through a portal.",
+                maxStackSize = 20,
+                weight = 4f,
+                itemType = "lodecore",
             });
 
-            // Per-type pawns + virtual station work orders from VillagerRegistry
+            // Virtual station work orders from VillagerRegistry. (Per-type "pawn" items were
+            // retired: the rescue dungeon now yields a generic Lode Core, and which villager
+            // type you can recruit is gated by the recipe unlocked on fragment-combine.)
             foreach (var kv in VillagerRegistry.Definitions)
             {
                 var def = kv.Value;
                 var typeKey = def.type.ToLower();
-
-                AddIfMissing(definitions, new ItemDefinition
-                {
-                    name = $"vv_{typeKey}_pawn",
-                    source = "clone",
-                    basePrefab = "DragonEgg",
-                    displayName = def.displayName,
-                    description = $"A {def.displayName.ToLower()} villager packaged for transport. {def.description}",
-                    maxStackSize = 1,
-                    weight = 10f,
-                    itemType = "pawn",
-                });
 
                 if (!string.IsNullOrEmpty(def.stationName))
                     AddIfMissing(definitions, new ItemDefinition
@@ -263,7 +260,7 @@ namespace ValheimVillages.Items
                     basePrefab = "DragonEgg",
                     displayName = $"{displayName} Ransom Fragment",
                     description = $"A torn piece of parchment stained with {inkColor} ink. " +
-                                  $"The scrawled text hints at a captive held somewhere in the {displayName.ToLower()}. " +
+                                  $"The scrawled text hints at a lost villager held somewhere in the {displayName.ToLower()}. " +
                                   "Combine three to reveal their location.",
                     maxStackSize = 3,
                     weight = 0.1f,
@@ -376,6 +373,28 @@ namespace ValheimVillages.Items
                 var tex = WorkOrderIconLoader.LoadTexture(def.stationType);
                 if (tex != null)
                     ParchmentModel.Apply(prefab, tex);
+            }
+
+            // Lode Core: a non-teleportable "metal"-class recruitment currency. Force the
+            // portal block (the base Surtling core is teleportable) and retint the glowing
+            // model to a cool hue so it reads distinct from a real Surtling core.
+            if (def.itemType == "lodecore")
+            {
+                newShared.m_teleportable = false;
+                // Replace the inherited ORANGE Surtling-core icon with a procedural blue core, so
+                // the inventory slot and recruit requirement row match the retinted world model.
+                newShared.m_icons = new[] { LodeCoreIcon.Generate() };
+                LodeCoreModel.Apply(prefab);
+            }
+
+            // Fragments: a procedurally generated, biome-tinted torn map scrap drives both the
+            // inventory icon and the world model — the latter simulated as cloth so it crumples
+            // and flutters when dropped. (Experimental; tuning knobs live in FragmentClothModel.)
+            if (def.itemType == "fragment")
+            {
+                var tex = FragmentArt.Generate(FragmentArt.InkFor(def.biome));
+                newShared.m_icons = new[] { FragmentArt.ToSprite(tex) };
+                FragmentClothModel.Apply(prefab, tex);
             }
 
             itemDrop.m_itemData.m_shared = newShared;

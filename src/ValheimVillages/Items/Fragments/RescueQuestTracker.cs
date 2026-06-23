@@ -5,8 +5,8 @@ using ValheimVillages.Attributes;
 namespace ValheimVillages.Items.Fragments
 {
     /// <summary>
-    ///     Tracks pending rescue quests and spawns captive pawn items when the player
-    ///     enters the dungeon at the quest location. Pawn spawning is triggered by
+    ///     Tracks pending rescue quests and places a Lode Core in the dungeon when the
+    ///     player enters at the quest location. The spawn is triggered by
     ///     EnvMan.SetForceEnvironment (the dungeon entry hook) rather than proximity,
     ///     ensuring the dungeon rooms are fully loaded before we try to place the item.
     /// </summary>
@@ -78,10 +78,10 @@ namespace ValheimVillages.Items.Fragments
                     Plugin.Log?.LogInfo(
                         $"Player entered dungeon (env: {environmentName}) within " +
                         $"{horizontalDistance:F0}m (horizontal) of rescue quest for " +
-                        $"{quest.VillagerType} — spawning captive pawn in dungeon room.");
+                        $"{quest.VillagerType} — placing a Lode Core in a dungeon room.");
 
                     var spawnPos = FindDungeonRoomPosition(playerPos);
-                    SpawnCaptivePawn(spawnPos, quest.VillagerType);
+                    SpawnLodeCore(spawnPos);
                     _pendingQuests.RemoveAt(i);
                     return; // Only handle one quest per dungeon entry
                 }
@@ -168,51 +168,25 @@ namespace ValheimVillages.Items.Fragments
         }
 
         /// <summary>
-        ///     Derives the pawn item prefab name from the villager type.
-        ///     Convention: vv_{type}_pawn (e.g., "Farmer" -> "vv_farmer_pawn").
+        ///     Places a generic Lode Core in the dungeon room. The core is the generic
+        ///     recruitment currency; which villager type the quest was for is already baked
+        ///     into the recipe the player unlocked on fragment-combine, so the reward is
+        ///     generic. World-spawn lives in <see cref="LodeCore.DropAt" /> (shared with the
+        ///     villager death drop).
         /// </summary>
-        private static string GetPawnName(string villagerType)
+        private static void SpawnLodeCore(Vector3 position)
         {
-            return $"vv_{villagerType.ToLower()}_pawn";
-        }
-
-        /// <summary>
-        ///     Spawns the type-specific pawn item as a proper world-dropped pickable
-        ///     item using ItemDrop.DropItem.
-        /// </summary>
-        private static void SpawnCaptivePawn(Vector3 position, string villagerType)
-        {
-            var pawnName = GetPawnName(villagerType);
-
-            if (ZNetScene.instance == null)
+            // The reward sits on a Dvergr pedestal to pry the core from. If the pedestal prefab
+            // isn't available, fail loudly but still drop the bare core so the reward is never lost.
+            if (LodeCorePedestal.SpawnAt(position) != null)
             {
-                Plugin.Log?.LogError("ZNetScene not available, cannot spawn captive pawn");
+                Plugin.Log?.LogInfo($"Placed a Lode Core pedestal in the dungeon at {position}");
                 return;
             }
 
-            var prefab = ZNetScene.instance.GetPrefab(pawnName);
-            if (prefab == null)
-            {
-                Plugin.Log?.LogError($"Pawn prefab not found: {pawnName}");
-                return;
-            }
-
-            var itemDrop = prefab.GetComponent<ItemDrop>();
-            if (itemDrop == null)
-            {
-                Plugin.Log?.LogError($"Pawn prefab {pawnName} has no ItemDrop component");
-                return;
-            }
-
-            // Inside a dungeon, use the room position directly with a small Y offset
+            Plugin.Log?.LogError("[RescueQuest] Lode Core pedestal unavailable; dropping the bare core instead.");
             var spawnPos = new Vector3(position.x, position.y + 0.5f, position.z);
-
-            var dropped = ItemDrop.DropItem(itemDrop.m_itemData, 1, spawnPos, Quaternion.identity);
-
-            if (dropped != null)
-                Plugin.Log?.LogInfo($"Spawned captive pawn {pawnName} at {spawnPos}");
-            else
-                Plugin.Log?.LogError($"Failed to spawn captive pawn {pawnName} at {spawnPos}");
+            LodeCore.DropAt(spawnPos);
         }
 
         /// <summary>

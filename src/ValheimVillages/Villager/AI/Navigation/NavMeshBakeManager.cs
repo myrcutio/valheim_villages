@@ -331,11 +331,14 @@ namespace ValheimVillages.Villager.AI.Navigation
             // second HNA-only rebake afterwards. The bake also keeps the
             // real piece colliders, so wall corners and small interior
             // obstacles (chairs, decorations) get carved properly.
+            var outsideFloodMark = PartitionProfile.Mark();
             var outsideCells = ValheimVillages.Villager.AI.Navigation
                 .RubberBandPrune.ComputeOutsideCellsForBake(bounds);
+            PartitionProfile.Since("bake_outside_flood", outsideFloodMark);
             var phantomOutside = AddOutsideCellBlockers(pieceSources, outsideCells, bounds);
             result.OutsideCellsBlocked = phantomOutside;
             result.OutsideCellsCount = outsideCells.Count;
+            result.OutsideCells = outsideCells;
 
             s_pieceSources.Clear();
             s_pieceSources.AddRange(pieceSources);
@@ -369,8 +372,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             combinedSources.AddRange(pieceSources);
             if (combinedSources.Count > 0)
             {
+                var buildMark = PartitionProfile.Mark();
                 var data = NavMeshBuilder.BuildNavMeshData(
                     settings, combinedSources, bounds, Vector3.zero, Quaternion.identity);
+                PartitionProfile.Since("bake_build", buildMark);
                 if (data != null)
                 {
                     Holder.SetForVillage(villageId ?? "", NavMesh.AddNavMeshData(data));
@@ -1202,6 +1207,14 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int FiresBlocked;
             public int OutsideCellsBlocked;
             public int OutsideCellsCount;
+
+            // The raw pre-bake perimeter-flood outside-cell set (packed XZ keys at
+            // RegionGraph.LookupCellSize). Surfaced so the partition handler can test
+            // whether the registry cell is reached by the outside flood (= village not
+            // sealed by a perimeter wall) without re-running the flood. Null if the bake
+            // failed before computing it.
+            public System.Collections.Generic.HashSet<long> OutsideCells;
+
             public float DurationMs;
             public string FailureReason;
 

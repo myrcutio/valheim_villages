@@ -128,6 +128,32 @@ namespace ValheimVillages.Villages.Entity
         }
 
         /// <summary>
+        ///     Tear down a village: unregister its derived area (and stations/PoIs/rooms keyed off
+        ///     it) and destroy its durable ZDO. Host-only in practice — DestroyZDO requires
+        ///     ownership and villages are host-authoritative, so callers route here via
+        ///     VillageCleanupRpc. Idempotent.
+        /// </summary>
+        public static void Delete(string villageId)
+        {
+            if (string.IsNullOrEmpty(villageId)) return;
+
+            VillageAreaManager.UnregisterArea(villageId);
+
+            var village = FindById(villageId);
+            s_live.Remove(villageId);
+            if (village == null) return;
+
+            var zdo = village.Zdo;
+            if (zdo != null && ZDOMan.instance != null)
+            {
+                zdo.SetOwner(ZDOMan.GetSessionID()); // claim — DestroyZDO requires ownership
+                ZDOMan.instance.DestroyZDO(zdo);
+            }
+
+            Plugin.Log?.LogInfo($"[VillageRegistry] Deleted village {villageId}");
+        }
+
+        /// <summary>
         ///     Resolve the village that owns <paramref name="pos" />: first by exact
         ///     graph coverage (<see cref="Villager.AI.Navigation.RegionGraph.PointToRegionId" />),
         ///     else the nearest village whose graph origin is closest, else null. Only
@@ -273,6 +299,7 @@ namespace ValheimVillages.Villages.Entity
             if (!NavMesh.SamplePosition(a, out var ha, 3f, filter)) return false;
             if (!NavMesh.SamplePosition(b, out var hb, 3f, filter)) return false;
             var path = new NavMeshPath();
+            PartitionProfile.CalcPath++;
             if (!NavMesh.CalculatePath(ha.position, hb.position, filter, path)) return false;
             return path.status == NavMeshPathStatus.PathComplete;
         }

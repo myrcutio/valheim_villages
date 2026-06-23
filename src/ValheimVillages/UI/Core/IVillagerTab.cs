@@ -38,5 +38,15 @@ namespace ValheimVillages.UI.Core
         ///     Used by the debug tab to show a top-down village patrol map.
         /// </summary>
         public Texture2D MapTexture { get; set; }
+
+        /// <summary>
+        ///     Optional recipe-style ingredient rows (item + amount), rendered with the native
+        ///     <c>InventoryGui.SetupRequirement</c> so icons + have/need colouring match the
+        ///     craft menu. Null = no ingredient row (the default text-only detail).
+        /// </summary>
+        public Piece.Requirement[] Requirements { get; set; }
+
+        /// <summary>Optional min crafting-station level shown as the native level star. 0 = hidden.</summary>
+        public int StationLevel { get; set; }
     }
 }

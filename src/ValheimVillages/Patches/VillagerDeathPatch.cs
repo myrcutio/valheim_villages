@@ -1,4 +1,6 @@
 using HarmonyLib;
+using UnityEngine;
+using ValheimVillages.Items;
 using ValheimVillages.Villager.Records;
 
 namespace ValheimVillages.Patches
@@ -59,9 +61,17 @@ namespace ValheimVillages.Patches
             // back-link so liveness/orphan checks read true and the record presents as Unlinked.
             record.NpcZdoId = ZDOID.None;
 
+            // Return the villager's Lode Core to the world so it can be recovered and spent to
+            // recruit/revive — closing the recruit↔death loop. Host-only (we're inside the
+            // IsOwner guard) so there's no duplicate drop. Use transform.position rather than
+            // GetCenterPoint(): the latter dereferences m_collider, and an NRE here would
+            // propagate out of this OnDeath prefix and SUPPRESS the native death sequence
+            // (ragdoll/ZDO-destroy). Nudged up so the core doesn't sink into the ground.
+            LodeCore.DropAt(__instance.transform.position + Vector3.up * 0.5f);
+
             Plugin.Log?.LogInfo(
                 $"[VillagerDeathPatch] '{record.Name}' ({record.Type}) died -> record {recordId} marked Dead " +
-                "(NPC back-link cleared). Revive from the registry to restore.");
+                "(NPC back-link cleared, Lode Core dropped). Revive from the registry to restore.");
         }
     }
 }

@@ -49,6 +49,14 @@ namespace ValheimVillages.Villages
             // This registry-placement path is the ONLY place a village is created.
             var village = VillageRegistry.GetVillageCovering(pos)
                           ?? VillageRegistry.GetOrCreateAt(pos, founderPos);
+
+            // Don't inherit a FAILED village: if we relinked to one whose triad validation
+            // failed, mint a fresh village so this placement gets a clean attempt. (The stale
+            // invalid village is reaped host-side when its own registry is removed — see
+            // VillageCleanupRpc — so a remove + re-place gives a clean start either way.)
+            if (village != null && village.IsInvalid)
+                village = VillageRegistry.Create(pos, founderPos);
+
             if (village == null) return;
 
             registryZdo.Set(Village.IdKey, village.VillageId);
