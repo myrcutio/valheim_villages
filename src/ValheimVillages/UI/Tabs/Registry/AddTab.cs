@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using ValheimVillages.Attributes;
+using ValheimVillages.Items.Fragments;
 using ValheimVillages.Schemas;
 using ValheimVillages.UI.Core;
 using ValheimVillages.Villager;
@@ -15,7 +16,8 @@ namespace ValheimVillages.UI.Tabs.Registry
     ///     Lists the villager types that can be recruited at this registry (loaded from
     ///     <see cref="VillagerRegistry" />). Recruiting spawns the chosen type at the
     ///     registry station (its home anchor becomes the registry — no anchor required) and
-    ///     mints a fresh Alive record. No cost for now; the egg/material flow is later.
+    ///     mints a fresh Alive record. Recruiting consumes a Lode Core and requires the type's
+    ///     recruit recipe (unlocked via fragment maps); only unlocked types are listed here.
     /// </summary>
     [RegisterRegistryTab("add", Order = 1)]
     public class AddTab : IRegistryTabUI
@@ -41,7 +43,10 @@ namespace ValheimVillages.UI.Tabs.Registry
 
         private void RefreshTypes()
         {
+            // Only types the local player has UNLOCKED (via fragment maps) appear at all —
+            // locked recipes are hidden entirely, not shown greyed/tagged.
             m_types = VillagerRegistry.EnabledDefinitions
+                .Where(d => RecruitUnlocks.IsUnlockedLocal(d.type))
                 .OrderBy(d => d.displayName)
                 .ToList();
         }
@@ -50,7 +55,13 @@ namespace ValheimVillages.UI.Tabs.Registry
         {
             if (!RegistryTabLoading.VillageReady(context)) return RegistryTabLoading.ListItems();
 
-            if (m_types.Count == 0) RefreshTypes();
+            RefreshTypes();
+            if (m_types.Count == 0)
+                return new List<TabListItemUI>
+                {
+                    new() { TabName = "(complete a biome map to unlock recruits)" },
+                };
+
             var items = new List<TabListItemUI>();
             foreach (var def in m_types)
                 items.Add(new TabListItemUI
@@ -65,26 +76,64 @@ namespace ValheimVillages.UI.Tabs.Registry
         {
             if (!RegistryTabLoading.VillageReady(context)) return RegistryTabLoading.Detail();
 
+            if (m_types.Count == 0)
+                return new TabDetailDataUI
+                {
+                    Title = "No recruits unlocked",
+                    Description = "Find ransom-note fragments and combine three of one biome to learn how " +
+                                  "to recruit that biome's villager. Only unlocked types appear here.",
+                };
+
             if (selectedIndex < 0 || selectedIndex >= m_types.Count)
                 return null;
 
             var def = m_types[selectedIndex];
             var name = string.IsNullOrEmpty(def.displayName) ? def.type : def.displayName;
+            var icon = ResolveItemIcon(def.stationIcon);
+
             return new TabDetailDataUI
             {
                 Title = name,
-                Icon = ResolveItemIcon(def.stationIcon),
+                Icon = icon,
                 Description = string.IsNullOrEmpty(def.description)
                     ? $"Recruit a {name} to this village. They will spawn at the registry."
                     : def.description,
                 ActionText = "Recruit",
                 OnAction = () => Recruit(def, name, context),
+                // Show the cost like the craft menu: the Lode Core ingredient icon + have/need
+                // amount and a station-level star, instead of plain "Costs 1 Lode Core" text.
+                Requirements = LodeCoreRequirement(),
+                StationLevel = 1,
             };
+        }
+
+        /// <summary>The recruit cost as a native recipe requirement (1 Lode Core), or null.</summary>
+        private static Piece.Requirement[] LodeCoreRequirement()
+        {
+            var prefab = ObjectDB.instance != null ? ObjectDB.instance.GetItemPrefab(RecruitCost.ItemPrefab) : null;
+            var drop = prefab != null ? prefab.GetComponent<ItemDrop>() : null;
+            return drop != null
+                ? new[] { new Piece.Requirement { m_resItem = drop, m_amount = 1 } }
+                : null;
         }
 
         private static void Recruit(VillagerDef def, string name, RegistryContext context)
         {
             if (context == null) return;
+
+            var player = Player.m_localPlayer;
+
+            // Belt-and-suspenders: the UI already locks un-learned types, but guard the action
+            // too. Fresh recruits require the per-player recipe (learned by completing the
+            // type's biome map). Revive is NOT gated this way.
+            if (!RecruitUnlocks.IsUnlocked(player, def.type))
+            {
+                var biomes = string.Join(" or ", FragmentCombiner.BiomesForType(def.type));
+                player?.Message(MessageHud.MessageType.Center, string.IsNullOrEmpty(biomes)
+                    ? $"You haven't learned to recruit {name}s."
+                    : $"Combine 3 {biomes} ransom fragments to learn how to recruit a {name}.");
+                return;
+            }
 
             // Spawn the chosen type at the registry. SpawnVillagerNpc mints a fresh Alive
             // record whose home (vv_home_position / record.HomeAnchor) is the seed below, so
@@ -127,13 +176,23 @@ namespace ValheimVillages.UI.Tabs.Registry
                 return;
             }
 
+            // Spend one Lode Core from the recruiting player's own (client-owned) inventory,
+            // right before the spawn RPC. No core → abort without spawning. (Spawn itself is
+            // server-authoritative; on the rare host-side rejection after our client checks
+            // the core is already spent — acceptable, the checks here mirror the host's.)
+            if (!RecruitCost.TryConsumeOne(player))
+            {
+                player?.Message(MessageHud.MessageType.Center, $"You need a Lode Core to recruit {name}.");
+                return;
+            }
+
             // Authoritative spawn happens on the HOST so the villager is server-owned from
             // birth — a villager created client-side and handed to the server despawns. The
             // checks above are client-side UX gating; the host re-resolves the seed against
             // ITS navmesh near the registry. recordId empty = fresh recruit.
-            VillagerRecruitRpc.RequestSpawn(def.type, context.VillageId, context.RegistryPosition, "");
+            VillagerRecruitRpc.RequestSpawn(def.type, context.VillageId, context.RegistryPosition, "", paid: true);
 
-            Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Recruiting {name}…");
+            player?.Message(MessageHud.MessageType.Center, $"Recruiting {name}… (−1 Lode Core)");
         }
 
         private static Sprite ResolveItemIcon(string itemPrefab)

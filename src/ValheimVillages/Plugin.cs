@@ -37,7 +37,7 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.1.3";
+        public const string PluginVersion = "0.2.0";
 
         private static bool _recipeRefreshEnqueued;
         private static bool _recordIndexEnqueued;
@@ -206,6 +206,7 @@ namespace ValheimVillages
             // ZRoutedRpc (recreated per world session). Cheap no-op once registered.
             Villager.VillagerRecruitRpc.EnsureRegistered();
             Villager.WorkOrderConfigRpc.EnsureRegistered();
+            Villages.VillageCleanupRpc.EnsureRegistered();
 
             // After world load, enqueue one low-priority recheck of discovered recipes (cultivator + cooking)
             if (!_recipeRefreshEnqueued &&

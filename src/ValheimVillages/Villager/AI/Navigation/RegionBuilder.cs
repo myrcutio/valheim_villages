@@ -553,6 +553,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     // after every cheaper filter has had a chance to reject.
                     var capP0 = c + Vector3.up * (CapsuleLift + CapsuleRadius);
                     var capP1 = c + Vector3.up * (CapsuleLift + CapsuleHeight - CapsuleRadius);
+                    PartitionProfile.CheckCapsule++;
                     if (Physics.CheckCapsule(capP0, capP1, CapsuleRadius, s_blockMask))
                     {
                         rejBlocked++;
@@ -567,6 +568,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     // is inside wall material at walker body height — see
                     // constants block for the geometric rationale.
                     var waistOrigin = c + Vector3.up * PieceWaistProbeLift;
+                    PartitionProfile.CheckSphere++;
                     if (Physics.CheckSphere(waistOrigin, PieceWaistProbeRadius,
                             s_blockMask, QueryTriggerInteraction.Ignore))
                     {
@@ -583,6 +585,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 // past 30m from any anchor. Both kinds fall through to the shared
                 // agent NavMesh sample below.
 
+                PartitionProfile.SamplePos++;
                 if (!NavMesh.SamplePosition(c, out var hit, AgentFilterRadius, filter) ||
                     Vector3.Distance(hit.position, c) > AgentFilterRadius)
                 {

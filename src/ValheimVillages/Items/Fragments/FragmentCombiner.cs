@@ -29,6 +29,16 @@ namespace ValheimVillages.Items.Fragments
         };
 
         /// <summary>
+        ///     The biome map(s) a player must complete to learn to recruit a given villager
+        ///     type — the reverse of <see cref="BiomeNpcMap" />. A type can be taught by more
+        ///     than one biome (e.g. Farmer from Meadows or Plains).
+        /// </summary>
+        public static IEnumerable<string> BiomesForType(string villagerType)
+        {
+            return BiomeNpcMap.Where(kv => kv.Value == villagerType).Select(kv => kv.Key);
+        }
+
+        /// <summary>
         ///     Maps biome identifiers to dungeon/location prefab names that can host rescue quests.
         ///     These are locations that are guaranteed to spawn in the correct biome and have
         ///     appropriate enemy difficulty. Preferred locations are listed first.
@@ -151,10 +161,16 @@ namespace ValheimVillages.Items.Fragments
 
             AddQuestMarker(questPos.Value, villagerType, biome);
             RescueQuestTracker.AddQuest(questPos.Value, villagerType, biome);
-            player.Message(MessageHud.MessageType.Center,
-                $"Rescue quest revealed! A captive {villagerType} awaits in the {biome}.");
 
-            Plugin.Log?.LogInfo($"Combined {RequiredFragments} {biome} fragments -> rescue quest for {villagerType}");
+            // Completing the map still teaches this player to recruit the biome's villager type
+            // (per-player unlock) — but quietly. Keep the on-screen text terse and cryptic; the
+            // map pin (Valheim's native discovery) is what actually points the player there.
+            var newlyLearned = global::ValheimVillages.Villager.RecruitUnlocks.Unlock(player, villagerType);
+            player.Message(MessageHud.MessageType.Center, "Quest location discovered");
+
+            Plugin.Log?.LogInfo(
+                $"Combined {RequiredFragments} {biome} fragments -> rescue quest for {villagerType} " +
+                $"(recruit recipe {(newlyLearned ? "UNLOCKED" : "already known")})");
             return true;
         }
 
@@ -257,7 +273,7 @@ namespace ValheimVillages.Items.Fragments
                 return;
             }
 
-            var pinName = $"Rescue: Captive {villagerType} ({biome})";
+            var pinName = $"Lost {villagerType} ({biome})";
 
             try
             {

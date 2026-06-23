@@ -8,8 +8,11 @@ namespace ValheimVillages.Villager.Records
     /// <summary>
     ///     Revives a fallen (<see cref="RecordStatus.Dead" />) villager from its record:
     ///     re-spawns the NPC at the registry anchor (or its stored home) and flips the
-    ///     record back to Alive. No material cost for now — a global cooldown gates how
-    ///     often revives can happen.
+    ///     record back to Alive. The Lode Core cost is charged at the UI call site (ReviveTab)
+    ///     and refunded if the host rejects the spawn; a global cooldown additionally gates
+    ///     how often revives can happen. The <c>paid</c> flag is threaded to the spawn RPC so
+    ///     the refund-on-failure path only fires for player-initiated (paid) revives, not the
+    ///     vv_revive dev command.
     /// </summary>
     public static class VillagerReviveService
     {
@@ -32,7 +35,8 @@ namespace ValheimVillages.Villager.Records
         /// </summary>
         public static bool Revive(VillagerRecord record, out string error)
         {
-            return Revive(record, null, out error);
+            // 2-arg entry = the vv_revive dev command: no Lode Core cost (paid: false).
+            return Revive(record, null, paid: false, out error);
         }
 
         /// <summary>
@@ -43,7 +47,7 @@ namespace ValheimVillages.Villager.Records
         ///     stale home that may now sit outside a rebuilt village (which re-seeds a
         ///     degenerate partition).
         /// </summary>
-        public static bool Revive(VillagerRecord record, Vector3? anchor, out string error)
+        public static bool Revive(VillagerRecord record, Vector3? anchor, bool paid, out string error)
         {
             error = null;
 
@@ -114,7 +118,7 @@ namespace ValheimVillages.Villager.Records
             // NPC handed to the server despawns). The host re-resolves the seed near the anchor
             // against its own navmesh and re-activates the record (Status->Alive, re-link NPC).
             // Passing the record id makes the host reuse this record rather than mint a new one.
-            VillagerRecruitRpc.RequestSpawn(record.Type, village.VillageId, rawAnchor, record.RecordId);
+            VillagerRecruitRpc.RequestSpawn(record.Type, village.VillageId, rawAnchor, record.RecordId, paid);
 
             s_lastReviveTime = Time.time;
             Plugin.Log?.LogInfo(

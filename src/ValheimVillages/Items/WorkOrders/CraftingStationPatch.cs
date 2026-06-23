@@ -6,6 +6,9 @@ using UnityEngine.UI;
 using ValheimVillages.Attributes;
 using ValheimVillages.Items.Icons;
 using ValheimVillages.UI.Core;
+using ValheimVillages.Villager;
+using ValheimVillages.Villager.AI.Work;
+using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.Items.WorkOrders
 {
@@ -454,7 +457,7 @@ namespace ValheimVillages.Items.WorkOrders
                 }
             }
 
-            SetOrderButtonTooltip(_workOrderButton);
+            SetOrderButtonTooltip(_workOrderButton, WorkOrderTooltipText);
             PinOrderTextColor(craftButton, _workOrderButton);
 
             _buttonCreated = true;
@@ -496,10 +499,9 @@ namespace ValheimVillages.Items.WorkOrders
             }
         }
 
-        private static void SetOrderButtonTooltip(GameObject buttonGO)
+        private static void SetOrderButtonTooltip(GameObject buttonGO, string text)
         {
             if (buttonGO == null) return;
-            const string text = WorkOrderTooltipText;
             // UITooltip (assembly_guiutils) has public m_text and m_topic; clone may already have it
             foreach (var comp in buttonGO.GetComponents<Component>())
             {
@@ -524,6 +526,34 @@ namespace ValheimVillages.Items.WorkOrders
                 ttType.GetField("m_text", BindingFlags.Public | BindingFlags.Instance)?.SetValue(tt, text);
                 ttType.GetField("m_topic", BindingFlags.Public | BindingFlags.Instance)?.SetValue(tt, "");
             }
+        }
+
+        /// <summary>
+        ///     Enabled villager types that (a) can work this station (per workStations) AND
+        ///     (b) the local player has unlocked via the fragment map (RecruitUnlocks). These
+        ///     are the villagers who would actually fulfill an order placed at this station;
+        ///     an empty list means the player hasn't discovered a capable villager yet, so the
+        ///     Order button stays hidden. Capability is per-station, so this is computed on the
+        ///     event-driven UpdateCraftingPanel path (no per-frame cost).
+        /// </summary>
+        private static List<string> UnlockedCapableTypeNames(string stationName)
+        {
+            var names = new List<string>();
+            if (string.IsNullOrEmpty(stationName)) return names;
+            foreach (var def in VillagerRegistry.EnabledDefinitions)
+                if (StationMatcher.CanWorkStation(def.type, stationName) &&
+                    RecruitUnlocks.IsUnlockedLocal(def.type))
+                    names.Add(string.IsNullOrEmpty(def.displayName) ? def.type : def.displayName);
+            return names;
+        }
+
+        /// <summary>Hover text naming the villager type(s) that will fulfill an order here.</summary>
+        private static string BuildFulfillerTooltip(List<string> fulfillerNames)
+        {
+            if (fulfillerNames == null || fulfillerNames.Count == 0)
+                return WorkOrderTooltipText;
+            return $"Place this order in a chest and your {string.Join(" or ", fulfillerNames)} " +
+                   "will fulfill it.";
         }
 
         /// <summary>
@@ -593,23 +623,40 @@ namespace ValheimVillages.Items.WorkOrders
             var hasWorkOrder = station != null && StationWorkOrderMap.ContainsKey(station.m_name);
             var isVirtual = station != null && IsVirtualStation(station.m_name);
 
+            // Only offer orders the player can actually staff: gate the button on having
+            // UNLOCKED (per-player, via the fragment map) at least one enabled villager type
+            // capable of this station. Capability is by station (workStations), so this is a
+            // per-station decision and the unlock can't change while the panel is open — no
+            // per-frame work needed. The same list names the "fulfilled by your X" tooltip.
+            var fulfillers = station != null ? UnlockedCapableTypeNames(station.m_name) : new List<string>();
+            var hasFulfiller = fulfillers.Count > 0;
+
             if (isVirtual)
             {
-                // Virtual station: Order replaces Craft in the same slot. Native
-                // UpdateRecipe re-activates Craft every idle frame, so flag it for the
-                // per-frame re-hide in UpdateFocusNavPostfix; this SetActive(false) only
-                // covers the current frame.
+                // Virtual station: Order replaces Craft in the same slot (no direct crafting
+                // here regardless), so keep Craft hidden via the per-frame flag — native
+                // UpdateRecipe re-activates Craft every idle frame, and UpdateFocusNavPostfix
+                // re-hides it. The Order button itself shows only if the player has a capable
+                // unlocked villager type.
                 _orderReplacesCraft = true;
                 gui.m_craftButton.gameObject.SetActive(false);
-                _workOrderButton.SetActive(true);
-                PositionWorkOrderButtonAsCraftReplacement(gui);
+                _workOrderButton.SetActive(hasFulfiller);
+                if (hasFulfiller)
+                {
+                    PositionWorkOrderButtonAsCraftReplacement(gui);
+                    SetOrderButtonTooltip(_workOrderButton, BuildFulfillerTooltip(fulfillers));
+                }
             }
             else
             {
                 gui.m_craftButton.gameObject.SetActive(true);
-                _workOrderButton.SetActive(hasWorkOrder);
-                if (hasWorkOrder)
+                var showOrder = hasWorkOrder && hasFulfiller;
+                _workOrderButton.SetActive(showOrder);
+                if (showOrder)
+                {
                     PositionWorkOrderButton(gui);
+                    SetOrderButtonTooltip(_workOrderButton, BuildFulfillerTooltip(fulfillers));
+                }
             }
         }
 

@@ -173,7 +173,7 @@ namespace ValheimVillages.Behaviors.Farming
             }
 
             SubState = FarmSubState.Planting;
-            m_context.PlantCooldown = dt - 4.0f;
+            m_context.PlantCooldown = dt - 2.0f;
             m_ai.Instance.StopMoving();
         }
 
@@ -190,7 +190,7 @@ namespace ValheimVillages.Behaviors.Farming
             if (m_context.PlantCooldown < dt)
                 return;
 
-            m_context.PlantCooldown = dt - 4.0f;
+            m_context.PlantCooldown = dt - 2.0f;
             var go = PlantingHelper.PlacePlant(
                 m_context.PlantPiecePrefab, m_context.NextPlantPosition.Value);
             if (go != null)

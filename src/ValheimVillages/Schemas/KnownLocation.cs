@@ -59,6 +59,7 @@ namespace ValheimVillages.Schemas
                 case LocationType.Animals: return 20f;
                 case LocationType.CraftStation: return 5f;
                 case LocationType.CookingStation: return 5f;
+                case LocationType.HotTub: return 10f;
                 default: return 10f;
             }
         }
@@ -78,6 +79,7 @@ namespace ValheimVillages.Schemas
                 case LocationType.Animals: return 2;
                 case LocationType.CraftStation: return 3;
                 case LocationType.CookingStation: return 5;
+                case LocationType.HotTub: return 2;
                 default: return 3;
             }
         }

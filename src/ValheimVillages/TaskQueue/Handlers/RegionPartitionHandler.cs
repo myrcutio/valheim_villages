@@ -184,6 +184,10 @@ namespace ValheimVillages.TaskQueue.Handlers
             // enqueue — the graph is stable while the task waits in the queue.
             VillageNavLock.RequestHold(NavRebuildSettleSeconds);
 
+            // Per-partition profiler: per-stage *_ms + native-query counters, flushed as a
+            // single "PartitionProfile" event before the success return (see PartitionProfile).
+            PartitionProfile.Begin();
+
             var allAnchors = CollectSeedAnchors();
             var anchors = FilterAnchorsByTask(allAnchors, task);
             // Snap each home/seed to a walkable, capsule-clear cell before it drives the
@@ -191,7 +195,9 @@ namespace ValheimVillages.TaskQueue.Handlers
             // (or a anchor) can sit inside its own colliders; flooding from there reaches a
             // couple of cells and the region graph/boundary degenerates. Resolved against
             // real geometry + the vanilla navmesh, so it works before slot 31 is (re)baked.
+            var seedsMark = PartitionProfile.Mark();
             anchors = ResolveWalkableSeeds(anchors);
+            PartitionProfile.Since("seeds", seedsMark);
             var hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(
                 out var patrolMinX, out var patrolMinZ, out var patrolMaxX, out var patrolMaxZ);
 
@@ -280,7 +286,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                 new Vector3(minX, bakeMinY - bakeYPadding, minZ),
                 new Vector3(maxX, bakeMaxY + bakeYPadding, maxZ));
 
+            var bakeMark = PartitionProfile.Mark();
             var bakeResult = NavMeshBakeManager.BakeVillage(bakeBounds, villageKey);
+            PartitionProfile.Since("bake", bakeMark);
             DebugLog.Event("NavMeshBake", "village_bake",
                 ("success", bakeResult.Success),
                 ("sources", bakeResult.SourceCount),
@@ -305,10 +313,14 @@ namespace ValheimVillages.TaskQueue.Handlers
             // second so on lookup-grid overlap it wins — player-placed
             // surfaces should override raw terrain at the same XZ + height
             // bucket.
+            var triTerrainMark = PartitionProfile.Mark();
             var terrainResult = RegionBuilder.BuildFromTriangulation(
                 SurfaceKind.Terrain, minX, minZ, maxX, maxZ, anchors);
+            PartitionProfile.Since("tri_terrain", triTerrainMark);
+            var triPieceMark = PartitionProfile.Mark();
             var pieceResult = RegionBuilder.BuildFromTriangulation(
                 SurfaceKind.Piece, minX, minZ, maxX, maxZ, anchors);
+            PartitionProfile.Since("tri_piece", triPieceMark);
 
             // Cross-kind BFS reachability: prune terrain regions not
             // reachable from anchors through the combined terrain↔piece
@@ -323,19 +335,24 @@ namespace ValheimVillages.TaskQueue.Handlers
             // a graph missing every piece-to-piece edge discovered by the
             // cell-level flood (and the trace would show "no path" for
             // any region only reachable via the piece chain).
+            var crossKindMark = PartitionProfile.Mark();
             var crossKindAdj = BuildCrossKindAdjacency(terrainResult, pieceResult, anchors);
+            PartitionProfile.Since("crosskind", crossKindMark);
 
 
             // Combine terrain + piece region sets (union + shadow suppression +
             // cascade) into the inputs the prune/graph stages consume.
+            var combineMark = PartitionProfile.Mark();
             RegionBuilder.CombineTerrainAndPiece(
                 terrainResult, pieceResult,
                 out var combinedRegionIds, out var combinedCentroids, out var combinedLinks,
                 out var combinedLookup, out var combinedBoundary, out var combinedTriangles,
                 out var kindMap);
+            PartitionProfile.Since("combine", combineMark);
 
             // Rubber-band prune: drop regions whose footprint sits outside
             // the outermost layer of player-placed wall pieces.
+            var pruneMark = PartitionProfile.Mark();
             var rbStats = RubberBandPrune.Apply(
                 combinedRegionIds, combinedCentroids, combinedLookup,
                 combinedBoundary, combinedLinks, kindMap, combinedTriangles,
@@ -347,6 +364,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 out var outsideCells,
                 out var prunedPieceKeys,
                 out var gateMarkers);
+            PartitionProfile.Since("prune", pruneMark);
 
             // Merge Pass 3 discovered edges into the cross-kind adjacency
             // (if it was built) and publish the merged graph to
@@ -448,6 +466,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
             }
 
+            var commitGraphMark = PartitionProfile.Mark();
             var graph = village.GetOrCreateGraph();
             graph.SetGraph(combinedRegionIds, combinedLinks,
                 combinedCentroids, combinedLookup, combinedBoundary, kindMap);
@@ -457,6 +476,21 @@ namespace ValheimVillages.TaskQueue.Handlers
             // to diff against. Must run after SetGraph so HasClassification flips
             // only on a populated graph.
             graph.SetClassification(outsideCells, anchorReachableCells, prunedPieceKeys);
+            PartitionProfile.Since("commit_graph", commitGraphMark);
+
+            // Perimeter-wall requirement: if the bake's raw outside flood reaches the
+            // registry cell, the village isn't sealed by a wall. Persist the flag so the
+            // registry station can refuse to open (workbench-style) until it's walled in.
+            // Uses the bake's RAW set (whole-footprint when unsealed) — NOT the committed
+            // classification, which is empty on a degenerate 0-region partition. A rebake
+            // fires on the next piece change, so the flag self-clears once the wall closes.
+            if (bakeResult.OutsideCells != null &&
+                village.TryGetAnchor(VillageAnchor.Registry, out var registryPos))
+            {
+                village.NeedsPerimeterWall =
+                    RubberBandPrune.IsOutsideCell(registryPos, bakeResult.OutsideCells);
+            }
+
             if (gateMarkers.Count > 0)
                 Plugin.Log?.LogInfo(
                     $"[Region] Sealed {gateMarkers.Count} gate(s) into the village boundary");
@@ -480,7 +514,9 @@ namespace ValheimVillages.TaskQueue.Handlers
             // would otherwise lock the villager into a doomed path
             // indefinitely (step-jumping at thin air, no stuck-timer
             // safety net because jumps register as movement).
+            var invalidateMark = PartitionProfile.Mark();
             var pathsInvalidated = VillagerAIManager.InvalidatePathsAfterRebake();
+            PartitionProfile.Since("invalidate_paths", invalidateMark);
             if (pathsInvalidated > 0)
                 Plugin.Log?.LogInfo(
                     $"[Region] Invalidated cached paths for {pathsInvalidated} villager(s) after rebake");
@@ -508,16 +544,22 @@ namespace ValheimVillages.TaskQueue.Handlers
             // Persist the freshly built graph onto the durable village ZDO (1-to-1),
             // then publish the area/caches from the village. This replaces the old
             // per-guard PatrolPersistence.SaveHnaGraph write.
+            var saveMark = PartitionProfile.Mark();
             village.SaveGraph();
+            PartitionProfile.Since("save_graph", saveMark);
 
             // Now that the graph is rebuilt + saved, create/repair/validate the village's
             // self-healing anchor triad (3 walkable, mutually connected, founder-reachable
             // points near the registry). Idempotent and cheap on the already-valid path.
             // Must run AFTER SaveGraph (so the navmesh/graph reflect the committed state)
             // and BEFORE RefreshFromVillage (so the area/caches publish from a valid triad).
+            var triadMark = PartitionProfile.Mark();
             VillageRegistry.EnsureAnchorTriad(village);
+            PartitionProfile.Since("anchor_triad", triadMark);
 
+            var areaMark = PartitionProfile.Mark();
             VillageAreaManager.RefreshFromVillage(village);
+            PartitionProfile.Since("area_refresh", areaMark);
 
             // The boundary may have grown or shrunk (e.g. the player walled off a
             // section). InvalidatePathsAfterRebake above only cleared the low-level
@@ -525,10 +567,14 @@ namespace ValheimVillages.TaskQueue.Handlers
             // the PRE-change boundary. Re-derive every patrol route from the fresh
             // graph so a guard stops marching into a now-sealed area. (Done here,
             // after SetGraph + SaveGraph, so StartDiscovery reads the committed graph.)
+            var patrolMark = PartitionProfile.Mark();
             var routesRebuilt = VillagerAIManager.ResetPatrolRoutesAfterRepartition();
+            PartitionProfile.Since("patrol_routes", patrolMark);
             if (routesRebuilt > 0)
                 Plugin.Log?.LogInfo(
                     $"[Region] Rebuilt patrol routes for {routesRebuilt} patroller(s) after repartition");
+
+            PartitionProfile.Emit(villageKey);
 
             return TaskResult.Ok(new Dictionary<string, string>
             {

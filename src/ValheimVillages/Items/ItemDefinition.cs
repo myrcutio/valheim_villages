@@ -19,7 +19,7 @@ namespace ValheimVillages.Items
         public int variants;
 
         /// <summary>
-        ///     Item category: "pawn", "fragment", "workorder". Empty for legacy items.
+        ///     Item category: "lodecore", "fragment", "workorder". Empty for legacy items.
         /// </summary>
         public string itemType = "";
 

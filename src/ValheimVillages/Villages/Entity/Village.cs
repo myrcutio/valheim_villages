@@ -25,6 +25,7 @@ namespace ValheimVillages.Villages.Entity
         public const string StationsKey = "vv_village_stations"; // string — serialized station metadata (reserved for WS3)
         public const string WorkOrdersKey = "vv_village_workorders"; // string — serialized work-order config list (Fix C)
         public const string InvalidKey = "vv_village_invalid"; // int 0/1 — village failed triad validation (recruit blocked)
+        public const string NeedsWallKey = "vv_village_needs_wall"; // int 0/1 — outside flood reaches the registry (no perimeter wall)
 
         private readonly ZDO m_zdo;
         private RegionGraph m_graph;
@@ -83,6 +84,26 @@ namespace ValheimVillages.Villages.Entity
             {
                 if (!CanPersist) return;
                 m_zdo.Set(InvalidKey, value ? 1 : 0);
+                m_zdo.Persistent = true;
+            }
+        }
+
+        /// <summary>
+        ///     True when the pre-bake outside flood reaches the registry cell — i.e. the
+        ///     village is NOT sealed by a perimeter wall. Computed each partition from the
+        ///     bake's raw outside-cell set (<see cref="RegionPartitionHandler" />) and read at
+        ///     registry-interact time to refuse opening the panel until the player walls the
+        ///     village in (mirrors a workbench needing a roof). Persisted as ZDO int 0/1;
+        ///     host-only writer, all peers read. A rebake fires on every piece change, so this
+        ///     clears on its own once the perimeter is closed.
+        /// </summary>
+        public bool NeedsPerimeterWall
+        {
+            get => m_zdo.GetInt(NeedsWallKey, 0) != 0;
+            set
+            {
+                if (!CanPersist) return;
+                m_zdo.Set(NeedsWallKey, value ? 1 : 0);
                 m_zdo.Persistent = true;
             }
         }

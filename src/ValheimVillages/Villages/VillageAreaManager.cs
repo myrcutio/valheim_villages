@@ -66,12 +66,62 @@ namespace ValheimVillages.Villages
             var waypoints = PatrolRouteBuilder.Build(village.Graph.GetBoundaryCells());
             if (waypoints == null || waypoints.Count < 3)
             {
+                // No real boundary (e.g. a registry with no enclosing/connected build pieces).
+                // Fall back to a circular area the size of the nearest workbench's build range,
+                // centered on the registry. Auto-heals: the next partition that finds a real
+                // boundary replaces this circle.
+                var fallback = TryBuildWorkbenchRadiusArea(village);
+                if (fallback != null)
+                {
+                    RegisterArea(fallback);
+                    return;
+                }
+
                 Plugin.Log?.LogInfo(
-                    $"[VillageArea] Skipped registration for village={id}: insufficient boundary waypoints ({waypoints?.Count ?? 0})");
+                    $"[VillageArea] Skipped registration for village={id}: insufficient boundary " +
+                    $"waypoints ({waypoints?.Count ?? 0}) and no nearby workbench to size a fallback");
                 return;
             }
 
             RegisterArea(new VillageArea(id, waypoints));
+        }
+
+        /// <summary>
+        ///     Fallback village area used when no real boundary can be derived: a circle the size
+        ///     of the nearest workbench's build range, centered on the registry. Returns null if
+        ///     there's no workbench nearby to size it against (we don't invent a radius).
+        /// </summary>
+        private static VillageArea TryBuildWorkbenchRadiusArea(Village village)
+        {
+            const float searchRange = 64f; // generous: the registry is normally built within a workbench's range
+            const int segments = 16;
+
+            var center = village.Anchor; // registry placement position
+            var workbench = CraftingStation.FindClosestStationInRange("$piece_workbench", center, searchRange);
+            if (workbench == null) return null;
+
+            var radius = workbench.GetStationBuildRange();
+            if (radius <= 0f) return null;
+
+            Plugin.Log?.LogInfo(
+                $"[VillageArea] village={village.VillageId}: no boundary found — using circular fallback " +
+                $"radius={radius:F1}m (nearest workbench) centered on the registry");
+
+            return new VillageArea(village.VillageId, BuildCircleWaypoints(center, radius, segments));
+        }
+
+        /// <summary>A closed ring of <paramref name="segments" /> evenly spaced points on a circle (XZ plane).</summary>
+        private static List<Vector3> BuildCircleWaypoints(Vector3 center, float radius, int segments)
+        {
+            var points = new List<Vector3>(segments);
+            for (var i = 0; i < segments; i++)
+            {
+                var angle = 2f * Mathf.PI * i / segments;
+                points.Add(new Vector3(
+                    center.x + radius * Mathf.Cos(angle), center.y, center.z + radius * Mathf.Sin(angle)));
+            }
+
+            return points;
         }
 
         /// <summary>

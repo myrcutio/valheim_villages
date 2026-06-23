@@ -42,18 +42,20 @@ namespace ValheimVillages.Patches
 
         [HarmonyPrefix]
         [HarmonyPatch(typeof(WearNTear), "Remove")]
-        private static void OnPieceRemoved()
+        private static void OnPieceRemoved(WearNTear __instance)
         {
             MarkDirty("hammer-remove");
+            Villages.VillageCleanupRpc.OnRegistryRemoved(__instance);
         }
 
         // Pieces destroyed by damage/decay go through the private WearNTear.Destroy
         // (→ m_onDestroyed), NOT Remove — so this is needed for boar-smashed walls etc.
         [HarmonyPrefix]
         [HarmonyPatch(typeof(WearNTear), "Destroy")]
-        private static void OnPieceDestroyed()
+        private static void OnPieceDestroyed(WearNTear __instance)
         {
             MarkDirty("destroyed");
+            Villages.VillageCleanupRpc.OnRegistryRemoved(__instance);
         }
 
         // Terrain edits (hoe/pickaxe/cultivator/raise/level) — the combined bake includes

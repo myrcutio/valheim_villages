@@ -208,6 +208,64 @@ namespace ValheimVillages.UI.Core
             ApplyTabAction(gui, detail);
 
             HideDescriptionSubElements(gui);
+
+            // Re-publish the native ingredient row + station-level star for details that carry
+            // recipe-style requirements (e.g. recruit = 1 Lode Core). Runs per-frame from
+            // LateUpdate AFTER native UpdateRecipe (which hides them when no native recipe is
+            // selected) and AFTER HideDescriptionSubElements (which hides the container).
+            PopulateRequirements(gui, detail);
+        }
+
+        /// <summary>
+        ///     Show the native ingredient row + min-station-level star for a custom detail that
+        ///     declares requirements, using Valheim's own <c>SetupRequirement</c> so the icons +
+        ///     have/need colouring match the craft menu exactly. Details without requirements
+        ///     leave them hidden (native already hid them this frame).
+        /// </summary>
+        private void PopulateRequirements(InventoryGui gui, TabDetailDataUI detail)
+        {
+            var list = gui.m_recipeRequirementList;
+            var player = Player.m_localPlayer;
+            if (list == null) return;
+
+            var reqs = detail?.Requirements;
+            if (reqs == null || reqs.Length == 0 || player == null)
+            {
+                if (gui.m_minStationLevelIcon != null)
+                    gui.m_minStationLevelIcon.gameObject.SetActive(false);
+                return; // native already hid the ingredient entries this frame
+            }
+
+            // HideDescriptionSubElements hid the "requirements" container this frame — re-show it.
+            var reqPanel = gui.m_crafting?.Find("Decription")?.Find("requirements");
+            if (reqPanel != null) reqPanel.gameObject.SetActive(true);
+
+            for (var i = 0; i < reqs.Length && i < list.Length; i++)
+                if (list[i] != null)
+                    InventoryGui.SetupRequirement(list[i].transform, reqs[i], player, false, 0);
+
+            if (gui.m_minStationLevelIcon != null)
+            {
+                var show = detail.StationLevel > 0;
+                gui.m_minStationLevelIcon.gameObject.SetActive(show);
+                if (show)
+                {
+                    var levelText = StationLevelTextObject(gui);
+                    if (levelText != null)
+                        VillagerUIFactory.SetTMPText(levelText, detail.StationLevel.ToString());
+                }
+            }
+        }
+
+        // m_minStationLevelText is a TMP_Text; reflect it as a Component to fetch its GameObject
+        // without a hard TextMeshPro assembly reference (this file is deliberately TMP-free — text
+        // is set via VillagerUIFactory.SetTMPText, which reflects the component).
+        private static GameObject StationLevelTextObject(InventoryGui gui)
+        {
+            var field = typeof(InventoryGui).GetField("m_minStationLevelText",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Instance);
+            return field?.GetValue(gui) is Component c ? c.gameObject : null;
         }
 
         /// <summary>The per-host action button for custom tabs (cloned from Craft).</summary>

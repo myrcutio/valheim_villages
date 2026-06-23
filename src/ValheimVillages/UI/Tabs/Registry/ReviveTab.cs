@@ -77,7 +77,7 @@ namespace ValheimVillages.UI.Tabs.Registry
 
             if (VillagerReviveService.IsOnCooldown)
             {
-                // Gate the action behind the cooldown (no material cost for now).
+                // Cooldown also gates the action; the Lode Core cost is charged in OnAction below.
                 detail.Description +=
                     $"\n\n<color=#FFE300>Revive cooldown: {VillagerReviveService.CooldownRemaining:F0}s</color>";
             }
@@ -92,10 +92,27 @@ namespace ValheimVillages.UI.Tabs.Registry
                 var registryPos = context.RegistryPosition;
                 detail.OnAction = () =>
                 {
-                    if (VillagerReviveService.Revive(VillagerRecordTable.FindById(recordId), registryPos, out var err))
-                        Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"{name} revived");
+                    var player = Player.m_localPlayer;
+
+                    // Reviving costs one Lode Core (death drops one, closing the loop). Check
+                    // first so a failed revive (cooldown/invalid) never burns the core; consume
+                    // only once the revive actually goes through.
+                    if (!global::ValheimVillages.Villager.RecruitCost.Has(player))
+                    {
+                        player?.Message(MessageHud.MessageType.Center,
+                            "You need a Lode Core to revive a villager.");
+                        return;
+                    }
+
+                    if (VillagerReviveService.Revive(VillagerRecordTable.FindById(recordId), registryPos, paid: true, out var err))
+                    {
+                        global::ValheimVillages.Villager.RecruitCost.TryConsumeOne(player);
+                        player?.Message(MessageHud.MessageType.Center, $"{name} revived (−1 Lode Core)");
+                    }
                     else
-                        Player.m_localPlayer?.Message(MessageHud.MessageType.Center, $"Cannot revive: {err}");
+                    {
+                        player?.Message(MessageHud.MessageType.Center, $"Cannot revive: {err}");
+                    }
                 };
             }
 

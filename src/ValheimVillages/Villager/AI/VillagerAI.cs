@@ -677,6 +677,21 @@ namespace ValheimVillages.Villager.AI
                 m_behaviors.Sort((a, b) => b.Priority.CompareTo(a.Priority));
             }
 
+            // Lowest-priority idle filler: every villager relaxes at a comfort spot (fire/
+            // table/seat/hot tub) when it has nothing better to do. Auto-added like flee so
+            // definitions don't each opt in; guarded so a JSON that already lists "relax"
+            // (or a hot-reload re-run) doesn't double it. Its priority(10) sits under every
+            // other behavior, so it only ever runs when nothing else wanted control and is
+            // preempted by any real work on the next reselect tick.
+            var hasRelax = false;
+            foreach (var b in m_behaviors)
+                if (b is Behaviors.Relax.RelaxBehavior) hasRelax = true;
+            if (!hasRelax)
+            {
+                m_behaviors.Add(new Behaviors.Relax.RelaxBehavior(this));
+                m_behaviors.Sort((a, b) => b.Priority.CompareTo(a.Priority));
+            }
+
             // TODO: why is this necessary? what part of farming requires crafting?
             var craftAdapter = GetBehavior<CraftingBehaviorAdapter>();
             var farmAdapter = GetBehavior<FarmBehaviorAdapter>();

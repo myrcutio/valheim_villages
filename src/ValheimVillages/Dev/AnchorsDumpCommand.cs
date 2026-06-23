@@ -48,7 +48,9 @@ namespace ValheimVillages.Dev
 
         private static void DumpVillage(StringBuilder sb, Village village)
         {
-            sb.AppendLine($"[vv_anchors] village {village.VillageId} invalid={village.IsInvalid}");
+            sb.AppendLine(
+                $"[vv_anchors] village {village.VillageId} invalid={village.IsInvalid} " +
+                $"needsWall={village.NeedsPerimeterWall}");
 
             // Resolve the four anchors in fixed order; missing ones print as "(unset)".
             var positions = new Vector3[Names.Length];

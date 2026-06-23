@@ -114,6 +114,15 @@ namespace ValheimVillages.Villages
         private static LocationType? ClassifyPoi(GameObject obj)
         {
             if (obj == null) return null;
+
+            // Hot tub: the piece_bathtub prefab is a Fireplace + comfort Piece, so it must be
+            // matched by prefab name BEFORE the Fireplace branch below or it would be filed as
+            // a plain Fire. No dedicated engine component exists for it.
+            var piece = obj.GetComponent<Piece>() ?? obj.GetComponentInParent<Piece>();
+            if (piece != null &&
+                piece.gameObject.name.IndexOf("bathtub", StringComparison.OrdinalIgnoreCase) >= 0)
+                return LocationType.HotTub;
+
             if (obj.GetComponent<Chair>() != null) return LocationType.Chair;
             if (obj.GetComponent<Fireplace>() != null) return LocationType.Fire;
 
@@ -130,6 +139,7 @@ namespace ValheimVillages.Villages
             return type switch
             {
                 LocationType.Fire => hasShelter ? 2f : 0.5f,
+                LocationType.HotTub => 2f, // warm + cozy, always a high-comfort relax spot
                 _ => 1f,
             };
         }
