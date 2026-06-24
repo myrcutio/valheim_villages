@@ -26,8 +26,8 @@ using ValheimVillages.Villages.Entity;
 [assembly: AssemblyCompany("Myrcutio")]
 [assembly: AssemblyProduct("ValheimVillages")]
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
-[assembly: AssemblyVersion("0.1.3")]
-[assembly: AssemblyFileVersion("0.1.3")]
+[assembly: AssemblyVersion("0.2.1")]
+[assembly: AssemblyFileVersion("0.2.1")]
 [assembly: InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
@@ -37,7 +37,7 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.2.0";
+        public const string PluginVersion = "0.2.1";
 
         private static bool _recipeRefreshEnqueued;
         private static bool _recordIndexEnqueued;
@@ -207,6 +207,7 @@ namespace ValheimVillages
             Villager.VillagerRecruitRpc.EnsureRegistered();
             Villager.WorkOrderConfigRpc.EnsureRegistered();
             Villages.VillageCleanupRpc.EnsureRegistered();
+            Items.Fragments.FragmentQuestRpc.EnsureRegistered();
 
             // After world load, enqueue one low-priority recheck of discovered recipes (cultivator + cooking)
             if (!_recipeRefreshEnqueued &&

@@ -5,6 +5,18 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-06-23
+
+### Fixed
+- **Map fragment rescue quests on dedicated servers.** Combining biome fragments
+  did nothing when playing on a dedicated server: the search for a quest dungeon
+  ran on your game client, which doesn't hold the world's location data (only the
+  server does), so no location was ever found and the fragments were left unspent.
+  The lookup now runs on the server and reports the chosen location back, so
+  combining fragments reliably reveals a quest marker in every setup — dedicated
+  server, player-hosted, and singleplayer. Fragments are still consumed only once a
+  valid location is confirmed, so a failed search leaves them in your pack.
+
 ## [0.2.0] - 2026-06-23
 
 ### Added

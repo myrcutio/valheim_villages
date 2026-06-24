@@ -45,7 +45,7 @@ namespace ValheimVillages.Items.Fragments
         /// </summary>
         private static readonly Dictionary<string, string[]> BiomeLocationMap = new()
         {
-            { "Meadows", new[] { "Dolmen01", "Dolmen02", "Dolmen03", "WoodVillage1" } },
+            { "Meadows", new[] { "WoodFarm1", "StoneCircle", "Dolmen01", "Dolmen02", "Dolmen03", "ShipSetting01", "WoodVillage1" } },
             {
                 "BlackForest", new[]
                 {
@@ -96,9 +96,18 @@ namespace ValheimVillages.Items.Fragments
         /// <summary>
         ///     Attempts to combine 3 fragments of the given biome from the player's inventory.
         ///     Counts stack sizes so a single stack of 3 is sufficient.
-        ///     On success, consumes the fragments and places a rescue quest marker on the map.
+        ///
+        ///     The location lookup is server-authoritative: <c>ZoneSystem.m_locationInstances</c>
+        ///     is populated only on the host (world save load / location generation), so a client
+        ///     connected to a dedicated server sees an empty dictionary and could never find a
+        ///     quest site. We therefore route the lookup to the host via
+        ///     <see cref="FragmentQuestRpc" /> and finish the combine in <see cref="CompleteQuest" />
+        ///     once the host replies with a real location. On a listen-host / singleplayer the RPC
+        ///     resolves in-process, so this path is correct in every topology. Fragments are NOT
+        ///     consumed until the host confirms a location, leaving the player free to retry on
+        ///     failure.
         /// </summary>
-        /// <returns>True if fragments were combined, false if not enough fragments.</returns>
+        /// <returns>True if a location request was sent, false if there aren't enough fragments.</returns>
         public static bool TryCombine(Player player, string biome)
         {
             if (player == null || string.IsNullOrEmpty(biome))
@@ -108,18 +117,50 @@ namespace ValheimVillages.Items.Fragments
             if (inventory == null)
                 return false;
 
-            // Find all fragment stacks matching this biome and count total quantity
-            var matchingItems = FindFragmentsByBiome(inventory, biome);
-            var totalCount = 0;
-            foreach (var item in matchingItems)
-                totalCount += item.m_stack;
-
+            // Count matching fragments up front so we can reject early with a helpful message
+            // and avoid a pointless server round-trip when the player can't combine anyway.
+            var totalCount = CountStacks(FindFragmentsByBiome(inventory, biome));
             if (totalCount < RequiredFragments)
             {
                 var needed = RequiredFragments - totalCount;
                 player.Message(MessageHud.MessageType.Center,
                     $"Need {needed} more {biome} fragments ({totalCount}/{RequiredFragments})");
                 return false;
+            }
+
+            // Ask the host to resolve a real location in this biome (the only server-authoritative
+            // step). The result handler (OnResult -> CompleteQuest) consumes the fragments and
+            // places the quest once the host replies.
+            FragmentQuestRpc.RequestQuestLocation(biome);
+            return true;
+        }
+
+        /// <summary>
+        ///     Finishes a combine on the requesting client after the host has resolved a real
+        ///     <paramref name="questPos" /> for <paramref name="biome" />: consumes 3 fragments,
+        ///     drops the map pin, registers the pending rescue quest, and unlocks the biome's
+        ///     recruit recipe for this player. Re-validates the fragment count first, since the
+        ///     inventory could have changed during the (usually instant) server round-trip.
+        /// </summary>
+        internal static void CompleteQuest(Player player, string biome, Vector3 questPos)
+        {
+            if (player == null || string.IsNullOrEmpty(biome))
+                return;
+
+            var inventory = player.GetInventory();
+            if (inventory == null)
+                return;
+
+            var matchingItems = FindFragmentsByBiome(inventory, biome);
+            var totalCount = CountStacks(matchingItems);
+            if (totalCount < RequiredFragments)
+            {
+                // Fragments were dropped/used while the host was resolving the location — bail
+                // without consuming anything so the player keeps what's left.
+                var needed = RequiredFragments - totalCount;
+                player.Message(MessageHud.MessageType.Center,
+                    $"Need {needed} more {biome} fragments ({totalCount}/{RequiredFragments})");
+                return;
             }
 
             // Determine NPC type for this biome
@@ -129,25 +170,7 @@ namespace ValheimVillages.Items.Fragments
                 villagerType = "Farmer";
             }
 
-            // Find a location in the target biome BEFORE consuming fragments.
-            // If no valid location exists in the loaded world, fail fast and leave
-            // the fragments in the player's inventory so they can retry elsewhere.
-            // The pawn is NOT spawned now — it will be spawned by RescueQuestTracker
-            // when the player arrives at the quest location (zone must be loaded).
-            var questPos = FindPositionInBiome(biome, player.transform.position);
-            if (!questPos.HasValue)
-            {
-                Plugin.Log?.LogError(
-                    $"Cannot combine {biome} fragments: no valid {biome} location found " +
-                    $"in loaded world (player at {player.transform.position}, " +
-                    $"villagerType={villagerType}, fragmentsHeld={totalCount}). " +
-                    "Fragments NOT consumed.");
-                player.Message(MessageHud.MessageType.Center,
-                    $"Cannot locate {biome} in the surrounding world. Try again from a different area.");
-                return false;
-            }
-
-            // Consume 3 fragments across stacks now that we know the quest can be placed.
+            // Consume 3 fragments across stacks now that the host has confirmed a location.
             var toRemove = RequiredFragments;
             foreach (var item in matchingItems)
             {
@@ -159,8 +182,8 @@ namespace ValheimVillages.Items.Fragments
                 toRemove -= removeFromStack;
             }
 
-            AddQuestMarker(questPos.Value, villagerType, biome);
-            RescueQuestTracker.AddQuest(questPos.Value, villagerType, biome);
+            AddQuestMarker(questPos, villagerType, biome);
+            RescueQuestTracker.AddQuest(questPos, villagerType, biome);
 
             // Completing the map still teaches this player to recruit the biome's villager type
             // (per-player unlock) — but quietly. Keep the on-screen text terse and cryptic; the
@@ -170,8 +193,30 @@ namespace ValheimVillages.Items.Fragments
 
             Plugin.Log?.LogInfo(
                 $"Combined {RequiredFragments} {biome} fragments -> rescue quest for {villagerType} " +
-                $"(recruit recipe {(newlyLearned ? "UNLOCKED" : "already known")})");
-            return true;
+                $"at {questPos} (recruit recipe {(newlyLearned ? "UNLOCKED" : "already known")})");
+        }
+
+        /// <summary>
+        ///     Called on the requesting client when the host could not resolve a location for
+        ///     <paramref name="biome" />. Fragments are left untouched so the player can retry.
+        /// </summary>
+        internal static void OnQuestLocationUnavailable(Player player, string biome, string reason)
+        {
+            Plugin.Log?.LogError(
+                $"Cannot combine {biome} fragments: {reason}. Fragments NOT consumed.");
+            player?.Message(MessageHud.MessageType.Center,
+                $"Cannot locate {biome} in the surrounding world. Try again from a different area.");
+        }
+
+        /// <summary>
+        ///     Sums stack sizes across the given fragment item stacks.
+        /// </summary>
+        private static int CountStacks(List<ItemDrop.ItemData> items)
+        {
+            var total = 0;
+            foreach (var item in items)
+                total += item.m_stack;
+            return total;
         }
 
         /// <summary>
@@ -209,8 +254,12 @@ namespace ValheimVillages.Items.Fragments
         ///     placed location instances. This guarantees the quest spawns at a real location
         ///     that is in the correct biome with appropriate enemies.
         ///     Picks a random matching location, preferring ones closer to the player.
+        ///
+        ///     HOST-ONLY: reads <c>ZoneSystem.m_locationInstances</c>, which is populated only
+        ///     on the server. Invoked from <see cref="FragmentQuestRpc" />'s server handler, never
+        ///     directly from the client.
         /// </summary>
-        private static Vector3? FindPositionInBiome(string biomeName, Vector3 playerPos)
+        internal static Vector3? FindPositionInBiome(string biomeName, Vector3 playerPos)
         {
             if (!BiomeLocationMap.TryGetValue(biomeName, out var locationNames))
             {
