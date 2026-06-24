@@ -36,7 +36,7 @@ namespace ValheimVillages.Items.Fragments
             try
             {
                 rpc.Register<string, Vector3>(RequestRpcName, OnRequest);
-                rpc.Register<bool, string, Vector3, string>(ResultRpcName, OnResult);
+                rpc.Register<bool, string, Vector3, string, string>(ResultRpcName, OnResult);
                 Plugin.Log?.LogInfo(
                     "[FragmentQuestRpc] registered VV_FindQuestLocation + VV_QuestLocationResult handlers");
             }
@@ -80,11 +80,11 @@ namespace ValheimVillages.Items.Fragments
         {
             if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
 
-            var questPos = FragmentCombiner.FindPositionInBiome(biome, playerPos);
+            var questPos = FragmentCombiner.FindPositionInBiome(biome, playerPos, out var locationName);
             if (questPos.HasValue)
-                SendResult(sender, true, biome, questPos.Value, "");
+                SendResult(sender, true, biome, questPos.Value, locationName ?? "", "");
             else
-                SendResult(sender, false, biome, Vector3.zero,
+                SendResult(sender, false, biome, Vector3.zero, "",
                     $"no valid {biome} location found in the loaded world");
         }
 
@@ -92,9 +92,11 @@ namespace ValheimVillages.Items.Fragments
         ///     Tell the requesting client how the lookup turned out. Targeted at the original
         ///     sender; on a listen-host that's our own id and ZRoutedRpc dispatches it locally.
         /// </summary>
-        private static void SendResult(long target, bool success, string biome, Vector3 questPos, string reason)
+        private static void SendResult(long target, bool success, string biome, Vector3 questPos, string locationName,
+            string reason)
         {
-            ZRoutedRpc.instance?.InvokeRoutedRPC(target, ResultRpcName, success, biome ?? "", questPos, reason ?? "");
+            ZRoutedRpc.instance?.InvokeRoutedRPC(target, ResultRpcName, success, biome ?? "", questPos,
+                locationName ?? "", reason ?? "");
         }
 
         /// <summary>
@@ -102,13 +104,14 @@ namespace ValheimVillages.Items.Fragments
         ///     the combine (consume fragments + place the quest) on success, or messages the
         ///     player on failure without touching their fragments.
         /// </summary>
-        private static void OnResult(long sender, bool success, string biome, Vector3 questPos, string reason)
+        private static void OnResult(long sender, bool success, string biome, Vector3 questPos, string locationName,
+            string reason)
         {
             var player = Player.m_localPlayer;
             if (player == null) return;
 
             if (success)
-                FragmentCombiner.CompleteQuest(player, biome, questPos);
+                FragmentCombiner.CompleteQuest(player, biome, questPos, locationName);
             else
                 FragmentCombiner.OnQuestLocationUnavailable(player, biome, reason);
         }

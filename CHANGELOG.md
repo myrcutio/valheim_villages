@@ -5,6 +5,19 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-06-24
+
+### Fixed
+- **Rescue quest rewards at surface locations.** A rescue quest could send you to
+  an above-ground site — a farm, camp, tower, or ruin — but the Lode Core reward
+  only ever appeared if you stepped into a dungeon *interior*. Surface sites have
+  no interior to enter, so those quests (most Meadows, Plains, and Ashlands
+  rescues) led you to an empty location with nothing to collect. Rewards now
+  recognize whether a quest points at an interior dungeon or a surface site:
+  interior quests still place the core inside when you enter, and surface quests
+  place it when you arrive at the marked location. Mixed-biome pools (Swamp,
+  Mountain, Mistlands) are decided per chosen location.
+
 ## [0.2.1] - 2026-06-23
 
 ### Fixed

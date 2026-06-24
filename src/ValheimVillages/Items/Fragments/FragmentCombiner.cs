@@ -142,7 +142,7 @@ namespace ValheimVillages.Items.Fragments
         ///     recruit recipe for this player. Re-validates the fragment count first, since the
         ///     inventory could have changed during the (usually instant) server round-trip.
         /// </summary>
-        internal static void CompleteQuest(Player player, string biome, Vector3 questPos)
+        internal static void CompleteQuest(Player player, string biome, Vector3 questPos, string locationName)
         {
             if (player == null || string.IsNullOrEmpty(biome))
                 return;
@@ -182,8 +182,12 @@ namespace ValheimVillages.Items.Fragments
                 toRemove -= removeFromStack;
             }
 
+            // Interior dungeons deliver the reward when the player enters (EnvMan dungeon-entry
+            // hook); surface sites have no interior to enter, so they deliver on arrival instead.
+            var isInterior = IsInteriorLocation(locationName);
+
             AddQuestMarker(questPos, villagerType, biome);
-            RescueQuestTracker.AddQuest(questPos, villagerType, biome);
+            RescueQuestTracker.AddQuest(questPos, villagerType, biome, isInterior);
 
             // Completing the map still teaches this player to recruit the biome's villager type
             // (per-player unlock) — but quietly. Keep the on-screen text terse and cryptic; the
@@ -193,7 +197,8 @@ namespace ValheimVillages.Items.Fragments
 
             Plugin.Log?.LogInfo(
                 $"Combined {RequiredFragments} {biome} fragments -> rescue quest for {villagerType} " +
-                $"at {questPos} (recruit recipe {(newlyLearned ? "UNLOCKED" : "already known")})");
+                $"at {questPos} (location '{locationName}', {(isInterior ? "interior" : "surface")}; " +
+                $"recruit recipe {(newlyLearned ? "UNLOCKED" : "already known")})");
         }
 
         /// <summary>
@@ -259,8 +264,10 @@ namespace ValheimVillages.Items.Fragments
         ///     on the server. Invoked from <see cref="FragmentQuestRpc" />'s server handler, never
         ///     directly from the client.
         /// </summary>
-        internal static Vector3? FindPositionInBiome(string biomeName, Vector3 playerPos)
+        internal static Vector3? FindPositionInBiome(string biomeName, Vector3 playerPos, out string locationName)
         {
+            locationName = null;
+
             if (!BiomeLocationMap.TryGetValue(biomeName, out var locationNames))
             {
                 Plugin.Log?.LogWarning($"No location names mapped for biome: {biomeName}");
@@ -271,7 +278,10 @@ namespace ValheimVillages.Items.Fragments
                 return null;
 
             var locationSet = new HashSet<string>(locationNames);
-            var candidates = new List<Vector3>();
+            // Track the prefab name alongside each candidate position so the caller can tell
+            // an interior dungeon (delve in) from a surface site (no dungeon to enter) — the
+            // two need different reward-delivery triggers downstream.
+            var candidates = new List<(Vector3 pos, string name)>();
 
             // Search all placed location instances for matching dungeon/location names
             foreach (var kvp in ZoneSystem.instance.m_locationInstances)
@@ -285,7 +295,7 @@ namespace ValheimVillages.Items.Fragments
                     continue;
 
                 if (locationSet.Contains(locName))
-                    candidates.Add(locInstance.m_position);
+                    candidates.Add((locInstance.m_position, locName));
             }
 
             if (candidates.Count == 0)
@@ -299,18 +309,41 @@ namespace ValheimVillages.Items.Fragments
             // Sort by distance to player and pick from the closest ~25%
             // to avoid sending players across the entire map
             candidates.Sort((a, b) =>
-                Vector3.Distance(playerPos, a).CompareTo(Vector3.Distance(playerPos, b)));
+                Vector3.Distance(playerPos, a.pos).CompareTo(Vector3.Distance(playerPos, b.pos)));
 
             var poolSize = Mathf.Max(1, candidates.Count / 4);
             var chosenIndex = Random.Range(0, poolSize);
             var chosen = candidates[chosenIndex];
+            locationName = chosen.name;
 
             Plugin.Log?.LogInfo(
-                $"Selected location for {biomeName} rescue quest: {chosen} " +
-                $"(distance: {Vector3.Distance(playerPos, chosen):F0}m, " +
+                $"Selected location for {biomeName} rescue quest: {chosen.name} at {chosen.pos} " +
+                $"(distance: {Vector3.Distance(playerPos, chosen.pos):F0}m, " +
                 $"{candidates.Count} candidates found, picked from top {poolSize})");
 
-            return chosen;
+            return chosen.pos;
+        }
+
+        /// <summary>
+        ///     Best-effort classification of a rescue-quest location prefab as an interior dungeon
+        ///     (the player must go inside, and entry raises an <c>EnvMan</c> forced-environment
+        ///     event) versus a surface site (no interior to enter). Surface sites can't rely on the
+        ///     dungeon-entry trigger and instead deliver their reward on arrival — see
+        ///     <see cref="RescueQuestTracker" />.
+        ///
+        ///     Keyed off the well-known interior-dungeon prefab keywords present in
+        ///     <see cref="BiomeLocationMap" /> (crypts, caves, infested-mine excavations). This is
+        ///     a heuristic, not engine-verified; if it misclassifies a site the failure is graceful
+        ///     (reward appears at the entrance instead of inside, or on arrival instead of on entry).
+        /// </summary>
+        internal static bool IsInteriorLocation(string locationName)
+        {
+            if (string.IsNullOrEmpty(locationName))
+                return false;
+
+            return locationName.IndexOf("Crypt", StringComparison.OrdinalIgnoreCase) >= 0
+                   || locationName.IndexOf("Cave", StringComparison.OrdinalIgnoreCase) >= 0
+                   || locationName.IndexOf("Excavation", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static void AddQuestMarker(Vector3 position, string villagerType, string biome)

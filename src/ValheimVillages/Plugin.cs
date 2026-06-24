@@ -26,8 +26,8 @@ using ValheimVillages.Villages.Entity;
 [assembly: AssemblyCompany("Myrcutio")]
 [assembly: AssemblyProduct("ValheimVillages")]
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
-[assembly: AssemblyVersion("0.2.1")]
-[assembly: AssemblyFileVersion("0.2.1")]
+[assembly: AssemblyVersion("0.2.2")]
+[assembly: AssemblyFileVersion("0.2.2")]
 [assembly: InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
@@ -37,7 +37,7 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.2.1";
+        public const string PluginVersion = "0.2.2";
 
         private static bool _recipeRefreshEnqueued;
         private static bool _recordIndexEnqueued;
@@ -208,6 +208,11 @@ namespace ValheimVillages
             Villager.WorkOrderConfigRpc.EnsureRegistered();
             Villages.VillageCleanupRpc.EnsureRegistered();
             Items.Fragments.FragmentQuestRpc.EnsureRegistered();
+
+            // Deliver surface rescue-quest rewards on arrival (interior dungeons spawn via the
+            // EnvMan dungeon-entry hook instead). Throttled internally; no-op on the dedicated
+            // server, which has no local player.
+            Items.Fragments.RescueQuestTracker.TickArrival(Player.m_localPlayer);
 
             // After world load, enqueue one low-priority recheck of discovered recipes (cultivator + cooking)
             if (!_recipeRefreshEnqueued &&
