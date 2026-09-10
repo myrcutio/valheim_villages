@@ -148,6 +148,37 @@ namespace ValheimVillages.Behaviors.Crafting
         /// </summary>
         public void AbandonWorkPublic(string reason) => AbandonWork(reason);
 
+        /// <summary>
+        ///     Re-diagnose a cooking station that has gone cold on arrival and, if the fuel it
+        ///     wants is in reach, start the fuelling leg. Returns false when there is genuinely
+        ///     nothing the villager can do (no fuel need identified, or no fuel in any chest),
+        ///     in which case the caller abandons as before.
+        /// </summary>
+        private bool TryDivertToFueling(CookingStation station)
+        {
+            if (m_context == null || m_ai == null) return false;
+
+            if (!StationFuelHelper.DiagnoseFuelNeed(station, out var need)) return false;
+
+            var containers = ContainerScanner.FindNearbyContainers(
+                m_ai.HomeAnchor, Settings.WorkSettings.ChestScanRadius);
+            if (!StationFuelHelper.FindFuelInContainers(containers, need.FuelItemPrefab, out var fc))
+                return false;
+
+            m_context.FuelRequirement = need;
+            m_context.FuelContainer = fc;
+            // Diverting mid-cycle — the fuelling leg must return to the station rather than
+            // re-running the gather (which would pull a second set of ingredients).
+            m_context.ResumeAtStationAfterFueling = true;
+
+            Plugin.Log?.LogInfo(
+                $"[Work:{LogName}] Cooking station went cold on arrival — fetching " +
+                $"{need.FuelItemPrefab} to relight instead of abandoning.");
+
+            BeginFueling();
+            return true;
+        }
+
         private void BeginFueling()
         {
             if (m_context?.FuelRequirement == null || m_context.FuelContainer == null)
@@ -274,6 +305,14 @@ namespace ValheimVillages.Behaviors.Crafting
             // matching HeldItem entry so AbandonWork down the line doesn't
             // try to roll back already-committed items.
             ClearHeldItem(fuel.FuelItemPrefab, 1);
+
+            if (m_context.ResumeAtStationAfterFueling)
+            {
+                m_context.ResumeAtStationAfterFueling = false;
+                BeginTravelingToStation();
+                return;
+            }
+
             BeginGatheringIngredients();
         }
 
@@ -316,7 +355,11 @@ namespace ValheimVillages.Behaviors.Crafting
 
             if (!StationFinder.IsCookingStationReady(station))
             {
-                AbandonWork("cooking station fire went out");
+                // Fire died with the food still on the station. Fetch fuel and come back
+                // rather than abandoning the cook — the item stays on the station meanwhile.
+                if (TryDivertToFueling(station)) return true;
+
+                AbandonWork("cooking station fire went out and no fuel available");
                 return true;
             }
 
@@ -522,10 +565,35 @@ namespace ValheimVillages.Behaviors.Crafting
             }
             else
             {
+                // Plain crafting station (workbench): there is no station to load the inputs
+                // into, so the craft itself consumes them. Clear the in-transit entries here,
+                // at the moment the product exists.
+                ConsumeIngredientHeldItems();
                 m_context.CraftedCount++;
             }
 
             BeginReturningToChest();
+        }
+
+        /// <summary>
+        ///     Mark this craft cycle's ingredient pickups as consumed.
+        ///
+        ///     <para>The cooking and smelter paths call <see cref="ClearHeldItem" /> when their
+        ///     RPC commits the input to a station. A plain crafting station has no such commit,
+        ///     so nothing cleared them and they survived to <see cref="FinishWork" />, which
+        ///     rolled them back into the chest — the villager kept the output AND returned the
+        ///     inputs, crafting for free. (Observed: a carpenter making 5 torches ended with 10
+        ///     uncommitted Wood/Resin entries, all refunded.)</para>
+        /// </summary>
+        private void ConsumeIngredientHeldItems()
+        {
+            if (m_context?.IngredientSources == null) return;
+
+            foreach (var src in m_context.IngredientSources)
+            {
+                if (src == null || string.IsNullOrEmpty(src.PrefabName)) continue;
+                ClearHeldItem(src.PrefabName, src.Amount);
+            }
         }
 
         private void BeginReturningToChest()
@@ -653,7 +721,12 @@ namespace ValheimVillages.Behaviors.Crafting
                 }
 
                 m_context.SmelterProcessedAtStart = GetSmelterProcessedQueueSize(smelter);
-                smelterNview.InvokeRPC("RPC_AddOre", m_context.SmelterInputItemName);
+                // The trailing bool is the engine's "cheated" flag (added by the 2026-09-09
+                // update, signature: RPC_AddOre(long sender, string name, bool cheated)); it is
+                // stored on the slot to mark cheat-spawned input. The villager removed this ore
+                // from a chest for real, so it is false. Omitting it throws EndOfStreamException
+                // inside ZRpc.Deserialize and the work order stalls forever at the station.
+                smelterNview.InvokeRPC("RPC_AddOre", m_context.SmelterInputItemName, false);
                 Plugin.Log?.LogInfo(
                     $"[Work:{LogName}] Added 1x {m_context.SmelterInputItemName} to Smelter ({smelter.gameObject.name})");
                 // Ore committed — clear the matching in-transit entry.
@@ -666,20 +739,40 @@ namespace ValheimVillages.Behaviors.Crafting
             {
                 if (!StationFinder.IsCookingStationReady(station))
                 {
-                    AbandonWork("cooking station not ready (fire or fuel)");
+                    // The fire was lit when the scan picked this station, but has since gone
+                    // out — fires burn down while the villager walks over. Giving up here is
+                    // what made a villager stand at a cold cooking station doing nothing, then
+                    // re-scan and repeat. Divert to the fuelling leg instead: it is the same
+                    // work the scan would have queued had the fire already been out on arrival.
+                    if (TryDivertToFueling(station)) return;
+
+                    AbandonWork("cooking station not ready and no fuel available");
                     return;
                 }
 
-                if (!StationFinder.HasFreeSlot(station))
+                // Mirror CookingStation.OnUseItem's own gate (fire + free slot) rather than the
+                // looser progress check. RPC_AddItem does no fire check of its own — it is the
+                // trusted inner call the engine's gated path makes — so this is what stops a
+                // villager doing what a player is refused: loading food onto a cold station.
+                if (!StationFinder.CanAcceptItem(station))
                 {
-                    AbandonWork("cooking station full");
+                    if (!StationFinder.HasFreeSlot(station))
+                    {
+                        AbandonWork("cooking station full");
+                        return;
+                    }
+
+                    if (TryDivertToFueling(station)) return;
+                    AbandonWork("cooking station has no fire and no fuel available");
                     return;
                 }
 
                 var nview = station.GetComponent<ZNetView>();
                 if (nview != null && nview.GetZDO() != null)
                 {
-                    nview.InvokeRPC("RPC_AddItem", m_context.CookingInputItemName);
+                    // Trailing "cheated" bool, as for RPC_AddOre above:
+                    // RPC_AddItem(long sender, string itemName, bool cheated).
+                    nview.InvokeRPC("RPC_AddItem", m_context.CookingInputItemName, false);
                     // Cooking input committed — clear the matching in-transit entry.
                     ClearHeldItem(m_context.CookingInputItemName, 1);
 

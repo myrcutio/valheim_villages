@@ -13,8 +13,11 @@
         <ValheimDir>$(HOME)/.local/share/Steam/steamapps/common/Valheim</ValheimDir>
         <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles</BepInExDir>
 
+        <!-- Build into the profile actually being tested (valheim-modding), whose
+             BepInEx/scripts dir is watched by ScriptEngine for hot reload. The release
+             profile path below is kept for reference; re-enable it to stage a server build. -->
         <OutputPath>$(BepInExDir)/$(R2ModmanProfile)/BepInEx/scripts/</OutputPath>
-        <OutputPath>$(BepInExDir)/$(R2ModmanReleaseProfile)/BepInEx/plugins/idontunderstand-ValheimVillages/ValheimVillages/</OutputPath>
+        <!-- <OutputPath>$(BepInExDir)/$(R2ModmanReleaseProfile)/BepInEx/plugins/idontunderstand-ValheimVillages/ValheimVillages/</OutputPath> -->
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     </PropertyGroup>
 
@@ -38,6 +41,10 @@
         </Reference>
         <Reference Include="assembly_utils">
             <HintPath>$(ValheimDir)/valheim_Data/Managed/assembly_utils.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="Splatform">
+            <HintPath>$(ValheimDir)/valheim_Data/Managed/Splatform.dll</HintPath>
             <Private>false</Private>
         </Reference>
         <Reference Include="assembly_guiutils">

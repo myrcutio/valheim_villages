@@ -152,7 +152,8 @@ namespace ValheimVillages.Dev
             var sector = ZoneSystem.GetZone(pos);
             var near = new List<ZDO>();
             var distant = new List<ZDO>();
-            zdoMan.FindSectorObjects(sector, SectorArea, SectorArea, near, distant);
+            zdoMan.FindSectorObjects(
+                sector, new SimulationDistance(SectorArea, SectorArea), near, distant);
 
             var all = near.Concat(distant)
                 .Where(z => z != null && Vector3.Distance(z.GetPosition(), pos) <= radius)

@@ -59,6 +59,11 @@ namespace ValheimVillages.Scheduling
 
         private static bool IsCapable(in VillagerQuery query, CandidateTask task)
         {
+            // A row minted for a specific villager is only ever that villager's.
+            if (!string.IsNullOrEmpty(task.OwnerVillagerId) &&
+                task.OwnerVillagerId != query.VillagerId)
+                return false;
+
             if (string.IsNullOrEmpty(task.RequiredCapability)) return true;
             return query.Capabilities != null && query.Capabilities.Contains(task.RequiredCapability);
         }

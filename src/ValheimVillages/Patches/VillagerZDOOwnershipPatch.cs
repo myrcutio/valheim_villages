@@ -150,9 +150,13 @@ namespace ValheimVillages.Patches
 
                 var zone = ZoneSystem.GetZone(refPosition);
                 s_nearObjects.Clear();
-                __instance.FindSectorObjects(
-                    zone, ZoneSystem.instance.m_activeArea, 0, s_nearObjects);
-                var activatedArea = ZoneSystem.instance.m_activeArea - 1;
+
+                // The engine now sweeps with a near-only SimulationDistance (far forced to 0)
+                // derived from the synced value, replacing the old m_activeArea/0 int pair.
+                var simulation = ZNet.instance.GetSyncedSimulationDistance();
+                var nearOnly = new SimulationDistance(
+                    simulation.NearSimulationDistance, 0, simulation.IsClassic);
+                __instance.FindSectorObjects(zone, nearOnly, s_nearObjects, null);
 
                 foreach (var zdo in s_nearObjects)
                 {
@@ -171,14 +175,16 @@ namespace ValheimVillages.Patches
                         continue;
                     }
 
-                    var sector = zdo.GetSector();
+                    // The engine switched from sector coords + an activated-area radius to a
+                    // straight world-position test against the reference zone.
+                    var position = zdo.GetPosition();
                     if (zdo.GetOwner() == uid)
                     {
-                        if (!ZNetScene.InActiveArea(sector, zone, activatedArea))
+                        if (!ZNetScene.InActiveArea(position, zone))
                             zdo.SetOwner(0L);
                     }
-                    else if ((!zdo.HasOwner() || !IsInPeerActiveArea(sector, zdo.GetOwner()))
-                             && ZNetScene.InActiveArea(sector, zone, activatedArea))
+                    else if ((!zdo.HasOwner() || !IsInPeerActiveArea(position, zdo.GetOwner()))
+                             && ZNetScene.InActiveArea(position, zone))
                     {
                         zdo.SetOwner(uid);
                     }
@@ -188,13 +194,13 @@ namespace ValheimVillages.Patches
             }
 
             /// <summary>Faithful copy of the private <c>ZDOMan.IsInPeerActiveArea</c>.</summary>
-            private static bool IsInPeerActiveArea(Vector2i sector, long owner)
+            private static bool IsInPeerActiveArea(Vector3 point, long owner)
             {
                 if (owner == ZDOMan.GetSessionID())
-                    return ZNetScene.InActiveArea(sector, ZNet.instance.GetReferencePosition());
+                    return ZNetScene.InActiveArea(point, ZNet.instance.GetReferencePosition());
 
                 var peer = ZNet.instance.GetPeer(owner);
-                return peer != null && ZNetScene.InActiveArea(sector, peer.GetRefPos());
+                return peer != null && ZNetScene.InActiveArea(point, peer.GetRefPos());
             }
         }
 

@@ -58,6 +58,18 @@ namespace ValheimVillages.UI.Interaction
         }
 
         /// <summary>
+        ///     Extra reach granted to the player when hovering this NPC. Despite the
+        ///     name it is not a vertical offset: the game adds it to
+        ///     <c>Player.m_maxInteractDistance</c> when deciding whether the hover
+        ///     raycast is close enough. Defer to the Character so a villager keeps the
+        ///     same reach as any other creature with this body.
+        /// </summary>
+        public float GetHoverOffset()
+        {
+            return m_character != null ? m_character.GetHoverOffset() : 0f;
+        }
+
+        /// <summary>
         ///     Gets the full hover text with interaction prompt.
         /// </summary>
         public string GetHoverText()

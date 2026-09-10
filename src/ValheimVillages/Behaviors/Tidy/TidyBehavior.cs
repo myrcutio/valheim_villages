@@ -236,8 +236,15 @@ namespace ValheimVillages.Behaviors.Tidy
 
             foreach (var itemName in itemNames)
             foreach (var container in containers)
+            {
+                // A chest holding a work order is reserved for that order's own goods; burnt
+                // meat swept off a station is exactly the kind of filler that would eat the
+                // slots the order's output needs. Skip those chests unless the sweep happens
+                // to be carrying something the order actually uses.
+                if (!WorkOrderChestPolicy.Allows(container, itemName)) continue;
                 if (ContainerScanner.TryDepositItem(container, itemName, 1))
                     break;
+            }
         }
 
         private void Reset()

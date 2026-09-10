@@ -26,8 +26,8 @@ using ValheimVillages.Villages.Entity;
 [assembly: AssemblyCompany("Myrcutio")]
 [assembly: AssemblyProduct("ValheimVillages")]
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
-[assembly: AssemblyVersion("0.2.2")]
-[assembly: AssemblyFileVersion("0.2.2")]
+[assembly: AssemblyVersion("0.2.3")]
+[assembly: AssemblyFileVersion("0.2.3")]
 [assembly: InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
@@ -37,7 +37,7 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.2.2";
+        public const string PluginVersion = "0.2.3";
 
         private static bool _recipeRefreshEnqueued;
         private static bool _recordIndexEnqueued;
@@ -213,6 +213,11 @@ namespace ValheimVillages
             // EnvMan dungeon-entry hook instead). Throttled internally; no-op on the dedicated
             // server, which has no local player.
             Items.Fragments.RescueQuestTracker.TickArrival(Player.m_localPlayer);
+
+            // Raise/clear the "!" over villagers with something the player must fix (storage
+            // nearly full, an order missing an ingredient). Throttled internally; no-op on the
+            // dedicated server, which has no local player to show it to.
+            UI.Alerts.VillageAlertMonitor.Tick();
 
             // After world load, enqueue one low-priority recheck of discovered recipes (cultivator + cooking)
             if (!_recipeRefreshEnqueued &&

@@ -124,17 +124,23 @@ namespace ValheimVillages.Patches
 
                 var refPos = ZNet.instance.GetReferencePosition();
                 var zone = ZoneSystem.GetZone(refPos);
-                var activeArea = ZoneSystem.instance.m_activeArea;
-                var activeDistant = ZoneSystem.instance.m_activeDistantArea;
 
-                ZDOMan.instance.FindSectorObjects(zone, activeArea, activeDistant, nearObjects, distantObjects);
+                // The engine replaced the separate m_activeArea/m_activeDistantArea ints with
+                // a single synced SimulationDistance carrying near + far (+ the "classic"
+                // flag). Full distance for the reference sweep; a near-only variant (far = 0)
+                // for the phantom sweeps, which must not pull in distant objects.
+                var simulation = ZNet.instance.GetSyncedSimulationDistance();
+                var nearOnly = new SimulationDistance(
+                    simulation.NearSimulationDistance, 0, simulation.IsClassic);
+
+                ZDOMan.instance.FindSectorObjects(zone, simulation, nearObjects, distantObjects);
 
                 foreach (var pos in phantoms)
                 {
                     var phantomZone = ZoneSystem.GetZone(pos);
                     if (phantomZone.x == zone.x && phantomZone.y == zone.y)
                         continue;
-                    ZDOMan.instance.FindSectorObjects(phantomZone, activeArea, 0, nearObjects);
+                    ZDOMan.instance.FindSectorObjects(phantomZone, nearOnly, nearObjects);
                 }
 
                 // The reference-position sweep and each phantom sweep cover overlapping zone

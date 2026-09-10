@@ -60,5 +60,19 @@ namespace ValheimVillages.Scheduling
 
         /// <summary>Region id of <see cref="Position" />, resolved/cached at produce time.</summary>
         public string RegionId;
+
+        /// <summary>
+        ///     Villager this row was minted FOR, or null when any capable villager may take it.
+        ///
+        ///     <para>Location-keyed rows (a damaged piece, food about to burn) belong to whoever
+        ///     is best placed to handle them, so they leave this null. A <see cref="TaskKind.CraftWork" />
+        ///     row is different: it is keyed <c>craft:&lt;villagerId&gt;</c>, positioned at THAT
+        ///     villager's anchor, and its work is discovered from that villager's own chest orders.
+        ///     Without this field a capability check alone let any craft-capable villager claim
+        ///     someone else's row, immediately fail <c>BeginAssignment</c> (it has no orders of its
+        ///     own), and leave the dispatcher's "(approach-failed)" sentinel claim on the row —
+        ///     locking it against the villager it was minted for, and against everyone else.</para>
+        /// </summary>
+        public string OwnerVillagerId;
     }
 }

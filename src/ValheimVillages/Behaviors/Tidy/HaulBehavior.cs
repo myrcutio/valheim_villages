@@ -216,7 +216,7 @@ namespace ValheimVillages.Behaviors.Tidy
             // Re-confirm a chest still has room (another villager may have filled
             // the one we picked); pick a fresh one if needed.
             if (m_targetChest == null ||
-                !ContainerScanner.CanAcceptItemData(m_targetChest, m_targetDrop.m_itemData))
+                !CanStoreIn(m_targetChest, m_targetDrop.m_itemData))
             {
                 var containers = ContainerScanner.FindNearbyContainers(
                     m_ai.HomeAnchor, WorkSettings.HaulScanRadius);
@@ -243,7 +243,8 @@ namespace ValheimVillages.Behaviors.Tidy
             }
 
             var payload = m_targetDrop.m_itemData.Clone();
-            var stored = ContainerScanner.TryDepositItemData(m_targetChest, payload);
+            var stored = CanStoreIn(m_targetChest, payload)
+                         && ContainerScanner.TryDepositItemData(m_targetChest, payload);
 
             // Fall back to any other nearby chest with room.
             if (!stored)
@@ -252,7 +253,7 @@ namespace ValheimVillages.Behaviors.Tidy
                     m_ai.HomeAnchor, WorkSettings.HaulScanRadius);
                 foreach (var c in containers)
                 {
-                    if (!ContainerScanner.CanAcceptItemData(c, payload)) continue;
+                    if (!CanStoreIn(c, payload)) continue;
                     stored = ContainerScanner.TryDepositItemData(c, payload.Clone());
                     if (stored) break;
                 }
@@ -274,9 +275,27 @@ namespace ValheimVillages.Behaviors.Tidy
             List<Container> containers, ItemDrop.ItemData item)
         {
             foreach (var c in containers)
-                if (ContainerScanner.CanAcceptItemData(c, item))
+                if (CanStoreIn(c, item))
                     return c;
             return null;
+        }
+
+        /// <summary>
+        ///     Room AND permission. A chest holding a work order is reserved for that order's
+        ///     output, ingredients and fuel — dumping unrelated salvage in it is what eats the
+        ///     slots the order's output needs, so hauling steps around those chests entirely.
+        ///     If none of the remaining chests will take the drop, it stays on the ground.
+        /// </summary>
+        private static bool CanStoreIn(Container container, ItemDrop.ItemData item)
+        {
+            if (!ContainerScanner.CanAcceptItemData(container, item)) return false;
+
+            if (WorkOrderChestPolicy.Allows(container, item)) return true;
+
+            Plugin.Log?.LogDebug(
+                $"[Haul] Skipping reserved work-order chest '{container.m_name}' for " +
+                $"{item?.m_dropPrefab?.name ?? "?"} — not part of its order.");
+            return false;
         }
 
         private void BeginLeg(Phase phase)

@@ -86,7 +86,9 @@ namespace ValheimVillages.Behaviors.Farming
 
             var piece = go.GetComponent<Piece>();
             if (piece != null)
-                piece.SetCreator(0L);
+                // SetCreator now also takes the creator's platform identity; a
+                // village-planted crop has no player behind it, so pass None.
+                piece.SetCreator(0L, Splatform.PlatformUserID.None);
 
             Plugin.Log?.LogInfo(
                 $"[Farming] Planted {piecePrefab.name} at {position}");
