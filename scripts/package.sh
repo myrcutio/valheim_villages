@@ -23,10 +23,11 @@ if [[ -z "${VERSION}" ]]; then
 fi
 echo "Packaging ValheimVillages v${VERSION}"
 
-# 1. Build Release (HotReload=false so it produces a clean plugins-style output
-#    rather than dropping into the live BepInEx scripts/ hot-reload folder) and
-#    capture the DLL path MSBuild reports rather than guessing the OutputPath.
-BUILD_LOG="$(dotnet build "${CSPROJ}" -c Release -p:HotReload=false)"
+# 1. Build Release. The csproj routes Release output to the server profile's
+#    plugins dir (Debug goes to the live BepInEx scripts/ hot-reload folder), so
+#    packaging never overwrites the DLL a running game is hot-reloading. Capture
+#    the DLL path MSBuild reports rather than guessing the OutputPath.
+BUILD_LOG="$(dotnet build "${CSPROJ}" -c Release)"
 echo "${BUILD_LOG}"
 DLL="$(printf '%s\n' "${BUILD_LOG}" | grep -oP 'ValheimVillages -> \K.*ValheimVillages\.dll' | head -1)"
 if [[ -z "${DLL}" || ! -f "${DLL}" ]]; then

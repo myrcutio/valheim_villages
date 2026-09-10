@@ -13,11 +13,14 @@
         <ValheimDir>$(HOME)/.local/share/Steam/steamapps/common/Valheim</ValheimDir>
         <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles</BepInExDir>
 
-        <!-- Build into the profile actually being tested (valheim-modding), whose
-             BepInEx/scripts dir is watched by ScriptEngine for hot reload. The release
-             profile path below is kept for reference; re-enable it to stage a server build. -->
-        <OutputPath>$(BepInExDir)/$(R2ModmanProfile)/BepInEx/scripts/</OutputPath>
-        <!-- <OutputPath>$(BepInExDir)/$(R2ModmanReleaseProfile)/BepInEx/plugins/idontunderstand-ValheimVillages/ValheimVillages/</OutputPath> -->
+        <!-- Dev builds land in the profile actually being tested (valheim-modding), whose
+             BepInEx/scripts dir ScriptEngine watches for hot reload. Release builds
+             (scripts/package.sh) stage into the server profile's plugins dir instead, so
+             packaging never overwrites the DLL the running game is hot-reloading.
+             These were two unconditional OutputPath lines — last one won — which meant
+             whichever was written second silently decided where every build went. -->
+        <OutputPath Condition="'$(Configuration)' == 'Release'">$(BepInExDir)/$(R2ModmanReleaseProfile)/BepInEx/plugins/idontunderstand-ValheimVillages/ValheimVillages/</OutputPath>
+        <OutputPath Condition="'$(Configuration)' != 'Release'">$(BepInExDir)/$(R2ModmanProfile)/BepInEx/scripts/</OutputPath>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     </PropertyGroup>
 
