@@ -19,6 +19,9 @@ namespace ValheimVillages.Items
     /// </summary>
     internal static class PrefabTemplates
     {
+        /// <summary>Name of the template root, also matched by the hot-reload cleanup sweep.</summary>
+        public const string RootName = "vv_prefab_templates";
+
         private static GameObject s_root;
 
         /// <summary>The shared inactive, DontDestroyOnLoad template parent (created on first use).</summary>
@@ -29,7 +32,7 @@ namespace ValheimVillages.Items
                 if (s_root == null)
                 {
                     // vv_ prefix so the standard hot-reload cleanup can reclaim it.
-                    s_root = new GameObject("vv_prefab_templates");
+                    s_root = new GameObject(RootName);
                     s_root.SetActive(false);
                     Object.DontDestroyOnLoad(s_root);
                 }

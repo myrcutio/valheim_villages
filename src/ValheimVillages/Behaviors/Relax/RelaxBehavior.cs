@@ -50,6 +50,18 @@ namespace ValheimVillages.Behaviors.Relax
         // (i.e. it was preempted by work and returned to idle elsewhere), drop the session.
         private const float DisplacedRadius = 6f;
 
+        /// <summary>Metres of travel that halve a spot's appeal — a tie-break, not a veto.</summary>
+        private const float DistanceDiscountMetres = 18f;
+
+        /// <summary>Radius counting as "already here" for the social clustering term.</summary>
+        private const float CompanyRadius = 4.5f;
+
+        /// <summary>How far from the anchor to look for tame animals.</summary>
+        private const float AnimalScanRadius = 32f;
+
+        /// <summary>Character layer, where tame creatures live.</summary>
+        private static readonly int AnimalLayerMask = LayerMask.GetMask("character");
+
         private readonly VillagerAI m_ai;
 
         private bool m_active;          // a relax session is in progress (traveling or lingering)
@@ -60,6 +72,7 @@ namespace ValheimVillages.Behaviors.Relax
         private Vector3 m_spot;         // the PoI centre (for status text)
         private LocationType m_spotType;
         private string m_claimId;       // TaskBoard reservation key for the chosen spot
+        private KnownLocation m_chosen; // the PoI row we picked, for the visit stamp
 
         public RelaxBehavior(VillagerAI ai)
         {
@@ -118,6 +131,15 @@ namespace ValheimVillages.Behaviors.Relax
                 EndSession();
         }
 
+        /// <summary>
+        ///     The spot kind this villager is currently lingering at, or null while
+        ///     travelling / not relaxing. Read by <see cref="VillagerAI" /> each tick to decide
+        ///     which drives are being satisfied — the tick cannot live in <see cref="Update" />
+        ///     because that only runs for the SELECTED behavior, so drives would never rise
+        ///     while the villager was busy working.
+        /// </summary>
+        public LocationType? ServedSpotType => m_active && m_arrived ? m_spotType : (LocationType?)null;
+
         public void OnArrival(float dt)
         {
             // Reached the approach point — stop and linger, don't bounce onward.
@@ -154,10 +176,17 @@ namespace ValheimVillages.Behaviors.Relax
             }
 
             var from = m_ai.Position;
+            var me = m_ai.UniqueId;
+            var now = Time.time;
+
             var candidates = new List<KnownLocation>();
             foreach (var p in pois)
-                if (IsRelaxType(p.Type))
+                if (LeisureAppeal.IsLeisureType(p.Type))
                     candidates.Add(p);
+
+            // Tame animals wander, so VillagePoiRegistry deliberately does not cache them
+            // (a partition-time snapshot would be stale). Scan for them live instead.
+            AppendAnimalSpots(anchor, candidates);
 
             if (candidates.Count == 0)
             {
@@ -165,11 +194,32 @@ namespace ValheimVillages.Behaviors.Relax
                 return false;
             }
 
-            candidates.Sort((a, b) =>
-                (a.Position - from).sqrMagnitude.CompareTo((b.Position - from).sqrMagnitude));
+            // Order by what this villager currently WANTS, not by what is closest. Distance
+            // still matters, but as a tie-break below rather than the primary key, so a
+            // villager that is cold will cross the village for the fire.
+            var drives = VillagerDrives.For(me);
+            var scored = new List<(KnownLocation poi, float score)>(candidates.Count);
+            foreach (var poi in candidates)
+            {
+                var company = CountCompanyAt(poi.Position, me);
+                var appeal = LeisureAppeal.Score(poi, drives, company, now);
+                if (appeal <= 0f) continue;
 
-            var me = m_ai.UniqueId;
-            var now = Time.time;
+                // Mild distance discount — enough to break ties between equally appealing
+                // spots, not enough to override a strong need.
+                var dist = Vector3.Distance(from, poi.Position);
+                scored.Add((poi, appeal / (1f + dist / DistanceDiscountMetres)));
+            }
+
+            if (scored.Count == 0)
+            {
+                BackOff();
+                return false;
+            }
+
+            scored.Sort((a, b) => b.score.CompareTo(a.score));
+            candidates.Clear();
+            foreach (var e in scored) candidates.Add(e.poi);
 
             // Pass 0: nearest unreserved spot. Pass 1: nearest of any (so a lone spot is
             // still used when every spot is already taken — relaxing together is fine).
@@ -183,6 +233,7 @@ namespace ValheimVillages.Behaviors.Relax
                     if (!VillagerMovement.TryResolveApproach(poi.Position, from, null, out var approach))
                         continue;
 
+                    m_chosen = poi;
                     m_spot = poi.Position;
                     m_spotType = poi.Type;
                     m_approach = approach;
@@ -214,6 +265,10 @@ namespace ValheimVillages.Behaviors.Relax
         {
             m_arrived = true;
             m_dwellUntil = Time.time + DwellSeconds;
+
+            // Stamp the visit so LeisureAppeal's novelty term dulls this spot for a while and
+            // the villager drifts elsewhere next session.
+            if (m_chosen != null) m_chosen.LastVisitedAt = Time.time;
         }
 
         private void EndSession()
@@ -236,10 +291,56 @@ namespace ValheimVillages.Behaviors.Relax
             m_nextRelaxTime = Time.time + RelaxCooldown;
         }
 
-        private static bool IsRelaxType(LocationType t)
+        /// <summary>
+        ///     Villagers already lingering within <see cref="CompanyRadius" /> of a spot,
+        ///     excluding the one choosing. Feeds the Social term so villagers cluster.
+        /// </summary>
+        private static int CountCompanyAt(Vector3 spot, string excludeVillagerId)
         {
-            return t == LocationType.Fire || t == LocationType.Table ||
-                   t == LocationType.Chair || t == LocationType.HotTub;
+            var n = 0;
+            foreach (var kv in VillagerAIManager.ActiveVillagers)
+            {
+                var other = kv.Value;
+                if (other == null || kv.Key == excludeVillagerId) continue;
+                if (other.CurrentState != BehaviorState.Idle) continue;
+                if (Vector3.Distance(other.Position, spot) <= CompanyRadius) n++;
+            }
+
+            return n;
+        }
+
+        /// <summary>
+        ///     Live scan for tame animals near the village anchor, appended as transient
+        ///     <see cref="LocationType.Animals" /> spots. Not cached: the whole reason the PoI
+        ///     registry skips animals is that they move.
+        /// </summary>
+        private static void AppendAnimalSpots(Vector3 anchor, List<KnownLocation> into)
+        {
+            var hits = Physics.OverlapSphere(anchor, AnimalScanRadius, AnimalLayerMask);
+            foreach (var col in hits)
+            {
+                if (col == null) continue;
+                var ch = col.GetComponentInParent<Character>();
+                if (ch == null || !ch.IsTamed() || ch.IsDead()) continue;
+
+                var pos = ch.transform.position;
+                var dup = false;
+                foreach (var existing in into)
+                    if (existing.Type == LocationType.Animals && existing.IsSameLocation(pos))
+                    {
+                        dup = true;
+                        break;
+                    }
+
+                if (dup) continue;
+                into.Add(new KnownLocation
+                {
+                    Position = pos,
+                    Type = LocationType.Animals,
+                    HasShelter = false,
+                    ComfortValue = 0f,
+                });
+            }
         }
 
         private static string WhereText(LocationType t)
@@ -250,6 +351,9 @@ namespace ValheimVillages.Behaviors.Relax
                 LocationType.HotTub => "in the hot tub",
                 LocationType.Table => "at the table",
                 LocationType.Chair => "on a seat",
+                LocationType.Shelter => "out of the weather",
+                LocationType.Farm => "out by the crops",
+                LocationType.Animals => "with the animals",
                 _ => "",
             };
         }

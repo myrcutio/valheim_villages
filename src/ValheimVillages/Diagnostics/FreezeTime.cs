@@ -60,8 +60,13 @@ namespace ValheimVillages.Diagnostics
 
         [DevCommand("Freeze the day/night cycle (no arg=unfreeze; or pass a time 0..1)",
             Name = "vv_freezetime")]
-        public static void Toggle(string arg = null)
+        public static void Toggle(Terminal.ConsoleEventArgs args)
         {
+            // AttributeScanner only binds () or (Terminal.ConsoleEventArgs); a loose
+            // (string arg = null) was silently skipped at registration, so vv_freezetime
+            // never existed at runtime.
+            var arg = args != null && args.Length > 1 ? args[1] : null;
+
             if (EnvMan.instance == null)
             {
                 const string err = "[vv_freezetime] EnvMan not available — no world loaded?";

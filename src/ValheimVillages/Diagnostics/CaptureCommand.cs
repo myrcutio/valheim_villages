@@ -33,8 +33,21 @@ namespace ValheimVillages.Diagnostics
         /// </summary>
         [DevCommand("Capture at (x, z) [clearance=10m]: vv_capture_at <x> <z> [clearance]",
             Name = "vv_capture_at")]
-        public static void CaptureAt(string xArg, string zArg, string clearanceArg = null)
+        public static void CaptureAt(Terminal.ConsoleEventArgs args)
         {
+            // AttributeScanner only binds () or (Terminal.ConsoleEventArgs); the loose
+            // (string, string, string) signature was silently skipped at registration, so
+            // vv_capture_at never existed at runtime.
+            if (args == null || args.Length < 3)
+            {
+                Report("usage: vv_capture_at <x> <z> [clearance]");
+                return;
+            }
+
+            var xArg = args[1];
+            var zArg = args[2];
+            var clearanceArg = args.Length > 3 ? args[3] : null;
+
             if (!float.TryParse(xArg, NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
                 !float.TryParse(zArg, NumberStyles.Float, CultureInfo.InvariantCulture, out var z))
             {

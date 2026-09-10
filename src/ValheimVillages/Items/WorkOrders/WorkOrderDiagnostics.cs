@@ -4,7 +4,6 @@ using UnityEngine;
 using ValheimVillages.Settings;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.AI.Work;
-using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.Items.WorkOrders
 {
@@ -101,31 +100,9 @@ namespace ValheimVillages.Items.WorkOrders
             return false;
         }
 
-        /// <summary>
-        ///     Resolve the recipe for a work order. Physical stations
-        ///     ($piece_forge, ...) match directly; virtual villager stations
-        ///     ($vv_blacksmith, ...) resolve through the owning villager type's
-        ///     work stations (which is how the scan handler finds them).
-        /// </summary>
         private static Recipe ResolveRecipe(string itemPrefab, string station)
         {
-            if (string.IsNullOrEmpty(station)) return null;
-
-            var direct = StationMatcher.FindRecipe(itemPrefab, station);
-            if (direct != null) return direct;
-
-            var villagerType = VillagerTypeForStation(station);
-            return villagerType != null
-                ? StationMatcher.FindRecipeForNpc(itemPrefab, villagerType)
-                : null;
-        }
-
-        private static string VillagerTypeForStation(string station)
-        {
-            foreach (var kv in VillagerRegistry.Definitions)
-                if (kv.Value?.stationName == station)
-                    return kv.Value.type;
-            return null;
+            return StationMatcher.FindRecipeForOrder(itemPrefab, station);
         }
 
         private static string MissingIngredients(

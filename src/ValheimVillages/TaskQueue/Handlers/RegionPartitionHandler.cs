@@ -88,7 +88,8 @@ namespace ValheimVillages.TaskQueue.Handlers
             // returns no_anchors and never bakes) rather than defer indefinitely.
             if (anchors == null || anchors.Count == 0) return true;
 
-            var area = ZoneSystem.instance.m_activeArea;
+            // m_activeArea is gone; the synced SimulationDistance carries near/far now.
+            var area = ZNet.instance.GetSyncedSimulationDistance();
             foreach (var anchor in anchors)
             {
                 var zone = ZoneSystem.GetZone(anchor);
@@ -138,7 +139,7 @@ namespace ValheimVillages.TaskQueue.Handlers
         ///     <para>
         ///     The footprint scope is deliberate: <see cref="NavMeshBakeManager.BakeVillage" />
         ///     only reads colliders within the anchor bounds, and the sector (zone +
-        ///     <c>m_activeArea</c> neighbours) is far larger. Natural world objects on these
+        ///     simulation-distance neighbours) is far larger. Natural world objects on these
         ///     layers (rocks/trees) at the sector periphery may never instantiate unless the
         ///     player walks to them — gating on those blocked the partition forever
         ///     (observed: a dormant <c>Rock_4</c> at the zone edge). We only wait on what the
@@ -146,11 +147,11 @@ namespace ValheimVillages.TaskQueue.Handlers
         ///     </para>
         /// </summary>
         private static bool SectorBakeGeometryInstantiated(
-            Vector2i zone, int area, Vector3 anchor, out string missingPrefab)
+            Vector2s zone, SimulationDistance area, Vector3 anchor, out string missingPrefab)
         {
             missingPrefab = null;
             s_readinessScratch.Clear();
-            ZDOMan.instance.FindSectorObjects(zone, area, 0, s_readinessScratch);
+            ZDOMan.instance.FindSectorObjects(zone, area, s_readinessScratch);
             foreach (var zdo in s_readinessScratch)
             {
                 if (zdo == null) continue;

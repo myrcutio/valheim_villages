@@ -62,6 +62,13 @@ namespace ValheimVillages.Behaviors.Work
         public bool BeginAssignment(CandidateTask task)
         {
             if (Crafting == null) return false;
+
+            // Honour the IDirectedBehavior contract: "returns false if it can't start
+            // (nothing actionable at the target)". Without this the adapter accepts every
+            // offer, enqueues a scan, comes back empty, releases, and is re-offered the same
+            // candidate next tick — an endless churn that keeps the villager pinned at
+            // dispatch step 2 so it never reaches the routine tier to wander or relax.
+            if (!Crafting.IsWorking && Crafting.NothingToDo) return false;
             // TryScanForWork enqueues an ASYNC work_order_scan and returns false at enqueue time —
             // the work only starts later in its callback. Accept the assignment if work is already
             // running OR a scan is now in flight; the dispatcher then holds the claim via

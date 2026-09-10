@@ -65,6 +65,24 @@ namespace ValheimVillages.Behaviors.Crafting
         ///     assignment) holding the scheduler claim. Reading it past the deadline clears the flag
         ///     and logs loud, freeing the next scan.
         /// </summary>
+        /// <summary>
+        ///     Seconds to stop re-offering work after a scan came back empty. Deliberately
+        ///     longer than RelaxBehavior's 30s dwell so an idle villager can finish a relax
+        ///     session instead of being yanked back for a re-scan partway through, while still
+        ///     picking up a restocked chest within about a minute.
+        /// </summary>
+        private const float NothingToDoBackoffSeconds = 45f;
+
+        private float m_nothingToDoUntil;
+
+        /// <summary>
+        ///     True while the last work scan found nothing and the backoff has not elapsed.
+        ///     <see cref="Work.CraftingBehaviorAdapter.BeginAssignment" /> declines while this
+        ///     holds, which is what lets the dispatcher release the villager to the routine
+        ///     (idle) tier instead of churning assign → empty scan → abandon every tick.
+        /// </summary>
+        public bool NothingToDo => Time.time < m_nothingToDoUntil;
+
         public bool ScanPending
         {
             get
@@ -201,8 +219,12 @@ namespace ValheimVillages.Behaviors.Crafting
             var context = result.Payload as WorkOrderContext;
             if (context == null)
             {
-                // Success with no payload = no work to do (e.g. work order already complete); just ACK and continue.
+                // Success with no payload = no work to do (e.g. work order already complete,
+                // or its ingredients ran out). Remember that so the directed adapter can
+                // decline the next assignment instead of re-scanning every tick — see
+                // NothingToDoUntil.
                 SetWorkNote($"scan: no work payload @ t={Time.time:F0}");
+                m_nothingToDoUntil = Time.time + NothingToDoBackoffSeconds;
                 return;
             }
 

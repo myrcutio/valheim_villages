@@ -36,6 +36,21 @@ namespace ValheimVillages.UI.Interaction
                 : "Village Registry";
         }
 
+        /// <summary>
+        ///     Extra reach granted to the player when hovering the registry. Despite the
+        ///     name it is not a vertical offset: the game adds it to
+        ///     <c>Player.m_maxInteractDistance</c> when deciding whether the hover
+        ///     raycast is close enough. Defer to the piece's CraftingStation so the
+        ///     registry reaches exactly as far as the station it wraps. Resolved lazily,
+        ///     not cached in Awake: this component is added to the prefab *before* the
+        ///     CraftingStation, so it does not exist yet when Awake runs.
+        /// </summary>
+        public float GetHoverOffset()
+        {
+            var station = GetComponent<CraftingStation>();
+            return station != null ? station.GetHoverOffset() : 0f;
+        }
+
         public string GetHoverText()
         {
             // $KEY_Use resolves to the bound Use key (E) on keyboard or the gamepad

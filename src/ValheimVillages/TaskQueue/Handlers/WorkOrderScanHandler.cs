@@ -203,8 +203,10 @@ namespace ValheimVillages.TaskQueue.Handlers
                 Container fuelContainer = null;
                 if (physicalStation == "cookingstation")
                 {
+                    // Select on "would the engine let us put food in?", not "is it warm enough to
+                    // keep cooking" — those differ for a fire-requiring station holding fuel.
                     if (VillageStationRegistry.TryFindStation<CookingStation>(
-                            anchorPos, s => StationFinder.IsCookingStationReady(s), out var pos, out var station))
+                            anchorPos, s => StationFinder.CanAcceptItem(s), out var pos, out var station))
                     {
                         stationPos = pos;
                         cookingStationRef = station;

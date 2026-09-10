@@ -5,6 +5,52 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-09-09
+
+### Fixed
+- **Compatibility with Valheim's 2026-09-09 update.** The update changed several
+  engine interfaces the mod builds on, and the mod stopped working in visible ways:
+  villagers could no longer be interacted with at all, and any villager that tried to
+  put food in a cooking station or ore in a smelter threw and abandoned the job. Both
+  are repaired — hovering a villager now grants the same reach as any other creature,
+  and the station calls match the game's new signatures.
+- **Villagers cooking on a cold fire.** A villager would walk to a cooking station,
+  put meat on it and stand there while nothing cooked, because the mod asked the
+  station whether it was lit rather than asking the fire. It now reads the fireplace's
+  own state, so an unlit station is recognised as unusable — and when a villager has
+  cooking to do and finds the fire out, they fetch fuel and relight it instead of
+  giving up.
+- **Villagers stalling beside a station or chest.** An approach point could land a few
+  centimetres from the edge of the walkable area, which left the villager unable to
+  finish the last step and stuck until something else interrupted them.
+- **Villagers taking each other's jobs.** Two villagers could claim the same crafting
+  task; the loser failed its assignment and went idle. Tasks are now owned by the
+  villager that claimed them.
+- **Workbench crafting produced items without consuming materials.** The workbench
+  path deposited its output but never removed the ingredients it used, so orders could
+  overshoot their quota and materials were never spent.
+- **Villager records reported as orphaned.** Records whose NPC had been re-created
+  (after a world reload) were listed as orphans instead of being re-linked to the
+  villager they belong to.
+
+### Added
+- **Idle villagers with their own needs.** Instead of picking a leisure spot at
+  random, villagers now build up warmth, company, rest and curiosity over time and
+  choose what to do accordingly — gathering near each other, visiting the animals and
+  the farm, heading for shelter when cold or exposed, and generally preferring the
+  more comfortable parts of the village.
+- **Villagers tell you when they are stuck.** A villager with a problem only you can
+  fix now shows a floating "!" and says what is wrong when you come near: storage
+  nearly full, a missing ingredient named from the recipe they actually know, or an
+  output chest with no room left.
+- **Chests holding a work order are reserved for it.** Villagers no longer fill a
+  work-order chest with unrelated salvage — only that order's output, the recipe's
+  ingredients, the fuel its station burns, and work orders themselves. Every slot
+  taken by something else was a slot the order's output could not land in, which
+  stalled the order outright.
+- **The Village Registry has its own build-menu icon**, rendered from the piece
+  itself, instead of showing the plain table it is built from.
+
 ## [0.2.2] - 2026-06-24
 
 ### Fixed

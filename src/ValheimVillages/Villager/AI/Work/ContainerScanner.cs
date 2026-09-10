@@ -116,6 +116,51 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
+        ///     The first ingredient of <paramref name="recipe" /> the containers cannot cover,
+        ///     as a localized display name plus how many are needed and held. Returns false when
+        ///     everything is available.
+        ///
+        ///     <para>Separate from <see cref="FindIngredients" /> because that one answers
+        ///     "can I start?" and throws away WHICH requirement failed — this is what tells the
+        ///     player the shortfall by name.</para>
+        /// </summary>
+        public static bool TryFindMissingIngredient(
+            List<Container> containers, Recipe recipe,
+            out string displayName, out int needed, out int found)
+        {
+            displayName = null;
+            needed = 0;
+            found = 0;
+            if (recipe?.m_resources == null) return false;
+
+            foreach (var req in recipe.m_resources)
+            {
+                if (req.m_resItem == null) continue;
+
+                var prefabName = req.m_resItem.gameObject.name;
+                var have = 0;
+                foreach (var container in containers)
+                {
+                    var inv = container.GetInventory();
+                    if (inv == null) continue;
+                    have += CountByPrefab(inv, prefabName);
+                }
+
+                if (have >= req.m_amount) continue;
+
+                var token = req.m_resItem.m_itemData?.m_shared?.m_name;
+                displayName = string.IsNullOrEmpty(token)
+                    ? prefabName
+                    : Localization.instance.Localize(token);
+                needed = req.m_amount;
+                found = have;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         ///     Check if required ingredients for a recipe exist across the given containers.
         ///     Returns a list describing where each ingredient can be found, or null if missing.
         /// </summary>
@@ -283,7 +328,15 @@ namespace ValheimVillages.Villager.AI.Work
 
         public static bool IsWorkOrderItem(ItemDrop.ItemData item)
         {
-            var prefabName = item?.m_dropPrefab?.name;
+            return IsWorkOrderPrefab(item?.m_dropPrefab?.name);
+        }
+
+        /// <summary>
+        ///     Same test as <see cref="IsWorkOrderItem" /> for callers that only hold a prefab
+        ///     name (a ground drop's prefab, a recipe output) and not the live ItemData.
+        /// </summary>
+        public static bool IsWorkOrderPrefab(string prefabName)
+        {
             if (string.IsNullOrEmpty(prefabName)) return false;
 
             var def = ItemFactory.GetDefinition(prefabName);

@@ -62,6 +62,13 @@ namespace ValheimVillages.Scheduling
 
             foreach (var task in tasks)
             {
+                // Hard filter: a row minted for a specific villager is only ever that
+                // villager's (see CandidateTask.OwnerVillagerId). Checked here as well as in
+                // DualEncoderScheduler because the reranker is also called directly.
+                if (!string.IsNullOrEmpty(task.OwnerVillagerId) &&
+                    task.OwnerVillagerId != query.VillagerId)
+                    continue;
+
                 // Hard filter: villager must have the required capability.
                 if (!string.IsNullOrEmpty(task.RequiredCapability) &&
                     (query.Capabilities == null || !query.Capabilities.Contains(task.RequiredCapability)))

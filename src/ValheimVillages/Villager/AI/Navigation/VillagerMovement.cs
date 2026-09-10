@@ -167,16 +167,67 @@ namespace ValheimVillages.Villager.AI.Navigation
             approach = target;
             var probes = s_probeOffsets;
             var pathBuffer = new List<Vector3>();
-            for (var i = 0; i < probes.Length; i++)
+
+            // Two passes. The first insists the point sit at least an agent-radius away from
+            // the NavMesh EDGE; the second accepts anything reachable, as before.
+            //
+            // A point can sample onto the mesh and still be unusable: the villager agent has
+            // radius 0.4, so it cannot centre itself 4cm from an edge — NavMeshAgent clamps and
+            // the villager stalls a metre short with desiredVel high and velocity zero, looking
+            // frozen mid-task. (Observed: a cooking station whose approach landed on a 1.62m²
+            // piece-region, 0.04m from its edge.) This is distinct from `minClearance`, which is
+            // a physics capsule test against structure colliders — that point passed physics
+            // fine; it was the mesh geometry that made it unstandable.
+            //
+            // The fallback pass matters: rejecting outright would make a station with no roomy
+            // approach simply unreachable, which is worse than a tight approach that usually
+            // works. Preference, not veto.
+            for (var pass = 0; pass < 2; pass++)
             {
-                var probe = target + probes[i];
-                if (!TryFindReachableApproach(probe, ApproachProbeRadius, out var hit, minClearance)) continue;
-                if (hullPredicate != null && !hullPredicate(hit)) continue;
-                if (!TryFindCompletePath(pathSource, hit, pathBuffer)) continue;
-                approach = hit;
-                return true;
+                var requireEdgeRoom = pass == 0;
+                for (var i = 0; i < probes.Length; i++)
+                {
+                    var probe = target + probes[i];
+                    if (!TryFindReachableApproach(probe, ApproachProbeRadius, out var hit, minClearance)) continue;
+                    if (requireEdgeRoom && !HasEdgeClearance(hit)) continue;
+                    if (hullPredicate != null && !hullPredicate(hit)) continue;
+                    if (!TryFindCompletePath(pathSource, hit, pathBuffer)) continue;
+
+                    if (!requireEdgeRoom)
+                        Plugin.Log?.LogDebug(
+                            $"[Approach] ({target.x:F1},{target.z:F1}): no edge-clear approach; " +
+                            $"falling back to a tight one at ({hit.x:F1},{hit.z:F1}) — " +
+                            "villager may stall short.");
+
+                    approach = hit;
+                    return true;
+                }
             }
+
             return false;
+        }
+
+        /// <summary>Minimum distance from a NavMesh edge for a villager to stand comfortably.</summary>
+        private const float AgentEdgeClearance = 0.45f;
+
+        /// <summary>
+        ///     True when <paramref name="point" /> is far enough from the nearest NavMesh edge for
+        ///     the villager agent (radius 0.4) to actually occupy it.
+        /// </summary>
+        private static bool HasEdgeClearance(Vector3 point)
+        {
+            if (!VillagerAgentType.IsRegistered) return true;
+
+            var filter = new NavMeshQueryFilter
+            {
+                agentTypeID = VillagerAgentType.UnityAgentTypeID,
+                areaMask = NavMesh.AllAreas,
+            };
+
+            // No edge found means the sample sits well inside a mesh island — that is the
+            // roomy case, not a failure.
+            if (!NavMesh.FindClosestEdge(point, out var edge, filter)) return true;
+            return edge.distance >= AgentEdgeClearance;
         }
 
         private const float ApproachProbeRadius = 1.5f;

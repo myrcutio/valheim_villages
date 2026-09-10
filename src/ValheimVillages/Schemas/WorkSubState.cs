@@ -112,6 +112,18 @@ namespace ValheimVillages.Schemas
         ///     workflow restarts, pulls more from the chest, repeats.
         /// </summary>
         public List<HeldItem> HeldItems = new List<HeldItem>();
+
+        /// <summary>
+        ///     Set when the villager diverts to refuel a cooking station that went cold MID-CYCLE
+        ///     — either on arrival (ingredients already in hand) or while the food was cooking
+        ///     (ingredients already committed to the station). Either way the fuelling leg must
+        ///     return straight to the station afterwards.
+        ///
+        ///     <para>The normal fuelling leg runs BEFORE gathering and correctly re-gathers when
+        ///     it finishes; re-gathering in the divert case would withdraw a SECOND set of
+        ///     ingredients from the chests.</para>
+        /// </summary>
+        public bool ResumeAtStationAfterFueling;
     }
 
     /// <summary>

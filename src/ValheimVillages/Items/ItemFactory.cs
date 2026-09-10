@@ -308,6 +308,19 @@ namespace ValheimVillages.Items
             var existing = objectDB.GetItemPrefab(def.name);
             if (existing != null)
             {
+                // Rescue it from the previous template root. On hot reload FullCleanup has
+                // already called Object.Destroy on the old "vv_prefab_templates" (it carries the
+                // vv_ prefix the cleanup sweep reclaims), and Unity defers that to end-of-frame.
+                // So `existing` still reads as alive here and gets counted as registered — then
+                // dies with its parent before the deferred ZNetScene mirror runs on the next
+                // tick, which silently purges it as null. The item ends up in ObjectDB but never
+                // in ZNetScene, so `spawn <name>` finds nothing. Re-parenting onto the freshly
+                // built root detaches it from the doomed one so it survives the frame.
+                var parent = existing.transform.parent;
+                if (parent != null && parent.name == PrefabTemplates.RootName
+                                   && parent != PrefabTemplates.Root)
+                    existing.transform.SetParent(PrefabTemplates.Root, false);
+
                 // Re-apply definition so hot-reloaded code changes (icons, etc.) take effect
                 ApplyItemDefinition(existing, def);
                 if (!_prefabs.Contains(existing))

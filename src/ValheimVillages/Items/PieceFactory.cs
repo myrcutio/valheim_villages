@@ -85,6 +85,7 @@ namespace ValheimVillages.Items
                 ConfigurePiece(existing);
                 ConfigureInteraction(existing);
                 GraftProps(existing, zNetScene);
+                ApplyIcon(existing);
                 _registryPrefab = existing;
                 Plugin.Log?.LogInfo("[PieceFactory] Re-grafted registry prefab after hot reload");
                 return;
@@ -102,9 +103,28 @@ namespace ValheimVillages.Items
             ConfigurePiece(prefab);
             ConfigureInteraction(prefab);
             GraftProps(prefab, zNetScene);
+            ApplyIcon(prefab);
 
             _registryPrefab = prefab;
             Plugin.Log?.LogInfo($"[PieceFactory] Built registry prefab from '{BaseTable}'");
+        }
+
+        /// <summary>
+        ///     Replace the inherited <c>piece_table</c> icon with a render of THIS prefab, so the
+        ///     build menu shows the scribe's desk rather than a bare dining table. Runs after
+        ///     <see cref="GraftProps" /> — the papers and candles are the whole point, so the
+        ///     shot has to be taken once they exist.
+        /// </summary>
+        private static void ApplyIcon(GameObject prefab)
+        {
+            var piece = prefab.GetComponent<Piece>();
+            if (piece == null) return;
+
+            var sprite = Icons.RegistryIconRenderer.Render(prefab);
+            if (sprite == null) return; // renderer already logged why; keep the inherited icon
+
+            piece.m_icon = sprite;
+            Plugin.Log?.LogInfo("[PieceFactory] Rendered the registry build-menu icon from the prefab");
         }
 
         private static void ConfigurePiece(GameObject prefab)
@@ -450,8 +470,127 @@ namespace ValheimVillages.Items
                 return;
             }
 
+            // Drop entries destroyed by an earlier hot reload before adding. Our template
+            // carries the vv_ prefix the cleanup sweep reclaims, so the previous incarnation is
+            // gone while its slot in this table survives. Player.UpdateKnownRecipesList walks
+            // every owned PieceTable and calls GetComponent<Piece>() on each entry, and Unity
+            // throws NullReferenceException (rather than returning null) once the GameObject's
+            // native side is gone — so ONE dead entry here breaks every inventory change, for
+            // vanilla items too (symptom: picking anything up throws from Inventory.AddItem).
+            var dead = table.m_pieces.RemoveAll(go => go == null);
+            if (dead > 0)
+                Plugin.Log?.LogInfo(
+                    $"[PieceFactory] Purged {dead} destroyed piece(s) from the Hammer table");
+
             if (!table.m_pieces.Contains(piece))
                 table.m_pieces.Add(piece);
+
+            RefreshBuildMenuLists(table, piece);
+        }
+
+        /// <summary>
+        ///     Rebuild the build menu's DERIVED piece lists after a hot reload.
+        ///
+        ///     <para>Purging <c>m_pieces</c> above is only half the job. <c>UpdateAvailable</c>
+        ///     also caches the Piece COMPONENTS in <c>m_availablePieces</c> / <c>m_enabledPieces</c>
+        ///     / <c>m_availablePiecesByCategory</c>, and nothing but <c>UpdateAvailable</c> ever
+        ///     clears those — so the destroyed component from the previous incarnation stays put.
+        ///     Reading a managed field off it (<c>m_repairPiece</c>, which is all
+        ///     <c>ByUsagePieceList</c> touches) is harmless, so it survives the filter; then
+        ///     <c>BuildUiPieceButton.Setup</c> -> <c>FavoritePieceList.IsFavorite</c> dereferences
+        ///     <c>piece.gameObject</c> and Unity throws NullReferenceException. Opening the Hammer
+        ///     menu fails outright.</para>
+        ///
+        ///     <para>Equipping the hammer rebuilds them for free (<c>Humanoid.SetupEquipment</c> ->
+        ///     <c>SetPlaceMode</c> -> <c>UpdateAvailablePiecesList</c>), which is why this only
+        ///     bites when the hammer was already in hand across the reload — and why there is
+        ///     nothing to do when the player is not in place mode with this table. Re-selecting the
+        ///     CURRENT category is the public route to that same rebuild and changes nothing else.</para>
+        /// </summary>
+        private static int CountDestroyed(PieceTable table)
+        {
+            var n = 0;
+            foreach (var p in table.m_availablePieces)
+                if (p == null)
+                    n++;
+            return n;
+        }
+
+        /// <summary>
+        ///     Drop every destroyed Piece from the table's three derived caches. Needs neither a
+        ///     player nor place mode, which is the whole point: this is what actually stops
+        ///     <c>FavoritePieceList.IsFavorite</c> dereferencing a corpse.
+        /// </summary>
+        private static int PurgeDestroyedFromCaches(PieceTable table)
+        {
+            var removed = table.m_availablePieces.RemoveWhere(p => p == null);
+            removed += table.m_enabledPieces.RemoveWhere(p => p == null);
+
+            // m_availablePiecesByCategory is private and holds the same components again, keyed
+            // by build category — the grid the menu actually indexes into.
+            var field = typeof(PieceTable).GetField(
+                "m_availablePiecesByCategory", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field?.GetValue(table) is List<List<Piece>> byCategory)
+                foreach (var list in byCategory)
+                    removed += list.RemoveAll(p => p == null);
+
+            return removed;
+        }
+
+        private static void RefreshBuildMenuLists(PieceTable table, GameObject piece)
+        {
+            var before = CountDestroyed(table);
+
+            // Always drop the corpses first. This needs no player and no place mode, and it is
+            // what stops the NRE on its own.
+            var purged = PurgeDestroyedFromCaches(table);
+
+            // If the player is holding this very tool, the engine can rebuild the caches from
+            // m_pieces, which additionally puts the freshly built prefab back on the menu right
+            // away. Not reachable otherwise (UpdateAvailable is gated on m_buildPieces) — but
+            // then the next equip does it: SetupEquipment -> SetPlaceMode -> UpdateAvailable.
+            var player = Player.m_localPlayer;
+            var inPlaceMode = player != null && (object)player.GetBuildTool() == (object)table;
+            if (inPlaceMode)
+                player.SetBuildCategory(table.GetSelectedCategory());
+
+            var scratch = ClearBuildUiScratch();
+
+            Plugin.Log?.LogInfo(
+                $"[PieceFactory] Build-menu caches: destroyed {before} -> {CountDestroyed(table)} " +
+                $"(purged {purged} across 3 caches, placeMode={inPlaceMode}, " +
+                $"BuildUi scratch dropped {scratch}); " +
+                $"table={table.GetInstanceID()} registry={piece.GetInstanceID()} " +
+                $"available={table.m_availablePieces.Count}");
+        }
+
+        /// <summary>
+        ///     Empty <c>BuildUi.m_tempPieces</c>, the scratch list the build menu builds its
+        ///     buttons from.
+        ///
+        ///     <para>This is why a clean PieceTable was not enough. <c>UpdatePieceButtons</c>
+        ///     APPENDS into that persistent list, walks it, and clears it at the END —
+        ///     so the NullReferenceException thrown mid-walk skips the clear and strands the dead
+        ///     Piece there forever. Every later open re-walks the same corpse and throws again,
+        ///     even once every table cache is spotless, and each failed open appends the whole
+        ///     available set on top. Nothing in the engine ever recovers it short of a restart.</para>
+        ///
+        ///     <para>A healthy run always leaves this list empty, so anything found in it is
+        ///     debris from an aborted one and clearing is exactly right. Returns how much was
+        ///     dropped — non-zero means the menu had previously thrown.</para>
+        /// </summary>
+        private static int ClearBuildUiScratch()
+        {
+            var buildUi = Hud.instance != null ? Hud.instance.m_buildUi : null;
+            if (buildUi == null) return 0;
+
+            var field = typeof(BuildUi).GetField(
+                "m_tempPieces", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field?.GetValue(buildUi) is not List<Piece> temp) return 0;
+
+            var n = temp.Count;
+            temp.Clear();
+            return n;
         }
 
         /// <summary>Remove previously grafted prop children (named "vv_*") before re-grafting on hot reload.</summary>

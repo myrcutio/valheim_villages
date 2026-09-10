@@ -57,6 +57,8 @@ namespace ValheimVillages.Scheduling.Producers
                     Priority = Mathf.Max(IdleFloor, deficit),
                     ExpiresAt = 0f, // no deadline
                     RequiredCapability = Capability,
+                    // This row is this villager's own work queue — see CandidateTask.OwnerVillagerId.
+                    OwnerVillagerId = ai.UniqueId,
                 });
             }
         }
@@ -69,7 +71,18 @@ namespace ValheimVillages.Scheduling.Producers
             return false;
         }
 
-        /// <summary>Largest unmet fraction across this villager type's chest work orders, in [0,1].</summary>
+        /// <summary>
+        ///     Largest unmet fraction across this villager type's chest work orders, in [0,1],
+        ///     counting ONLY orders the villager could actually act on right now.
+        ///
+        ///     <para>An order whose ingredients are missing contributes nothing. Output
+        ///     shortfall alone is not enough: a CookedMeat order sitting at 5/17 with no RawMeat
+        ///     left keeps a high-priority row on the board forever, and because a directed
+        ///     behavior claims the villager at dispatch step 2, the villager never falls through
+        ///     to the routine tier — it churns BeginAssignment → "no work payload" → abandon
+        ///     every tick and can never idle or relax. The board must only advertise work that
+        ///     can be executed.</para>
+        /// </summary>
         private static float OrderDeficit(Village village, VillagerAI ai)
         {
             var containers = ContainerScanner.FindNearbyContainers(ai.HomeAnchor, WorkSettings.ChestScanRadius);
@@ -81,11 +94,27 @@ namespace ValheimVillages.Scheduling.Producers
                 if (o == null || o.MaxQuantity <= 0) continue;
                 var have = ContainerScanner.CountAcrossContainers(containers, o.ItemPrefabName);
                 if (have >= o.MaxQuantity) continue;
+                if (!CanSupply(containers, o.ItemPrefabName, ai.VillagerType)) continue;
+
                 var deficit = Mathf.Clamp01((o.MaxQuantity - have) / (float)o.MaxQuantity);
                 if (deficit > worst) worst = deficit;
             }
 
             return worst;
+        }
+
+        /// <summary>
+        ///     True if the recipe for <paramref name="itemPrefabName" /> exists and every
+        ///     ingredient it needs is currently present in the villager's chests. Uses the same
+        ///     scan the crafting flow itself runs, so the board's view and the behavior's view
+        ///     of "can I do this?" cannot drift apart.
+        /// </summary>
+        private static bool CanSupply(
+            System.Collections.Generic.List<Container> containers, string itemPrefabName, string villagerType)
+        {
+            var recipe = StationMatcher.FindRecipeForNpc(itemPrefabName, villagerType);
+            if (recipe == null) return false;
+            return ContainerScanner.FindIngredients(containers, recipe) != null;
         }
     }
 }

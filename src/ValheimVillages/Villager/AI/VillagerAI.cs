@@ -355,6 +355,16 @@ namespace ValheimVillages.Villager.AI
 
                 return false;
             }
+            // Idle drives are continuous state, so they advance every frame — NOT inside the
+            // behavior-reselect gate below. Ticking them there would advance them by one
+            // frame's dt per reselect interval, which runs ~40x slow and effectively freezes
+            // the idle rotation. Every villager accumulates pressure whatever it is doing;
+            // only one actually lingering at a spot sheds it.
+            Behaviors.Relax.VillagerDrives.Tick(
+                UniqueId, dt,
+                (ActiveBehavior as Behaviors.Relax.RelaxBehavior)?.ServedSpotType,
+                CurrentState == BehaviorState.Traveling);
+
             if (m_lastBehaviorUpdateTime > 0.0)
             {
                 m_lastBehaviorUpdateTime -= dt;
