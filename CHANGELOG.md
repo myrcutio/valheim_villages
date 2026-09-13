@@ -5,6 +5,13 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-09-13
+
+### Fixed
+- Village navmesh graph no longer gets confused sometimes on dedicated servers
+- Work orders in chests should be owned by dedicated server, not by individual players
+- Villagers prioritize tasks more intelligently
+
 ## [0.2.3] - 2026-09-09
 
 ### Fixed
