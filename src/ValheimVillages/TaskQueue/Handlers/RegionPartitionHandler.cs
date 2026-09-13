@@ -39,6 +39,26 @@ namespace ValheimVillages.TaskQueue.Handlers
         internal const float FloodFillRadius = 30f;
         private const float RegionBuildRadius = 30f;
 
+        /// <summary>How far out to look for player-built pieces when sizing the footprint.</summary>
+        private const float FootprintScanRadius = 100f;
+
+        /// <summary>
+        ///     Hard cap on footprint AREA, in 1m flood cells. A runaway build (a fence line
+        ///     running off across the map) must not balloon the grid — repartition cost scales
+        ///     with cell count — but the limit has to be on area, not on a symmetric radius:
+        ///     real bases are lopsided (the test base runs 93m west of its anchor centroid and
+        ///     44m east), and a symmetric radius clamps the long side while wasting budget on
+        ///     the short one. Clamping is logged loudly because it means the flood seeds inside
+        ///     the build again and those cells mis-classify as outside.
+        /// </summary>
+        private const int MaxFootprintCells = 40000;
+
+        /// <summary>
+        ///     Clearance kept between the outermost village piece and the footprint border, so
+        ///     the seed ring sits demonstrably OUTSIDE the perimeter wall rather than on it.
+        /// </summary>
+        private const float SeedRingMargin = 4f;
+
         private const float VillageClusterRadius = 50f;
 
         /// <summary>
@@ -258,6 +278,16 @@ namespace ValheimVillages.TaskQueue.Handlers
                     { "regions", "0" }, { "links", "0" }, { "reason", "no_anchors_or_areas" },
                 });
             }
+
+            // The footprint border is the outside-flood's SEED RING. Anchors +/- RegionBuildRadius
+            // knows nothing about where the player actually walled, so a perimeter beyond that
+            // radius leaves the ring INSIDE the village — the flood is seeded inside its own walls
+            // and classifies the whole settlement as outside (measured: 88% of the footprint carved
+            // NotWalkable, villagers stranded, registry stuck on "needs a perimeter wall"). Grow
+            // the box until every player-built piece is inside it.
+            var footprintMark = PartitionProfile.Mark();
+            ExpandFootprintToVillagePieces(anchors, ref minX, ref minZ, ref maxX, ref maxZ);
+            PartitionProfile.Since("footprint", footprintMark);
 
             // Bake a fresh NavMesh surface for the villager agent (slot 31)
             // over this village's bounds. Without this, RegionBuilder's
@@ -485,6 +515,10 @@ namespace ValheimVillages.TaskQueue.Handlers
             // Uses the bake's RAW set (whole-footprint when unsealed) — NOT the committed
             // classification, which is empty on a degenerate 0-region partition. A rebake
             // fires on the next piece change, so the flag self-clears once the wall closes.
+            // Publish the footprint so chest/station lookups can ask "is this inside the
+            // village?" instead of guessing with a radius around one villager's anchor.
+            village.SetFootprint(minX, minZ, maxX, maxZ);
+
             if (bakeResult.OutsideCells != null &&
                 village.TryGetAnchor(VillageAnchor.Registry, out var registryPos))
             {
@@ -727,6 +761,101 @@ namespace ValheimVillages.TaskQueue.Handlers
         ///     villager homes (1 m²) so a registry co-located with a villager home isn't
         ///     counted twice. Returns a fresh list (GetAllAnchorPositions already does).
         /// </summary>
+        /// <summary>
+        ///     Grow the partition footprint until every player-built piece near the anchors lies
+        ///     inside it, with <see cref="SeedRingMargin" /> of clearance.
+        ///     <para>
+        ///         WHY: the footprint border doubles as the outside-flood's seed ring. Sizing it
+        ///         from anchors alone (+/- <see cref="RegionBuildRadius" />) means a village whose
+        ///         perimeter wall sits further out than that radius gets its flood seeded INSIDE
+        ///         the wall — the flood then fills the settlement from within and every open cell
+        ///         is classified outside, so the bake carves it NotWalkable and villagers strand.
+        ///         Only pieces count (a <see cref="Piece" /> component): terrain, rocks and trees
+        ///         must NOT drag the footprint outward.
+        ///     </para>
+        /// </summary>
+        private static void ExpandFootprintToVillagePieces(
+            List<Vector3> anchors, ref float minX, ref float minZ, ref float maxX, ref float maxZ)
+        {
+            if (anchors == null || anchors.Count == 0) return;
+
+            float cx = 0f, cz = 0f;
+            foreach (var a in anchors)
+            {
+                cx += a.x;
+                cz += a.z;
+            }
+
+            cx /= anchors.Count;
+            cz /= anchors.Count;
+
+            var mask = Villager.AI.Navigation.NavMeshBakeManager.SolidMask;
+            if (mask == 0) return;
+
+            var hits = Physics.OverlapBox(
+                new Vector3(cx, 0f, cz),
+                new Vector3(FootprintScanRadius, 5000f, FootprintScanRadius),
+                Quaternion.identity, mask, QueryTriggerInteraction.Ignore);
+
+            float pMinX = float.MaxValue, pMinZ = float.MaxValue;
+            float pMaxX = float.MinValue, pMaxZ = float.MinValue;
+            var pieces = 0;
+            foreach (var col in hits)
+            {
+                if (col == null) continue;
+                if (col.GetComponentInParent<Piece>() == null) continue;
+                var b = col.bounds;
+                if (b.min.x < pMinX) pMinX = b.min.x;
+                if (b.min.z < pMinZ) pMinZ = b.min.z;
+                if (b.max.x > pMaxX) pMaxX = b.max.x;
+                if (b.max.z > pMaxZ) pMaxZ = b.max.z;
+                pieces++;
+            }
+
+            if (pieces == 0) return;
+
+            var wantMinX = Mathf.Min(minX, pMinX - SeedRingMargin);
+            var wantMinZ = Mathf.Min(minZ, pMinZ - SeedRingMargin);
+            var wantMaxX = Mathf.Max(maxX, pMaxX + SeedRingMargin);
+            var wantMaxZ = Mathf.Max(maxZ, pMaxZ + SeedRingMargin);
+
+            // Clamp on AREA, shrinking both axes by the same factor about the anchor centroid
+            // so a lopsided build keeps its long side instead of losing it to a symmetric cap.
+            var wantW = wantMaxX - wantMinX;
+            var wantH = wantMaxZ - wantMinZ;
+            float clampMinX = wantMinX, clampMinZ = wantMinZ;
+            float clampMaxX = wantMaxX, clampMaxZ = wantMaxZ;
+
+            var wantCells = (double)wantW * wantH;
+            if (wantCells > MaxFootprintCells)
+            {
+                var scale = Mathf.Sqrt(MaxFootprintCells / (float)wantCells);
+                clampMinX = cx - (cx - wantMinX) * scale;
+                clampMaxX = cx + (wantMaxX - cx) * scale;
+                clampMinZ = cz - (cz - wantMinZ) * scale;
+                clampMaxZ = cz + (wantMaxZ - cz) * scale;
+
+                Plugin.Log?.LogWarning(
+                    $"[Region] Footprint clamped to {MaxFootprintCells} cells around " +
+                    $"({cx:F0},{cz:F0}): village pieces span x[{pMinX:F0}..{pMaxX:F0}] " +
+                    $"z[{pMinZ:F0}..{pMaxZ:F0}] ({wantCells:F0} cells wanted). The flood will " +
+                    "seed INSIDE the build on every side and those cells will mis-classify as " +
+                    "outside. Split this into separate villages.");
+            }
+
+            var grewX = clampMaxX - clampMinX - (maxX - minX);
+            var grewZ = clampMaxZ - clampMinZ - (maxZ - minZ);
+            minX = clampMinX;
+            minZ = clampMinZ;
+            maxX = clampMaxX;
+            maxZ = clampMaxZ;
+
+            if (grewX > 0.01f || grewZ > 0.01f)
+                Plugin.Log?.LogInfo(
+                    $"[Region] Footprint grown to enclose {pieces} village piece collider(s): " +
+                    $"+{grewX:F1}m x, +{grewZ:F1}m z -> x[{minX:F0}..{maxX:F0}] z[{minZ:F0}..{maxZ:F0}]");
+        }
+
         private static List<Vector3> CollectSeedAnchors()
         {
             var anchors = VillagerAIManager.GetAllAnchorPositions();

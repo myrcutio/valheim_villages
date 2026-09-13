@@ -92,6 +92,17 @@ namespace ValheimVillages.Villager.AI.Navigation
         private static readonly int s_pieceMask =
             LayerMask.GetMask("Default", "static_solid", "piece");
 
+        /// <summary>
+        ///     THE definition of "solid" for this mod: every layer the bake voxelizes into
+        ///     the agent NavMesh. Anything here blocks a villager, so anything here must
+        ///     also block the perimeter flood — otherwise the flood pours through geometry
+        ///     the navmesh treats as a wall and classifies the village interior as outside.
+        ///     Exposed so <see cref="RubberBandPrune" /> shares this one value instead of
+        ///     keeping its own (it used to test "piece" alone, which made every stone /
+        ///     static_solid perimeter invisible to the flood).
+        /// </summary>
+        internal static int SolidMask => s_pieceMask;
+
         private static NavMeshBakeHolder Holder
         {
             get

@@ -160,7 +160,7 @@ namespace ValheimVillages.Behaviors.Crafting
 
             if (!StationFuelHelper.DiagnoseFuelNeed(station, out var need)) return false;
 
-            var containers = ContainerScanner.FindNearbyContainers(
+            var containers = ContainerScanner.FindVillageContainers(
                 m_ai.HomeAnchor, Settings.WorkSettings.ChestScanRadius);
             if (!StationFuelHelper.FindFuelInContainers(containers, need.FuelItemPrefab, out var fc))
                 return false;

@@ -168,9 +168,16 @@ namespace ValheimVillages.Villager.AI
                 if (ai == null) continue;
 
                 var anchor = ai.m_homeAnchor;
-                var containers = Work.ContainerScanner.FindNearbyContainers(
+                // Must match WorkOrderScanHandler exactly: inChests is the number the scan
+                // gates the quota on, so counting it over a different chest set makes this
+                // diagnostic lie about completion.
+                var containers = Work.ContainerScanner.FindVillageContainers(
                     anchor, Settings.WorkSettings.ChestScanRadius);
-                var village = Villages.Entity.VillageRegistry.GetVillageAt(anchor);
+                // GetVillageAt needs graph coverage; on a client whose graph hasn't replicated
+                // it returns null and this printed village=(none) orders=0 for a villager that
+                // plainly has both. Same anchor fallback the rest of the mod uses.
+                var village = Villages.Entity.VillageRegistry.GetVillageAt(anchor)
+                              ?? Villages.Entity.VillageRegistry.FindNearAnchor(anchor);
                 var orders = Work.ContainerScanner.FindAllWorkOrders(village, ai.VillagerType);
                 var vid = village != null ? village.VillageId : "(none)";
                 var owns = village?.Zdo != null && village.Zdo.IsOwner();

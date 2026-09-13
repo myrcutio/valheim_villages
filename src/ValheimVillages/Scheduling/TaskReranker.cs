@@ -41,15 +41,59 @@ namespace ValheimVillages.Scheduling
     /// </summary>
     public static class TaskReranker
     {
-        public const int FeatureCount = 6;
+        /// <summary>
+        ///     Width of the MLP input. Bumping this invalidates every persisted model — see the
+        ///     version guard in <see cref="SchedulerModelPersistence" />, which discards an
+        ///     incompatible blob loudly rather than loading weights of the wrong shape.
+        /// </summary>
+        public const int FeatureCount = 6 + 3 + ItemBuckets;
+
+        /// <summary>
+        ///     Hashed one-hot width for item identity. Without SOME identity signal a learner can
+        ///     only ever learn "prefer a big deficit": every craft order shares
+        ///     <see cref="TaskKind.CraftWork" />, so nothing else in the vector distinguishes
+        ///     CarrotSeeds from CookedMeat. The hashing trick keeps the width fixed as the recipe
+        ///     list grows; collisions make two items share a bucket, which blurs them together
+        ///     rather than breaking anything.
+        /// </summary>
+        public const int ItemBuckets = 8;
+
+        /// <summary>Seconds since last worked at which the staleness feature saturates.</summary>
+        private const float StalenessNorm = 600f;
+
+        /// <summary>
+        ///     The chosen task plus the inputs that chose it, so a trainer can attribute an
+        ///     outcome back to the exact feature vector that produced the pick. Without this the
+        ///     learner would have to recompute features later, against state that has since moved.
+        /// </summary>
+        public readonly struct RerankPick
+        {
+            public readonly CandidateTask Task;
+            public readonly float[] Features; // defensive copy of the winning vector
+            public readonly float Closed; // closed-form component, the learner's baseline
+
+            public RerankPick(CandidateTask task, float[] features, float closed)
+            {
+                Task = task;
+                Features = features;
+                Closed = closed;
+            }
+        }
 
         public static CandidateTask SelectBest(
             in VillagerQuery query,
             IReadOnlyList<CandidateTask> tasks,
             Mlp mlp,
             RerankSettings settings)
+            => SelectBestExplained(in query, tasks, mlp, settings).Task;
+
+        public static RerankPick SelectBestExplained(
+            in VillagerQuery query,
+            IReadOnlyList<CandidateTask> tasks,
+            Mlp mlp,
+            RerankSettings settings)
         {
-            if (tasks == null || tasks.Count == 0) return null;
+            if (tasks == null || tasks.Count == 0) return default;
             if (settings == null) throw new ArgumentNullException(nameof(settings));
             if (mlp != null && mlp.InputCount != FeatureCount)
                 throw new ArgumentException(
@@ -58,6 +102,8 @@ namespace ValheimVillages.Scheduling
             var now = Time.time;
             CandidateTask best = null;
             var bestScore = float.NegativeInfinity;
+            var bestClosed = 0f;
+            float[] bestFeatures = null;
             var features = new float[FeatureCount];
 
             foreach (var task in tasks)
@@ -86,34 +132,71 @@ namespace ValheimVillages.Scheduling
 
                 var closed = task.Priority * Sigmoid(settings.SlackSharpness * slack);
 
-                var residual = 0f;
-                if (mlp != null)
-                {
-                    BuildFeatures(features, task, hops, eta, slack, in query, settings);
-                    residual = mlp.Forward(features);
-                }
+                // Always build features — the trainer needs them for the winner even while the
+                // model is untrained (that is exactly when learning has to start).
+                BuildFeatures(features, task, hops, eta, slack, in query, settings);
+                var residual = mlp != null ? mlp.Forward(features) : 0f;
 
                 var score = closed + residual;
                 if (score > bestScore)
                 {
                     bestScore = score;
                     best = task;
+                    bestClosed = closed;
+                    bestFeatures = (float[])features.Clone();
                 }
             }
 
-            return best;
+            return new RerankPick(best, bestFeatures, bestClosed);
         }
 
-        private static void BuildFeatures(
+        internal static void BuildFeatures(
             float[] f, CandidateTask task, int hops, float eta, float slack,
             in VillagerQuery query, RerankSettings s)
         {
+            Array.Clear(f, 0, f.Length);
+
             f[0] = task.Priority;
             f[1] = hops; // raw hop count
             f[2] = eta / s.EtaNorm; // normalized ETA
             f[3] = task.ExpiresAt > 0f ? slack / s.SlackNorm : 1f; // normalized slack
             f[4] = task.ExpiresAt > 0f ? 1f : 0f; // has-deadline flag
             f[5] = query.LastTaskKind == task.Kind ? 1f : 0f; // continuity / inertia
+
+            // --- per-order state (zero for rows that are not a specific work order) ---
+            f[6] = task.StockFraction;
+            f[7] = task.MinShortfall;
+            f[8] = task.LastWorkedAt > 0f
+                ? Mathf.Clamp01((Time.time - task.LastWorkedAt) / StalenessNorm)
+                : 1f; // never worked = maximally stale
+
+            // --- hashed one-hot item identity ---
+            var bucket = ItemBucket(task.TargetItemPrefab);
+            if (bucket >= 0) f[9 + bucket] = 1f;
+        }
+
+        /// <summary>
+        ///     Stable bucket for an item prefab, or -1 when the row is not item-specific.
+        ///     FNV-1a rather than <c>string.GetHashCode</c>: weights are PERSISTED, so the mapping
+        ///     from item to bucket must be identical across sessions and runtimes, and
+        ///     GetHashCode is explicitly not guaranteed to be.
+        /// </summary>
+        internal static int ItemBucket(string itemPrefab)
+        {
+            if (string.IsNullOrEmpty(itemPrefab)) return -1;
+            unchecked
+            {
+                const uint offset = 2166136261;
+                const uint prime = 16777619;
+                var h = offset;
+                foreach (var c in itemPrefab)
+                {
+                    h ^= c;
+                    h *= prime;
+                }
+
+                return (int)(h % ItemBuckets);
+            }
         }
 
         private static float Sigmoid(float x) => 1f / (1f + Mathf.Exp(-x));

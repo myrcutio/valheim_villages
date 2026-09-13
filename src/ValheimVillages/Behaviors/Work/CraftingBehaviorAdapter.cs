@@ -75,7 +75,9 @@ namespace ValheimVillages.Behaviors.Work
             // AssignmentActive until the scan resolves (starts work) or clears (nothing to do).
             // The old `return Crafting.IsWorking` could never be true here, so every craft
             // assignment was wrongly reserved (approach-failed) and churned SelectBest=null.
-            Crafting.TryScanForWork(ignoreScanInterval: true);
+            // Forward the order the reranker actually chose. Null (the farming floor row) keeps
+            // the old self-discovery path.
+            Crafting.TryScanForWork(ignoreScanInterval: true, targetItemPrefab: task?.TargetItemPrefab);
             return Crafting.IsWorking || Crafting.ScanPending;
         }
 

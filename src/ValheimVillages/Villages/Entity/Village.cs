@@ -26,6 +26,7 @@ namespace ValheimVillages.Villages.Entity
         public const string WorkOrdersKey = "vv_village_workorders"; // string — serialized work-order config list (Fix C)
         public const string InvalidKey = "vv_village_invalid"; // int 0/1 — village failed triad validation (recruit blocked)
         public const string NeedsWallKey = "vv_village_needs_wall"; // int 0/1 — outside flood reaches the registry (no perimeter wall)
+        public const string FootprintKey = "vv_village_footprint"; // string "minX minZ maxX maxZ" — XZ extent of the village's pieces
 
         private readonly ZDO m_zdo;
         private RegionGraph m_graph;
@@ -106,6 +107,48 @@ namespace ValheimVillages.Villages.Entity
                 m_zdo.Set(NeedsWallKey, value ? 1 : 0);
                 m_zdo.Persistent = true;
             }
+        }
+
+        /// <summary>
+        ///     The village's XZ footprint — the extent of its player-built pieces, as computed
+        ///     by the partition (<c>ExpandFootprintToVillagePieces</c>) and persisted here so
+        ///     every other subsystem can ask "is this inside the village?" instead of guessing
+        ///     with a fixed radius around one anchor.
+        ///     <para>
+        ///         A radius around an anchor is the wrong model: it is centred on whichever
+        ///         villager is asking, so on a real base the far half of the settlement falls
+        ///         outside it (measured: a Farmer's ingredient chest 23.5m away against a 20m
+        ///         scan radius, so it never saw its own deer meat).
+        ///     </para>
+        ///     Returns false when no partition has run yet — callers must fall back rather
+        ///     than treat an unset footprint as an empty village.
+        /// </summary>
+        public bool TryGetFootprint(out float minX, out float minZ, out float maxX, out float maxZ)
+        {
+            minX = minZ = maxX = maxZ = 0f;
+            var raw = m_zdo.GetString(FootprintKey, "");
+            if (string.IsNullOrEmpty(raw)) return false;
+
+            var parts = raw.Split(' ');
+            if (parts.Length != 4) return false;
+            return float.TryParse(parts[0], System.Globalization.NumberStyles.Float,
+                       System.Globalization.CultureInfo.InvariantCulture, out minX)
+                   && float.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                       System.Globalization.CultureInfo.InvariantCulture, out minZ)
+                   && float.TryParse(parts[2], System.Globalization.NumberStyles.Float,
+                       System.Globalization.CultureInfo.InvariantCulture, out maxX)
+                   && float.TryParse(parts[3], System.Globalization.NumberStyles.Float,
+                       System.Globalization.CultureInfo.InvariantCulture, out maxZ);
+        }
+
+        /// <summary>Persist the footprint computed by the partition. Host-only writer.</summary>
+        public void SetFootprint(float minX, float minZ, float maxX, float maxZ)
+        {
+            if (!CanPersist) return;
+            m_zdo.Set(FootprintKey, string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "{0:R} {1:R} {2:R} {3:R}", minX, minZ, maxX, maxZ));
+            m_zdo.Persistent = true;
         }
 
         /// <summary>

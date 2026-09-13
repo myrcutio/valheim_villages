@@ -868,6 +868,13 @@ namespace ValheimVillages.Items.WorkOrders
             newItemData.m_customData["wo_station"] = station.m_name;
             newItemData.m_customData["wo_item"] = itemPrefabName;
             newItemData.m_customData["wo_item_name"] = itemDisplayName;
+            // Bind the token to the village whose record holds its quota. Without this the
+            // editor has to re-derive the village from the player's position every time it
+            // opens, and with overlapping villages (or an unavailable region graph) that
+            // lookup can land on a DIFFERENT village than the one the order was registered
+            // on — the edit writes record B while the editor keeps reading record A, so the
+            // quota appears stuck at the 1-10 default and no edit ever takes.
+            newItemData.m_customData["wo_village"] = village.VillageId;
 
             // Resolve pretty name for display and tooltip
             var localizedName = Localization.instance.Localize(

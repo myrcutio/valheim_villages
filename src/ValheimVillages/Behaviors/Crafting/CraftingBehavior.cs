@@ -141,7 +141,7 @@ namespace ValheimVillages.Behaviors.Crafting
         ///     If true, enqueue a scan even if the last scan was recent (e.g. right after finishing a
         ///     task).
         /// </param>
-        public bool TryScanForWork(bool ignoreScanInterval = false)
+        public bool TryScanForWork(bool ignoreScanInterval = false, string targetItemPrefab = null)
         {
             if (IsWorking) return false;
             if (ScanPending) return false;
@@ -173,6 +173,8 @@ namespace ValheimVillages.Behaviors.Crafting
                     { "home_x", bp.x.ToString("F2", CultureInfo.InvariantCulture) },
                     { "home_y", bp.y.ToString("F2", CultureInfo.InvariantCulture) },
                     { "home_z", bp.z.ToString("F2", CultureInfo.InvariantCulture) },
+                    // Empty = "pick for yourself" (non-primary mode, or the farming floor row).
+                    { "target_item", targetItemPrefab ?? "" },
                 },
                 Callback = OnWorkOrderScanResult,
             });

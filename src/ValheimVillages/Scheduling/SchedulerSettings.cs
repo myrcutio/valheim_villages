@@ -67,5 +67,21 @@ namespace ValheimVillages.Scheduling
 
         /// <summary>Seconds a task assignment is reserved to one villager.</summary>
         public static float ClaimTtl = 20f;
+
+        /// <summary>
+        ///     Whether the reranker's residual learns online from dispatch outcomes
+        ///     (<see cref="SchedulerTrainer" />). Off leaves the model exactly as loaded, so the
+        ///     scheduler runs on its closed-form utility — the behaviour before any of this existed.
+        /// </summary>
+        public static bool TrainingEnabled = true;
+
+        /// <summary>
+        ///     SGD step size. Small on purpose: samples arrive one dispatch at a time with no
+        ///     batching or replay, so a large rate lets one unlucky fizzle swamp the model.
+        /// </summary>
+        public static float LearningRate = 0.01f;
+
+        /// <summary>Log every training step. Verbose — for tuning sessions, not normal play.</summary>
+        public static bool LogTraining = false;
     }
 }

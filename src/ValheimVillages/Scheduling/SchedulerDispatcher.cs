@@ -87,7 +87,9 @@ namespace ValheimVillages.Scheduling
                     LastTaskKind = null,
                 };
 
-                var best = DualEncoderScheduler.SelectBest(in query, tasks, model.mlp, model.settings);
+                var pick = DualEncoderScheduler.SelectBestExplained(
+                    in query, tasks, model.mlp, model.settings);
+                var best = pick.Task;
                 if (best == null)
                 {
                     Diag(ai, $"SelectBest=null over {tasks.Count} tasks (caps={string.Join(",", ai.BehaviorTags)})");
@@ -102,7 +104,14 @@ namespace ValheimVillages.Scheduling
                 }
 
                 TaskBoard.Claim(best.SourceId, villagerId, now);
-                if (!beh.BeginAssignment(best))
+                var accepted = beh.BeginAssignment(best);
+
+                // One training sample per dispatch: did this pick convert into work? Recorded for
+                // BOTH outcomes — learning only from successes would teach the model nothing about
+                // what to avoid.
+                SchedulerTrainer.Learn(village, model.mlp, model.settings, in pick, accepted ? 1f : 0f);
+
+                if (!accepted)
                 {
                     // No walkable approach right now. Reserve to a sentinel owner so the
                     // dispatcher rotates to a different piece next tick instead of looping

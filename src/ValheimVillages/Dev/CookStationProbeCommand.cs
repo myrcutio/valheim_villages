@@ -30,7 +30,14 @@ namespace ValheimVillages.Dev
             if (args != null && args.Length >= 3 &&
                 float.TryParse(args[1], out var x) && float.TryParse(args[2], out var z))
             {
-                origin = new Vector3(x, origin.y, z);
+                // Resolve Y from the ground, not from the (absent) local player. On a dedicated
+                // server m_localPlayer is null so origin.y stayed 0, and the distance below is
+                // 3D — every station then read ~31m further away than it is (a station 5.6m
+                // away printed d=33.5m), which silently excluded them from small radii.
+                var y = origin.y;
+                if (Player.m_localPlayer == null && ZoneSystem.instance != null)
+                    y = ZoneSystem.instance.GetGroundHeight(new Vector3(x, 0f, z));
+                origin = new Vector3(x, y, z);
                 if (args.Length > 3 && float.TryParse(args[3], out var r)) radius = r;
             }
 

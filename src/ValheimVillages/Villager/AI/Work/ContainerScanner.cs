@@ -22,6 +22,47 @@ namespace ValheimVillages.Villager.AI.Work
         ///     Results are filtered to objects holding a valid ZDO and deduped by ZDO id, so a single
         ///     networked chest is counted exactly once on every peer.</para>
         /// </summary>
+        /// <summary>
+        ///     Every container belonging to the village that contains <paramref name="anchorPos" />,
+        ///     using the village's published XZ footprint rather than a radius around the anchor.
+        ///     <para>
+        ///         A radius is centred on whichever villager is asking, so half a real settlement
+        ///         falls outside it — a Farmer's ingredient chest measured 23.5m from its anchor
+        ///         against a 20m radius, so the scan reported "missing ingredients" while the
+        ///         deer meat sat in a chest reserved for exactly that order.
+        ///     </para>
+        ///     Falls back to <paramref name="fallbackRadius" /> when no village resolves or it has
+        ///     no footprint yet (no partition since world load) — never silently returns nothing.
+        /// </summary>
+        public static List<Container> FindVillageContainers(Vector3 anchorPos, float fallbackRadius)
+        {
+            var village = Villages.Entity.VillageRegistry.GetVillageAt(anchorPos)
+                          ?? Villages.Entity.VillageRegistry.FindNearAnchor(anchorPos);
+
+            if (village == null || !village.TryGetFootprint(
+                    out var minX, out var minZ, out var maxX, out var maxZ))
+                return FindNearbyContainers(anchorPos, fallbackRadius);
+
+            var result = new List<Container>();
+            var seen = new HashSet<ZDOID>();
+            foreach (var container in UnityEngine.Object.FindObjectsOfType<Container>())
+            {
+                if (container == null) continue;
+
+                var nview = container.GetComponent<ZNetView>();
+                var zdo = nview != null ? nview.GetZDO() : null;
+                if (zdo == null) continue;
+
+                var p = container.transform.position;
+                if (p.x < minX || p.x > maxX || p.z < minZ || p.z > maxZ) continue;
+                if (!seen.Add(zdo.m_uid)) continue;
+
+                result.Add(container);
+            }
+
+            return result;
+        }
+
         public static List<Container> FindNearbyContainers(Vector3 center, float radius)
         {
             var result = new List<Container>();
