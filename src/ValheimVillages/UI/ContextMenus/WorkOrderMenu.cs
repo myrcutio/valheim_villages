@@ -42,6 +42,10 @@ namespace ValheimVillages.UI.ContextMenus
         // The quota values as loaded from the record, so SaveToItem only sends a real change.
         private int m_loadedMinimum = 1;
         private int m_loadedMaximum = 10;
+
+        // The village that owns the order being edited, bound ONCE in LoadFromItem and reused
+        // by SaveToItem/DeleteOrder. Re-resolving per call let load and save disagree.
+        private string m_villageId = "";
         private GameObject m_panelRoot;
         private string m_stationDisplay = "";
         private GameObject m_stationLabel;
@@ -265,9 +269,17 @@ namespace ValheimVillages.UI.ContextMenus
             var itemPrefab = GetData(item, "wo_item", "");
             if (!string.IsNullOrEmpty(station) && !string.IsNullOrEmpty(itemPrefab))
             {
-                var village = ResolveVillage();
+                // Bound at load, for the same reason as SaveToItem — deleting from the wrong
+                // village would leave the real record orphaned and still driving villagers.
+                var village = string.IsNullOrEmpty(m_villageId)
+                    ? null
+                    : Villages.Entity.VillageRegistry.FindById(m_villageId);
                 if (village != null)
                     Villager.WorkOrderConfigRpc.RequestDelete(village.VillageId, station, itemPrefab);
+                else
+                    Plugin.Log?.LogError(
+                        $"[WorkOrderMenu] removed the {itemPrefab}@{station} token but its bound village " +
+                        $"'{m_villageId}' did not resolve — the record was NOT deleted.");
             }
 
             var inv = FindInventory(item);
@@ -365,7 +377,9 @@ namespace ValheimVillages.UI.ContextMenus
             // works on a client). Fall back to the token's legacy values only for an un-migrated
             // token with no record entry yet.
             var itemPrefab = GetData(item, "wo_item", "");
-            var village = ResolveVillage();
+            var village = ResolveVillageForItem(item);
+            m_villageId = village?.VillageId ?? "";
+
             if (village != null && !string.IsNullOrEmpty(itemPrefab)
                 && village.TryGetWorkOrder(stationRaw, itemPrefab, out var entry))
             {
@@ -374,6 +388,19 @@ namespace ValheimVillages.UI.ContextMenus
             }
             else
             {
+                // No record entry: either a pre-Fix-C token that was never migrated, or the
+                // village didn't resolve. Log which, because the two look identical on screen
+                // (both show the token's 1-10) and only the second is a fault.
+                if (village == null)
+                    Plugin.Log?.LogError(
+                        $"[WorkOrderMenu] no village resolved for {itemPrefab}@{stationRaw}; showing the " +
+                        "token's values, and saving is disabled until the order re-binds.");
+                else
+                    Plugin.Log?.LogInfo(
+                        $"[WorkOrderMenu] no record entry for {itemPrefab}@{stationRaw} in village " +
+                        $"{village.VillageId}; falling back to the legacy token values " +
+                        "(run vv_migrate_workorders to promote it).");
+
                 m_minimum = int.TryParse(GetData(item, "wo_min", "1"), out var min) ? min : 1;
                 m_maximum = int.TryParse(GetData(item, "wo_max", "10"), out var max) ? max : 10;
             }
@@ -388,15 +415,44 @@ namespace ValheimVillages.UI.ContextMenus
         }
 
         /// <summary>
-        ///     Resolve the village at the editing player — graph coverage if available, else the
-        ///     graph-independent nearest-anchor lookup (works on a client without the region
-        ///     graph). Same pattern as the recruit flow.
+        ///     Resolve the village that OWNS this order, preferring the id stamped on the token.
+        ///     <para>
+        ///         Position lookup is not a stable identity: <c>GetVillageCovering</c> needs a
+        ///         region graph (absent on a client whose graph hasn't replicated) and
+        ///         <c>FindNearAnchor</c> takes the nearest anchor within 30m, so overlapping
+        ///         villages resolve differently as the player moves. Load and save then target
+        ///         different records — the observed "quota stuck at 1-10, edits don't take".
+        ///         The token's stamp pins one village for the order's whole life.
+        ///     </para>
         /// </summary>
-        private static Villages.Entity.Village ResolveVillage()
+        private static Villages.Entity.Village ResolveVillageForItem(ItemDrop.ItemData item)
         {
+            var stamped = GetData(item, "wo_village", "");
+            if (!string.IsNullOrEmpty(stamped))
+            {
+                var bound = Villages.Entity.VillageRegistry.FindById(stamped);
+                if (bound != null) return bound;
+
+                // Fail loud rather than re-bind to whichever village happens to be nearest —
+                // silently re-homing the order is the bug this method exists to prevent.
+                Plugin.Log?.LogError(
+                    $"[WorkOrderMenu] token is bound to village '{stamped}', which did not resolve " +
+                    "(deleted, or its ZDO is not loaded here). Refusing to re-bind.");
+                return null;
+            }
+
+            // Un-stamped legacy token: resolve from position ONCE, then stamp it so it can
+            // never drift again.
             var pos = Player.m_localPlayer != null ? Player.m_localPlayer.transform.position : Vector3.zero;
-            return Villages.Entity.VillageRegistry.GetVillageCovering(pos)
-                   ?? Villages.Entity.VillageRegistry.FindNearAnchor(pos);
+            var village = Villages.Entity.VillageRegistry.GetVillageCovering(pos)
+                          ?? Villages.Entity.VillageRegistry.FindNearAnchor(pos);
+            if (village == null) return null;
+
+            if (item.m_customData == null) item.m_customData = new Dictionary<string, string>();
+            item.m_customData["wo_village"] = village.VillageId;
+            Plugin.Log?.LogInfo(
+                $"[WorkOrderMenu] bound legacy work-order token to village {village.VillageId}");
+            return village;
         }
 
         private void SaveToItem()
@@ -426,11 +482,18 @@ namespace ValheimVillages.UI.ContextMenus
             // writing the chest token. The old PersistEdit path (mutate m_customData ->
             // Inventory.Changed -> owner-gated Container.Save) lost the ownership race against the
             // farmers (and the open-chest SetOwner flip) and got clobbered. No token write here.
-            var village = ResolveVillage();
+            // Use the village bound at load — NOT a fresh position lookup, which is what let the
+            // edit land on a different record than the one the editor read.
+            var village = string.IsNullOrEmpty(m_villageId)
+                ? null
+                : Villages.Entity.VillageRegistry.FindById(m_villageId);
             if (village == null)
             {
                 Player.m_localPlayer?.Message(
-                    MessageHud.MessageType.Center, "No village here — work order quota not saved");
+                    MessageHud.MessageType.Center, "Work order has no village — quota not saved");
+                Plugin.Log?.LogError(
+                    $"[WorkOrderMenu] quota not saved for {itemPrefab}@{station}: bound village " +
+                    $"'{m_villageId}' did not resolve at save time.");
                 return;
             }
 

@@ -93,7 +93,18 @@ namespace ValheimVillages.Villages.Entity
                 var id = zdo.GetString(Village.IdKey);
                 if (string.IsNullOrEmpty(id)) continue;
 
-                if (!s_live.TryGetValue(id, out var village))
+                // Re-wrap whenever the cache does not point at THIS ZDO. s_live is a static that
+                // survives a reconnect / world reload, but the ZDOs it wrapped do not: the server
+                // restarts, every ZDO is destroyed and re-sent as a new instance, and the cached
+                // Village is left holding a dead one. Reading it yields VillageId "" and every
+                // anchor unset — so the client resolved a hollow village, found no work orders on
+                // it, and the work-order editor fell back to the token's 1-10 defaults while the
+                // host's record still held the real quotas.
+                // The id above is read from the LIVE zdo, so it is always correct; only the
+                // wrapper can be stale. FindById already guarded this with IsValid; this did not.
+                if (!s_live.TryGetValue(id, out var village)
+                    || !village.IsValid
+                    || !ReferenceEquals(village.Zdo, zdo))
                 {
                     village = new Village(zdo);
                     s_live[id] = village;

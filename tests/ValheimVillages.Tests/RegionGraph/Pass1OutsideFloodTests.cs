@@ -15,7 +15,14 @@ public class Pass1OutsideFloodTests
     private static HashSet<long> Flood(
         GridEnv env, int gxMin, int gzMin, int gxMax, int gzMax, out int seeds) =>
         RubberBandPrune.PerimeterOutsideFlood(
-            gxMin, gzMin, gxMax, gzMax, env.CellY, env.WallBlocks, out seeds);
+            gxMin, gzMin, gxMax, gzMax, env.CellY, env.WallBlocks, null, out seeds);
+
+    /// <summary>Flood with an impassable-cell predicate (production passes deep water here).</summary>
+    private static HashSet<long> Flood(
+        GridEnv env, int gxMin, int gzMin, int gxMax, int gzMax,
+        Func<int, int, float, bool> impassable, out int seeds) =>
+        RubberBandPrune.PerimeterOutsideFlood(
+            gxMin, gzMin, gxMax, gzMax, env.CellY, env.WallBlocks, impassable, out seeds);
 
     [Fact]
     public void OpenGrid_EveryCellIsOutside()
@@ -76,6 +83,40 @@ public class Pass1OutsideFloodTests
     }
 
     [Fact]
+    public void ImpassableMoat_ShieldsTheInterior_WithoutAnyWall()
+    {
+        // A village ringed by water instead of a wall (production: cells more than 1m
+        // below sea level). NO wall pieces anywhere — the moat alone must bound the
+        // village. Impassable ring = the border of the 2..6 block; interior is 3..5.
+        // Note a single channel COLUMN would shield nothing: the whole grid border is
+        // seeded, so the flood would simply route around it. Only a closed ring works.
+        bool Moat(int gx, int gz, float _) =>
+            gx >= 2 && gx <= 6 && gz >= 2 && gz <= 6 &&
+            (gx == 2 || gx == 6 || gz == 2 || gz == 6);
+
+        var outside = Flood(new GridEnv(), 0, 0, 8, 8, Moat, out _);
+
+        Assert.Equal(81 - 9, outside.Count);               // only the 3x3 interior is spared
+        Assert.Contains(GridEnv.Key(0, 0), outside);       // open ground beyond the moat
+        Assert.Contains(GridEnv.Key(2, 4), outside);       // the moat itself is still carved
+        Assert.DoesNotContain(GridEnv.Key(4, 4), outside); // village centre, shielded by water
+        Assert.DoesNotContain(GridEnv.Key(3, 5), outside);
+    }
+
+    [Fact]
+    public void ImpassableCells_AreStillMarkedOutside_SoTheBakeCarvesThem()
+    {
+        // Nothing walks on deep water, so those cells must remain in the outside set
+        // (the bake carves outside cells NotWalkable). Making the whole grid impassable
+        // yields exactly the seeds: each is marked, none expands.
+        var outside = Flood(new GridEnv(), 0, 0, 4, 4, (_, _, _) => true, out var seeds);
+
+        Assert.Equal(seeds, outside.Count);
+        Assert.Contains(GridEnv.Key(0, 0), outside);
+        Assert.DoesNotContain(GridEnv.Key(2, 2), outside);
+    }
+
+    [Fact]
     public void WallGate_HonorsTheHeightArguments()
     {
         // The helper must pass each cell's Y to the wall gate. With a gate that
@@ -87,11 +128,11 @@ public class Pass1OutsideFloodTests
             (_, _, _, _, ya, yb) => Math.Abs(ya - yb) > 0.5f;
 
         var flat = RubberBandPrune.PerimeterOutsideFlood(
-            0, 0, 4, 4, (_, _) => 0f, stepGate, out _);
+            0, 0, 4, 4, (_, _) => 0f, stepGate, null, out _);
         Assert.Equal(25, flat.Count);
 
         var stepped = RubberBandPrune.PerimeterOutsideFlood(
-            0, 0, 4, 4, (gx, gz) => gx + gz, stepGate, out var seeds);
+            0, 0, 4, 4, (gx, gz) => gx + gz, stepGate, null, out var seeds);
         Assert.Equal(seeds, stepped.Count);                   // no expansion past seeds
         Assert.DoesNotContain(GridEnv.Key(2, 2), stepped);    // interior never reached
     }

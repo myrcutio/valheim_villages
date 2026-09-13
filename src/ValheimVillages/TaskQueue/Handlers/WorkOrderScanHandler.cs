@@ -44,7 +44,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                 return TaskResult.Fail($"Villager {villagerId} not found in active villagers");
 
             // Find containers
-            var containers = ContainerScanner.FindNearbyContainers(
+            // Village-scoped, not a radius around this villager: the chest holding an order's
+            // ingredients is routinely further from one villager's anchor than the radius.
+            var containers = ContainerScanner.FindVillageContainers(
                 anchorPos, WorkSettings.ChestScanRadius);
 
             if (containers.Count == 0) return TaskResult.Fail("No containers found near anchor");
@@ -78,6 +80,64 @@ namespace ValheimVillages.TaskQueue.Handlers
             // stable. Completion still scans ALL nearby chests (CountAcrossContainers).
             var depositChest = ContainerScanner.FindNearestContainer(containers, anchorPos);
 
+            // Work the LARGEST SHORTFALL first. The loop below returns on the first order it can
+            // fulfil, so record order alone starves everything after the first unsatisfied entry:
+            // CarrotSeeds sat at 0/20 and was never even evaluated because CookedDeerMeat at 4/20
+            // came earlier in the list. Nothing is logged in that case either — the in-loop return
+            // skips EmitRejections — so a starved order is invisible rather than reported.
+            //
+            // Deficit is (Max - have)/Max, the SAME metric CraftWorkProducer already advertises as
+            // the board priority for this villager, so the board's "how badly does this crafter
+            // need to work" and the scan's "which order do I pick" cannot drift apart.
+            //
+            // Counts are computed once here and reused in the loop: CountAcrossContainers walks
+            // every container per order, and the loop needs the same number for its quota check.
+            var existingCounts = new Dictionary<string, int>();
+            foreach (var m in allMatches)
+            {
+                if (m?.ItemPrefabName == null || existingCounts.ContainsKey(m.ItemPrefabName)) continue;
+                existingCounts[m.ItemPrefabName] =
+                    ContainerScanner.CountAcrossContainers(containers, m.ItemPrefabName);
+            }
+
+            float DeficitOf(WorkOrderMatch m)
+            {
+                if (m?.ItemPrefabName == null || m.MaxQuantity <= 0) return 0f;
+                var have = existingCounts.TryGetValue(m.ItemPrefabName, out var c) ? c : 0;
+                return Mathf.Clamp01((m.MaxQuantity - have) / (float)m.MaxQuantity);
+            }
+
+            // Stable within equal deficits: ties keep record order so behaviour stays predictable
+            // for a player who deliberately ordered their queue.
+            allMatches = allMatches
+                .OrderByDescending(DeficitOf)
+                .ToList();
+
+            // The scheduler picked a SPECIFIC order (one board row per order, scored by the
+            // reranker). Honour it instead of re-deciding here — otherwise the reranker's choice
+            // is silently overridden by this handler's own ordering and per-order scoring is
+            // pointless. Empty attribute = "pick for yourself" (non-primary mode, farming floor).
+            task.Attributes.TryGetValue("target_item", out var targetItem);
+            if (!string.IsNullOrEmpty(targetItem))
+            {
+                var directed = allMatches
+                    .Where(m => m.ItemPrefabName == targetItem)
+                    .ToList();
+                if (directed.Count > 0)
+                {
+                    allMatches = directed;
+                }
+                else
+                {
+                    // The row went stale between produce and scan (quota filled, ingredients
+                    // consumed). Fall through to the full list rather than returning empty: the
+                    // villager is already here and the trip should not be wasted.
+                    Plugin.Log?.LogInfo(
+                        $"[WorkOrderScan] {ai.NpcName}: directed order '{targetItem}' is no longer " +
+                        "actionable; falling back to best-deficit selection.");
+                }
+            }
+
             var rejections = new List<RejectionRecord>();
             foreach (var match in allMatches)
             {
@@ -85,9 +145,10 @@ namespace ValheimVillages.TaskQueue.Handlers
                 // deterministic deposit chest.
                 match.SourceContainer = depositChest;
 
-                // Check existing output quantity
-                var existingCount = ContainerScanner.CountAcrossContainers(
-                    containers, match.ItemPrefabName);
+                // Check existing output quantity (precomputed above for the deficit sort).
+                var existingCount = existingCounts.TryGetValue(match.ItemPrefabName, out var have)
+                    ? have
+                    : ContainerScanner.CountAcrossContainers(containers, match.ItemPrefabName);
 
                 if (existingCount >= match.MaxQuantity)
                 {
@@ -370,6 +431,10 @@ namespace ValheimVillages.TaskQueue.Handlers
                     "work_order_matched",
                     $"matched work order for {match.ItemPrefabName} " +
                     $"(need: {ingredientDesc}, station: {match.StationName})");
+
+                // Staleness signal for the reranker: mark on START, not on offer — a row that is
+                // offered and fizzles must still read as stale, or it stops gaining ground.
+                Scheduling.OrderActivity.MarkWorked(village.VillageId, match.ItemPrefabName);
 
                 // Return result with context as payload for the callback
                 return TaskResult.Ok(

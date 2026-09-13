@@ -101,6 +101,15 @@ namespace ValheimVillages.Villager.AI.Navigation
         // reached this cell, and if not, what blocked it?".
         internal static HashSet<long> LastOutsideCells;
         internal static Dictionary<long, float> LastXzMaxY;
+
+        /// <summary>
+        ///     Terrain-only cell heights — the map Pass 1 actually floods on. Kept apart from
+        ///     <see cref="LastXzMaxY" /> (terrain UNION piece, max) because the combined map
+        ///     reports a roof or upper storey as the cell's height: a diagnostic that probed
+        ///     for walls at that altitude was testing open sky several metres above the
+        ///     surface the flood walks on, and reported WallBlocks=false for real walls.
+        /// </summary>
+        internal static Dictionary<long, float> LastXzMaxYTerrain;
         internal static int LastGxMin, LastGzMin, LastGxMax, LastGzMax;
         internal static float LastCell;
         internal static int LastPieceMask;
@@ -111,6 +120,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             LastOutsideCells = null;
             LastXzMaxY = null;
+            LastXzMaxYTerrain = null;
             LastGxMin = LastGzMin = LastGxMax = LastGzMax = 0;
             LastCell = 0f;
             LastPieceMask = 0;
@@ -149,10 +159,15 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (regionIds == null || regionIds.Count == 0) return stats;
             if (lookupGrid == null || lookupGrid.Count == 0) return stats;
 
-            var pieceMask = LayerMask.GetMask("piece");
+            // Must be the BAKE's notion of solid, not the "piece" layer alone: Valheim puts
+            // stone pieces (stone_fence, stone walls) and world rock/cliff props on
+            // static_solid, and a few build pieces on Default. Probing only "piece" made a
+            // stone perimeter invisible to the flood, so it poured through the wall and
+            // classified the whole interior as outside.
+            var pieceMask = NavMeshBakeManager.SolidMask;
             if (pieceMask == 0)
             {
-                Plugin.Log?.LogWarning("[RubberBand] Skipped: 'piece' layer not found");
+                Plugin.Log?.LogWarning("[RubberBand] Skipped: no solid layers found");
                 return stats;
             }
 
@@ -285,6 +300,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 (ax, az, bx, bz, ya, yb) =>
                     WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
                     || GateBlocksStep(ax, az, bx, bz, cell, gateSeals),
+                IsDeepWaterCell,
                 out var perimeterSeeds);
             stats.PerimeterSeeds = perimeterSeeds;
 
@@ -871,6 +887,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (!combinedXzMaxY.TryGetValue(kv.Key, out var existing) || kv.Value > existing)
                     combinedXzMaxY[kv.Key] = kv.Value;
             LastXzMaxY = combinedXzMaxY;
+            LastXzMaxYTerrain = new Dictionary<long, float>(xzMaxYTerrain);
             LastGxMin = gxMin;
             LastGzMin = gzMin;
             LastGxMax = gxMax;
@@ -979,6 +996,19 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// </summary>
         internal static float DiagnoseCellY(int gx, int gz)
         {
+            // Terrain-only, matching Pass 1's cellY provider. Using the combined map here
+            // made every wall probe near a roofed cell fire metres too high.
+            if (LastXzMaxYTerrain == null) return 0f;
+            return GetCellY(gx, gz, LastXzMaxYTerrain,
+                LastCell > 0f ? LastCell : RegionGraph.LookupCellSize);
+        }
+
+        /// <summary>
+        ///     Highest surface of ANY kind in the cell (terrain or piece) — for display only.
+        ///     Never feed this to a wall probe; see <see cref="DiagnoseCellY" />.
+        /// </summary>
+        internal static float DiagnoseSurfaceMaxY(int gx, int gz)
+        {
             if (LastXzMaxY == null) return 0f;
             return GetCellY(gx, gz, LastXzMaxY, LastCell > 0f ? LastCell : RegionGraph.LookupCellSize);
         }
@@ -999,6 +1029,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             int gxMin, int gzMin, int gxMax, int gzMax,
             Func<int, int, float> cellY,
             Func<int, int, int, int, float, float, bool> wallBlocks,
+            Func<int, int, float, bool> cellImpassable,
             out int perimeterSeedCount)
         {
             var outsideCells = new HashSet<long>();
@@ -1024,6 +1055,13 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var curKey = queue.Dequeue();
                 UnpackXz(curKey, out var gx, out var gz);
                 var curY = cellY(gx, gz);
+
+                // An impassable cell (deep water) stays MARKED outside — nothing walks there, so
+                // the bake should still carve it — but the flood may not travel THROUGH it. This
+                // is what makes a shoreline a real village boundary: the flood wades the last
+                // shallow cell and stops instead of crossing the bay and coming ashore inside.
+                if (cellImpassable != null && cellImpassable(gx, gz, curY)) continue;
+
                 for (var d = 0; d < 4; d++)
                 {
                     int ngx = gx + dx[d], ngz = gz + dz[d];
@@ -1152,7 +1190,8 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// </summary>
         public static HashSet<long> ComputeOutsideCellsForBake(Bounds bounds)
         {
-            var pieceMask = LayerMask.GetMask("piece");
+            // Same solid mask as Pass 1 and the bake — see NavMeshBakeManager.SolidMask.
+            var pieceMask = NavMeshBakeManager.SolidMask;
             if (pieceMask == 0) return new HashSet<long>();
             if (ZoneSystem.instance == null) return new HashSet<long>();
 
@@ -1194,7 +1233,28 @@ namespace ValheimVillages.Villager.AI.Navigation
                     (wallCells.Contains(XzKey(ax, az)) || wallCells.Contains(XzKey(bx, bz)))
                     && WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
                     || GateBlocksStep(ax, az, bx, bz, cell, gateSeals),
+                IsDeepWaterCell,
                 out _);
+        }
+
+        /// <summary>
+        ///     Water deeper than this (metres below the sea surface) is a barrier to the
+        ///     perimeter flood. Shallower than this is wadeable, so a beach still connects the
+        ///     village to the world and the flood correctly comes ashore there.
+        /// </summary>
+        private const float MaxWadeDepth = 1.0f;
+
+        /// <summary>
+        ///     The flood's impassable-cell test: true when the cell's ground sits more than
+        ///     <see cref="MaxWadeDepth" /> below the world water level. Returns false when
+        ///     there is no ZoneSystem (tests / teardown), so behaviour is unchanged rather
+        ///     than silently walling everything off.
+        /// </summary>
+        private static bool IsDeepWaterCell(int gx, int gz, float groundY)
+        {
+            var zs = ZoneSystem.instance;
+            if (zs == null) return false;
+            return groundY < zs.m_waterLevel - MaxWadeDepth;
         }
 
         /// <summary>

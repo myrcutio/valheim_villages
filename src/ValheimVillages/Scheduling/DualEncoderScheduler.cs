@@ -27,8 +27,12 @@ namespace ValheimVillages.Scheduling
     {
         public static CandidateTask SelectBest(
             in VillagerQuery query, IReadOnlyList<CandidateTask> tasks, Mlp mlp, RerankSettings settings)
+            => SelectBestExplained(in query, tasks, mlp, settings).Task;
+
+        public static TaskReranker.RerankPick SelectBestExplained(
+            in VillagerQuery query, IReadOnlyList<CandidateTask> tasks, Mlp mlp, RerankSettings settings)
         {
-            if (tasks == null || tasks.Count == 0) return null;
+            if (tasks == null || tasks.Count == 0) return default;
 
             var now = Time.time;
             var qEmb = VillagerEncoder.Encode(
@@ -45,7 +49,7 @@ namespace ValheimVillages.Scheduling
                 scored.Add((t, Dot(qEmb, tEmb)));
             }
 
-            if (scored.Count == 0) return null;
+            if (scored.Count == 0) return default;
 
             // Stage 3: retrieve top-M by embedding score (descending).
             scored.Sort((a, b) => b.dot.CompareTo(a.dot));
@@ -54,7 +58,7 @@ namespace ValheimVillages.Scheduling
             for (var i = 0; i < m; i++) topM.Add(scored[i].task);
 
             // Stage 4: exact rerank (region-hop distance + slack gate + learned residual).
-            return TaskReranker.SelectBest(in query, topM, mlp, settings);
+            return TaskReranker.SelectBestExplained(in query, topM, mlp, settings);
         }
 
         private static bool IsCapable(in VillagerQuery query, CandidateTask task)

@@ -41,7 +41,14 @@ namespace ValheimVillages.Dev
                 && float.TryParse(args[rest], out var x)
                 && float.TryParse(args[rest + 1], out var z))
             {
-                origin = new Vector3(x, origin.y, z);
+                // Resolve Y from the ground, not from the (absent) local player. On a dedicated
+                // server m_localPlayer is null so origin.y stayed 0, and FindNearbyContainers
+                // measures in 3D — every chest then read ~31m further away than it is, and a
+                // radius query near the village returned nothing at all.
+                var y = origin.y;
+                if (Player.m_localPlayer == null && ZoneSystem.instance != null)
+                    y = ZoneSystem.instance.GetGroundHeight(new Vector3(x, 0f, z));
+                origin = new Vector3(x, y, z);
                 if (args.Length > rest + 2 && float.TryParse(args[rest + 2], out var r)) radius = r;
             }
 

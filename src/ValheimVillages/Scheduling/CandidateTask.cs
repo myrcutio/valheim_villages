@@ -74,5 +74,44 @@ namespace ValheimVillages.Scheduling
         ///     locking it against the villager it was minted for, and against everyone else.</para>
         /// </summary>
         public string OwnerVillagerId;
+
+        /// <summary>
+        ///     For <see cref="TaskKind.CraftWork" />: the output item prefab this row represents,
+        ///     or null for a generic "this crafter has work" row (the farming floor candidate).
+        ///
+        ///     <para>Work orders used to be collapsed into ONE row per villager whose priority was
+        ///     the worst deficit across all of them, so the reranker could only decide WHETHER a
+        ///     villager crafts — never WHICH order. Which-order fell to the first-viable scan loop,
+        ///     and orders late in record order were starved outright. One row per order lets the
+        ///     reranker score them against each other with its spatial and slack terms, and gives a
+        ///     trainer something per-order to learn from.</para>
+        ///
+        ///     <para>Plumbed through <c>BeginAssignment</c> -> <c>TryScanForWork</c> ->
+        ///     the <c>work_order_scan</c> attributes, so the behavior executes THIS order instead
+        ///     of re-deciding for itself.</para>
+        /// </summary>
+        public string TargetItemPrefab;
+
+        /// <summary>
+        ///     How stocked this order is, <c>have / Max</c> in [0,1]. Distinct from
+        ///     <see cref="Priority" /> (the deficit): a learner can use the level and the gap
+        ///     differently, e.g. treating "nearly empty" as urgent beyond what a linear deficit says.
+        /// </summary>
+        public float StockFraction;
+
+        /// <summary>
+        ///     How far below the player's MINIMUM this order sits, <c>(Min - have) / Max</c> clamped
+        ///     to [0,1]. Zero once the floor is met. Min is the number the player actually asked to
+        ///     always have on hand, so falling under it is a different kind of urgent from merely
+        ///     being under Max — the closed-form deficit cannot express that distinction.
+        /// </summary>
+        public float MinShortfall;
+
+        /// <summary>
+        ///     <c>Time.time</c> when this order was last started, or 0 if never. Feeds a staleness
+        ///     feature so a long-ignored order can gain ground — the anti-starvation signal, learned
+        ///     rather than hard-coded.
+        /// </summary>
+        public float LastWorkedAt;
     }
 }

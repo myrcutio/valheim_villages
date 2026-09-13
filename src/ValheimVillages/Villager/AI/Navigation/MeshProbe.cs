@@ -571,6 +571,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             if (!RubberBandPrune.HasSnapshot ||
                 RubberBandPrune.LastOutsideCells == null ||
+                RubberBandPrune.LastXzMaxYTerrain == null ||
                 RubberBandPrune.LastXzMaxY == null ||
                 RubberBandPrune.LastCell <= 0f)
             {
@@ -586,8 +587,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             var selfOutside = RubberBandPrune.LastOutsideCells.Contains(selfKey);
             var selfPopulated = RubberBandPrune.LastXzMaxY.ContainsKey(selfKey);
             var selfY = RubberBandPrune.DiagnoseCellY(gx, gz);
+            var selfSurfaceY = RubberBandPrune.DiagnoseSurfaceMaxY(gx, gz);
             sb.AppendLine(
-                $"  cell gx={gx} gz={gz}  Y={selfY:F2}  " +
+                $"  cell gx={gx} gz={gz}  floodY={selfY:F2} (terrain; what Pass 1 walks on)  " +
+                $"surfaceMaxY={selfSurfaceY:F2} (incl. pieces/roofs)  " +
                 $"populated={(selfPopulated ? "yes" : "no")}  " +
                 $"in_outsideCells={(selfOutside ? "YES" : "NO")}");
             sb.AppendLine(
