@@ -82,7 +82,27 @@ namespace ValheimVillages.Dev
 
                 if (testItem != null)
                     sb.AppendLine($"    Allows('{testItem}') = " +
-                                  WorkOrderChestPolicy.Allows(c, testItem));
+                                  WorkOrderChestPolicy.Allows(c, testItem) +
+                                  (WorkOrderChestPolicy.HoldsOrder(c, testItem, null)
+                                      ? "  <-- holds this order"
+                                      : ""));
+            }
+
+            // The allow-list is a veto; it does not say WHERE the item actually lands. Print the
+            // resolver's pick too, because "every chest allows it" was exactly the state in which
+            // every order's output still piled into the one box nearest the anchor.
+            if (testItem != null)
+            {
+                var target = WorkOrderChestPolicy.ResolveDepositChest(
+                    containers, testItem, null, 1, origin);
+                sb.AppendLine(target == null
+                    ? $"  deposit target for '{testItem}': none (no chest has room)"
+                    : $"  deposit target for '{testItem}': {target.m_name} @ " +
+                      $"({target.transform.position.x:F1},{target.transform.position.y:F1}," +
+                      $"{target.transform.position.z:F1})" +
+                      (WorkOrderChestPolicy.HoldsOrder(target, testItem, null)
+                          ? " [its own work-order chest]"
+                          : " [spill — no order chest with room]"));
             }
 
             if (containers.Count == 0) sb.AppendLine("  (no chests in range)");

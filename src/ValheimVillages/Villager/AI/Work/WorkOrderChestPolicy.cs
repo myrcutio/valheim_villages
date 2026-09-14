@@ -60,6 +60,122 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
+        ///     True when this chest holds the token for THAT order — the same (item, station)
+        ///     pair, not merely an order that happens to use the item. The station half is only
+        ///     compared when both sides name one, so a legacy token with no station still
+        ///     matches its own item.
+        /// </summary>
+        public static bool HoldsOrder(Container container, string itemPrefab, string station)
+        {
+            if (string.IsNullOrEmpty(itemPrefab)) return false;
+
+            var inv = container?.GetInventory();
+            if (inv == null) return false;
+
+            var orders = ReadOrders(inv);
+            if (orders == null) return false;
+
+            foreach (var order in orders)
+            {
+                if (order.Item != itemPrefab) continue;
+                if (!string.IsNullOrEmpty(station) && !string.IsNullOrEmpty(order.Station)
+                    && order.Station != station) continue;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        ///     Where an order's goods belong. The chest the player parked the order's token in is
+        ///     that order's home — putting the token there is how the player says "this job, and
+        ///     its output, lives here" — so it wins over every other candidate regardless of
+        ///     distance.
+        ///
+        ///     <para>Without this the deposit chest was simply the container nearest the village
+        ///     anchor, shared by every order: a settlement with a labelled chest per order had all
+        ///     of its cooked food, carrots and honey piled into whichever unreserved box happened
+        ///     to sit closest to the registry, while the labelled chests held nothing but their
+        ///     own tokens.</para>
+        ///
+        ///     <para>Falls back to the nearest chest that <see cref="Allows" /> the item and has
+        ///     room, so a full home chest stalls nothing — the spill is logged, because a player
+        ///     who labelled a chest wants to know when it stopped being used.</para>
+        ///
+        ///     Returns null only when no chest in the village will take the item.
+        /// </summary>
+        public static Container ResolveDepositChest(
+            List<Container> containers, string itemPrefab, string station, int amount, Vector3 near)
+        {
+            return Resolve(
+                containers, itemPrefab, station, near,
+                c => ContainerScanner.CanAcceptItem(c, itemPrefab, amount));
+        }
+
+        /// <summary>
+        ///     Item-data overload, for filing a picked-up ground drop: same home-chest-first
+        ///     ordering, but capacity is measured against the real stack (and quality) rather
+        ///     than a prefab count. The order's station is unknown to a haul, so the item alone
+        ///     identifies the home chest.
+        /// </summary>
+        public static Container ResolveDepositChest(
+            List<Container> containers, ItemDrop.ItemData item, Vector3 near)
+        {
+            return Resolve(
+                containers, item?.m_dropPrefab?.name, null, near,
+                c => ContainerScanner.CanAcceptItemData(c, item));
+        }
+
+        private static Container Resolve(
+            List<Container> containers, string itemPrefab, string station, Vector3 near,
+            System.Func<Container, bool> hasRoom)
+        {
+            if (containers == null || string.IsNullOrEmpty(itemPrefab)) return null;
+
+            Container home = null, spill = null, fullHome = null;
+            float homeSq = float.MaxValue, spillSq = float.MaxValue;
+
+            foreach (var container in containers)
+            {
+                if (container == null) continue;
+
+                var isHome = HoldsOrder(container, itemPrefab, station);
+
+                if (!hasRoom(container))
+                {
+                    if (isHome) fullHome = container;
+                    continue;
+                }
+
+                var distSq = (container.transform.position - near).sqrMagnitude;
+
+                if (isHome)
+                {
+                    if (distSq >= homeSq) continue;
+                    homeSq = distSq;
+                    home = container;
+                    continue;
+                }
+
+                if (!Allows(container, itemPrefab)) continue;
+                if (distSq >= spillSq) continue;
+                spillSq = distSq;
+                spill = container;
+            }
+
+            if (home != null) return home;
+
+            if (fullHome != null)
+                Plugin.Log?.LogInfo(
+                    $"[ChestPolicy] Work-order chest for '{itemPrefab}' is full; " +
+                    (spill != null
+                        ? $"spilling to '{spill.m_name}' at {spill.transform.position}."
+                        : "no other chest will take it either."));
+
+            return spill;
+        }
+
+        /// <summary>
         ///     The chest's reservation as a one-line summary, for <c>vv_chestpolicy</c>. Null when
         ///     the chest holds no work order.
         /// </summary>

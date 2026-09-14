@@ -117,16 +117,16 @@ namespace ValheimVillages.UI.Alerts
                 // so this outranks both other alerts. Checked per-order because the villager is
                 // blocked on ONE specific chest; the village-wide fraction below can sit
                 // comfortably under the threshold while the chest that matters is jammed.
-                if (TryDescribeFullOutputChest(village, ai, mine, out var jammed))
+                if (TryDescribeFullOutputChest(village, ai, mine, out var jammed, out var jammedItem))
                 {
-                    marker.Set(jammed);
+                    marker.Set(jammed, jammedItem);
                     continue;
                 }
 
                 // Per-villager ingredient shortfall takes precedence over storage: it is specific.
-                if (TryDescribeShortfall(village, ai, mine, out var shortfall))
+                if (TryDescribeShortfall(village, ai, mine, out var shortfall, out var shortItem))
                 {
-                    marker.Set(shortfall);
+                    marker.Set(shortfall, shortItem);
                     continue;
                 }
 
@@ -175,9 +175,11 @@ namespace ValheimVillages.UI.Alerts
         ///     ingredients have run out, phrased for the player.
         /// </summary>
         private static bool TryDescribeShortfall(
-            Village village, VillagerAI ai, List<Container> containers, out string message)
+            Village village, VillagerAI ai, List<Container> containers,
+            out string message, out string itemPrefab)
         {
             message = null;
+            itemPrefab = null;
 
             var orders = ContainerScanner.FindAllWorkOrders(village, ai.VillagerType);
             foreach (var o in orders)
@@ -204,6 +206,7 @@ namespace ValheimVillages.UI.Alerts
                 message = found > 0
                     ? $"I need more {missing} for the {outputName} — only {found} of {needed} left!"
                     : $"I'm out of {missing} for the {outputName}!";
+                itemPrefab = o.ItemPrefabName;
                 return true;
             }
 
@@ -255,26 +258,28 @@ namespace ValheimVillages.UI.Alerts
         ///     the alert cannot claim a chest is fine while the scan refuses to work from it.
         /// </summary>
         private static bool TryDescribeFullOutputChest(
-            Village village, VillagerAI ai, List<Container> containers, out string message)
+            Village village, VillagerAI ai, List<Container> containers,
+            out string message, out string itemPrefab)
         {
             message = null;
+            itemPrefab = null;
             if (containers == null || containers.Count == 0) return false;
 
-            // FindAllWorkOrders leaves SourceContainer null on purpose. The scan then routes
-            // every order's deposit to ONE deterministic chest — the nearest to the village
-            // anchor — so "some chest somewhere has room" is the wrong question: the villager is
-            // blocked whenever THAT chest is full, even with space elsewhere. Mirror the scan's
-            // own choice or the alert silently disagrees with the behaviour it describes.
-            var depositChest = ContainerScanner.FindNearestContainer(containers, village.Anchor);
-            if (depositChest == null) return false;
-
+            // FindAllWorkOrders leaves SourceContainer null on purpose; the scan resolves each
+            // order's deposit chest itself — the chest holding that order's token first, then the
+            // nearest chest that will take the item. Ask the SAME resolver, or the alert disagrees
+            // with the behaviour it describes: "some chest somewhere has room" is not the question,
+            // and neither is "the chest nearest the anchor is full".
             var orders = ContainerScanner.FindAllWorkOrders(village, ai.VillagerType);
             foreach (var o in orders)
             {
                 if (o == null || o.MaxQuantity <= 0) continue;
-                if (ContainerScanner.CanAcceptItem(depositChest, o.ItemPrefabName, 1)) continue;
+                if (WorkOrderChestPolicy.ResolveDepositChest(
+                        containers, o.ItemPrefabName, o.StationName, 1, village.Anchor) != null)
+                    continue;
 
                 message = $"The chest is full — I've nowhere to put the {DisplayName(o)}!";
+                itemPrefab = o.ItemPrefabName;
                 return true;
             }
 

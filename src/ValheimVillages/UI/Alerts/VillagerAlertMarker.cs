@@ -43,18 +43,44 @@ namespace ValheimVillages.UI.Alerts
         private GameObject m_badge;
         private float m_nextSpeakTime;
         private string m_message;
+        private string m_itemPrefab;
 
         /// <summary>The line this villager will say. Empty clears the alert entirely.</summary>
         public string Message => m_message;
 
-        /// <summary>Raise (or update) the alert. Re-arms the spoken line when the text changes.</summary>
-        public void Set(string message)
+        /// <summary>
+        ///     The work order this alert is about, so the Tasks tab can open on the row that
+        ///     explains the badge instead of the player having to guess which of several blocked
+        ///     entries the "!" meant. Null for a village-wide alert (storage) that belongs to no
+        ///     single order.
+        /// </summary>
+        public string ItemPrefab => m_itemPrefab;
+
+        /// <summary>
+        ///     The alert currently raised on this villager, or null when it has nothing to say.
+        ///     A marker component lingers after its condition clears (it just hides the badge),
+        ///     so "has the component" is not the same question as "has something to tell me".
+        /// </summary>
+        public static VillagerAlertMarker Find(GameObject villager)
+        {
+            var marker = villager != null ? villager.GetComponent<VillagerAlertMarker>() : null;
+            return marker != null && !string.IsNullOrEmpty(marker.m_message) ? marker : null;
+        }
+
+        /// <summary>
+        ///     Raise (or update) the alert. Re-arms the spoken line when the text changes.
+        ///     <paramref name="itemPrefab" /> names the order the alert is about; leave it null
+        ///     for a village-wide condition.
+        /// </summary>
+        public void Set(string message, string itemPrefab = null)
         {
             if (string.IsNullOrEmpty(message))
             {
                 Clear();
                 return;
             }
+
+            m_itemPrefab = itemPrefab;
 
             if (m_message != message)
             {
@@ -64,7 +90,8 @@ namespace ValheimVillages.UI.Alerts
                 // Log raise/change (not every evaluation) so the alert is verifiable from the
                 // log. Without this the badge is rendered-only state with no read-out, which
                 // makes "is it actually firing?" unanswerable outside the game window.
-                Plugin.Log?.LogInfo($"[VillageAlert] {name}: \"{message}\"");
+                Plugin.Log?.LogInfo($"[VillageAlert] {name}: \"{message}\"" +
+                                    (itemPrefab != null ? $" (order: {itemPrefab})" : ""));
             }
 
             EnsureBadge(true);
@@ -76,6 +103,7 @@ namespace ValheimVillages.UI.Alerts
             if (!string.IsNullOrEmpty(m_message))
                 Plugin.Log?.LogInfo($"[VillageAlert] {name}: cleared");
             m_message = null;
+            m_itemPrefab = null;
             EnsureBadge(false);
         }
 

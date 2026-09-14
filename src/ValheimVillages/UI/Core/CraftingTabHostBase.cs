@@ -84,10 +84,43 @@ namespace ValheimVillages.UI.Core
             return s_instance;
         }
 
+        /// <summary>
+        ///     Row to select as soon as the incoming tab's list has been built. Set by
+        ///     <see cref="FocusAlertRow" /> just before the tab switch, because the list
+        ///     elements the selection refers to do not exist until the switch rebuilds them.
+        /// </summary>
+        private int m_pendingListSelection = -1;
+
+        /// <summary>
+        ///     Open the tab that owns the row the subject's alert is about, and select that row.
+        ///     No-op when no tab claims the alert, which leaves the default tab and first row —
+        ///     the behaviour before there was an alert to follow.
+        /// </summary>
+        protected void FocusAlertRow()
+        {
+            if (!m_active || m_tabHandler == null || !HasSubject) return;
+
+            for (var i = 0; i < m_tabs.Count; i++)
+            {
+                if (m_tabs[i] is not IAlertFocusTab<TSubject> focus) continue;
+
+                var row = focus.FindAlertRow(CurrentSubject);
+                if (row < 0) continue;
+
+                m_pendingListSelection = row;
+                // forceSelect: the alert's tab may already BE the active one (it is the default
+                // for a non-crafting villager), and SetActiveTab returns early without firing
+                // ActiveTabChanged in that case — so the row would never be applied.
+                m_tabHandler.SetActiveTab(m_firstCustomTabIndex + i, true);
+                return;
+            }
+        }
+
         /// <summary>Shared activation: subclasses bind their subject, then call this.</summary>
         protected void ActivateCore(bool hasCraftingRecipes, string headerName)
         {
             m_active = true;
+            m_pendingListSelection = -1;
             m_hasCraftingRecipes = hasCraftingRecipes;
             m_lastUpdateTime = Time.time;
             m_headerName = headerName;

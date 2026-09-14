@@ -210,15 +210,17 @@ namespace ValheimVillages.Behaviors.Tidy
             if (containers.Count == 0) return;
 
             foreach (var itemName in itemNames)
-            foreach (var container in containers)
             {
                 // A chest holding a work order is reserved for that order's own goods; burnt
                 // meat swept off a station is exactly the kind of filler that would eat the
-                // slots the order's output needs. Skip those chests unless the sweep happens
-                // to be carrying something the order actually uses.
-                if (!WorkOrderChestPolicy.Allows(container, itemName)) continue;
-                if (ContainerScanner.TryDepositItem(container, itemName, 1))
-                    break;
+                // slots the order's output needs. The resolver skips those chests unless the
+                // sweep is carrying something the order actually uses — and when the swept item
+                // IS an order's output (a finished dish left on the station), it goes to that
+                // order's own chest rather than to the first box in range.
+                var target = WorkOrderChestPolicy.ResolveDepositChest(
+                    containers, itemName, null, 1, station.transform.position);
+                if (target == null) continue;
+                ContainerScanner.TryDepositItem(target, itemName, 1);
             }
         }
 

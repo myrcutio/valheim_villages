@@ -5,6 +5,17 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-09-13
+
+### New
+- Farmers can now harvest honey
+- villagers will pause when their menu is opened
+- crafted items will prefer being stored adjacent to their work orders.  other items will avoid being stored in chests with work orders.
+
+### Fixed
+- Scheduling villagers no longer get stuck on lower priority, unfulfillable tasks
+
+
 ## [0.2.4] - 2026-09-13
 
 ### Fixed

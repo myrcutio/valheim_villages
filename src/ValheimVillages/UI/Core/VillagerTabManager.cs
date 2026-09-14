@@ -60,6 +60,13 @@ namespace ValheimVillages.UI.Core
 
         public static void Deactivate() => DeactivateInstance();
 
+        /// <summary>
+        ///     Open on the task the villager's floating "!" is about. Called right after
+        ///     <see cref="Activate" />, so the tab handler exists and the row can be applied as
+        ///     part of the switch.
+        /// </summary>
+        public static void FocusAlert() => s_instance?.FocusAlertRow();
+
         // Real tabs implement IVillagerTabUI : ITabContent<VillagerBehaviorBridge>;
         // a bare IVillagerTab without the UI surface is a registration error and
         // should fail loudly (cast throws) rather than be silently dropped.

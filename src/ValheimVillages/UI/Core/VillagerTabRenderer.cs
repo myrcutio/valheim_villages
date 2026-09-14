@@ -55,6 +55,14 @@ namespace ValheimVillages.UI.Core
                 m_renderedListSignature = signature;
             }
 
+            // A pending focus (the player walked up to a villager with a "!" over their head)
+            // claims the row before the default "first row" below does.
+            if (m_pendingListSelection >= 0)
+            {
+                m_selectedListIndex = m_pendingListSelection;
+                m_pendingListSelection = -1;
+            }
+
             if (m_selectedListIndex < 0 && m_listElements.Count > 0)
                 m_selectedListIndex = 0;
             if (m_selectedListIndex >= m_listElements.Count)

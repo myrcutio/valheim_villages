@@ -189,7 +189,8 @@ namespace ValheimVillages.Behaviors.Tidy
                 var dist = Vector3.Distance(drop.transform.position, center);
                 if (dist >= bestDist) continue;
 
-                var chest = FindAcceptingChest(containers, drop.m_itemData);
+                var chest = WorkOrderChestPolicy.ResolveDepositChest(
+                    containers, drop.m_itemData, drop.transform.position);
                 if (chest == null) continue;
 
                 best = drop;
@@ -220,7 +221,8 @@ namespace ValheimVillages.Behaviors.Tidy
             {
                 var containers = ContainerScanner.FindNearbyContainers(
                     m_ai.HomeAnchor, WorkSettings.HaulScanRadius);
-                m_targetChest = FindAcceptingChest(containers, m_targetDrop.m_itemData);
+                m_targetChest = WorkOrderChestPolicy.ResolveDepositChest(
+                    containers, m_targetDrop.m_itemData, m_targetDrop.transform.position);
             }
 
             if (m_targetChest == null)
@@ -251,12 +253,10 @@ namespace ValheimVillages.Behaviors.Tidy
             {
                 var containers = ContainerScanner.FindNearbyContainers(
                     m_ai.HomeAnchor, WorkSettings.HaulScanRadius);
-                foreach (var c in containers)
-                {
-                    if (!CanStoreIn(c, payload)) continue;
-                    stored = ContainerScanner.TryDepositItemData(c, payload.Clone());
-                    if (stored) break;
-                }
+                var alternate = WorkOrderChestPolicy.ResolveDepositChest(
+                    containers, payload, m_targetDrop.transform.position);
+                if (alternate != null)
+                    stored = ContainerScanner.TryDepositItemData(alternate, payload.Clone());
             }
 
             if (stored)
@@ -271,20 +271,18 @@ namespace ValheimVillages.Behaviors.Tidy
             Reset();
         }
 
-        private static Container FindAcceptingChest(
-            List<Container> containers, ItemDrop.ItemData item)
-        {
-            foreach (var c in containers)
-                if (CanStoreIn(c, item))
-                    return c;
-            return null;
-        }
-
         /// <summary>
-        ///     Room AND permission. A chest holding a work order is reserved for that order's
-        ///     output, ingredients and fuel — dumping unrelated salvage in it is what eats the
-        ///     slots the order's output needs, so hauling steps around those chests entirely.
-        ///     If none of the remaining chests will take the drop, it stays on the ground.
+        ///     Room AND permission — the re-confirmation test only, for a chest already chosen by
+        ///     <see cref="WorkOrderChestPolicy.ResolveDepositChest" /> that another villager may
+        ///     have filled since. Choosing is the resolver's job: it files a drop into the chest
+        ///     holding the work order for that very item before considering anything else, so a
+        ///     harvested crop picked up off the ground lands with its order rather than in
+        ///     whatever box the enumeration happened to reach first.
+        ///
+        ///     <para>A chest holding a work order is reserved for that order's output, ingredients
+        ///     and fuel — dumping unrelated salvage in it is what eats the slots the order's output
+        ///     needs, so hauling steps around those chests entirely. If none of the remaining
+        ///     chests will take the drop, it stays on the ground.</para>
         /// </summary>
         private static bool CanStoreIn(Container container, ItemDrop.ItemData item)
         {

@@ -75,11 +75,6 @@ namespace ValheimVillages.TaskQueue.Handlers
                 // No work orders to do: ACK so the queue continues (no retry/dead-letter).
                 return TaskResult.Ok();
 
-            // The token no longer carries its source chest; pick a deterministic deposit chest
-            // (nearest to the anchor) so output lands consistently and rejection positions are
-            // stable. Completion still scans ALL nearby chests (CountAcrossContainers).
-            var depositChest = ContainerScanner.FindNearestContainer(containers, anchorPos);
-
             // Work the LARGEST SHORTFALL first. The loop below returns on the first order it can
             // fulfil, so record order alone starves everything after the first unsatisfied entry:
             // CarrotSeeds sat at 0/20 and was never even evaluated because CookedDeerMeat at 4/20
@@ -144,9 +139,16 @@ namespace ValheimVillages.TaskQueue.Handlers
             var rejections = new List<RejectionRecord>();
             foreach (var match in allMatches)
             {
-                // Config carries no chest; route this order's deposit/capacity/position to the
-                // deterministic deposit chest.
-                match.SourceContainer = depositChest;
+                // Where THIS order's output belongs: the chest holding its own token, falling
+                // back to the nearest chest that will take the item. Resolved per order rather
+                // than once for the whole village — a single shared deposit chest is what piled
+                // every order's food into whichever unreserved box sat closest to the registry
+                // while the player's labelled chests stayed empty. The nearest-container fallback
+                // is only so the rejections below have a position to report when nothing has room.
+                match.SourceContainer =
+                    WorkOrderChestPolicy.ResolveDepositChest(
+                        containers, match.ItemPrefabName, match.StationName, 1, anchorPos)
+                    ?? ContainerScanner.FindNearestContainer(containers, anchorPos);
 
                 // Check existing output quantity (precomputed above for the deficit sort).
                 var existingCount = existingCounts.TryGetValue(match.ItemPrefabName, out var have)
@@ -183,10 +185,13 @@ namespace ValheimVillages.TaskQueue.Handlers
                     continue;
                 }
 
-                // Check output capacity
+                // Check output capacity. Re-resolved at the real batch size: a home chest with
+                // one free slot cannot take a recipe that yields three, and the chest the order
+                // then spills into is a different one.
                 var outputAmount = recipe.m_amount > 0 ? recipe.m_amount : 1;
-                if (!ContainerScanner.CanAcceptItem(
-                        match.SourceContainer, match.ItemPrefabName, outputAmount))
+                var outputChest = WorkOrderChestPolicy.ResolveDepositChest(
+                    containers, match.ItemPrefabName, match.StationName, outputAmount, anchorPos);
+                if (outputChest == null)
                 {
                     rejections.Add(new RejectionRecord
                     {
@@ -199,6 +204,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                     });
                     continue;
                 }
+
+                match.SourceContainer = outputChest;
 
                 // Find crafting station (check for physical station override from virtual recipes)
                 var physicalStation = VirtualRecipeLoader.GetPhysicalStation(recipe.name);

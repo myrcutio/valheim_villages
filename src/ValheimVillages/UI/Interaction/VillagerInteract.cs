@@ -186,6 +186,12 @@ namespace ValheimVillages.UI.Interaction
             // Activate the tab system
             VillagerTabManager.Activate(Bridge, hasCrafting);
 
+            // A villager wearing a "!" is telling the player about one specific blocked task.
+            // Land on that row rather than the generic first one: otherwise the badge says
+            // "something is wrong" and then the UI makes the player hunt through the list for
+            // which of several blocked orders it meant.
+            VillagerTabManager.FocusAlert();
+
             Plugin.Log?.LogInfo(
                 $"VillagerInteract: Opened UI for {GetHoverName()} " +
                 $"(station: {station.m_name}, crafting: {hasCrafting})");

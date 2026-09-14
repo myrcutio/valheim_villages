@@ -6,6 +6,7 @@ using ValheimVillages.Behaviors.Work;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Items.WorkOrders;
 using ValheimVillages.TaskQueue.ActivityLog;
+using ValheimVillages.UI.Alerts;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
 using ValheimVillages.UI.Panels;
@@ -18,9 +19,12 @@ namespace ValheimVillages.UI.Tabs
     ///     reason it can't be fulfilled.
     /// </summary>
     [RegisterTab("info", Order = 0)]
-    public class InfoTab : IVillagerTabUI
+    public class InfoTab : IVillagerTabUI, IAlertFocusTab<VillagerBehaviorBridge>
     {
         private const string AttentionPrefix = "⚠ ";
+
+        /// <summary>Colour for the one row the villager's floating "!" is actually about.</summary>
+        private const string AlertRowColor = "#FFC24A";
 
         private List<ActivityLogEntry> m_issues = new();
         private int m_issueCount;
@@ -55,12 +59,21 @@ namespace ValheimVillages.UI.Tabs
             };
 
             m_issueCount = m_issues.Count;
-            foreach (var issue in m_issues)
+
+            // Every blocked order gets a "⚠" row; the one the villager is actually complaining
+            // about is tinted, so it stays identifiable after the player clicks around and loses
+            // the initial selection.
+            var alerted = MatchingIssueIndex(FindMarker(villager));
+            for (var i = 0; i < m_issues.Count; i++)
+            {
+                var issue = m_issues[i];
+                var label = AttentionPrefix + (issue.ItemPrefab ?? issue.TaskName ?? "(blocked)");
                 items.Add(new TabListItemUI
                 {
-                    TabName = AttentionPrefix + (issue.ItemPrefab ?? issue.TaskName ?? "(blocked)"),
+                    TabName = i == alerted ? $"<color={AlertRowColor}>{label}</color>" : label,
                     Icon = ResolveItemIcon(issue.ItemPrefab),
                 });
+            }
 
             AddAbilityItems(items, villager);
             return items;
@@ -107,6 +120,15 @@ namespace ValheimVillages.UI.Tabs
                 var description = string.IsNullOrEmpty(issue.StationName)
                     ? reason
                     : $"Station: {StationDisplay.Pretty(issue.StationName)}\n{reason}";
+
+                // Lead with the villager's own words when this is the row their badge is about.
+                // The floating "!" and the line over their head are the player's entry point;
+                // repeating it here is what connects the thing they saw in the world to the
+                // blocked entry that explains it.
+                var marker = FindMarker(villager);
+                if (MatchingIssueIndex(marker) == issueIdx)
+                    description = Spoken(marker) + description;
+
                 if (legend.Length > 0) description += $"\n\n{legend}";
 
                 return new TabDetailDataUI
@@ -138,6 +160,15 @@ namespace ValheimVillages.UI.Tabs
             // Show the behavior status; append the raw state only when it adds
             // information (the status fell back to the state otherwise).
             var description = status == state ? $"State: {state}" : $"{status}\nState: {state}";
+
+            // A village-wide alert (storage almost full) belongs to no order, so no "⚠" row owns
+            // it — and neither does an alert naming an order the scan hasn't logged a blocker for
+            // yet. Either way the badge sent the player here, so the line has to appear somewhere
+            // rather than leaving them on a row that says nothing about it.
+            var marker = FindMarker(villager);
+            if (marker != null && MatchingIssueIndex(marker) < 0)
+                description = Spoken(marker) + description;
+
             if (legend.Length > 0) description += $"\n\n{legend}";
 
             // The native description layout collapses (and the map covers the
@@ -196,6 +227,63 @@ namespace ValheimVillages.UI.Tabs
                         ? panelUI.GetDetail(absoluteIndex - startIdx, villager)
                         : null;
             return null;
+        }
+
+        #endregion
+
+        #region Alert Focus
+
+        /// <summary>
+        ///     Which row explains this villager's floating "!". The alert names the order it is
+        ///     about, so it maps onto the matching blocked entry; a village-wide alert (or one
+        ///     whose order has no logged blocker) has no row of its own and falls back to the
+        ///     current-activity row, whose detail carries the spoken line instead.
+        /// </summary>
+        public int FindAlertRow(VillagerBehaviorBridge villager)
+        {
+            var marker = FindMarker(villager);
+            if (marker == null) return -1;
+
+            // FindAlertRow runs before the tab is selected, so nothing has refreshed the issue
+            // list for this villager yet — and the returned index must address the list the
+            // upcoming GetListItems will build.
+            RefreshIssues(villager);
+
+            var issueIdx = MatchingIssueIndex(marker);
+            return issueIdx >= 0 ? CurrentTaskCount + issueIdx : 0;
+        }
+
+        /// <summary>
+        ///     Index into <see cref="m_issues" /> of the blocked entry this alert is about, or -1.
+        ///     Matched on the item alone: the alert reads the order's own station name
+        ///     ("$vv_farmer") while a blocker logs the PHYSICAL station it resolved to ("farm"),
+        ///     so comparing stations would reject pairs that are in fact the same order.
+        /// </summary>
+        private int MatchingIssueIndex(VillagerAlertMarker marker)
+        {
+            if (marker == null || string.IsNullOrEmpty(marker.ItemPrefab)) return -1;
+
+            for (var i = 0; i < m_issues.Count; i++)
+                if (m_issues[i]?.ItemPrefab == marker.ItemPrefab)
+                    return i;
+
+            return -1;
+        }
+
+        /// <summary>
+        ///     The bridge, the AI and the alert marker all live on the one NPC GameObject
+        ///     (SpawnPatch adds them together), so the bridge's own object is the marker's — no
+        ///     need to walk through <c>villagerInstance</c> and risk a destroyed component.
+        /// </summary>
+        private static VillagerAlertMarker FindMarker(VillagerBehaviorBridge villager)
+        {
+            return VillagerAlertMarker.Find(villager != null ? villager.gameObject : null);
+        }
+
+        /// <summary>The villager's own line, styled as speech, ready to prefix a description.</summary>
+        private static string Spoken(VillagerAlertMarker marker)
+        {
+            return $"<color={AlertRowColor}><i>\u201c{marker.Message}\u201d</i></color>\n\n";
         }
 
         #endregion
