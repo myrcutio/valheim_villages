@@ -19,8 +19,8 @@ namespace ValheimVillages.Behaviors.Wander
     ///
     ///     <para>Purely cosmetic idle filler: priority sits below patrol and far below the
     ///     reactive floor, so flee/combat still preempt. Not an <see cref="IDirectedBehavior" />
-    ///     — there is no scheduler task for it; it runs in the routine (step-3) slot in
-    ///     PrimaryMode and in the normal dispatch loop otherwise. Tag: "wander".</para>
+    ///     — there is no scheduler task for it; it runs in the routine (step-3) slot, only
+    ///     reached when the scheduler had nothing to dispatch. Tag: "wander".</para>
     /// </summary>
     [RegisterBehavior("wander")]
     public class WanderBehavior : IBehavior

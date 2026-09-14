@@ -14,20 +14,20 @@ using ValheimVillages.Villages;
 namespace ValheimVillages.Behaviors.Tidy
 {
     /// <summary>
-    ///     Scans nearby cooking stations for finished (Done) or burnt items and removes them
-    ///     from the spit. Higher priority than crafting/farming so the NPC tidies before
-    ///     starting new work. Removed items are deposited into the nearest container if one
-    ///     exists; otherwise the physical drop is simply destroyed.
-    ///     Tag: "tidy", Priority: 60.
+    ///     Clears finished (Done) or burnt items off a cooking station's spit. Removed items
+    ///     are deposited into the nearest container if one exists; otherwise the physical drop
+    ///     is simply destroyed.
+    ///
+    ///     <para>Never self-discovers: the station to clear arrives as a
+    ///     <see cref="TaskKind.CookRescue" /> assignment from the scheduler, produced by
+    ///     <see cref="Scheduling.Producers.CookRescueProducer" />. Tag: "tidy", Priority: 60.</para>
     /// </summary>
     [RegisterBehavior("tidy")]
     public class TidyBehavior : IBehavior, IDirectedBehavior
     {
-        private const float ScanInterval = 4f;
         private const float ItemPickupRadius = 3f;
         private readonly VillagerAI m_ai;
         private bool m_active;
-        private float m_lastScanTime;
         private CookingStation m_targetStation;
 
         public TidyBehavior(VillagerAI ai)
@@ -38,21 +38,13 @@ namespace ValheimVillages.Behaviors.Tidy
         public string Tag => "tidy";
         public int Priority => 60;
 
-        public bool WantsControl(BehaviorContext ctx)
-        {
-            // In PrimaryMode the scheduler owns target selection — act only on an
-            // assignment, never self-discover.
-            if (SchedulerSettings.PrimaryMode) return m_active || m_targetStation != null;
+        // The scheduler owns target selection — act only on an assignment, never
+        // self-discover. Deliberately identical to AssignmentActive: the dispatcher holds
+        // a claim while that is true, so if the two could disagree the villager would be
+        // "busy" to the dispatcher and idle to the selector, and never get reassigned.
+        public bool WantsControl(BehaviorContext ctx) => AssignmentActive;
 
-            if (m_active) return true;
-
-            if (Time.time - m_lastScanTime < ScanInterval) return false;
-            m_lastScanTime = Time.time;
-
-            return FindDirtyStation();
-        }
-
-        // --- IDirectedBehavior: scheduler-assigned execution (PrimaryMode) ---
+        // --- IDirectedBehavior: scheduler-assigned execution ---
 
         public bool CanExecute(TaskKind kind) => kind == TaskKind.CookRescue;
 
@@ -123,23 +115,6 @@ namespace ValheimVillages.Behaviors.Tidy
             if (m_active)
                 return m_targetStation != null ? "Tidying cooking station" : "Looking for mess";
             return "";
-        }
-
-        private bool FindDirtyStation()
-        {
-            // Cooking stations come from the shared village registry (resolved by
-            // the villager's anchor), not per-villager memory. TryFindStation returns
-            // the nearest one matching the filter that also has a reachable
-            // approach, so an unreachable mess won't be picked.
-            var anchorPos = m_ai.GetMemory().HomeAnchor;
-            if (VillageStationRegistry.TryFindStation<CookingStation>(
-                    anchorPos, HasDoneOrBurntItems, out _, out var station))
-            {
-                m_targetStation = station;
-                return true;
-            }
-
-            return false;
         }
 
         private static bool HasDoneOrBurntItems(CookingStation station)

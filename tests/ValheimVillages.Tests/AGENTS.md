@@ -27,7 +27,23 @@ ValheimVillages.Tests/
     TagParserTests.cs                  -- TryParse, FilterByNamespace, GetValues, HasTag, case insensitivity
   TaskQueue/
     TaskQueueTests.cs                  -- TaskPriority, TaskResult.Ok/Fail, VillagerTask, behavior priorities
+  RegionGraph/
+    GridEnv.cs                         -- engine-free grid fixture (walls/heights/populated) for the flood passes
+    Pass1OutsideFloodTests.cs          -- outside flood: seeds, wall sealing
+    Pass2AnchorReachableTests.cs       -- anchor inside-out flood: snapping, outside cells, walls
+    OutsideFillTests.cs                -- outside-cell fill behaviour
+  Scheduling/
+    MlpTrainingTests.cs                -- residual MLP forward/backward, all-zero-gradient guard
+    RegionHopDistanceTests.cs          -- hops semantics; an UNRESOLVED endpoint must never read as unreachable
+    SchedulerSelectionTests.cs         -- reranker/dual-encoder picks; capability + owner filters still bite
 ```
+
+## Scheduler invariant
+
+The scheduler is the only thing that hands a villager work — there is no self-discovery
+fallback. So `SelectBest` returning null means the villager does nothing at all, and the
+Scheduling tests exist to pin the cases where it must NOT return null (notably a villager
+whose position doesn't resolve to a region, which previously filtered out every candidate).
 
 ## Test Categories
 

@@ -60,7 +60,7 @@ namespace ValheimVillages.Villager.AI
 
         /// <summary>
         ///     First directed behavior that can execute the given task kind, or null.
-        ///     Used by the scheduler dispatcher in PrimaryMode.
+        ///     Used by the scheduler dispatcher to route an assignment.
         /// </summary>
         public IDirectedBehavior FindDirectedBehavior(Scheduling.TaskKind kind)
         {
@@ -379,7 +379,22 @@ namespace ValheimVillages.Villager.AI
                 // through.
             }
 
-            if (IsPaused) return true;
+            if (IsPaused)
+            {
+                // Lease lapsed — whoever asked for the pause stopped renewing it (menu
+                // closed without the release arriving, client disconnected, game crashed).
+                // Resume rather than stand here forever.
+                if (Time.time >= m_pauseLeaseUntil)
+                {
+                    SetPaused(false, 0f);
+                    Plugin.Log?.LogInfo(
+                        $"[AI:{m_villagerName}] pause lease expired — resuming.");
+                }
+                else
+                {
+                    return true;
+                }
+            }
 
             // Hold movement across a navmesh / region-graph rebuild. The bake is
             // synchronous, so the hazard is the frames right after it: a path
@@ -492,13 +507,45 @@ namespace ValheimVillages.Villager.AI
                     var ctx = new BehaviorContext();
                     var handled = false;
 
-                    if (Scheduling.SchedulerSettings.PrimaryMode)
+                    // Three tiers, in strict order. The scheduler is the sole selector of
+                    // WORK; there is no self-discovery path and no log-only mode.
+
+                    // 1. Reactive behaviors (combat/flee/alarm) preempt the scheduler — a
+                    // villager must never ignore a threat to go repair.
+                    foreach (var b in m_behaviors)
                     {
-                        // 1. Reactive behaviors (combat/flee/alarm) still preempt the
-                        // scheduler — a villager must never ignore a threat to go repair.
+                        if (b.Priority < Scheduling.SchedulerSettings.ReactivePriorityFloor) continue;
+                        if (b.WantsControl(ctx))
+                        {
+                            ActiveBehavior = b;
+                            b.Update(dt);
+                            handled = true;
+                            break;
+                        }
+                    }
+
+                    // 2. The scheduler assigns + runs the matching directed behavior.
+                    // Every craft/farm/repair/tidy/cook task a villager performs enters
+                    // here, dispatched from the village task board.
+                    if (!handled)
+                    {
+                        var directed = Scheduling.SchedulerDispatcher.AssignIfIdle(this);
+                        if (directed is IBehavior db && db.WantsControl(ctx))
+                        {
+                            ActiveBehavior = db;
+                            db.Update(dt);
+                            handled = true;
+                        }
+                    }
+
+                    // 3. Routine filler (wander/relax/patrol). Directed behaviors are
+                    // skipped here — they ONLY run via the dispatcher above, never by
+                    // self-discovery, so the board can never be bypassed.
+                    if (!handled)
                         foreach (var b in m_behaviors)
                         {
-                            if (b.Priority < Scheduling.SchedulerSettings.ReactivePriorityFloor) continue;
+                            if (b.Priority >= Scheduling.SchedulerSettings.ReactivePriorityFloor) continue;
+                            if (b is IDirectedBehavior) continue;
                             if (b.WantsControl(ctx))
                             {
                                 ActiveBehavior = b;
@@ -508,71 +555,12 @@ namespace ValheimVillages.Villager.AI
                             }
                         }
 
-                        // 2. Scheduler is the primary work selector: assign + run the
-                        // matching directed behavior. Outranks routine self-discovered work.
-                        if (!handled)
-                        {
-                            var directed = Scheduling.SchedulerDispatcher.AssignIfIdle(this);
-                            if (directed is IBehavior db && db.WantsControl(ctx))
-                            {
-                                ActiveBehavior = db;
-                                db.Update(dt);
-                                handled = true;
-                            }
-                        }
-
-                        // 3. Routine work the scheduler doesn't own yet (craft/farming/
-                        // patrol/haul). Directed behaviors are skipped here — in
-                        // PrimaryMode they ONLY run via the dispatcher above, never by
-                        // self-discovery.
-                        if (!handled)
-                            foreach (var b in m_behaviors)
-                            {
-                                if (b.Priority >= Scheduling.SchedulerSettings.ReactivePriorityFloor) continue;
-                                if (b is IDirectedBehavior) continue;
-                                if (b.WantsControl(ctx))
-                                {
-                                    ActiveBehavior = b;
-                                    b.Update(dt);
-                                    handled = true;
-                                    break;
-                                }
-                            }
-                    }
-                    else
-                    {
-                        foreach (var b in m_behaviors)
-                            if (b.WantsControl(ctx))
-                            {
-                                ActiveBehavior = b;
-                                b.Update(dt);
-                                handled = true;
-                                break;
-                            }
-                    }
-
-                    // No behavior wanted control — the villager is idle. Trigger
-                    // work scanning here (this used to live in the always-on
-                    // Explore fallback, which has been removed) and settle to
-                    // Idle. Crafting takes over on the next tick once a scan
-                    // result flips the state to Working.
+                    // Nothing wanted control — settle to Idle so the next reselect starts
+                    // from a clean state (and so routine behaviors, which arm on Idle, can
+                    // pick up next tick).
                     if (!handled)
                     {
                         ActiveBehavior = null;
-
-                        // Log-only observation when the scheduler is NOT the primary
-                        // driver (PrimaryMode off) — logs the pick it would make.
-                        if (!Scheduling.SchedulerSettings.PrimaryMode)
-                            Scheduling.SchedulerObserver.Observe(this);
-
-                        // Legacy (PrimaryMode off): self-scan for work when idle. In
-                        // PrimaryMode the scheduler owns work-start — crafting/farming run
-                        // only via a CraftWork assignment (CraftingBehaviorAdapter is a
-                        // directed behavior), so self-scanning here would start work behind
-                        // the board's back and double-drive it.
-                        if (!Scheduling.SchedulerSettings.PrimaryMode
-                            && CurrentState != BehaviorState.Working)
-                            GetWorkScanner()?.TryScanForWork();
                         if (CurrentState != BehaviorState.Idle)
                             SetState(BehaviorState.Idle);
                     }
@@ -628,6 +616,21 @@ namespace ValheimVillages.Villager.AI
                                        || (!IsCasualTravel && remaining > 5f);
                     UpdateAgentMovement(targetPos, agentRunning);
                 }
+            }
+            else if (m_currentWaypoint == null && IsPureTravel(CurrentState))
+            {
+                // A pure-travel state with no waypoint is a dead end: the block above is
+                // the only thing that fires OnArrivedAtTarget, and it can't run without a
+                // waypoint, so nothing would ever move this villager out of Traveling.
+                // Routine behaviors (wander/relax) release on Idle and otherwise pin
+                // control forever — observed as a villager frozen mid-village in
+                // state=Traveling, target=<none>, vel=0, doing no work at all.
+                //
+                // Only the PURE travel states recover this way. Working and Alarmed use
+                // ClearWaypoint() deliberately to stand still while a station processes or
+                // a combatant fires in place, so flipping those to Idle would abort real
+                // work; Patrolling owns its own route recovery.
+                SetState(BehaviorState.Idle);
             }
 
             return false;
@@ -714,6 +717,22 @@ namespace ValheimVillages.Villager.AI
         /// <summary>
         ///     Whether the given state requires active movement toward a target.
         /// </summary>
+        /// <summary>
+        ///     States whose ONLY purpose is getting somewhere, so losing the waypoint means
+        ///     the move is over. Excludes Working/Alarmed (both park deliberately via
+        ///     <see cref="ClearWaypoint" />) and Patrolling (rebuilds its own route).
+        /// </summary>
+        private static bool IsPureTravel(BehaviorState state)
+        {
+            return state switch
+            {
+                BehaviorState.Traveling => true,
+                BehaviorState.Exploring => true,
+                BehaviorState.Wandering => true,
+                _ => false,
+            };
+        }
+
         private static bool NeedsMovement(BehaviorState state)
         {
             return state switch
@@ -793,12 +812,6 @@ namespace ValheimVillages.Villager.AI
 
         /// <summary>Crafting behavior adapter if present. Compatibility with UI and workflows.</summary>
         public CraftingBehaviorAdapter CraftingBehavior => GetBehavior<CraftingBehaviorAdapter>();
-
-        /// <summary>Work-order scanner for BehaviorLogic. No dependency on concrete crafting type.</summary>
-        public IWorkScanBehavior GetWorkScanner()
-        {
-            return GetBehavior<CraftingBehaviorAdapter>();
-        }
 
         /// <summary>Villager type string from JSON definition (e.g. "Guard", "Farmer").</summary>
         public string VillagerType { get; private set; }
@@ -885,14 +898,28 @@ namespace ValheimVillages.Villager.AI
                 Plugin.Log?.LogDebug($"[AI:{m_villagerName}] State -> {newState}");
         }
 
-        public void SetPaused(bool paused)
+        /// <summary>
+        ///     Hold this villager in place (a player has its craft menu open).
+        ///
+        ///     <para><paramref name="leaseSeconds" /> is how long the pause survives WITHOUT
+        ///     renewal. Pause is requested remotely — see <see cref="VillagerPauseRpc" /> —
+        ///     and a client that disconnects or crashes with the menu open never sends the
+        ///     release. A latched pause would strand that villager forever with nothing able
+        ///     to clear it, so the holder renews the lease while the menu is open and it
+        ///     lapses on its own otherwise.</para>
+        /// </summary>
+        public void SetPaused(bool paused, float leaseSeconds)
         {
             IsPaused = paused;
+            m_pauseLeaseUntil = paused ? Time.time + leaseSeconds : 0f;
             if (paused)
                 StopMoving();
         }
 
         public bool IsPaused { get; private set; }
+
+        /// <summary>When the current pause lapses unless renewed. See <see cref="SetPaused" />.</summary>
+        private float m_pauseLeaseUntil;
 
         /// <summary>
         ///     Ask the AI to run the next behavior-selection/Update tick after

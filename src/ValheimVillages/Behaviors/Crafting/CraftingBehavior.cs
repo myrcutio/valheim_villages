@@ -265,6 +265,7 @@ namespace ValheimVillages.Behaviors.Crafting
             // Cooking station: poll for done items instead of using a fixed timer
             if (TryPollCookingStation()) return;
             if (TryPollSmelter()) return;
+            if (TryPollBeehive()) return;
 
             // Fixed timer for non-cooking stations
             var elapsed = Time.time - m_context.CraftStartTime;

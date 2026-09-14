@@ -24,30 +24,22 @@ namespace ValheimVillages.Behaviors.Repair
     ///     piece (which strands it). Repair is a ZDO health restore with no range/LOS
     ///     requirement, so an elevated piece (a roof) is repaired from the ground
     ///     beside the building via the on-arrival radius sweep.</para>
-    ///     <para>Only starts when idle, so it never interrupts active crafting (work
-    ///     orders). Tag: "repair", Priority: 35 (below craft, above patrol).</para>
+    ///     <para>Which piece to repair is chosen here, but WHETHER to repair is the
+    ///     scheduler's call: this behavior never self-discovers work, it only acts on a
+    ///     <see cref="TaskKind.RepairPiece" /> assignment. Tag: "repair", Priority: 35.</para>
     /// </summary>
     [RegisterBehavior("repair")]
     public class RepairBehavior : IBehavior, IDirectedBehavior
     {
-        private const float ScanInterval = 8f;
         private const float MaxLegSeconds = 20f;
         private const float UnreachableCooldown = 30f;
 
         // Repair anything below this fraction of full health (avoids float jitter at 1.0).
         private const float DamagedThreshold = 0.99f;
 
-        // Pieces below this durability are "critical" and are headed to first, ahead
-        // of any merely-closer healthier piece.
-        private const float CriticalDurability = 0.45f;
-
         // On arrival, repair every damaged piece within this 3D range — clears a
         // cluster (a building's walls + the roof above) from one ground spot.
         private const float RepairRange = 3f;
-
-        // Cap on reachability path-checks per scan so a wrecked village (many damaged
-        // pieces) can't spike a frame.
-        private const int MaxReachabilityChecks = 12;
 
         // Snap radius used when landing a resolved region cell onto the agent navmesh.
         // Deliberately small (~one height bucket): the cell is already region-resident, so
@@ -62,7 +54,6 @@ namespace ValheimVillages.Behaviors.Repair
         private bool m_active;
         private Vector3 m_approach;
         private float m_legDeadline;
-        private float m_lastScanTime;
         private bool m_navIssued;
         private WearNTear m_target;
 
@@ -77,25 +68,14 @@ namespace ValheimVillages.Behaviors.Repair
         // fills idle time. Combat/flee (100) still preempt.
         public int Priority => 35;
 
-        public bool WantsControl(BehaviorContext ctx)
-        {
-            // In PrimaryMode the scheduler owns target selection — act only on an
-            // assignment (m_active set by BeginAssignment), never self-discover.
-            if (SchedulerSettings.PrimaryMode) return m_active;
+        // The scheduler owns target selection — act only on an assignment (m_active set by
+        // BeginAssignment), never self-discover. Deliberately identical to
+        // AssignmentActive: the dispatcher holds a claim while that is true, so if the two
+        // could disagree the villager would be "busy" to the dispatcher and idle to the
+        // selector, and never get reassigned.
+        public bool WantsControl(BehaviorContext ctx) => AssignmentActive;
 
-            if (m_active) return true;
-
-            // Only start when idle so we never interrupt active work (crafting).
-            if (m_ai.CurrentState != BehaviorState.Idle) return false;
-            if (m_ai.IsInBackoff) return false;
-
-            if (Time.time - m_lastScanTime < ScanInterval) return false;
-            m_lastScanTime = Time.time;
-
-            return FindDamaged();
-        }
-
-        // --- IDirectedBehavior: scheduler-assigned execution (PrimaryMode) ---
+        // --- IDirectedBehavior: scheduler-assigned execution ---
 
         public bool CanExecute(TaskKind kind) => kind == TaskKind.RepairPiece;
 
@@ -117,14 +97,21 @@ namespace ValheimVillages.Behaviors.Repair
             return true;
         }
 
-        /// <summary>Nearest still-damaged structure within repair range of a point.</summary>
-        private static WearNTear FindDamagedNear(Vector3 pos)
+        /// <summary>
+        ///     Nearest still-damaged structure within repair range of a point, skipping
+        ///     pieces this carpenter recently gave up reaching. The blacklist check lives
+        ///     here because this is now the ONLY place a repair target is chosen — the
+        ///     scheduler dispatches the task, but which piece to actually swing at is still
+        ///     resolved locally, and a piece that timed out must not be re-picked instantly.
+        /// </summary>
+        private WearNTear FindDamagedNear(Vector3 pos)
         {
             WearNTear best = null;
             var bestSq = float.MaxValue;
             foreach (var wnt in PhysicsHelper.GetAllInRadius<WearNTear>(pos, RepairRange))
             {
                 if (!IsValid(wnt)) continue;
+                if (IsBlacklisted(wnt)) continue;
                 if (wnt.GetHealthPercentage() >= DamagedThreshold) continue;
                 var d = (wnt.transform.position - pos).sqrMagnitude;
                 if (d < bestSq)
@@ -211,62 +198,6 @@ namespace ValheimVillages.Behaviors.Repair
         public string GetStatusText()
         {
             return m_active ? "Repairing structures" : "";
-        }
-
-        /// <summary>
-        ///     Nearest damaged structure that has a COMPLETE ground path to a resolved
-        ///     approach. Skipping pieces without a complete path is what stops the
-        ///     carpenter from climbing onto roofs to reach elevated pieces and
-        ///     stranding itself.
-        /// </summary>
-        private bool FindDamaged()
-        {
-            var center = m_ai.HomeAnchor;
-            var radius = WorkSettings.RepairScanRadius;
-            var myPos = m_ai.Position;
-
-            // Collect damaged candidates, nearest first.
-            var seen = new HashSet<WearNTear>();
-            var candidates = new List<(WearNTear wnt, float distSq, float hp)>();
-            foreach (var wnt in PhysicsHelper.GetAllInRadius<WearNTear>(center, radius))
-            {
-                if (wnt == null || !seen.Add(wnt)) continue;
-                if (!IsValid(wnt)) continue;
-                if (IsBlacklisted(wnt)) continue;
-                var hp = wnt.GetHealthPercentage();
-                if (hp >= DamagedThreshold) continue;
-                candidates.Add((wnt, (wnt.transform.position - myPos).sqrMagnitude, hp));
-            }
-
-            if (candidates.Count == 0) return false;
-
-            // Critical (sub-45% durability) pieces first, then nearest. So the
-            // carpenter heads to the most-worn structures before topping up cosmetic
-            // damage on closer pieces.
-            candidates.Sort((a, b) =>
-            {
-                var aCrit = a.hp < CriticalDurability;
-                var bCrit = b.hp < CriticalDurability;
-                if (aCrit != bCrit) return aCrit ? -1 : 1;
-                return a.distSq.CompareTo(b.distSq);
-            });
-
-            var checks = 0;
-            foreach (var (wnt, _, _) in candidates)
-            {
-                if (checks++ >= MaxReachabilityChecks) break;
-                if (!TryResolveReachableApproach(wnt.transform.position, out var approach))
-                    continue;
-
-                m_target = wnt;
-                m_approach = approach;
-                m_active = true;
-                m_navIssued = false;
-                m_legDeadline = Time.time + MaxLegSeconds;
-                return true;
-            }
-
-            return false;
         }
 
         /// <summary>

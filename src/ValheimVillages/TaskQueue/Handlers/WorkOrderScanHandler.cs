@@ -123,19 +123,22 @@ namespace ValheimVillages.TaskQueue.Handlers
                 var directed = allMatches
                     .Where(m => m.ItemPrefabName == targetItem)
                     .ToList();
-                if (directed.Count > 0)
+                if (directed.Count == 0)
                 {
-                    allMatches = directed;
-                }
-                else
-                {
-                    // The row went stale between produce and scan (quota filled, ingredients
-                    // consumed). Fall through to the full list rather than returning empty: the
-                    // villager is already here and the trip should not be wasted.
+                    // The row went stale between produce and scan (quota filled, order deleted,
+                    // ingredients consumed). Do NOT re-decide here: the scheduler is the only
+                    // thing that chooses work, and silently substituting a different order
+                    // bypasses the reranker's per-order scoring and makes the board's picks
+                    // untraceable — "assigned Honey" in one log line, Carrot actually worked in
+                    // the next. Report no work; the producer refreshes the board and the
+                    // dispatcher offers a current row on the next tick.
                     Plugin.Log?.LogInfo(
                         $"[WorkOrderScan] {ai.NpcName}: directed order '{targetItem}' is no longer " +
-                        "actionable; falling back to best-deficit selection.");
+                        "actionable; no work this cycle (board will refresh).");
+                    return TaskResult.Ok();
                 }
+
+                allMatches = directed;
             }
 
             var rejections = new List<RejectionRecord>();
@@ -258,6 +261,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 }
 
                 CookingStation cookingStationRef = null;
+                Beehive beehiveRef = null;
                 Smelter smelterRef = null;
                 string smelterInputName = null;
                 FuelNeed? fuelRequirement = null;
@@ -297,6 +301,27 @@ namespace ValheimVillages.TaskQueue.Handlers
                     }
 
                     stationDesc = "CookingStation";
+                }
+                else if (physicalStation == BeehiveHelper.PhysicalStation)
+                {
+                    // Beekeeping: the "station" is whichever hive currently HAS something in
+                    // it AND yields THIS order's item — piece_birdnest shares the Beehive
+                    // component and yields Feathers, so an unqualified search would send a
+                    // Honey order to a nest. An empty hive is not work either, so the order
+                    // simply isn't offered until the bees have produced something.
+                    if (BeehiveHelper.TryFindHarvestable(
+                            anchorPos, WorkSettings.ChestScanRadius, match.ItemPrefabName,
+                            out var hive, out var hiveApproach))
+                    {
+                        stationPos = hiveApproach;
+                        beehiveRef = hive;
+                    }
+                    else
+                    {
+                        stationPos = null;
+                    }
+
+                    stationDesc = "Beehive";
                 }
                 else if (!string.IsNullOrEmpty(physicalStation)
                          && StationFinder.GetSmelterPrefab(physicalStation) != null)
@@ -410,6 +435,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                     IngredientSources = ingredients,
                     CraftStationPosition = stationPos.Value,
                     CookingStationRef = cookingStationRef,
+                    BeehiveRef = beehiveRef,
                     CookingInputItemName = cookingInputName,
                     CraftedCount = existingCount,
                     CurrentIngredientIndex = 0,

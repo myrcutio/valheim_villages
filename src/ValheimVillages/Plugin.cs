@@ -67,7 +67,7 @@ namespace ValheimVillages
         public static Plugin Instance { get; private set; }
 
         /// <summary>
-        ///     Wall-clock time this assembly's <see cref="Plugin" /> type was first
+        ///     Wall-clock time this assembly's <see cref="Plugin" /> type was firstw
         ///     touched (≈ when ScriptEngine loaded this assembly). Because a hot
         ///     reload loads a brand-new assembly, this field is re-initialized on
         ///     every reload — so a dev command that prints it advancing confirms
@@ -88,9 +88,6 @@ namespace ValheimVillages
             LastLoadWasHotReload = isHotReload;
             DebugLog.BeginCycle(isHotReload);
             RegionGraphPersistence.LogAction = msg => Log.LogInfo(msg);
-            // Bind config-backed settings early (PrimaryMode persists across hot reloads /
-            // restarts; a plain static reset to false on every reload).
-            Scheduling.SchedulerSettings.BindConfig(Config);
             Log.LogInfo($"{PluginName} v{PluginVersion} loading...");
 
             // Clean up any previous patches with our GUID (hot reload support)
@@ -206,6 +203,7 @@ namespace ValheimVillages
             // ZRoutedRpc (recreated per world session). Cheap no-op once registered.
             Villager.VillagerRecruitRpc.EnsureRegistered();
             Villager.WorkOrderConfigRpc.EnsureRegistered();
+            Villager.VillagerPauseRpc.EnsureRegistered();
             Villages.VillageCleanupRpc.EnsureRegistered();
             Items.Fragments.FragmentQuestRpc.EnsureRegistered();
 

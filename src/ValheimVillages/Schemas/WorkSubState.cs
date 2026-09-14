@@ -93,6 +93,20 @@ namespace ValheimVillages.Schemas
         /// <summary>True after we've requested removal of the processed item; prevents re-entry from re-polling.</summary>
         public bool SmelterRemovalRequested;
 
+        /// <summary>
+        ///     The beehive this Honey order harvests from. Set during the scan; null for every
+        ///     other order kind.
+        /// </summary>
+        public Beehive BeehiveRef;
+
+        /// <summary>
+        ///     True once RPC_Extract has been sent for this trip. The hive's honey drops appear
+        ///     a frame or more later (the RPC goes through the network pump), so the workflow
+        ///     extracts once and then polls the ground; without this it would re-extract every
+        ///     poll tick.
+        /// </summary>
+        public bool BeehiveExtractRequested;
+
         /// <summary>The container where the work order was found.</summary>
         public Container SourceContainer;
 

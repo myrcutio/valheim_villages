@@ -3,10 +3,17 @@ using ValheimVillages.Scheduling;
 namespace ValheimVillages.Interfaces
 {
     /// <summary>
-    ///     A work behavior the scheduler can drive directly (PrimaryMode): instead of
-    ///     self-discovering a target, it executes a specific scheduler-assigned task. Every
-    ///     directed behavior is also an <see cref="IBehavior" /> — the scheduler assigns the
-    ///     task, the normal dispatch loop executes it.
+    ///     A work behavior the scheduler drives directly: instead of self-discovering a
+    ///     target, it executes a specific scheduler-assigned task. Every directed behavior is
+    ///     also an <see cref="IBehavior" /> — the scheduler assigns the task, the normal
+    ///     dispatch loop executes it.
+    ///
+    ///     <para>The scheduler is the ONLY selector of work, so a directed behavior must
+    ///     never self-discover: its <c>WantsControl</c> is required to return exactly
+    ///     <see cref="AssignmentActive" />. If the two could disagree the villager would read
+    ///     as busy to the dispatcher (which holds the task claim while AssignmentActive) and
+    ///     as idle to the behavior selector, and would never be reassigned — a permanent
+    ///     stall with the villager falling through to the routine tier forever.</para>
     /// </summary>
     public interface IDirectedBehavior
     {

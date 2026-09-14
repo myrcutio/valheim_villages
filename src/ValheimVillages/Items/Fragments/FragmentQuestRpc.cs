@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using ValheimVillages.Networking;
 
 namespace ValheimVillages.Items.Fragments
 {
@@ -35,6 +36,8 @@ namespace ValheimVillages.Items.Fragments
             s_registeredInstance = rpc;
             try
             {
+                RoutedRpcRegistrar.ClearStale(rpc, RequestRpcName);
+                RoutedRpcRegistrar.ClearStale(rpc, ResultRpcName);
                 rpc.Register<string, Vector3>(RequestRpcName, OnRequest);
                 rpc.Register<bool, string, Vector3, string, string>(ResultRpcName, OnResult);
                 Plugin.Log?.LogInfo(

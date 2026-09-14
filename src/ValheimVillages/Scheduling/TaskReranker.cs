@@ -36,8 +36,14 @@ namespace ValheimVillages.Scheduling
     ///     Scores every eligible candidate task for one idle villager and returns the
     ///     best. v1 utility is the closed-form, feasibility-gated priority
     ///     <c>U = priority · σ(k·slack)</c> PLUS a learned residual from
-    ///     <paramref name="mlp" /> (zero while untrained). Capability mismatch and
-    ///     unreachable tasks are hard-filtered before scoring.
+    ///     <paramref name="mlp" /> (zero while untrained).
+    ///
+    ///     <para>Only two things hard-filter a candidate: a capability the villager lacks,
+    ///     and a row minted for a different villager. Distance never does. Reachability is
+    ///     decided later, by the behavior that actually pathfinds
+    ///     (<see cref="Interfaces.IDirectedBehavior.BeginAssignment" /> returning false) —
+    ///     because this is the only source of villager work, a distance-based filter here
+    ///     doesn't degrade the pick, it removes the villager's entire job list.</para>
     /// </summary>
     public static class TaskReranker
     {
@@ -84,14 +90,22 @@ namespace ValheimVillages.Scheduling
             in VillagerQuery query,
             IReadOnlyList<CandidateTask> tasks,
             Mlp mlp,
-            RerankSettings settings)
-            => SelectBestExplained(in query, tasks, mlp, settings).Task;
+            RerankSettings settings,
+            float now)
+            => SelectBestExplained(in query, tasks, mlp, settings, now).Task;
 
+        /// <param name="now">
+        ///     Current time, passed in rather than read from <c>Time.time</c> so the whole
+        ///     selection path can be exercised headlessly. The scheduler is the only source of
+        ///     villager work now, so "which task wins, and does anything win at all" has to be
+        ///     testable without launching the game.
+        /// </param>
         public static RerankPick SelectBestExplained(
             in VillagerQuery query,
             IReadOnlyList<CandidateTask> tasks,
             Mlp mlp,
-            RerankSettings settings)
+            RerankSettings settings,
+            float now)
         {
             if (tasks == null || tasks.Count == 0) return default;
             if (settings == null) throw new ArgumentNullException(nameof(settings));
@@ -99,7 +113,6 @@ namespace ValheimVillages.Scheduling
                 throw new ArgumentException(
                     $"MLP expects {mlp.InputCount} inputs, reranker emits {FeatureCount}");
 
-            var now = Time.time;
             CandidateTask best = null;
             var bestScore = float.NegativeInfinity;
             var bestClosed = 0f;
@@ -120,8 +133,11 @@ namespace ValheimVillages.Scheduling
                     (query.Capabilities == null || !query.Capabilities.Contains(task.RequiredCapability)))
                     continue;
 
+                // -1 now means "no graph to measure against", not "unreachable": see
+                // RegionHopDistance. A merely-unresolved endpoint must never filter a
+                // candidate, or a villager standing in a lookup-grid hole starves.
                 var hops = RegionHopDistance.Hops(query.Graph, query.Position, task.Position);
-                if (hops < 0) continue; // unreachable — never dispatch
+                if (hops < 0) continue;
 
                 var eta = hops * settings.PerHopSeconds;
 
@@ -134,7 +150,7 @@ namespace ValheimVillages.Scheduling
 
                 // Always build features — the trainer needs them for the winner even while the
                 // model is untrained (that is exactly when learning has to start).
-                BuildFeatures(features, task, hops, eta, slack, in query, settings);
+                BuildFeatures(features, task, hops, eta, slack, in query, settings, now);
                 var residual = mlp != null ? mlp.Forward(features) : 0f;
 
                 var score = closed + residual;
@@ -152,7 +168,7 @@ namespace ValheimVillages.Scheduling
 
         internal static void BuildFeatures(
             float[] f, CandidateTask task, int hops, float eta, float slack,
-            in VillagerQuery query, RerankSettings s)
+            in VillagerQuery query, RerankSettings s, float now)
         {
             Array.Clear(f, 0, f.Length);
 
@@ -167,7 +183,7 @@ namespace ValheimVillages.Scheduling
             f[6] = task.StockFraction;
             f[7] = task.MinShortfall;
             f[8] = task.LastWorkedAt > 0f
-                ? Mathf.Clamp01((Time.time - task.LastWorkedAt) / StalenessNorm)
+                ? Mathf.Clamp01((now - task.LastWorkedAt) / StalenessNorm)
                 : 1f; // never worked = maximally stale
 
             // --- hashed one-hot item identity ---

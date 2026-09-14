@@ -98,5 +98,13 @@ namespace ValheimVillages.Schemas
         public string input = "";
         public int inputAmount = 1;
         public int minStationLevel = 1;
+
+        /// <summary>
+        ///     Optional physical station this recipe is performed AT, instead of the villager's
+        ///     virtual station. Matches <see cref="Items.VirtualRecipes.VirtualRecipeEntry.physicalStation" />
+        ///     ("cookingstation", "farm", "beehive", or a smelter prefab name). Empty = the
+        ///     virtual station.
+        /// </summary>
+        public string physicalStation = "";
     }
 }

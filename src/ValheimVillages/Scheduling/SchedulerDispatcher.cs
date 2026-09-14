@@ -9,7 +9,7 @@ using ValheimVillages.Villages.Entity;
 namespace ValheimVillages.Scheduling
 {
     /// <summary>
-    ///     Primary-mode work selector. For an idle villager it refreshes the village board
+    ///     THE work selector. For an idle villager it refreshes the village board
     ///     (throttled), runs the dual-encoder scheduler, claims the chosen task, and hands
     ///     it to the matching directed behavior. Returns the directed behavior currently
     ///     executing an assignment — which the <see cref="VillagerAI" /> selection loop then
@@ -25,13 +25,16 @@ namespace ValheimVillages.Scheduling
         private static readonly Dictionary<string, (Mlp mlp, RerankSettings settings)> s_models = new();
         private static readonly Dictionary<string, (string sourceId, IDirectedBehavior beh)> s_assigned = new();
 
+        /// <summary>Seconds between repeats of an UNCHANGED dispatch-bail reason.</summary>
+        private const float DiagHeartbeatSeconds = 30f;
+
         // DIAGNOSTIC: throttle per-villager bail logging so the decision path is visible
         // without flooding the log every reselect tick.
-        private static readonly Dictionary<string, float> s_lastDiag = new();
+        private static readonly Dictionary<string, (float at, string msg)> s_lastDiag = new();
 
         public static IDirectedBehavior AssignIfIdle(VillagerAI ai)
         {
-            if (!SchedulerSettings.Enabled || !SchedulerSettings.PrimaryMode || ai == null) return null;
+            if (ai == null) return null;
             try
             {
                 var villagerId = ai.UniqueId;
@@ -88,7 +91,7 @@ namespace ValheimVillages.Scheduling
                 };
 
                 var pick = DualEncoderScheduler.SelectBestExplained(
-                    in query, tasks, model.mlp, model.settings);
+                    in query, tasks, model.mlp, model.settings, now);
                 var best = pick.Task;
                 if (best == null)
                 {
@@ -134,12 +137,21 @@ namespace ValheimVillages.Scheduling
             }
         }
 
+        /// <summary>
+        ///     Log why a villager got no assignment. "Nothing to dispatch" is a NORMAL steady
+        ///     state now that the scheduler is the only work selector (a villager with a full
+        ///     board of satisfied orders relaxes), so a fixed short throttle would spam the log
+        ///     forever. Log immediately whenever the REASON changes — that is the interesting
+        ///     event — and otherwise only as an occasional heartbeat.
+        /// </summary>
         private static void Diag(VillagerAI ai, string msg)
         {
             var now = Time.time;
             var id = ai.UniqueId ?? ai.NpcName;
-            if (id != null && s_lastDiag.TryGetValue(id, out var t) && now - t < 2f) return;
-            if (id != null) s_lastDiag[id] = now;
+            if (id != null && s_lastDiag.TryGetValue(id, out var prev)
+                           && prev.msg == msg && now - prev.at < DiagHeartbeatSeconds)
+                return;
+            if (id != null) s_lastDiag[id] = (now, msg);
             Plugin.Log?.LogInfo($"[SchedDiag:{ai.NpcName}] {msg}");
         }
 

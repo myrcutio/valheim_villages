@@ -45,7 +45,9 @@ namespace ValheimVillages.Dev
                 var station = r.m_craftingStation != null
                     ? $"'{r.m_craftingStation.m_name}'"
                     : "(NONE — hand-craftable)";
-                sb.AppendLine($"  recipe '{r.name}' station={station} enabled={r.m_enabled}");
+                sb.AppendLine($"  recipe '{r.name}' station={station} enabled={r.m_enabled} " +
+                              $"inputs={r.m_resources?.Length ?? 0} minLvl={r.m_minStationLevel}");
+                sb.AppendLine($"    player-facing: {DescribePlayerGates(r)}");
             }
 
             if (hits == 0) sb.AppendLine("  (no recipe produces that item name)");
@@ -60,6 +62,43 @@ namespace ValheimVillages.Dev
             }
 
             Print(sb.ToString().TrimEnd());
+        }
+
+        /// <summary>
+        ///     Why the player's crafting list does (or doesn't) show this recipe.
+        ///
+        ///     <para>A recipe existing in ObjectDB is NOT enough to reach the Orders UI: the
+        ///     work-order button acts on the SELECTED row of the craft list, and
+        ///     <c>Player.GetAvailableRecipes</c> only emits a recipe the player has discovered
+        ///     (<c>m_knownRecipes</c> keyed on the OUTPUT item's shared name) at a station it
+        ///     requires. Those two gates are invisible from the recipe itself, which is exactly
+        ///     how a correctly-registered recipe goes missing from the list.</para>
+        /// </summary>
+        private static string DescribePlayerGates(Recipe r)
+        {
+            var player = Player.m_localPlayer;
+            if (player == null) return "no local player (dedicated server)";
+
+            var shared = r.m_item?.m_itemData?.m_shared?.m_name;
+            if (string.IsNullOrEmpty(shared)) return "output has no shared name";
+
+            var known = player.IsRecipeKnown(shared);
+
+            var current = player.GetCurrentCraftingStation();
+            var currentName = current != null ? current.m_name : "(none)";
+
+            var listed = false;
+            var available = new System.Collections.Generic.List<Recipe>();
+            player.GetAvailableRecipes(ref available);
+            foreach (var a in available)
+                if (ReferenceEquals(a, r))
+                {
+                    listed = true;
+                    break;
+                }
+
+            return $"sharedName='{shared}' known={known} inCraftList={listed} " +
+                   $"currentStation='{currentName}'";
         }
 
         private static void Print(string s)

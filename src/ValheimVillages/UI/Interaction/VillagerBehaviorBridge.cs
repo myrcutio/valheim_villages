@@ -55,11 +55,13 @@ namespace ValheimVillages.UI.Interaction
         public string VillagerType => villagerInstance?.villagerType ?? "";
 
         /// <summary>
-        ///     Pause/unpause the villager AI.
+        ///     Pause/unpause the villager AI. Routed to the HOST, which is where the villager
+        ///     is actually simulated — setting the local instance's flag would do nothing on a
+        ///     dedicated server. Idempotent: re-sending "paused" renews the host-side lease.
         /// </summary>
         public void SetPaused(bool paused)
         {
-            villagerInstance.villagerAI?.SetPaused(paused);
+            Villager.VillagerPauseRpc.Request(UniqueId, paused);
         }
 
         #endregion

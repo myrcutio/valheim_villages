@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using ValheimVillages.Networking;
 
 namespace ValheimVillages.Villager
 {
@@ -28,14 +29,17 @@ namespace ValheimVillages.Villager
             s_registeredInstance = rpc;
             try
             {
+                RoutedRpcRegistrar.ClearStale(rpc, SetRpc);
+                RoutedRpcRegistrar.ClearStale(rpc, DeleteRpc);
                 rpc.Register<string, string, string, string, int, int>(SetRpc, OnSet);
                 rpc.Register<string, string, string>(DeleteRpc, OnDelete);
                 Plugin.Log?.LogInfo("[WorkOrderRpc] registered VV_SetWorkOrder/VV_DeleteWorkOrder");
             }
             catch (Exception ex)
             {
-                // ZRoutedRpc has no Unregister; re-registering the same instance throws on the
-                // duplicate key (only possible after a hot reload, which the server never does).
+                // Should not happen now that ClearStale drops the previous assembly's handler
+                // first, but keep reporting it: a swallowed registration failure means the RPC
+                // silently does nothing (see RoutedRpcRegistrar).
                 Plugin.Log?.LogWarning($"[WorkOrderRpc] register skipped: {ex.Message}");
             }
         }

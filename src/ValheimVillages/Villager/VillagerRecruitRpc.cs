@@ -2,6 +2,7 @@ using System;
 using UnityEngine;
 using ValheimVillages.Villager.Records;
 using ValheimVillages.Villager.Registry;
+using ValheimVillages.Networking;
 
 namespace ValheimVillages.Villager
 {
@@ -35,6 +36,8 @@ namespace ValheimVillages.Villager
             s_registeredInstance = rpc;
             try
             {
+                RoutedRpcRegistrar.ClearStale(rpc, RpcName);
+                RoutedRpcRegistrar.ClearStale(rpc, ResultRpcName);
                 rpc.Register<string, string, Vector3, string, bool>(RpcName, OnSpawn);
                 rpc.Register<bool, bool, string>(ResultRpcName, OnSpawnResult);
                 Plugin.Log?.LogInfo("[RecruitRpc] registered VV_SpawnVillager + VV_SpawnResult handlers");

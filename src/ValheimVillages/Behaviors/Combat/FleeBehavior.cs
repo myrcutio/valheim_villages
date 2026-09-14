@@ -14,8 +14,15 @@ namespace ValheimVillages.Behaviors.Combat
     ///     <see cref="CombatSettings.FleeDangerRadius"/>, the villager panics and
     ///     runs — toward the nearest guard (any villager with a
     ///     <see cref="CombatBehavior"/>) if one is on the roster, otherwise directly
-    ///     away from the threat. Calms (yields back to work/patrol) once the threat
-    ///     is beyond <see cref="CombatSettings.FleeClearRadius"/>.
+    ///     away from the threat.
+    ///
+    ///     <para>Once the threat passes <see cref="CombatSettings.FleeClearRadius"/> the
+    ///     villager does NOT resume work immediately — it holds position and sweeps
+    ///     <see cref="CombatSettings.FleeAllClearRadius"/> every
+    ///     <see cref="CombatSettings.FleeAllClearCheckInterval"/> seconds, yielding back to the
+    ///     scheduler only when that sweep comes back empty. "The one chasing me left" is not
+    ///     "the area is safe": a raid arrives as a pack, and resuming on the first clear
+    ///     reading walked villagers straight back into the next wolf.</para>
     ///
     ///     <para>Auto-added by <c>VillagerAI.RegisterBehaviors</c> to every villager
     ///     that is NOT itself a combatant, so "any non-guard flees" without each
@@ -34,6 +41,11 @@ namespace ValheimVillages.Behaviors.Combat
         private bool m_runningToGuard;
         private Character m_threat;
 
+        // The threat that drove us here is gone, but we are holding position until an
+        // all-clear sweep says the area is actually empty. See BeginAllClearWatch.
+        private bool m_watchingForAllClear;
+        private float m_nextAllClearAt;
+
         public FleeBehavior(VillagerAI ai)
         {
             m_ai = ai;
@@ -49,21 +61,51 @@ namespace ValheimVillages.Behaviors.Combat
             // Keep fleeing while the current threat is still within the (larger)
             // clear radius — hysteresis so panic doesn't flicker at the boundary.
             if (IsStillDangerous(m_threat))
+            {
+                m_watchingForAllClear = false;
                 return true;
+            }
 
-            if (Time.time - m_lastScanTime < CombatSettings.TargetRescanInterval)
-                return false;
-            m_lastScanTime = Time.time;
+            // The hostile we were running from just cleared. Do NOT hand straight back to
+            // the scheduler: hold control and watch first (see BeginAllClearWatch).
+            if (m_threat != null)
+            {
+                m_threat = null;
+                BeginAllClearWatch();
+                return true;
+            }
 
-            m_threat = FindNearestThreat(CombatSettings.FleeDangerRadius);
-            return m_threat != null;
+            // Normal danger scan. Runs while watching too, so a NEW hostile arriving during
+            // the watch re-triggers flight at the fast cadence rather than waiting out the
+            // (deliberately slow) all-clear interval.
+            if (Time.time - m_lastScanTime >= CombatSettings.TargetRescanInterval)
+            {
+                m_lastScanTime = Time.time;
+                m_threat = FindNearestThreat(CombatSettings.FleeDangerRadius);
+                if (m_threat != null)
+                {
+                    m_watchingForAllClear = false;
+                    return true;
+                }
+            }
+
+            return m_watchingForAllClear;
         }
 
         public void Update(float dt)
         {
+            // Holding position after the threat cleared — the only thing left to decide is
+            // when it is safe to go back to work.
+            if (m_watchingForAllClear)
+            {
+                TickAllClearWatch();
+                return;
+            }
+
             if (!IsStillDangerous(m_threat))
             {
-                Calm();
+                // WantsControl owns the threat-cleared transition (into the watch); nothing
+                // to drive this tick.
                 return;
             }
 
@@ -139,8 +181,52 @@ namespace ValheimVillages.Behaviors.Combat
 
         public string GetStatusText()
         {
+            if (m_watchingForAllClear) return "Waiting for the coast to clear...";
             if (m_threat == null) return "";
             return m_runningToGuard ? "Fleeing to a guard!" : "Hiding from danger!";
+        }
+
+        /// <summary>
+        ///     Stop running and start watching. Entered the moment the hostile we fled from
+        ///     leaves <see cref="CombatSettings.FleeClearRadius" />. Control is deliberately
+        ///     RETAINED here: releasing it would let the scheduler dispatch work immediately
+        ///     and march the villager back across the village while the rest of the pack is
+        ///     still standing in it.
+        /// </summary>
+        private void BeginAllClearWatch()
+        {
+            m_watchingForAllClear = true;
+            m_runningToGuard = false;
+            m_nextAllClearAt = Time.time + CombatSettings.FleeAllClearCheckInterval;
+            if (m_ai.CurrentState != BehaviorState.Idle)
+                m_ai.SetState(BehaviorState.Idle);
+        }
+
+        /// <summary>
+        ///     One tick of the all-clear watch. Sweeps for ANY hostile within
+        ///     <see cref="CombatSettings.FleeAllClearRadius" /> on the
+        ///     <see cref="CombatSettings.FleeAllClearCheckInterval" /> cadence; when the sweep
+        ///     comes back empty the behavior releases control and the scheduler puts the
+        ///     villager back to work on the next reselect.
+        /// </summary>
+        private void TickAllClearWatch()
+        {
+            if (Time.time < m_nextAllClearAt) return;
+            m_nextAllClearAt = Time.time + CombatSettings.FleeAllClearCheckInterval;
+
+            if (FindNearestThreat(CombatSettings.FleeAllClearRadius) != null)
+            {
+                // Still something out there. Stay put and re-check next interval; if it comes
+                // close enough to be an actual danger, the scan in WantsControl picks it up
+                // first and we go back to running.
+                return;
+            }
+
+            m_watchingForAllClear = false;
+            Calm();
+            Plugin.Log?.LogInfo(
+                $"[Flee:{m_ai.NpcName}] all clear (nothing within " +
+                $"{CombatSettings.FleeAllClearRadius:F0}m) — returning to work");
         }
 
         // --- helpers -------------------------------------------------------
@@ -234,6 +320,7 @@ namespace ValheimVillages.Behaviors.Combat
         {
             m_threat = null;
             m_runningToGuard = false;
+            m_watchingForAllClear = false;
             if (m_ai.CurrentState != BehaviorState.Idle)
                 m_ai.SetState(BehaviorState.Idle);
         }

@@ -1,4 +1,5 @@
 using System;
+using HarmonyLib;
 using System.Collections.Generic;
 using UnityEngine;
 using ValheimVillages.Attributes;
@@ -17,6 +18,7 @@ namespace ValheimVillages.Items.VirtualRecipes
     {
         private static readonly List<Recipe> _registeredRecipes = new();
         private static readonly Dictionary<string, string> _physicalStationMap = new();
+
 
         /// <summary>
         ///     Clear cached recipe state on world unload / hot reload so the
@@ -69,7 +71,16 @@ namespace ValheimVillages.Items.VirtualRecipes
                 var station = VirtualRecipeParser.GetOrCreateStationTemplate(def.stationName);
                 var existingOutputs = new HashSet<string>();
 
-                count += RegisterStationRecipes(objectDB, station, def.stationRecipes, existingOutputs);
+                // Per-definition accounting. Without it a definition whose stationRecipes
+                // silently arrive empty (JSON key drift, a deserialization quirk) looks
+                // identical to one that simply has none, and the missing recipes only ever
+                // surface as "that work order isn't in the list".
+                var fromStation = RegisterStationRecipes(objectDB, station, def.stationRecipes, existingOutputs);
+                count += fromStation;
+                Plugin.Log?.LogInfo(
+                    $"VirtualRecipeLoader: {def.type} station='{def.stationName}' " +
+                    $"stationRecipes={(def.stationRecipes == null ? "null" : def.stationRecipes.Count.ToString())} " +
+                    $"registered={fromStation}");
 
                 if (def.tags != null && TagParser.HasTag(def.tags, "recipe", "cultivator"))
                 {
@@ -89,10 +100,49 @@ namespace ValheimVillages.Items.VirtualRecipes
                     var smelterEntries = SmelterRecipeDiscovery.GetSmelterRecipes(existingOutputs);
                     count += RegisterDiscoveredEntries(objectDB, station, smelterEntries, existingOutputs);
                 }
+
+                if (def.tags != null && TagParser.HasTag(def.tags, "recipe", "beekeeping"))
+                {
+                    var beeEntries = BeehiveRecipeDiscovery.GetBeehiveRecipes(existingOutputs);
+                    count += RegisterDiscoveredEntries(objectDB, station, beeEntries, existingOutputs);
+                }
             }
 
             Plugin.Log?.LogInfo(
                 $"VirtualRecipeLoader: Registered {count} virtual recipes");
+
+            RefreshPlayerKnownRecipes();
+        }
+
+        /// <summary>
+        ///     Make freshly-registered recipes actually reachable in the crafting UI.
+        ///
+        ///     <para>A recipe in ObjectDB is not yet a row in the player's craft list:
+        ///     <c>Player.GetAvailableRecipes</c> emits only recipes present in
+        ///     <c>m_knownRecipes</c>, which the game fills in <c>UpdateKnownRecipesList</c> —
+        ///     and it runs that from <c>OnInventoryChanged</c>, not when ObjectDB gains
+        ///     recipes. On a hot reload (and on the deferred ZNetScene-ready pass) our recipes
+        ///     therefore exist but stay undiscovered until the player happens to touch their
+        ///     inventory, which reads as "the mod registered it but it isn't in my list".
+        ///     Nudging the game's own discovery keeps vanilla's rules (station knowledge,
+        ///     materials) intact rather than force-adding entries behind its back.</para>
+        /// </summary>
+        private static void RefreshPlayerKnownRecipes()
+        {
+            var player = Player.m_localPlayer;
+            if (player == null) return; // cold start: the player discovers on spawn anyway
+
+            var method = AccessTools.Method(typeof(Player), "UpdateKnownRecipesList");
+            if (method == null)
+            {
+                Plugin.Log?.LogWarning(
+                    "[VirtualRecipeLoader] Player.UpdateKnownRecipesList not found — newly " +
+                    "registered recipes will stay out of the craft list until the player's " +
+                    "inventory changes.");
+                return;
+            }
+
+            method.Invoke(player, null);
         }
 
         /// <summary>
@@ -150,7 +200,22 @@ namespace ValheimVillages.Items.VirtualRecipes
                                 $"VirtualRecipeLoader: Registered {added} smelter-discovered recipes for {def.stationName} (ZNetScene ready)");
                     }
                 }
+
+                if (TagParser.HasTag(def.tags, "recipe", "beekeeping"))
+                {
+                    var existingOutputs = CollectExistingOutputs(def.stationName);
+                    var beeEntries = BeehiveRecipeDiscovery.GetBeehiveRecipes(existingOutputs);
+                    if (beeEntries.Count > 0)
+                    {
+                        var added = RegisterDiscoveredEntries(objectDB, station, beeEntries, existingOutputs);
+                        if (added > 0)
+                            Plugin.Log?.LogInfo(
+                                $"VirtualRecipeLoader: Registered {added} beehive-discovered recipes for {def.stationName} (ZNetScene ready)");
+                    }
+                }
             }
+
+            RefreshPlayerKnownRecipes();
         }
 
         /// <summary>
@@ -241,6 +306,7 @@ namespace ValheimVillages.Items.VirtualRecipes
                         ? null
                         : new[] { new VirtualRecipeInput { item = sr.input, amount = sr.inputAmount } },
                     minStationLevel = sr.minStationLevel,
+                    physicalStation = sr.physicalStation,
                 };
 
                 var recipe = CreateRecipe(objectDB, station, entry);
@@ -396,6 +462,7 @@ namespace ValheimVillages.Items.VirtualRecipes
 
             if (!string.IsNullOrEmpty(entry.physicalStation))
                 _physicalStationMap[recipeName] = entry.physicalStation;
+
 
             Plugin.Log?.LogInfo(
                 $"VirtualRecipeLoader: Created recipe '{recipeName}' " +

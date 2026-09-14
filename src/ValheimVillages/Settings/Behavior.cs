@@ -415,6 +415,23 @@ namespace ValheimVillages.Settings
         public const float FleeClearRadius = 16f;
 
         /// <summary>
+        ///     After the hostile it was running from clears, a villager does NOT go straight
+        ///     back to work: it holds position and sweeps this radius for any remaining
+        ///     hostile. "The one chasing me left" is not the same as "the area is safe" — a
+        ///     raid is a pack, and resuming instantly walked villagers back into the next
+        ///     wolf. Work only resumes when a sweep finds nothing inside this radius.
+        /// </summary>
+        public const float FleeAllClearRadius = 15f;
+
+        /// <summary>
+        ///     Cadence of the all-clear sweep. Deliberately slow: it decides only when to
+        ///     RESUME, and a settling pause is the desired behaviour. New danger arriving
+        ///     during the watch is still caught at <see cref="TargetRescanInterval" /> by the
+        ///     normal threat scan, so this interval never delays a reaction to a fresh threat.
+        /// </summary>
+        public const float FleeAllClearCheckInterval = 10f;
+
+        /// <summary>
         ///     How far a non-combatant runs from the threat when there is no guard
         ///     on the roster to flee toward.
         /// </summary>

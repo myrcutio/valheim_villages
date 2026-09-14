@@ -18,8 +18,8 @@ namespace ValheimVillages.Behaviors.Relax
     ///
     ///     <para>Modeled on <see cref="Wander.WanderBehavior" />: a routine
     ///     <see cref="IBehavior" /> (NOT an <see cref="Interfaces.IDirectedBehavior" />), so
-    ///     it is never dispatched by the reranker and always sits in the step-3 routine slot
-    ///     in PrimaryMode / last-by-priority otherwise. Its priority (10) is below wander (20)
+    ///     it is never dispatched by the reranker and always sits in the step-3 routine slot,
+    ///     reached only when the scheduler had nothing. Its priority (10) is below wander (20)
     ///     and patrol (30) and far below the reactive floor (100), so ANY real work — reactive
     ///     (combat/flee) or scheduler work (craft/repair/cook/farm) — preempts it on the next
     ///     reselect tick. That is the "always interruptible for any real work" contract: relax

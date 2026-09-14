@@ -41,10 +41,27 @@ namespace ValheimVillages.UI.Interaction
             }
         }
 
+        /// <summary>Next time the host-side pause lease is re-asserted while the menu is open.</summary>
+        private float m_nextPauseRenewAt;
+
         private void Awake()
         {
             m_character = GetComponent<Character>();
             m_humanoid = GetComponent<Humanoid>();
+        }
+
+        /// <summary>
+        ///     Renew the host-side pause while this villager's craft menu is open. The pause
+        ///     is a lease (see <see cref="Villager.VillagerPauseRpc" />) so that a client which
+        ///     disconnects mid-menu cannot freeze a villager permanently — which means the
+        ///     client holding the menu has to keep saying "still here".
+        /// </summary>
+        private void Update()
+        {
+            if (!ReferenceEquals(ActiveCraftingVillager, this)) return;
+            if (Time.time < m_nextPauseRenewAt) return;
+            m_nextPauseRenewAt = Time.time + Villager.VillagerPauseRpc.HeartbeatSeconds;
+            Bridge?.SetPaused(true);
         }
 
         /// <summary>
@@ -149,9 +166,11 @@ namespace ValheimVillages.UI.Interaction
         {
             var station = villagerStation.Station;
 
-            // Pause the NPC while the UI is open
-            Bridge?.SetPaused(true);
+            // Pause the NPC while the UI is open. Applied on the HOST (the villager is
+            // simulated there), and renewed from Update while the menu stays open.
             ActiveCraftingVillager = this;
+            m_nextPauseRenewAt = Time.time + Villager.VillagerPauseRpc.HeartbeatSeconds;
+            Bridge?.SetPaused(true);
 
             // Set the player's crafting station to our virtual station
             player.SetCraftingStation(station);

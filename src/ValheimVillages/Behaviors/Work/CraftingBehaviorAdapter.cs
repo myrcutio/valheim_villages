@@ -14,16 +14,15 @@ namespace ValheimVillages.Behaviors.Work
     ///     IBehavior adapter wrapping the existing CraftingBehavior for worker NPCs.
     ///     Tag: "craft", Priority: 50.
     ///
-    ///     <para>Also an <see cref="IDirectedBehavior" />: in PrimaryMode the scheduler
-    ///     owns work-start. A <see cref="TaskKind.CraftWork" /> assignment calls
-    ///     <c>TryScanForWork</c> (the same detect-and-commit the legacy idle-scan used),
-    ///     which finds the villager's next chest order OR farm task. The assignment stays
-    ///     active while crafting/farming runs and releases when it finishes — so the
-    ///     reranker schedules craft/farm alongside repair instead of it bypassing the
-    ///     board via a self-scan.</para>
+    ///     <para>Also an <see cref="IDirectedBehavior" />, and the scheduler owns work-start
+    ///     outright. A <see cref="TaskKind.CraftWork" /> assignment calls <c>TryScanForWork</c>
+    ///     with the order the reranker chose, which commits the villager to that chest order
+    ///     (or, for the farming floor row, to a farm task). The assignment stays active while
+    ///     crafting/farming runs and releases when it finishes, so craft/farm is scheduled
+    ///     alongside repair instead of bypassing the board via a self-scan.</para>
     /// </summary>
     [RegisterBehavior("craft")]
-    public class CraftingBehaviorAdapter : IBehavior, IDirectedBehavior, IWorkScanBehavior, IPathUnreachableHandler
+    public class CraftingBehaviorAdapter : IBehavior, IDirectedBehavior, IPathUnreachableHandler
     {
         private readonly VillagerAI m_ai;
 
@@ -39,17 +38,14 @@ namespace ValheimVillages.Behaviors.Work
         public string Tag => "craft";
         public int Priority => 50;
 
-        public bool WantsControl(BehaviorContext ctx)
-        {
-            // PrimaryMode routes work-start through the scheduler (BeginAssignment), so
-            // only keep control while an assigned craft/farm task is actually running.
-            // IsWorking covers both crafting sub-states and the injected farming behavior.
-            if (SchedulerSettings.PrimaryMode)
-                return (Crafting?.IsWorking ?? false) || (Crafting?.ScanPending ?? false);
-            return m_ai.CurrentState == BehaviorState.Working;
-        }
+        // Work-start is routed through the scheduler (BeginAssignment), so this only keeps
+        // control while an assigned craft/farm task is actually running. Deliberately
+        // identical to AssignmentActive: the dispatcher holds a claim while that is true,
+        // so if the two could disagree the villager would be "busy" to the dispatcher and
+        // idle to the selector, and never get reassigned.
+        public bool WantsControl(BehaviorContext ctx) => AssignmentActive;
 
-        // --- IDirectedBehavior: scheduler-assigned execution (PrimaryMode) ---
+        // --- IDirectedBehavior: scheduler-assigned execution ---
 
         public bool CanExecute(TaskKind kind) => kind == TaskKind.CraftWork;
 
@@ -106,12 +102,6 @@ namespace ValheimVillages.Behaviors.Work
             if (m_ai.CurrentState == BehaviorState.Working)
                 return $"Working: {Crafting.SubState}";
             return "Idle";
-        }
-
-        /// <summary>Try to find a work order and begin working. Delegates to CraftingBehavior.</summary>
-        public bool TryScanForWork(bool ignoreScanInterval = false)
-        {
-            return Crafting?.TryScanForWork(ignoreScanInterval) ?? false;
         }
 
         /// <summary>Inject a farming sub-behavior into the crafting behavior.</summary>

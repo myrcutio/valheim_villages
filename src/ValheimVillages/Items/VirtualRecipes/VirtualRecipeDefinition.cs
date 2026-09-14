@@ -18,7 +18,9 @@ namespace ValheimVillages.Items.VirtualRecipes
         ///     Physical station type override. When set, the NPC walks to this
         ///     station type instead of the virtual station.
         ///     Values: "cookingstation" (routes to CookingStation component),
-        ///     "farm" (routes to cultivator planting).
+        ///     "farm" (routes to cultivator planting), "beehive" (routes to
+        ///     <see cref="Villager.AI.Work.BeehiveHelper" /> honey extraction), or a
+        ///     smelter-family prefab name.
         /// </summary>
         public string physicalStation = "";
     }

@@ -1,6 +1,7 @@
 using System;
 using ValheimVillages.Items;
 using ValheimVillages.Villages.Entity;
+using ValheimVillages.Networking;
 
 namespace ValheimVillages.Villages
 {
@@ -24,6 +25,7 @@ namespace ValheimVillages.Villages
             s_registeredInstance = rpc;
             try
             {
+                RoutedRpcRegistrar.ClearStale(rpc, RpcName);
                 rpc.Register<string>(RpcName, OnDelete);
             }
             catch (Exception ex)

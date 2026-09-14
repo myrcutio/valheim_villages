@@ -11,10 +11,13 @@ namespace ValheimVillages.Scheduling.Producers
     /// <summary>
     ///     Produces one <see cref="TaskKind.CraftWork" /> task per craft-capable villager
     ///     in the village so the scheduler offers crafting/farming alongside repair instead
-    ///     of it bypassing the board. Unlike repair (one task per damaged piece), the work a
-    ///     crafter does is self-discovered (next chest order or farm plot), so the task is
-    ///     keyed to the VILLAGER, positioned at its home anchor, and the directed
-    ///     <c>CraftingBehaviorAdapter.BeginAssignment</c> commits the actual work.
+    ///     of it bypassing the board. Each row names the ORDER to work
+    ///     (<see cref="CandidateTask.TargetItemPrefab" />) and sits at the station where it
+    ///     happens; the directed <c>CraftingBehaviorAdapter.BeginAssignment</c> forwards that
+    ///     choice into the work-order scan and commits the actual work. Rows are keyed to the
+    ///     VILLAGER (<see cref="CandidateTask.OwnerVillagerId" />) because a crafter's queue is
+    ///     its own. The lone exception is the farming floor row below, which carries no item
+    ///     and lets the scan pick a farm task the chest-order board cannot see.
     ///
     ///     <para>Priority is the worst unmet fraction across the villager type's chest work
     ///     orders, floored at <see cref="IdleFloor" />. The floor matters: it keeps a tiny
@@ -135,7 +138,7 @@ namespace ValheimVillages.Scheduling.Producers
                 if (o == null || o.MaxQuantity <= 0 || string.IsNullOrEmpty(o.ItemPrefabName)) continue;
                 var have = ContainerScanner.CountAcrossContainers(containers, o.ItemPrefabName);
                 if (have >= o.MaxQuantity) continue;
-                if (!CanSupply(containers, o.ItemPrefabName, ai.VillagerType)) continue;
+                if (!CanSupply(containers, o.ItemPrefabName, ai)) continue;
 
                 var deficit = Mathf.Clamp01((o.MaxQuantity - have) / (float)o.MaxQuantity);
                 var stock = Mathf.Clamp01(have / (float)o.MaxQuantity);
@@ -161,6 +164,11 @@ namespace ValheimVillages.Scheduling.Producers
                     ai.HomeAnchor, null, out var cookPos, out _))
                 return cookPos;
 
+            if (physical == BeehiveHelper.PhysicalStation
+                && BeehiveHelper.TryFindHarvestable(
+                    ai.HomeAnchor, WorkSettings.ChestScanRadius, itemPrefab, out _, out var hivePos))
+                return hivePos;
+
             if (physical != null && physical != "farm"
                 && VillageStationRegistry.TryFindStation<Smelter>(
                     ai.HomeAnchor, sm => sm != null && StationFinder.GetSmelterPrefab(physical) != null,
@@ -171,16 +179,25 @@ namespace ValheimVillages.Scheduling.Producers
         }
 
         /// <summary>
-        ///     True if the recipe for <paramref name="itemPrefabName" /> exists and every
-        ///     ingredient it needs is currently present in the villager's chests. Uses the same
-        ///     scan the crafting flow itself runs, so the board's view and the behavior's view
-        ///     of "can I do this?" cannot drift apart.
+        ///     True if the recipe for <paramref name="itemPrefabName" /> exists and the villager
+        ///     could actually start it right now. Uses the same scans the crafting flow itself
+        ///     runs, so the board's view and the behavior's view of "can I do this?" cannot
+        ///     drift apart — a row the scan will refuse must never reach the board, or the
+        ///     villager churns BeginAssignment -> "no work payload" -> abandon.
         /// </summary>
         private static bool CanSupply(
-            System.Collections.Generic.List<Container> containers, string itemPrefabName, string villagerType)
+            System.Collections.Generic.List<Container> containers, string itemPrefabName, VillagerAI ai)
         {
-            var recipe = StationMatcher.FindRecipeForNpc(itemPrefabName, villagerType);
+            var recipe = StationMatcher.FindRecipeForNpc(itemPrefabName, ai.VillagerType);
             if (recipe == null) return false;
+
+            // A HARVEST order has no ingredients — its precondition is that the thing being
+            // harvested has actually produced something. FindIngredients would trivially
+            // succeed on the empty requirement list and advertise honey from empty hives.
+            if (VirtualRecipeLoader.GetPhysicalStation(recipe.name) == BeehiveHelper.PhysicalStation)
+                return BeehiveHelper.TryFindHarvestable(
+                    ai.HomeAnchor, WorkSettings.ChestScanRadius, itemPrefabName, out _, out _);
+
             return ContainerScanner.FindIngredients(containers, recipe) != null;
         }
     }

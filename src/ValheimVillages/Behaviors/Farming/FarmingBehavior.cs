@@ -137,9 +137,11 @@ namespace ValheimVillages.Behaviors.Farming
             VillagerActivityLog.Instance.Record(m_villager.UniqueID, itemName, "complete", "farming");
             m_context = null;
             SubState = FarmSubState.Idle;
+            // Deliberately does NOT re-scan for more work. The assignment ends here and
+            // the villager goes Idle; the scheduler picks what comes next on the following
+            // reselect. Kicking off a self-scan here would start work behind the task
+            // board's back, bypassing the reranker's choice of WHICH order to do next.
             m_ai.SetState(BehaviorState.Idle);
-            // Trigger immediate re-scan for more work (other work orders, etc.)
-            m_ai.CraftingBehavior?.TryScanForWork(true);
         }
 
         private void AbandonWork(string reason)

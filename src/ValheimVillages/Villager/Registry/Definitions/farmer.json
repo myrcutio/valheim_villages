@@ -75,7 +75,8 @@
     "tab:debug",
     "tab:workorder",
     "recipe:cultivator",
-    "recipe:cooking"
+    "recipe:cooking",
+    "recipe:beekeeping"
   ],
   "dependentOnNpcType": "",
   "tieredBenefits": [],

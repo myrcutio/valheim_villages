@@ -26,15 +26,17 @@ namespace ValheimVillages.Scheduling
     public static class DualEncoderScheduler
     {
         public static CandidateTask SelectBest(
-            in VillagerQuery query, IReadOnlyList<CandidateTask> tasks, Mlp mlp, RerankSettings settings)
-            => SelectBestExplained(in query, tasks, mlp, settings).Task;
+            in VillagerQuery query, IReadOnlyList<CandidateTask> tasks, Mlp mlp,
+            RerankSettings settings, float now)
+            => SelectBestExplained(in query, tasks, mlp, settings, now).Task;
 
+        /// <param name="now">Current time; see <see cref="TaskReranker.SelectBestExplained" />.</param>
         public static TaskReranker.RerankPick SelectBestExplained(
-            in VillagerQuery query, IReadOnlyList<CandidateTask> tasks, Mlp mlp, RerankSettings settings)
+            in VillagerQuery query, IReadOnlyList<CandidateTask> tasks, Mlp mlp,
+            RerankSettings settings, float now)
         {
             if (tasks == null || tasks.Count == 0) return default;
 
-            var now = Time.time;
             var qEmb = VillagerEncoder.Encode(
                 query.Graph, query.Triad, query.Position, SchedulerSettings.PriorityWeight);
 
@@ -58,7 +60,7 @@ namespace ValheimVillages.Scheduling
             for (var i = 0; i < m; i++) topM.Add(scored[i].task);
 
             // Stage 4: exact rerank (region-hop distance + slack gate + learned residual).
-            return TaskReranker.SelectBestExplained(in query, topM, mlp, settings);
+            return TaskReranker.SelectBestExplained(in query, topM, mlp, settings, now);
         }
 
         private static bool IsCapable(in VillagerQuery query, CandidateTask task)
