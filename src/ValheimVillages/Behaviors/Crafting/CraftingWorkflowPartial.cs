@@ -610,6 +610,16 @@ namespace ValheimVillages.Behaviors.Crafting
             }
         }
 
+        /// <summary>
+        ///     How many output items one craft of this work order's recipe yields
+        ///     (<see cref="Recipe.m_amount" />): 20 for arrows, 1 for most things.
+        /// </summary>
+        private int OutputPerCraft()
+        {
+            var amount = m_context?.Recipe?.m_amount ?? 0;
+            return amount > 0 ? amount : 1;
+        }
+
         private void CompleteCraft()
         {
             if (m_context == null)
@@ -644,7 +654,25 @@ namespace ValheimVillages.Behaviors.Crafting
                 // into, so the craft itself consumes them. Clear the in-transit entries here,
                 // at the moment the product exists.
                 ConsumeIngredientHeldItems();
-                m_context.CraftedCount++;
+
+                // One craft yields the recipe's FULL output amount, not one item: arrows come
+                // 20 to a craft. Carry the whole batch as a tracked HeldItem so the deposit on
+                // arrival is the real yield — OnArrivedAtOutputChest only ever saw an empty
+                // carry list here and fell through to its legacy "deposit 1", so a multi-output
+                // recipe charged the player every ingredient and returned a single item.
+                // Added AFTER ConsumeIngredientHeldItems so an ingredient entry that happens to
+                // match the output prefab+amount can't be cleared in its place.
+                var outputPrefab = m_context.WorkOrder?.ItemPrefabName;
+                var perCraft = OutputPerCraft();
+                if (!string.IsNullOrEmpty(outputPrefab))
+                    m_context.HeldItems.Add(new HeldItem
+                    {
+                        SourceContainer = m_context.SourceContainer,
+                        PrefabName = outputPrefab,
+                        Amount = perCraft,
+                    });
+
+                m_context.CraftedCount += perCraft;
             }
 
             BeginReturningToChest();
@@ -901,10 +929,25 @@ namespace ValheimVillages.Behaviors.Crafting
             m_context.SmelterRemovalRequested = false;
 
             var maxQuantity = m_context.WorkOrder?.MaxQuantity ?? 1;
-            if (m_context.CraftedCount < maxQuantity)
+
+            var quotaItem = m_context.WorkOrder?.ItemPrefabName;
+            if (string.IsNullOrEmpty(quotaItem) || m_ai == null)
+            {
+                AbandonWork("cannot re-count order output: no output prefab or villager");
+                return;
+            }
+
+            if (CountInVillage(quotaItem) < maxQuantity)
                 BeginGatheringIngredients();
             else
                 FinishWork();
+        }
+
+        private int CountInVillage(string prefabName)
+        {
+            var containers = ContainerScanner.FindVillageContainers(
+                m_ai.HomeAnchor, Settings.WorkSettings.ChestScanRadius);
+            return ContainerScanner.CountAcrossContainers(containers, prefabName);
         }
 
         private void BeginTravelingToStation()

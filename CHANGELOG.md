@@ -5,6 +5,12 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-09-15
+
+### Fixed
+- Work orders for recipes that craft in batches (arrows and the like) now deliver the whole batch.  the villager was paying the full ingredient cost for the stack and then handing back a single item.
+- Work order quantities are now counted from what is actually sitting in the village's chests rather than from what one villager remembers crafting, so an order stops at the right amount and picks itself back up when the stock gets used.
+
 ## [0.2.6] - 2026-09-13
 
 ### New

@@ -55,7 +55,8 @@ Requires [BepInExPack Valheim](https://thunderstore.io/c/valheim/p/denikson/BepI
     - added better controller support for navigating tabs, particularly on steam deck
 
 ### Known Issues
-If you are looking here you probably 
+If you are looking here you probably noticed something dreadfully wrong and broken, and for that I am sorry.
+  - multiple villages with village registries is probably going to break in fun and exciting ways, especially when players aren't in town.  for best results try to keep saves to a single, enclosed village.
   - the villagers use dverger prefabs for animations, and sometimes a race condition on load fails to clean up the old prefab while still creating a new one, leading to very confused dwarves wandering your village
   - navmeshes are really hard
     - there are many, many edge cases that the villagers may not be able to properly navigate.  in particular this is a problem with shallow stairs and low gaps between floors.  to best avoid these, use wide stairs and ramps, and lots of clearance between floors and terrain.  if it's not handicap accessible, it will probably prove a problem for a villager.

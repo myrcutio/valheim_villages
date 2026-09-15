@@ -26,8 +26,8 @@ using ValheimVillages.Villages.Entity;
 [assembly: AssemblyCompany("Myrcutio")]
 [assembly: AssemblyProduct("ValheimVillages")]
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
-[assembly: AssemblyVersion("0.2.6")]
-[assembly: AssemblyFileVersion("0.2.6")]
+[assembly: AssemblyVersion("0.2.7")]
+[assembly: AssemblyFileVersion("0.2.7")]
 [assembly: InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
@@ -37,7 +37,7 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.2.6";
+        public const string PluginVersion = "0.2.7";
 
         private static bool _recipeRefreshEnqueued;
         private static bool _recordIndexEnqueued;
