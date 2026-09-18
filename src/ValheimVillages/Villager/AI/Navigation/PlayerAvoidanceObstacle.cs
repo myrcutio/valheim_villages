@@ -34,7 +34,7 @@ namespace ValheimVillages.Villager.AI.Navigation
     /// </summary>
     internal static class PlayerAvoidanceObstacle
     {
-        // Match the player capsule (~0.5m radius, ~1.8m tall — see vv_bake_audit
+        // Match the player capsule (~0.5m radius, ~1.8m tall — see vv_probe bake
         // 'Player(Clone)' CapsuleCollider size(0.98,1.85,0.98)).
         private const float Radius = 0.5f;
         private const float Height = 1.8f;

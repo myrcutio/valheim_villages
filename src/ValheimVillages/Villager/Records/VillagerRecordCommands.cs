@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.Villager.Records
@@ -10,10 +12,39 @@ namespace ValheimVillages.Villager.Records
     /// <summary>Dev commands to inspect the villager record table and exercise its lifecycle.</summary>
     public static class VillagerRecordCommands
     {
-        [DevCommand("Dump villager records [alive|dead|egg|<villageKey>]", Name = "vv_records")]
+        /// <summary>
+        ///     Tab completions for <c>vv_records</c>: the fixed status filters plus every
+        ///     village key that currently has records, so the useful values are reachable
+        ///     without first running the command to discover them.
+        /// </summary>
+        private static IEnumerable<string> RecordFilterOptions()
+        {
+            var options = new List<string> { "alive", "dead", "egg" };
+            options.AddRange(VillagerRecordTable.EnumerateAll()
+                .Select(r => r.Village)
+                .Where(v => !string.IsNullOrEmpty(v))
+                .Distinct());
+            return options;
+        }
+
+        [DevCommand(
+            "Dump villager records [alive|dead|egg|<villageKey>] [-v = full live AI/path/region detail]",
+            Name = "vv_records", OptionsProvider = nameof(RecordFilterOptions))]
         public static void Dump(Terminal.ConsoleEventArgs args)
         {
-            var filter = args.Length > 1 ? args[1] : null;
+            // Absorbed vv_get_villagers: same row set (the record table) and the same
+            // presence resolver, so -v just adds the live-instance block under each row.
+            string filter = null;
+            var verbose = false;
+            for (var i = 1; i < args.Length; i++)
+            {
+                var a = args[i];
+                if (string.Equals(a, "-v", System.StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a, "--verbose", System.StringComparison.OrdinalIgnoreCase))
+                    verbose = true;
+                else if (filter == null)
+                    filter = a;
+            }
 
             List<VillagerRecord> records;
             if (string.Equals(filter, "alive", System.StringComparison.OrdinalIgnoreCase))
@@ -27,8 +58,14 @@ namespace ValheimVillages.Villager.Records
             else
                 records = VillagerRecordTable.EnumerateAll().ToList();
 
+            // Make the in-memory instance count honest before we report it in the footer.
+            var pruned = VillagerAIManager.PruneTombstones();
+            var navHold = VillageNavLock.IsHeld
+                ? $" [nav hold {VillageNavLock.SecondsRemaining:F1}s — rebuild settle]"
+                : "";
+
             Print($"[vv_records] {VillagerLiveness.PeerLabel()} {records.Count} record(s)" +
-                  $"{(filter != null ? $" (filter: {filter})" : "")}");
+                  $"{(filter != null ? $" (filter: {filter})" : "")}{navHold}");
             Print("  legend: live=loaded here · away=elsewhere/unloaded · missing=NPC ZDO gone (orphan) · " +
                   "unlinked=no NPC link · ?=can't tell (client). npc= is a stored back-link, not a liveness probe.");
             foreach (var r in records)
@@ -38,11 +75,23 @@ namespace ValheimVillages.Villager.Records
                 Print(
                     $"  {r.Status,-5} {r.Name} ({r.Type})  village={r.Village}  " +
                     $"live={VillagerLiveness.Tag(presence)}{warn}  id={r.RecordId}  npc={r.NpcZdoId} home={r.HomeAnchor}");
+
+                // Only a record with a live local instance has a runtime block to show.
+                if (!verbose || presence != LivePresence.Live) continue;
+                if (!VillagerAIManager.ActiveVillagers.TryGetValue(r.RecordId, out var ai) || ai == null)
+                    continue;
+
+                var sb = new StringBuilder();
+                ai.AppendDebug(sb);
+                Print(sb.ToString().TrimEnd());
             }
+
+            Print($"  in-memory AI instances on this peer: {VillagerAIManager.ActiveVillagers.Count}" +
+                  (pruned > 0 ? $" ({pruned} null tombstone(s) pruned)" : ""));
         }
 
         [DevCommand("Kill nearest active villager (or by record id) to test the death->Dead flow",
-            Name = "vv_kill_villager")]
+            Name = "vv_kill_villager", Destructive = true)]
         public static void KillVillager(Terminal.ConsoleEventArgs args)
         {
             var idArg = args.Length > 1 ? args[1] : null;
@@ -108,7 +157,7 @@ namespace ValheimVillages.Villager.Records
         }
 
         [DevCommand("Set a record's status: vv_set_record_status <id> <alive|dead|egg>",
-            Name = "vv_set_record_status")]
+            Name = "vv_set_record_status", Destructive = true)]
         public static void SetRecordStatus(Terminal.ConsoleEventArgs args)
         {
             if (args.Length < 3)

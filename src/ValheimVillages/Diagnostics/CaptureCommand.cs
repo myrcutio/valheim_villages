@@ -5,42 +5,35 @@ using ValheimVillages.Attributes;
 namespace ValheimVillages.Diagnostics
 {
     /// <summary>
-    ///     Dev commands to fire orchestrated captures on demand. Equivalent to
-    ///     what repartition does automatically: teleports the player to an
+    ///     Dev command to fire an orchestrated capture on demand. Equivalent to
+    ///     what repartition used to do automatically: teleports the player to an
     ///     anchor, looks straight down, hides the HUD, snaps the PNG, and
     ///     restores state in a <c>finally</c>. Useful when reproducing a
     ///     transient in-game condition without having to also trigger a hot
     ///     reload or repartition.
+    ///     <para>
+    ///         Absorbed the former <c>vv_capture_at</c>. The two forms are not the same
+    ///         request with a different origin, so the defaults differ: with no args the
+    ///         capture anchors on the nearest village seed anchor at 45m clearance and
+    ///         includes the diagnostics sidecar; with explicit coords it anchors there at
+    ///         10m and omits diagnostics (incident-style framing).
+    ///     </para>
     /// </summary>
     internal static class CaptureCommand
     {
-        [DevCommand("Capture an orchestrated village screenshot + diagnostics sidecar",
-            Name = "vv_capture")]
-        public static void Capture()
-        {
-            DebugLog.Capture("manual");
-            const string msg = "[vv_capture] Enqueued orchestrated capture (manual trigger)";
-            Console.instance?.Print(msg);
-            Plugin.Log?.LogInfo(msg);
-        }
+        private const float CoordClearanceDefault = 10f;
 
-        /// <summary>
-        ///     Capture an orchestrated screenshot at a specific world XZ with
-        ///     a tighter clearance — sibling to <c>vv_capture</c> for incident-
-        ///     style framing. Y is sampled from solid terrain at (x, z) so the
-        ///     camera lands at terrain Y + clearance instead of sea-level +
-        ///     clearance, which matters at higher-altitude villages.
-        /// </summary>
-        [DevCommand("Capture at (x, z) [clearance=10m]: vv_capture_at <x> <z> [clearance]",
-            Name = "vv_capture_at")]
-        public static void CaptureAt(Terminal.ConsoleEventArgs args)
+        [DevCommand(
+            "Capture an orchestrated village screenshot + diagnostics sidecar. " +
+            "vv_capture [x z [clearance=10]] — no args = village seed anchor at 45m",
+            Name = "vv_capture")]
+        public static void Capture(Terminal.ConsoleEventArgs args)
         {
-            // AttributeScanner only binds () or (Terminal.ConsoleEventArgs); the loose
-            // (string, string, string) signature was silently skipped at registration, so
-            // vv_capture_at never existed at runtime.
+            // No coords: the seed-anchor form, which also carries the diagnostics sidecar.
             if (args == null || args.Length < 3)
             {
-                Report("usage: vv_capture_at <x> <z> [clearance]");
+                DebugLog.Capture("manual");
+                Report("enqueued orchestrated capture at the village seed anchor (manual trigger)");
                 return;
             }
 
@@ -55,12 +48,12 @@ namespace ValheimVillages.Diagnostics
                 return;
             }
 
-            var clearance = 10f;
+            var clearance = CoordClearanceDefault;
             if (!string.IsNullOrEmpty(clearanceArg) &&
                 !float.TryParse(clearanceArg, NumberStyles.Float, CultureInfo.InvariantCulture, out clearance))
             {
-                Report($"could not parse clearance '{clearanceArg}' as float, using 10m");
-                clearance = 10f;
+                Report($"could not parse clearance '{clearanceArg}' as float, using {CoordClearanceDefault:F0}m");
+                clearance = CoordClearanceDefault;
             }
 
             // Sample terrain Y at (x, z) so the camera lands above the actual
@@ -69,9 +62,7 @@ namespace ValheimVillages.Diagnostics
             var anchorY = 0f;
             if (ZoneSystem.instance != null &&
                 ZoneSystem.instance.GetSolidHeight(new Vector3(x, 500f, z), out var terrainY, 550))
-            {
                 anchorY = terrainY;
-            }
 
             var req = CaptureRequest.ForIncident("manual_at",
                 incidentSubdir: "", baseName: "last_capture",
@@ -82,7 +73,7 @@ namespace ValheimVillages.Diagnostics
 
         private static void Report(string state)
         {
-            var msg = $"[vv_capture_at] {state}";
+            var msg = $"[vv_capture] {state}";
             Console.instance?.Print(msg);
             Plugin.Log?.LogInfo(msg);
         }

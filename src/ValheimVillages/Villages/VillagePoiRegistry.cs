@@ -170,37 +170,46 @@ namespace ValheimVillages.Villages
             });
         }
 
-        [DevCommand("List cached village PoIs (fire/table/chair/farm) for the village containing the player",
-            Name = "vv_pois")]
-        public static void DumpPois()
+        /// <param name="target">
+        ///     The village to report on, or null to resolve it from the player's position.
+        ///     In a multi-village world the positional resolve is ambiguous, so
+        ///     <c>vv_village pois &lt;id&gt;</c> passes an explicit village through here.
+        /// </param>
+        public static void DumpPois(Village target = null)
         {
             var player = Player.m_localPlayer;
             var sb = new System.Text.StringBuilder();
-            if (player == null)
+            var village = target;
+
+            if (village == null)
             {
-                sb.AppendLine("[vv_pois] No local player.");
-            }
-            else
-            {
-                var pos = player.transform.position;
-                var village = VillageRegistry.GetVillageAt(pos);
-                if (village == null)
+                if (player == null)
                 {
-                    sb.AppendLine(
-                        $"[vv_pois] player at ({pos.x:F1},{pos.z:F1}) is not inside any registered village.");
+                    sb.AppendLine("[vv_village pois] No local player and no village id given.");
                 }
                 else
                 {
-                    var key = village.VillageId;
-                    var list = s_poisByVillage.TryGetValue(key, out var pois) ? pois : null;
-                    sb.AppendLine($"[vv_pois] village {key}: {(list?.Count ?? 0)} PoI(s)");
-                    if (list != null)
-                        foreach (var p in list)
-                            sb.AppendLine(
-                                $"  [{p.Type}] @ ({p.Position.x:F1},{p.Position.y:F1},{p.Position.z:F1}) " +
-                                $"shelter={p.HasShelter} comfort={p.ComfortValue:F1} " +
-                                $"dist={Vector3.Distance(pos, p.Position):F1}m");
+                    var pos = player.transform.position;
+                    village = VillageRegistry.GetVillageAt(pos);
+                    if (village == null)
+                        sb.AppendLine(
+                            $"[vv_village pois] player at ({pos.x:F1},{pos.z:F1}) is not inside any registered village.");
                 }
+            }
+
+            if (village != null)
+            {
+                var key = village.VillageId;
+                var list = s_poisByVillage.TryGetValue(key, out var pois) ? pois : null;
+                sb.AppendLine($"[vv_village pois] village {key}: {(list?.Count ?? 0)} PoI(s)");
+                if (list != null)
+                    foreach (var p in list)
+                        sb.AppendLine(
+                            $"  [{p.Type}] @ ({p.Position.x:F1},{p.Position.y:F1},{p.Position.z:F1}) " +
+                            $"shelter={p.HasShelter} comfort={p.ComfortValue:F1}" +
+                            (player != null
+                                ? $" dist={Vector3.Distance(player.transform.position, p.Position):F1}m"
+                                : ""));
             }
 
             global::Console.instance?.Print(sb.ToString());

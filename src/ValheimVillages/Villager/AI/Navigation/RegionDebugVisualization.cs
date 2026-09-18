@@ -18,7 +18,6 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     Emergency cleanup: find and destroy ALL persisted torch markers from
         ///     old sessions that used torch-based visualization.
         /// </summary>
-        [DevCommand("Remove ALL persisted torch markers from the world", Name = "vv_hna_cleanup")]
         public static void CleanupPersistedMarkers()
         {
             if (ZNetScene.instance == null)

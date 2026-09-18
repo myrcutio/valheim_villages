@@ -11,9 +11,6 @@ namespace ValheimVillages.Diagnostics
     /// </summary>
     internal static class PurgeStaleCommand
     {
-        [DevCommand(
-            "Report + purge stale (old-assembly) mod instances left by hot reloads",
-            Name = "vv_purge_stale")]
         public static void Run(Terminal.ConsoleEventArgs args)
         {
             var report = HotReloadHelper.PurgeStaleObjects();

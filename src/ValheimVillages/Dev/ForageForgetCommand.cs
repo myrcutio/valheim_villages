@@ -22,28 +22,26 @@ namespace ValheimVillages.Dev
     /// </summary>
     public static class ForageForgetCommand
     {
-        [DevCommand("Forget forage recipes for plants this character has never picked: " +
-                    "vv_forage_forget", Name = "vv_forage_forget")]
         public static void Forget(Terminal.ConsoleEventArgs args)
         {
             var player = Player.m_localPlayer;
             if (player == null)
             {
-                Print("[vv_forage_forget] no local player on this peer");
+                Print("[vv_reset forage] no local player on this peer");
                 return;
             }
 
             if (!(AccessTools.Field(typeof(Player), "m_knownRecipes")?.GetValue(player)
                     is HashSet<string> known))
             {
-                Print("[vv_forage_forget] could not read m_knownRecipes");
+                Print("[vv_reset forage] could not read m_knownRecipes");
                 return;
             }
 
             var db = ObjectDB.instance;
             if (db?.m_recipes == null)
             {
-                Print("[vv_forage_forget] ObjectDB not ready");
+                Print("[vv_reset forage] ObjectDB not ready");
                 return;
             }
 
@@ -72,7 +70,7 @@ namespace ValheimVillages.Dev
             }
 
             var sb = new StringBuilder();
-            sb.AppendLine($"[vv_forage_forget] forgot {removed.Count} unearned forage recipe(s)");
+            sb.AppendLine($"[vv_reset forage] forgot {removed.Count} unearned forage recipe(s)");
             foreach (var name in removed)
                 sb.AppendLine("    " + Localization.instance.Localize(name));
             if (removed.Count > 0)

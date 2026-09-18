@@ -69,6 +69,37 @@ namespace ValheimVillages.TaskQueue.Handlers
                 return TaskResult.Ok();
             }
 
+            // Which of those chests this villager can actually WALK to.
+            //
+            // `containers` is scoped by the village FOOTPRINT, which is grown to enclose every
+            // player-built piece within 100m, while reachability comes from the region GRAPH —
+            // so a chest is routinely in scope and provably unwalkable. Picking one anyway
+            // committed the order, CraftingWorkflow.TryWalkTo abandoned it at execution, and
+            // the next scan re-ranked the same largest-deficit order: the villager looped on an
+            // impossible order forever and never reached the orders it COULD do. (Measured: a
+            // Farmer 32m from its ingredient chest, with no graph region within 16m of it,
+            // re-picking ArrowWood every cycle while Carrot sat at 10/40.)
+            //
+            // Same predicate as TryWalkTo, from the same path source, so selection and
+            // execution cannot disagree. Computed ONCE per scan — one resolve per chest, not
+            // per chest per order — and only after the village/graph readiness checks above,
+            // so a cold graph defers the scan rather than rejecting every order.
+            var reachable = ContainerScanner.FilterReachable(containers, ai.Position);
+
+            if (reachable.Count == 0)
+            {
+                Plugin.Log?.LogWarning(
+                    $"[WorkOrderScan] {ai.NpcName}: none of the village's {containers.Count} chest(s) " +
+                    $"has an HNA-valid approach from ({ai.Position.x:F0},{ai.Position.z:F0}) — " +
+                    "the villager is off the region graph, or the village's chests are outside it.");
+                return TaskResult.Ok();
+            }
+
+            if (reachable.Count < containers.Count)
+                Plugin.Log?.LogInfo(
+                    $"[WorkOrderScan] {ai.NpcName}: {reachable.Count}/{containers.Count} village chest(s) " +
+                    "are reachable; the rest are inside the footprint but off the region graph.");
+
             // Config now lives on the village record, not chest tokens.
             var allMatches = ContainerScanner.FindAllWorkOrders(village, villagerType);
             if (allMatches == null || allMatches.Count == 0)
@@ -145,9 +176,12 @@ namespace ValheimVillages.TaskQueue.Handlers
                 // every order's food into whichever unreserved box sat closest to the registry
                 // while the player's labelled chests stayed empty. The nearest-container fallback
                 // is only so the rejections below have a position to report when nothing has room.
+                // Deposit chests come from the REACHABLE set — the villager has to walk there to
+                // drop the output. The rejection-reporting fallback still spans every container,
+                // because those records only need a position to point the player at.
                 match.SourceContainer =
                     WorkOrderChestPolicy.ResolveDepositChest(
-                        containers, match.ItemPrefabName, match.StationName, 1, anchorPos)
+                        reachable, match.ItemPrefabName, match.StationName, 1, anchorPos)
                     ?? ContainerScanner.FindNearestContainer(containers, anchorPos);
 
                 // Check existing output quantity (precomputed above for the deficit sort).
@@ -190,7 +224,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 // then spills into is a different one.
                 var outputAmount = recipe.m_amount > 0 ? recipe.m_amount : 1;
                 var outputChest = WorkOrderChestPolicy.ResolveDepositChest(
-                    containers, match.ItemPrefabName, match.StationName, outputAmount, anchorPos);
+                    reachable, match.ItemPrefabName, match.StationName, outputAmount, anchorPos);
                 if (outputChest == null)
                 {
                     rejections.Add(new RejectionRecord
@@ -216,7 +250,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 // itself. Gating here would block harvesting a grown crop just
                 // because no seeds are stocked (e.g. ready turnips with an empty
                 // TurnipSeeds shelf).
-                var ingredients = ContainerScanner.FindIngredients(containers, recipe);
+                var ingredients = ContainerScanner.FindIngredients(reachable, recipe);
                 if (ingredients == null && physicalStation != "farm")
                 {
                     rejections.Add(new RejectionRecord

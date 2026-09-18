@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -27,35 +28,45 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <summary>Wider radius for character-layer overlap (we want to know about NPCs across a wider area).</summary>
         private const float CharacterRadius = 3f;
 
-        [DevCommand("Audit bake collider coverage at a position (defaults to player). Usage: vv_bake_audit [x z [y]]",
-            Name = "vv_bake_audit")]
-        public static void Audit(Terminal.ConsoleEventArgs args)
+        /// <summary>
+        ///     Appends the bake-coverage audit at <paramref name="pos" />: the agent-body waist
+        ///     probe, runtime colliders, enumerated bake sources, and the collider-to-source
+        ///     cross-reference that attributes phantom blockers (door/bed/outside_cell).
+        ///     <para>
+        ///         Formerly the standalone <c>vv_bake_audit</c>. It shared its first two sections
+        ///         with <c>vv_probe</c> (same slot-31/Humanoid sample, same collider listing) and
+        ///         answers the other half of the same question, so it is now <c>vv_probe bake</c>.
+        ///     </para>
+        /// </summary>
+        internal static void AppendBakeAudit(StringBuilder sb, Vector3 pos)
         {
-            if (!TryResolvePosition(args, out var pos, out var source)) return;
-
-            var sb = new StringBuilder();
-            sb.AppendLine(
-                $"[BakeAudit] pos=({pos.x:F2}, {pos.y:F2}, {pos.z:F2}) source={source} radius={Radius:F1}m");
-
-            sb.AppendLine($"--- agent-body waist probe ---\n  IsAgentBodyBlocked(pos)={NavMeshBakeManager.IsAgentBodyBlocked(pos)}");
+            sb.AppendLine($"--- bake audit (radius {Radius:F1}m) ---");
+            sb.AppendLine($"  agent-body waist probe: IsAgentBodyBlocked(pos)={NavMeshBakeManager.IsAgentBodyBlocked(pos)}");
             ReportNavMeshSample(sb, pos);
             ReportRuntimePhysics(sb, pos, out var runtimeHits);
             ReportBakeSources(sb, pos, out var sourceMatches, out var phantomMatches);
             ReportCrossReference(sb, runtimeHits, sourceMatches, phantomMatches);
             ReportPhantomCoverage(sb, pos, phantomMatches);
             ReportCharacterOverlap(sb, pos);
-
-            var output = sb.ToString();
-            Console.instance?.Print(output);
-            Plugin.Log?.LogInfo(output);
         }
 
 
         [DevCommand("Compare a NavMesh path on the villager (slot 31) bake vs Valheim's Humanoid agent. " +
-                    "Usage: vv_pathcompare <fromX> <fromZ> <toX> <toZ>",
-            Name = "vv_pathcompare")]
+                    "Usage: vv_path <fromX> <fromZ> <toX> <toZ> [draw] | vv_path off",
+            Name = "vv_path")]
         public static void PathCompare(Terminal.ConsoleEventArgs args)
         {
+            // Absorbed vv_drawpath: it took the same four coords and repeated this
+            // command's endpoint sampling and NavMesh.CalculatePath verbatim, differing
+            // only in drawing the result. `draw` now adds the magenta overlay here.
+            if (args?.Args != null && args.Args.Length >= 2 &&
+                args.Args[1].Equals("off", StringComparison.OrdinalIgnoreCase))
+            {
+                PathDebugRenderer.ClearRawPathOverlay();
+                Console.instance?.Print("[vv_path] overlay cleared");
+                return;
+            }
+
             var inv = CultureInfo.InvariantCulture;
             if (args?.Args == null || args.Args.Length < 5
                 || !float.TryParse(args.Args[1], NumberStyles.Float, inv, out var fx)
@@ -63,9 +74,12 @@ namespace ValheimVillages.Villager.AI.Navigation
                 || !float.TryParse(args.Args[3], NumberStyles.Float, inv, out var tx)
                 || !float.TryParse(args.Args[4], NumberStyles.Float, inv, out var tz))
             {
-                Console.instance?.Print("Usage: vv_pathcompare <fromX> <fromZ> <toX> <toZ>");
+                Console.instance?.Print("Usage: vv_path <fromX> <fromZ> <toX> <toZ> [draw] | vv_path off");
                 return;
             }
+
+            var draw = args.Args.Length > 5 &&
+                       args.Args[5].Equals("draw", StringComparison.OrdinalIgnoreCase);
 
             var sb = new StringBuilder();
             sb.AppendLine($"[PathCompare] from=({fx:F1},{fz:F1}) to=({tx:F1},{tz:F1})");
@@ -95,6 +109,12 @@ namespace ValheimVillages.Villager.AI.Navigation
                 $"  HNA corridor (villager): complete={hnaOk} corners={hnaBuf.Count} " +
                 $"len={hnaLen:F1}m straight={hnaStraight:F1}m " +
                 $"detour={(hnaStraight > 0.01f ? hnaLen / hnaStraight : 1f):F2}x");
+
+            if (draw)
+            {
+                var overlay = PathDebugRenderer.DrawRawPathBetween(fx, fz, tx, tz);
+                sb.AppendLine($"  {overlay ?? "overlay: endpoint sample failed"}");
+            }
 
             var output = sb.ToString();
             Console.instance?.Print(output);

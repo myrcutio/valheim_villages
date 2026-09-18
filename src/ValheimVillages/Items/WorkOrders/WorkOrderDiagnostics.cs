@@ -35,12 +35,12 @@ namespace ValheimVillages.Items.WorkOrders
 
             item.m_customData.TryGetValue("wo_station", out var station);
 
-            // Authoritative quota is the host-owned village record (Fix C); the token's wo_max is
-            // only a fallback for an un-migrated/orphan token.
-            var tokenMax = 10;
-            if (item.m_customData.TryGetValue("wo_max", out var maxStr))
-                int.TryParse(maxStr, out tokenMax);
-            var max = ContainerScanner.ResolveOrderMax(station, itemPrefab, scanPos, tokenMax);
+            // The host-owned village record is the only source of the quota. If it does not
+            // resolve, say so — inventing a number here is what used to make an unreadable
+            // record look like a real order stuck at 1-10.
+            if (!ContainerScanner.TryResolveOrderMax(station, itemPrefab, scanPos, out var max))
+                return new Status(
+                    "$vv_workorder_no_record", Severity.Warning, 0);
 
             // One container scan feeds both the current count and the message.
             var containers = ContainerScanner.FindNearbyContainers(

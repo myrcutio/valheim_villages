@@ -9,61 +9,15 @@ using ValheimVillages.Villager.Records;
 namespace ValheimVillages.Villager.AI
 {
     /// <summary>
-    ///     Debug introspection for villagers, surfaced as the <c>vv_get_villagers</c>
-    ///     console command. Lives in a partial so it can read VillagerAI's private
-    ///     state (waypoint, path, recovery) without widening its public surface.
-    ///     Output goes to the console so it round-trips through ValheimMCP.
+    ///     Debug introspection for villagers. The per-instance runtime block
+    ///     (<see cref="AppendDebug" />) is rendered by <c>vv_records -v</c>; the commands
+    ///     below cover the event ring, patrol reset and work orders. Lives in a partial so
+    ///     it can read VillagerAI's private state (waypoint, path, recovery) without
+    ///     widening its public surface. Output goes to the console so it round-trips
+    ///     through ValheimMCP.
     /// </summary>
     public partial class VillagerAI
     {
-        [DevCommand(
-            "List villagers from the authoritative record table (all statuses), annotated " +
-            "with live-instance presence; full AI/path/region detail under each loaded instance",
-            Name = "vv_get_villagers")]
-        public static void DumpVillagers()
-        {
-            // Make the in-memory instance count honest before we report it.
-            var pruned = VillagerAIManager.PruneTombstones();
-
-            // The record table — NOT the in-memory AI dict — is the row set, so this now
-            // agrees with vv_records (same store) and includes Dead/Egg/away villagers,
-            // each annotated with where its NPC actually is right now.
-            var records = VillagerRecordTable.EnumerateAll()
-                .OrderBy(r => r.Village)
-                .ThenBy(r => r.Name)
-                .ToList();
-
-            var sb = new StringBuilder();
-            var navHold = Navigation.VillageNavLock.IsHeld
-                ? $" [nav hold {Navigation.VillageNavLock.SecondsRemaining:F1}s — rebuild settle]"
-                : "";
-            sb.AppendLine(
-                $"[vv_get_villagers] {VillagerLiveness.PeerLabel()} {records.Count} villager record(s); " +
-                $"live-instance annotated{navHold}");
-
-            foreach (var r in records)
-            {
-                var presence = VillagerLiveness.Resolve(r);
-                var warn = presence == LivePresence.Missing ? " ⚠ORPHAN" : "";
-                sb.AppendLine(
-                    $"- {r.Name} [{r.Type}] status={r.Status} " +
-                    $"presence={VillagerLiveness.Tag(presence)}{warn} id={r.RecordId}");
-
-                // Only a record with a live local instance gets the full runtime block.
-                if (presence == LivePresence.Live
-                    && VillagerAIManager.ActiveVillagers.TryGetValue(r.RecordId, out var ai)
-                    && ai != null)
-                    ai.AppendDebug(sb);
-            }
-
-            sb.AppendLine(
-                $"  in-memory AI instances on this peer: {VillagerAIManager.ActiveVillagers.Count}" +
-                (pruned > 0 ? $" ({pruned} null tombstone(s) pruned)" : ""));
-
-            Console.instance?.Print(sb.ToString());
-            Plugin.Log?.LogInfo(sb.ToString());
-        }
-
         /// <summary>
         ///     Runtime toggle for the off-mesh rescue (strand detection → walk-home →
         ///     teleport escalation) in <see cref="TryOffMeshRescue" />. Defaults OFF for the
@@ -89,7 +43,7 @@ namespace ValheimVillages.Villager.AI
             Plugin.Log?.LogInfo(msg);
         }
 
-        [DevCommand("Dump each villager's AI event ring — state changes / target sets / path recomputes with timestamps. The transition timeline that polling vv_get_villagers aliases past.",
+        [DevCommand("Dump each villager's AI event ring — state changes / target sets / path recomputes with timestamps. The transition timeline that polling vv_records -v aliases past.",
             Name = "vv_ai_events")]
         public static void DumpAiEvents()
         {
@@ -139,8 +93,6 @@ namespace ValheimVillages.Villager.AI
             Plugin.Log?.LogInfo(sb.ToString());
         }
 
-        [DevCommand("Reset patrol discovery for all patrollers, forcing a fresh route rebuild from the region graph",
-            Name = "vv_patrol_reset")]
         public static void ResetPatrols()
         {
             var count = 0;
@@ -152,13 +104,11 @@ namespace ValheimVillages.Villager.AI
                 count++;
             }
 
-            var msg = $"[vv_patrol_reset] Reset discovery for {count} patroller(s)";
+            var msg = $"[vv_reset patrols] Reset discovery for {count} patroller(s)";
             Console.instance?.Print(msg);
             Plugin.Log?.LogInfo(msg);
         }
 
-        [DevCommand("List work orders in chests near each villager + how many outputs exist in chests (the real completion metric)",
-            Name = "vv_workorders")]
         public static void DumpWorkOrders()
         {
             var sb = new StringBuilder();
@@ -197,90 +147,14 @@ namespace ValheimVillages.Villager.AI
             Plugin.Log?.LogInfo(sb.ToString());
         }
 
-        /// <summary>
-        ///     Migrate legacy in-chest work-order tokens into the host-owned village record
-        ///     (Fix C seed). Host-only — the village carrier is host-owned so UpsertWorkOrder
-        ///     no-ops on a client. Fail-loud per token whose village can't be resolved (no
-        ///     auto-create). Idempotent: skips any (station,item) already present in the record,
-        ///     so a re-run never resets a player's edited quota back to the token's original.
-        /// </summary>
-        [DevCommand("Migrate legacy in-chest work-order tokens into the host-owned village record (Fix C). Host-only.",
-            Name = "vv_migrate_workorders")]
-        public static void MigrateWorkOrders()
-        {
-            if (ZNet.instance == null || !ZNet.instance.IsServer())
-            {
-                Console.instance?.Print(
-                    "[vv_migrate_workorders] Run on the SERVER — the host owns the village record.");
-                return;
-            }
-
-            var sb = new StringBuilder();
-            sb.AppendLine("[vv_migrate_workorders]");
-            int tokens = 0, migrated = 0, skipped = 0, unresolved = 0;
-
-            foreach (var c in Object.FindObjectsByType<Container>(FindObjectsSortMode.None))
-            {
-                if (c == null) continue;
-                var inv = c.GetInventory();
-                if (inv == null) continue;
-
-                foreach (var item in inv.GetAllItems())
-                {
-                    if (!Work.ContainerScanner.IsWorkOrderItem(item)) continue;
-                    if (item.m_customData == null) continue;
-                    tokens++;
-
-                    item.m_customData.TryGetValue("wo_station", out var station);
-                    item.m_customData.TryGetValue("wo_item", out var orderItem);
-                    item.m_customData.TryGetValue("wo_item_name", out var itemName);
-                    var p = c.transform.position;
-
-                    if (string.IsNullOrEmpty(station) || string.IsNullOrEmpty(orderItem))
-                    {
-                        sb.AppendLine($"  SKIP token with empty station/item @ ({p.x:F0},{p.z:F0})");
-                        unresolved++;
-                        continue;
-                    }
-
-                    int min = 1, max = 10;
-                    if (item.m_customData.TryGetValue("wo_min", out var minStr)) int.TryParse(minStr, out min);
-                    if (item.m_customData.TryGetValue("wo_max", out var maxStr)) int.TryParse(maxStr, out max);
-
-                    var village = Villages.Entity.VillageRegistry.GetVillageAt(p);
-                    if (village == null)
-                    {
-                        sb.AppendLine(
-                            $"  UNRESOLVED village for {orderItem}@{station} @ ({p.x:F0},{p.z:F0}) — skipped (no auto-create)");
-                        unresolved++;
-                        continue;
-                    }
-
-                    // Idempotent: never overwrite an existing record entry — a re-run must not
-                    // reset a player's edited quota back to the token's stale original value.
-                    if (village.TryGetWorkOrder(station, orderItem, out _))
-                    {
-                        sb.AppendLine($"  skip {orderItem}@{station} — already in record (village {village.VillageId})");
-                        skipped++;
-                        continue;
-                    }
-
-                    village.UpsertWorkOrder(
-                        new Villages.Entity.WorkOrderEntry(station, orderItem, itemName ?? "", min, max));
-                    migrated++;
-                    sb.AppendLine(
-                        $"  migrated {orderItem} x[{min}-{max}] station={station} -> village {village.VillageId}");
-                }
-            }
-
-            sb.AppendLine(
-                $"  => {tokens} token(s), {migrated} migrated, {skipped} already-present, {unresolved} unresolved.");
-            Console.instance?.Print(sb.ToString());
-            Plugin.Log?.LogInfo(sb.ToString());
-        }
-
         /// <summary>Append this villager's diagnostic block to <paramref name="sb" />.</summary>
-        private void AppendDebug(StringBuilder sb)
+        /// <summary>
+        ///     Appends this instance's full runtime block (position, state, region, ZDO
+        ///     ownership, target, agent path state, behaviors). Internal so
+        ///     <c>vv_records -v</c> can render it; stays in this partial because it reads
+        ///     VillagerAI's private waypoint/path/recovery state.
+        /// </summary>
+        internal void AppendDebug(StringBuilder sb)
         {
             var pos = transform != null ? transform.position : Vector3.zero;
 

@@ -219,9 +219,6 @@ namespace ValheimVillages.TaskQueue.Handlers
             var seedsMark = PartitionProfile.Mark();
             anchors = ResolveWalkableSeeds(anchors);
             PartitionProfile.Since("seeds", seedsMark);
-            var hasPatrolBounds = VillageAreaManager.TryGetCombinedBounds(
-                out var patrolMinX, out var patrolMinZ, out var patrolMaxX, out var patrolMaxZ);
-
             var village = ResolveVillage(task, anchors);
             if (village == null)
             {
@@ -235,6 +232,13 @@ namespace ValheimVillages.TaskQueue.Handlers
             }
 
             var villageKey = village.VillageId;
+
+            // Seed the box from THIS village's patrol ring only. Resolved after the village
+            // (not before, as the combined-bounds version was) because the lookup is keyed by
+            // village id — see VillageAreaManager.TryGetAreaBounds for what the combined form
+            // did to a two-village world.
+            var hasPatrolBounds = VillageAreaManager.TryGetAreaBounds(
+                villageKey, out var patrolMinX, out var patrolMinZ, out var patrolMaxX, out var patrolMaxZ);
 
             float minX, minZ, maxX, maxZ;
             if (hasPatrolBounds && anchors != null && anchors.Count > 0)
@@ -362,7 +366,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             //
             // Captured here (not persisted) so Pass 3's discovered piece-
             // step edges can be merged in before the BfsAdjacencyStore
-            // gets its final snapshot — otherwise vv_bfs_trace would walk
+            // gets its final snapshot — otherwise vv_graph bfs would walk
             // a graph missing every piece-to-piece edge discovered by the
             // cell-level flood (and the trace would show "no path" for
             // any region only reachable via the piece chain).
@@ -399,7 +403,7 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             // Merge Pass 3 discovered edges into the cross-kind adjacency
             // (if it was built) and publish the merged graph to
-            // BfsAdjacencyStore for vv_bfs_trace. Pass 3 records each
+            // BfsAdjacencyStore for vv_graph bfs. Pass 3 records each
             // piece-step transition during its cell-level flood — ground
             // truth for walkable adjacency, more reliable than vertex-
             // proximity heuristics. We add ONLY edges where both endpoints
@@ -937,7 +941,7 @@ namespace ValheimVillages.TaskQueue.Handlers
         ///     piece↔piece in-pass edges, plus terrain↔piece cross-kind edges via
         ///     shared quantized vertex positions and via vertex-to-vertex
         ///     proximity) and locates anchor-anchored terrain seeds. Persists both
-        ///     to <see cref="BfsAdjacencyStore" /> so the <c>vv_bfs_trace</c> dev
+        ///     to <see cref="BfsAdjacencyStore" /> so the <c>vv_graph bfs</c> dev
         ///     command can compute paths back to a anchor without re-running the
         ///     partition. Read-only: does NOT mutate inputs and does NOT prune
         ///     regions; downstream <see cref="RubberBandPrune" /> handles cell-grid
@@ -963,7 +967,7 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             // --- Build combined adjacency ---
             var combinedAdj = new Dictionary<string, HashSet<string>>();
-            // Per-edge metadata for vv_bfs_trace. Tracks which mechanism(s)
+            // Per-edge metadata for vv_graph bfs. Tracks which mechanism(s)
             // added each edge (in-pass shared edge / cross-kind vertex
             // coincidence / cross-kind 0.5m vertex proximity) and a
             // representative bridge position for cross-kind edges. Keyed by
@@ -1203,7 +1207,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 Plugin.Log?.LogError(
                     "[Region] CrossKind adjacency aborted: no anchor mapped to any terrain region " +
                     $"(anchors={anchorCount}, terrain_regions={regionCount}). " +
-                    "Refusing to seed BFS from a synthetic largest-region fallback; vv_bfs_trace will report no data.");
+                    "Refusing to seed BFS from a synthetic largest-region fallback; vv_graph bfs will report no data.");
                 return null;
             }
 

@@ -21,8 +21,16 @@ namespace ValheimVillages.Behaviors.Farming
         ///     on the space-check layers blocks the position (unless it's a healthy Plant,
         ///     which uses growRadius * 2 spacing instead).
         /// </summary>
+        /// <param name="skip">
+        ///     Spots already proven unusable this session (the villager could not stand at
+        ///     them). The scan below is a deterministic spiral, so without this it returns the
+        ///     identical cell on every call — a farmer that stopped 3.1m short of a spot
+        ///     "skipped to find another", got the same one back, and walked that 3m loop
+        ///     indefinitely. Excluding them is also what bounds the caller's retry loop.
+        /// </param>
         public static Vector3? FindPlantingPosition(
-            Vector3 center, float searchRadius, float growRadius)
+            Vector3 center, float searchRadius, float growRadius,
+            IReadOnlyList<Vector3> skip = null)
         {
             EnsureSpaceMask();
             var plantSpacing = Mathf.Max(growRadius * 2f, 1.5f);
@@ -65,11 +73,36 @@ namespace ValheimVillages.Behaviors.Farming
                     if (!HasGrowSpace(candidate, growRadius, plantSpacing))
                         continue;
 
+                    if (IsSkipped(candidate, skip, plantSpacing))
+                        continue;
+
                     return candidate;
                 }
             }
 
             return null;
+        }
+
+        /// <summary>
+        ///     True when <paramref name="candidate" /> is one of the spots already rejected
+        ///     this session. Matched within <paramref name="plantSpacing" /> rather than exactly,
+        ///     because the spiral re-derives its candidates from terrain height each pass and a
+        ///     re-sampled Y is not bit-identical to the stored one.
+        /// </summary>
+        private static bool IsSkipped(
+            Vector3 candidate, IReadOnlyList<Vector3> skip, float plantSpacing)
+        {
+            if (skip == null || skip.Count == 0) return false;
+
+            var sqrTolerance = plantSpacing * plantSpacing;
+            for (var i = 0; i < skip.Count; i++)
+            {
+                var dx = candidate.x - skip[i].x;
+                var dz = candidate.z - skip[i].z;
+                if (dx * dx + dz * dz <= sqrTolerance) return true;
+            }
+
+            return false;
         }
 
         /// <summary>

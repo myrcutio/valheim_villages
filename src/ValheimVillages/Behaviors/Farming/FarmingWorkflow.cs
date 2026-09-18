@@ -115,41 +115,62 @@ namespace ValheimVillages.Behaviors.Farming
             var plantComp = m_context.PlantPiecePrefab.GetComponent<Plant>();
             var growRadius = plantComp != null ? plantComp.m_growRadius : 0.5f;
 
-            var pos = PlantingHelper.FindPlantingPosition(
-                m_context.FarmPosition, FarmSettings.PlantSearchRadius, growRadius);
-
-            if (!pos.HasValue)
+            // Walk candidates until one is reachable. Bounded two ways: every rejected spot
+            // is added to the session's exclusion list so the spiral strictly shrinks, and
+            // the attempt cap stops a farm whose every cell is off the graph from burning a
+            // frame on the whole spiral. Previously the FIRST unreachable spot ended the
+            // planting session outright, so one bad cell next to the farm stopped the work.
+            for (var attempt = 0; attempt < MaxPlantSpotAttempts; attempt++)
             {
-                Plugin.Log?.LogDebug(
-                    $"[Farming:{m_ai.NpcName}] No more valid planting positions");
-                FinishWork();
-                return;
-            }
+                var pos = PlantingHelper.FindPlantingPosition(
+                    m_context.FarmPosition, FarmSettings.PlantSearchRadius, growRadius,
+                    m_context.UnreachablePlantSpots);
 
-            m_context.NextPlantPosition = pos.Value;
-            SubState = FarmSubState.WalkingToPlantSpot;
-
-            if (!m_ai.NavTo(pos.Value, BehaviorState.Working, "plant spot"))
-            {
-                // This spot isn't reachable on the agent navmesh; end planting
-                // gracefully rather than stranding (FinishWork is the same path
-                // used when no more positions are available).
-                Plugin.Log?.LogDebug(
-                    $"[Farming:{m_ai.NpcName}] Plant spot {pos.Value} unreachable; finishing.");
-                FinishWork();
-                return;
-            }
-
-            DebugLog.Append("FarmingWorkflow.cs:TryFindAndWalkToNextPlantSpot", "Walking to plant spot",
-                new Dictionary<string, object>
+                if (!pos.HasValue)
                 {
-                    { "position", pos.Value.ToString() }, { "seedsRemaining", m_context.SeedsGathered },
-                    { "plantedSoFar", m_context.PlantedThisSession },
-                }, "H3", "run1");
+                    Plugin.Log?.LogDebug(
+                        $"[Farming:{m_ai.NpcName}] No more valid planting positions");
+                    FinishWork();
+                    return;
+                }
 
-            Plugin.Log?.LogDebug(
-                $"[Farming:{m_ai.NpcName}] Walking to plant spot at {pos.Value}");
+                m_context.NextPlantPosition = pos.Value;
+                SubState = FarmSubState.WalkingToPlantSpot;
+
+                if (m_ai.NavTo(pos.Value, BehaviorState.Working, "plant spot"))
+                {
+                    DebugLog.Append("FarmingWorkflow.cs:TryFindAndWalkToNextPlantSpot",
+                        "Walking to plant spot",
+                        new Dictionary<string, object>
+                        {
+                            { "position", pos.Value.ToString() },
+                            { "seedsRemaining", m_context.SeedsGathered },
+                            { "plantedSoFar", m_context.PlantedThisSession },
+                        }, "H3", "run1");
+
+                    Plugin.Log?.LogDebug(
+                        $"[Farming:{m_ai.NpcName}] Walking to plant spot at {pos.Value}");
+                    return;
+                }
+
+                Plugin.Log?.LogDebug(
+                    $"[Farming:{m_ai.NpcName}] Plant spot {pos.Value} unreachable; trying another.");
+                m_context.UnreachablePlantSpots.Add(pos.Value);
+                m_context.NextPlantPosition = null;
+            }
+
+            Plugin.Log?.LogInfo(
+                $"[Farming:{m_ai.NpcName}] No reachable planting position after " +
+                $"{MaxPlantSpotAttempts} attempts; finishing.");
+            FinishWork();
         }
+
+        /// <summary>
+        ///     How many planting candidates to try in one call before giving up for this cycle.
+        ///     The exclusion list makes progress monotonic, so this only caps the work done in
+        ///     a single frame — the next cycle resumes past the spots already ruled out.
+        /// </summary>
+        private const int MaxPlantSpotAttempts = 8;
 
         private void OnArrivedAtPlantSpot(float dt)
         {
@@ -164,9 +185,15 @@ namespace ValheimVillages.Behaviors.Farming
 
             if (dist > FarmSettings.PlantProximityRequired)
             {
+                // NavTo walked to the approach it snapped to, which can be metres from the spot
+                // itself, so "arrived" does not mean "close enough to plant". Record the spot
+                // before retrying: FindPlantingPosition is a deterministic spiral and without
+                // the exclusion it returned this same cell every time — the farmer walked the
+                // identical 3m loop indefinitely instead of skipping anything.
                 Plugin.Log?.LogDebug(
                     $"[Farming:{m_ai.NpcName}] Can't reach plant spot " +
                     $"({dist:F1}m away), skipping to find another");
+                m_context.UnreachablePlantSpots.Add(m_context.NextPlantPosition.Value);
                 m_context.NextPlantPosition = null;
                 TryFindAndWalkToNextPlantSpot();
                 return;

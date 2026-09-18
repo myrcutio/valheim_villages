@@ -37,62 +37,6 @@ namespace ValheimVillages
             Write("hna_graph", JsonUtility.ToJson(data), "hna");
         }
 
-        /// <summary>
-        ///     Log HNA attributes for a world position (e.g. player): region id, validity, solid height, cell bounds,
-        ///     vertical sample heights.
-        /// </summary>
-        public static void LogHnaPlayerDebug(Vector3 position)
-        {
-            var px = (float)Math.Round(position.x, 2);
-            var py = (float)Math.Round(position.y, 2);
-            var pz = (float)Math.Round(position.z, 2);
-            var graph = Villages.Entity.VillageRegistry.GraphAt(position);
-            var regionId = graph?.PointToRegionId(position);
-            var graphAvailable = graph != null && graph.GetOrigin(out _, out _);
-            var regionValid = graph != null && !string.IsNullOrEmpty(regionId) && graph.IsValidRegion(regionId);
-            var solidHeightAtPosition = 0f;
-            if (ZoneSystem.instance != null)
-                ZoneSystem.instance.GetSolidHeight(new Vector3(position.x, 0f, position.z), out solidHeightAtPosition,
-                    500);
-            float cellMinX = 0f, cellMaxX = 0f, cellMinZ = 0f, cellMaxZ = 0f;
-            float centerY = 0f, minY = 0f, maxY = 0f;
-            float mx = 0f, mx2 = 0f, mz = 0f, mz2 = 0f;
-            if (regionValid && graph.GetRegionBounds(regionId, out mx, out mx2, out mz, out mz2))
-            {
-                cellMinX = (float)Math.Round(mx, 2);
-                cellMaxX = (float)Math.Round(mx2, 2);
-                cellMinZ = (float)Math.Round(mz, 2);
-                cellMaxZ = (float)Math.Round(mz2, 2);
-            }
-
-            float cy = 0f, mnY = 0f, mxY = 0f;
-            if (regionValid && graph.GetRegionSampleHeights(regionId, out cy, out mnY, out mxY))
-            {
-                centerY = (float)Math.Round(cy, 2);
-                minY = (float)Math.Round(mnY, 2);
-                maxY = (float)Math.Round(mxY, 2);
-            }
-
-            var data = new HnaPlayerDebugData
-            {
-                px = px,
-                py = py,
-                pz = pz,
-                regionId = regionId ?? "",
-                graphAvailable = graphAvailable,
-                regionValid = regionValid,
-                solidHeightAtPosition = (float)Math.Round(solidHeightAtPosition, 2),
-                cellMinX = cellMinX,
-                cellMaxX = cellMaxX,
-                cellMinZ = cellMinZ,
-                cellMaxZ = cellMaxZ,
-                centerY = centerY,
-                minY = minY,
-                maxY = maxY,
-                verticalSpread = (float)Math.Round(maxY - minY, 2),
-            };
-            Write("hna_player_debug", JsonUtility.ToJson(data), "hna_debug");
-        }
 
         private static void Write(string message, string dataJson, string runId)
         {
@@ -131,16 +75,5 @@ namespace ValheimVillages
             public string linksSummary;
         }
 
-        [Serializable]
-        private class HnaPlayerDebugData
-        {
-            public float px, py, pz;
-            public string regionId;
-            public bool graphAvailable;
-            public bool regionValid;
-            public float solidHeightAtPosition;
-            public float cellMinX, cellMaxX, cellMinZ, cellMaxZ;
-            public float centerY, minY, maxY, verticalSpread;
-        }
     }
 }

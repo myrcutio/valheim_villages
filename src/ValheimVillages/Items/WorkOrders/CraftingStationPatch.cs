@@ -922,6 +922,25 @@ namespace ValheimVillages.Items.WorkOrders
                 return;
             }
 
+            // Default quota is sized from the OUTPUT item's own stack: a full stack as the cap,
+            // half a stack (rounded up) as the refill threshold. A flat 1-10 ignored what was
+            // being made — it ordered a fifth of a stack of something that stacks to 50, and ten
+            // separate copies of something that does not stack at all.
+            var outputShared = selectedRecipe.m_item.m_itemData?.m_shared;
+            if (outputShared == null || outputShared.m_maxStackSize < 1)
+            {
+                Plugin.Log?.LogError(
+                    $"Recipe output '{itemPrefabName}' has no usable stack size " +
+                    $"(shared={(outputShared == null ? "null" : outputShared.m_maxStackSize.ToString())}); " +
+                    "refusing to create a work order whose quota cannot be sized.");
+                player.Message(MessageHud.MessageType.Center,
+                    "Invalid recipe selected");
+                return;
+            }
+
+            var defaultMax = outputShared.m_maxStackSize;
+            var defaultMin = (defaultMax + 1) / 2; // ceil(max / 2)
+
             // Fix C: the quota lives on the host-owned village record. Resolve the village now
             // (graph-independent FindNearAnchor works on a client) so the order can be registered
             // there; refuse to create a work order with no village to own it.
@@ -970,9 +989,10 @@ namespace ValheimVillages.Items.WorkOrders
             if (newItemData.m_customData == null)
                 newItemData.m_customData = new Dictionary<string, string>();
 
-            newItemData.m_customData["wo_min"] = "1";
-            newItemData.m_customData["wo_max"] = "10";
-            newItemData.m_customData["wo_range"] = "1-10";
+            // wo_min/wo_max/wo_range are NOT written: the quota lives on the village record
+            // (registered below via WorkOrderConfigRpc), and nothing reads these keys any more.
+            // Stamping a "1-10" onto every token is what gave an unreadable record the
+            // appearance of a real order with a default range.
             newItemData.m_customData["wo_station"] = station.m_name;
             newItemData.m_customData["wo_item"] = itemPrefabName;
             newItemData.m_customData["wo_item_name"] = itemDisplayName;
@@ -996,7 +1016,7 @@ namespace ValheimVillages.Items.WorkOrders
                     ItemDrop.ItemData.SharedData>(
                     JsonUtility.ToJson(newItemData.m_shared));
                 newItemData.m_shared.m_description =
-                    $"{localizedName} (1-10)\nRight-click to change settings.";
+                    $"{localizedName} ({defaultMin}-{defaultMax})\nRight-click to change settings.";
             }
 
             // Overlay the production item's icon on the parchment
@@ -1007,7 +1027,8 @@ namespace ValheimVillages.Items.WorkOrders
                 // Register the order on the host-owned village record (Fix C). The token is now
                 // just a UI handle; the host record is the authoritative config the scan reads.
                 Villager.WorkOrderConfigRpc.RequestSet(
-                    village.VillageId, station.m_name, itemPrefabName, itemDisplayName, 1, 10);
+                    village.VillageId, station.m_name, itemPrefabName, itemDisplayName,
+                    defaultMin, defaultMax);
 
                 player.Message(MessageHud.MessageType.Center,
                     $"Created work order: {localizedName}");

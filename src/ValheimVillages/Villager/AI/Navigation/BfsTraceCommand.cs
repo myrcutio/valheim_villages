@@ -20,8 +20,6 @@ namespace ValheimVillages.Villager.AI.Navigation
     /// </summary>
     internal static class BfsTraceCommand
     {
-        [DevCommand("Highlight BFS path from region (or player) to anchor seed. Args: [regionId | off]",
-            Name = "vv_bfs_trace")]
         public static void Trace(Terminal.ConsoleEventArgs args)
         {
             string arg = null;
@@ -34,7 +32,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                  arg == "0"))
             {
                 PathDebugRenderer.HighlightedRegions.Clear();
-                Console.instance?.Print("[vv_bfs_trace] highlight cleared");
+                Console.instance?.Print("[vv_graph bfs] highlight cleared");
                 return;
             }
 
@@ -44,14 +42,14 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var player = Player.m_localPlayer;
                 if (player == null)
                 {
-                    Console.instance?.Print("[vv_bfs_trace] no player and no region arg");
+                    Console.instance?.Print("[vv_graph bfs] no player and no region arg");
                     return;
                 }
 
                 var graph = Villages.Entity.VillageRegistry.GraphAt(player.transform.position);
                 if (graph == null)
                 {
-                    Console.instance?.Print("[vv_bfs_trace] no RegionGraph available");
+                    Console.instance?.Print("[vv_graph bfs] no RegionGraph available");
                     return;
                 }
 
@@ -59,7 +57,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (string.IsNullOrEmpty(targetRegionId))
                 {
                     Console.instance?.Print(
-                        "[vv_bfs_trace] PointToRegionId unresolved at player " +
+                        "[vv_graph bfs] PointToRegionId unresolved at player " +
                         $"({player.transform.position.x:F1},{player.transform.position.y:F1},{player.transform.position.z:F1})");
                     return;
                 }
@@ -69,7 +67,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (path == null)
             {
                 Console.instance?.Print(
-                    $"[vv_bfs_trace] no BFS path from {targetRegionId} back to any seed " +
+                    $"[vv_graph bfs] no BFS path from {targetRegionId} back to any seed " +
                     $"(adjacency size={BfsAdjacencyStore.Adjacency.Count}, " +
                     $"seeds={BfsAdjacencyStore.Seeds.Count})");
                 return;
@@ -80,7 +78,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 PathDebugRenderer.HighlightedRegions.Add(rid);
 
             var sb = new StringBuilder();
-            sb.Append("[vv_bfs_trace] ").Append(targetRegionId).Append(" -> seed: ");
+            sb.Append("[vv_graph bfs] ").Append(targetRegionId).Append(" -> seed: ");
             sb.Append(path.Count).Append(" hops [");
             for (var i = 0; i < path.Count; i++)
             {
@@ -136,13 +134,13 @@ namespace ValheimVillages.Villager.AI.Navigation
 
                 if (!perHopBounds.TryGetValue(rid, out var b))
                 {
-                    Plugin.Log?.LogInfo($"[vv_bfs_trace]   {rid}: (no cached tris){edgeLabel}");
+                    Plugin.Log?.LogInfo($"[vv_graph bfs]   {rid}: (no cached tris){edgeLabel}");
                     continue;
                 }
 
                 Vector3 c = b.center, sz = b.size;
                 Plugin.Log?.LogInfo(
-                    $"[vv_bfs_trace]   {rid}: centroid=({c.x:F1},{c.y:F1},{c.z:F1}) " +
+                    $"[vv_graph bfs]   {rid}: centroid=({c.x:F1},{c.y:F1},{c.z:F1}) " +
                     $"size=({sz.x:F1}x{sz.y:F1}x{sz.z:F1}) " +
                     $"y=[{b.min.y:F2}..{b.max.y:F2}]{edgeLabel}");
             }

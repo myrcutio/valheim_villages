@@ -13,7 +13,7 @@ namespace ValheimVillages.Dev
     public static class DamageStructuresCommand
     {
         [DevCommand("Damage nearby structures to test repair: vv_damage_structures [radius=15] [amount=40]",
-            Name = "vv_damage_structures")]
+            Name = "vv_damage_structures", Destructive = true)]
         public static void Run(Terminal.ConsoleEventArgs args)
         {
             var radius = args.Length > 1 && float.TryParse(args[1], out var r) ? r : 15f;

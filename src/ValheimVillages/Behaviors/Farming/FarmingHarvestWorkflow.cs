@@ -19,12 +19,13 @@ namespace ValheimVillages.Behaviors.Farming
         {
             if (m_context.CurrentHarvestTarget == null)
             {
-                // Try to find more harvestable crops: nearest to where the farmer is
-                // standing now, anywhere in the village.
-                var crop = ForageHelper.FindNearestRipe(
-                    m_ai.HomeAnchor, m_ai.transform.position,
-                    FarmSettings.HarvestScanRadius, m_context.WorkOrder.ItemPrefabName);
-                if (crop == null)
+                // Try to find more harvestable crops anywhere in the village. Must use the
+                // REACHABLE variant (and keep its resolved standing spot) for the same reason
+                // the selection scan does — see FarmWorkOrderHelper: an unreachable crop here
+                // just moved the infinite retry from the scan into the harvest pass.
+                if (!ForageHelper.TryFindHarvestable(
+                        m_ai.HomeAnchor, FarmSettings.HarvestScanRadius,
+                        m_context.WorkOrder.ItemPrefabName, out var crop, out var approach))
                 {
                     Plugin.Log?.LogDebug(
                         $"[Farming:{m_ai.NpcName}] No more crops to harvest");
@@ -37,11 +38,14 @@ namespace ValheimVillages.Behaviors.Farming
                 }
 
                 m_context.CurrentHarvestTarget = crop;
+                m_context.HarvestApproach = approach;
             }
 
             SubState = FarmSubState.TravelingToHarvest;
-            if (!m_ai.NavTo(m_context.CurrentHarvestTarget.transform.position,
-                    BehaviorState.Working, "crop"))
+            // Walk the approach resolved when the crop was chosen. Re-resolving here would
+            // aim at the Pickable's own collider and fail (see FarmingContext.HarvestApproach).
+            if (!m_ai.NavTo(m_context.HarvestApproach,
+                    BehaviorState.Working, "crop", snapToApproach: false))
             {
                 AbandonWork("no reachable approach to crop");
                 return;

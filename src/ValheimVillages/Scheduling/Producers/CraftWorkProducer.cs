@@ -130,6 +130,13 @@ namespace ValheimVillages.Scheduling.Producers
             Village village, VillagerAI ai)
         {
             var containers = ContainerScanner.FindVillageContainers(ai.HomeAnchor, WorkSettings.ChestScanRadius);
+            // Supply is judged against the chests this villager can WALK to; the quota count
+            // below stays village-wide. Same split, and the same helper, as the work-order scan
+            // this board feeds — see FilterReachable. Without it the board scored an order whose
+            // ingredient chest is off the region graph as the biggest deficit, directed the
+            // villager at it every cycle, and the scan's rejection could never fall through to
+            // the orders the villager could actually have worked.
+            var reachable = ContainerScanner.FilterReachable(containers, ai.Position);
             var orders = ContainerScanner.FindAllWorkOrders(village, ai.VillagerType);
             if (orders == null) yield break;
 
@@ -138,7 +145,7 @@ namespace ValheimVillages.Scheduling.Producers
                 if (o == null || o.MaxQuantity <= 0 || string.IsNullOrEmpty(o.ItemPrefabName)) continue;
                 var have = ContainerScanner.CountAcrossContainers(containers, o.ItemPrefabName);
                 if (have >= o.MaxQuantity) continue;
-                if (!CanSupply(containers, o.ItemPrefabName, ai)) continue;
+                if (!CanSupply(reachable, o.ItemPrefabName, ai)) continue;
 
                 var deficit = Mathf.Clamp01((o.MaxQuantity - have) / (float)o.MaxQuantity);
                 var stock = Mathf.Clamp01(have / (float)o.MaxQuantity);

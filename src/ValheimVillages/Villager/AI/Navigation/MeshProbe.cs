@@ -42,7 +42,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 : 0f;
         }
 
-        [DevCommand("Probe NavMesh + colliders at the player's position (or pass x z [y] to override)",
+        [DevCommand("Probe NavMesh + colliders at a point. vv_probe [x z [y]] [bake] — `bake` adds the collider-vs-bake-source cross-reference",
             Name = "vv_probe")]
         public static void Probe(Terminal.ConsoleEventArgs args)
         {
@@ -113,6 +113,13 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             sb.AppendLine("--- Pass 1 flood reachability at this cell ---");
             ReportFloodReachability(sb, pos);
+
+            // Absorbed vv_bake_audit. Opt-in rather than always-on: it is the expensive
+            // half (full source enumeration + collider cross-reference) and answers a
+            // different question ("why is there no mesh here") than the sections above.
+            if (args?.Args != null && System.Array.Exists(args.Args,
+                    a => string.Equals(a, "bake", System.StringComparison.OrdinalIgnoreCase)))
+                BakeAuditCommand.AppendBakeAudit(sb, pos);
 
             var output = sb.ToString();
             Console.instance?.Print(output);
@@ -494,6 +501,24 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             var resolved = graph.PointToRegionId(pos);
             sb.AppendLine($"  PointToRegionId: {resolved ?? "(unresolved)"}");
+
+            // Absorbed from vv_hna_debug_player, which wrote these to a path_telemetry
+            // ndjson nothing parsed. Printed here so they round-trip through the console.
+            if (ZoneSystem.instance != null &&
+                ZoneSystem.instance.GetSolidHeight(new Vector3(pos.x, 0f, pos.z), out var solidY, 500))
+                sb.AppendLine($"  solidHeight@(x,z): {solidY:F2}  (probe y={pos.y:F2}, delta={pos.y - solidY:F2})");
+
+            var regionValid = !string.IsNullOrEmpty(resolved) && graph.IsValidRegion(resolved);
+            sb.AppendLine($"  graphOrigin={graph.GetOrigin(out _, out _)} regionValid={regionValid}");
+            if (regionValid)
+            {
+                if (graph.GetRegionBounds(resolved, out var bMinX, out var bMaxX, out var bMinZ, out var bMaxZ))
+                    sb.AppendLine(
+                        $"  regionBounds: x[{bMinX:F2}..{bMaxX:F2}] z[{bMinZ:F2}..{bMaxZ:F2}]");
+                if (graph.GetRegionSampleHeights(resolved, out var cY, out var mnY, out var mxY))
+                    sb.AppendLine(
+                        $"  regionHeights: center={cY:F2} min={mnY:F2} max={mxY:F2} spread={mxY - mnY:F2}");
+            }
 
             // For the resolved region, count cached triangles + sum area + count
             // links. Helps verify whether a "visually isolated single tri" really

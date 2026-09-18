@@ -32,7 +32,7 @@ namespace ValheimVillages.Behaviors.Patrol
         private Vector3 m_helpPosition;
 
         // One-shot self-heal. Before parking in NeedsHelp, try a single automatic
-        // ResetDiscovery (same as vv_patrol_reset) — a stale route left by a navmesh
+        // ResetDiscovery (same as vv_reset patrols) — a stale route left by a navmesh
         // rebuild often clears instantly. Set true once attempted; re-armed by a manual
         // reset or a full clean patrol lap. Prevents a reset↔NeedsHelp loop: if the reset
         // lands right back in NeedsHelp, the patrol parks for diagnosis.
@@ -78,7 +78,7 @@ namespace ValheimVillages.Behaviors.Patrol
         /// </summary>
         public void ResetDiscovery()
         {
-            // A manual reset (vv_patrol_reset) re-arms the one-shot auto-heal: the operator
+            // A manual reset (vv_reset patrols) re-arms the one-shot auto-heal: the operator
             // is explicitly asking for a fresh attempt.
             m_autoResetAttempted = false;
             ResetDiscoveryInternal("manual");
@@ -306,7 +306,7 @@ namespace ValheimVillages.Behaviors.Patrol
 
             // One-shot self-heal before parking: a NeedsHelp is often just a stale route
             // left over from a navmesh rebuild. Try a single automatic reset (same as
-            // vv_patrol_reset) to re-derive waypoints from the current graph. If that lands
+            // vv_reset patrols) to re-derive waypoints from the current graph. If that lands
             // us right back here, m_autoResetAttempted is already set and we fall through to
             // park for diagnosis — no reset↔NeedsHelp loop.
             if (!m_autoResetAttempted)
@@ -324,7 +324,7 @@ namespace ValheimVillages.Behaviors.Patrol
             // the waypoint — that would silently paper over a broken route or genuinely
             // impassable geometry. Park in NeedsHelp as an operator signal: inspect the
             // spot, then either fix the route algorithm or the physical geometry and run
-            // vv_patrol_reset.
+            // vv_reset patrols.
             m_helpWaypointIndex = idx;
             m_helpPosition = wp.Position;
 
@@ -332,7 +332,7 @@ namespace ValheimVillages.Behaviors.Patrol
             Plugin.Log?.LogError(
                 $"[Patrol:{m_villager.VillagerName}] NeedsHelp: {reason} " +
                 $"({wp.Position.x:F1},{wp.Position.y:F1},{wp.Position.z:F1}) — " +
-                "patrol parked, fix route/geometry then vv_patrol_reset.");
+                "patrol parked, fix route/geometry then vv_reset patrols.");
             // Surface as a structured "blocked" issue (deduped, with a map pin to
             // the unreachable waypoint) so it renders in the Info tab the same way
             // a blocked work order does.

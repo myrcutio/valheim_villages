@@ -33,7 +33,7 @@ Villager/
     Discovery/
       VillagerComfort.cs               -- UpdateExperiencedComfort: samples shelter+fire comfort into memory (PoI discovery is village-level now)
     Navigation/
-      DoorHandler.cs, VillagerMovement.cs, VillagerWaypoint.cs, Region*.cs, BoundaryDump.cs, SpatialDump.cs, NavMeshLinkPlacer.cs
+      DoorHandler.cs, VillagerMovement.cs, VillagerWaypoint.cs, Region*.cs, BoundaryDump.cs, NavMeshLinkPlacer.cs
     Work/
       ContainerScanner.cs, StationFinder.cs, StationMatcher.cs (reads workStations from VillagerDef)
       BeehiveHelper.cs, ForageHelper.cs  -- harvest sources that aren't stations (hives, ripe pickables)

@@ -5,6 +5,53 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - Unreleased
+
+### Fixed
+- **A second village no longer corrupts the first one's map.** Each village sized its
+  territory from the combined boundary of *every* village, so with two settlements each
+  one claimed hundreds of metres of the other's empty ground. That blew past the size cap,
+  and the cap then trimmed the box around the village's own centre — cutting part of the
+  village's own buildings out of its own territory. Territory is now measured per village.
+- **With two or more villages, only one of them would rebuild its map.** A queued rebuild
+  for one village counted as a duplicate of another village's and was silently dropped, so
+  a second village's layout could stay stale indefinitely after you built there.
+- **Villagers no longer stall forever on work they cannot reach.** A chest, crop or plant
+  spot inside the village but off the walkable map was still offered as work; the villager
+  committed to it, failed to path there, and picked the identical target again next cycle —
+  so orders it *could* have worked were never reached. Work is now only offered if the
+  villager can actually walk to it, and a spot that fails is skipped for the rest of that
+  session instead of being re-chosen.
+- Farmers no longer end a whole planting session at the first plant spot they can't stand
+  at, and no longer walk in a loop between the same unreachable spot and the farm.
+- Villagers no longer log a spurious "lost context" warning and drop to idle each time the
+  scheduler hands them a job, moments before that job's own scan result arrives.
+
+### Removed
+- **Saves from before 0.2 are no longer supported.** The one-time work-order migration
+  (`vv_migrate_workorders`) has been removed, along with the fallback that read a quota
+  off the legacy in-chest order token. A work order whose village record cannot be read
+  now says so instead of silently displaying a 1-10 range.
+- Vestigial dev commands: the offline HNA dump/record pipeline (nothing read its output),
+  the scene-snapshot harness, the room catalog, and probes for bugs that have since been
+  fixed.
+
+### Changed
+- A new work order now defaults to **one full stack** of the item it produces, refilling at
+  **half a stack**, instead of a flat 1-10. The old default ignored what was being made: it
+  ordered a fifth of a stack of something that stacks to 50, and ten separate copies of
+  something that does not stack at all.
+- The `vv_` dev console surface is consolidated from 63 commands to 36. Dumps that describe
+  one subject are now subcommands — `vv_village <list|at|anchors|stations|pois|orders>`,
+  `vv_graph <regions|boundary|bfs>`, `vv_viz <path|tri|off>`,
+  `vv_reset <all|stale|patrols|forage|markers>` and `vv_log <channel> [on|off]` — and the
+  console tab-completes each group's subcommands.
+- `vv_get_villagers` is now `vv_records -v`; `vv_beeprobe`/`vv_forageprobe` are
+  `vv_harvestprobe`; `vv_bake_audit` is `vv_probe bake`; `vv_drawpath`/`vv_pathcompare` are
+  `vv_path`; `vv_capture_at` is `vv_capture <x> <z>`.
+- Commands that destroy or fabricate state (`vv_reset all`, `vv_damage_structures`,
+  `vv_kill_villager`, `vv_set_record_status`) now require an explicit `--yes`.
+
 ## [0.2.8] - 2026-09-18
 
 ### New
@@ -202,6 +249,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server console once the world has loaded. Until then, previously-placed work
   orders are not picked up (the new version reads quotas from the village, not the
   chest item). Re-running the command is safe — it skips orders already migrated.
+  **(Removed in 0.3.0 — this migration is no longer available. A world last played
+  before 0.2 must be upgraded on 0.2.8 or earlier first.)**
 
 ## [0.1.2] - 2026-06-18
 

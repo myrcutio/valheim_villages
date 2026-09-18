@@ -63,6 +63,37 @@ namespace ValheimVillages.Villager.AI.Work
             return result;
         }
 
+        /// <summary>
+        ///     The subset of <paramref name="containers" /> the villager at
+        ///     <paramref name="pathSource" /> can actually walk to.
+        ///     <para>
+        ///         Village scope and reachability are two different questions and they disagree:
+        ///         the footprint that scopes a village is grown to enclose every player-built
+        ///         piece within 100m, while reachability comes from the region graph, so a chest
+        ///         is routinely in scope and provably unwalkable. Anything that decides "can this
+        ///         villager do this order?" must ask both — the work-order scan AND the scheduler
+        ///         producer that feeds it, or the board offers a row the scan refuses and the
+        ///         villager churns dispatch -> "no work payload" -> abandon forever.
+        ///     </para>
+        ///     <para>
+        ///         Deliberately NOT applied to quota counting: "does the village hold enough?"
+        ///         is a question about the village, not about one villager's legs.
+        ///     </para>
+        /// </summary>
+        public static List<Container> FilterReachable(List<Container> containers, Vector3 pathSource)
+        {
+            var result = new List<Container>(containers?.Count ?? 0);
+            if (containers == null) return result;
+
+            foreach (var container in containers)
+                if (container != null &&
+                    Navigation.VillagerMovement.TryResolveApproach(
+                        container.transform.position, pathSource, null, out _))
+                    result.Add(container);
+
+            return result;
+        }
+
         public static List<Container> FindNearbyContainers(Vector3 center, float radius)
         {
             var result = new List<Container>();
@@ -120,18 +151,29 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        ///     The authoritative Max quota for a (station, item) order from the host-owned village
-        ///     record near <paramref name="pos" /> (Fix C). Falls back to <paramref name="tokenMax" />
-        ///     (the legacy chest-token value) only when no village/record entry resolves — e.g. an
-        ///     un-migrated or orphaned token.
+        ///     The authoritative Max quota for a (station, item) order, from the host-owned
+        ///     village record near <paramref name="pos" />. Returns false when no village or
+        ///     record entry resolves.
+        ///     <para>
+        ///         This used to fall back to the token's legacy <c>wo_max</c>, which defaulted to
+        ///         10 — that fallback is precisely what made a failure to resolve the village
+        ///         present as a work order silently stuck at a 1-10 range instead of reporting
+        ///         that it could not read the record. The legacy in-chest token format is no
+        ///         longer supported (it was last written before 0.2, and the migration command
+        ///         that repaired it is gone), so an unresolved order is now a real error and
+        ///         callers must surface it rather than invent a quota.
+        ///     </para>
         /// </summary>
-        public static int ResolveOrderMax(string station, string itemPrefab, Vector3 pos, int tokenMax)
+        public static bool TryResolveOrderMax(string station, string itemPrefab, Vector3 pos, out int max)
         {
+            max = 0;
             var village = VillageRegistry.GetVillageCovering(pos) ?? VillageRegistry.FindNearAnchor(pos);
-            if (village != null && !string.IsNullOrEmpty(station) && !string.IsNullOrEmpty(itemPrefab)
-                && village.TryGetWorkOrder(station, itemPrefab, out var entry))
-                return entry.Max;
-            return tokenMax;
+            if (village == null || string.IsNullOrEmpty(station) || string.IsNullOrEmpty(itemPrefab)
+                || !village.TryGetWorkOrder(station, itemPrefab, out var entry))
+                return false;
+
+            max = entry.Max;
+            return true;
         }
 
         /// <summary>

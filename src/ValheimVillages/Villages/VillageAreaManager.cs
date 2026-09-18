@@ -36,7 +36,6 @@ namespace ValheimVillages.Villages
                 $"[VillageArea] Registered area for {area.VillageId} with {area.Waypoints.Count} waypoints");
             VillageStationRegistry.RefreshFor(area);
             VillagePoiRegistry.RefreshFor(area);
-            VillageRoomCatalog.RefreshFor(area);
         }
 
         /// <summary>
@@ -49,7 +48,6 @@ namespace ValheimVillages.Villages
                 Plugin.Log?.LogInfo($"[VillageArea] Unregistered area for {villageId}");
                 VillageStationRegistry.RemoveFor(villageId);
                 VillagePoiRegistry.RemoveFor(villageId);
-                VillageRoomCatalog.RemoveFor(villageId);
             }
         }
 
@@ -149,15 +147,28 @@ namespace ValheimVillages.Villages
         }
 
         /// <summary>
-        ///     Get the combined axis-aligned XZ bounds of all registered village areas.
-        ///     Returns false if there are no areas.
+        ///     Axis-aligned XZ bounds of ONE village's area (its patrol ring). Returns false
+        ///     when that village has no registered area yet.
+        ///     <para>
+        ///         This was <c>TryGetCombinedBounds</c>, which unioned EVERY registered area.
+        ///         Its only caller seeds the partition's bake/footprint box with it, so in a
+        ///         world with two villages every partition started from a box spanning both.
+        ///         Measured at 300m apart: the box wanted 61,892 cells against the 40,000 cap,
+        ///         and <c>ExpandFootprintToVillagePieces</c>' area clamp then shrank it about
+        ///         the village's own centroid — so the published footprint claimed ~250m of the
+        ///         other village's empty ground while cutting 14m of this village's own build
+        ///         out of it, and the graph baked over that box left the village's own
+        ///         ingredient chest outside every region. Bounds must be per-village for the
+        ///         same reason anchors are (<c>RegionPartitionHandler.FilterAnchorsByTask</c>).
+        ///     </para>
         /// </summary>
-        public static bool TryGetCombinedBounds(out float minX, out float minZ, out float maxX, out float maxZ)
+        public static bool TryGetAreaBounds(
+            string villageId, out float minX, out float minZ, out float maxX, out float maxZ)
         {
             minX = minZ = float.MaxValue;
             maxX = maxZ = float.MinValue;
-            if (s_areas.Count == 0) return false;
-            foreach (var area in s_areas.Values)
+            if (string.IsNullOrEmpty(villageId) || !s_areas.TryGetValue(villageId, out var area)) return false;
+
             foreach (var wp in area.Waypoints)
             {
                 if (wp.x < minX) minX = wp.x;
@@ -175,7 +186,6 @@ namespace ValheimVillages.Villages
             s_areas.Clear();
             VillageStationRegistry.Clear();
             VillagePoiRegistry.Clear();
-            VillageRoomCatalog.Clear();
         }
     }
 }

@@ -43,6 +43,11 @@ namespace ValheimVillages.UI.ContextMenus
         private int m_loadedMinimum = 1;
         private int m_loadedMaximum = 10;
 
+        // Set when the order's quota could not be read from the village record. There is no
+        // legacy token fallback any more, so the values on screen are not a quota and must
+        // never be written back as one.
+        private bool m_unresolved;
+
         // The village that owns the order being edited, bound ONCE in LoadFromItem and reused
         // by SaveToItem/DeleteOrder. Re-resolving per call let load and save disagree.
         private string m_villageId = "";
@@ -369,13 +374,17 @@ namespace ValheimVillages.UI.ContextMenus
 
         private void LoadFromItem(ItemDrop.ItemData item)
         {
+            // Per-load state: the panel instance is reused across orders, so a previous
+            // unresolved order must not leave this set.
+            m_unresolved = false;
+
             var stationRaw = GetData(item, "wo_station", "Unknown");
             m_stationDisplay = FormatStationName(stationRaw);
 
-            // Quota is host-authoritative now (Fix C) — read it from the village record, not the
-            // token. Resolve the village at the player (FindNearAnchor is graph-independent so it
-            // works on a client). Fall back to the token's legacy values only for an un-migrated
-            // token with no record entry yet.
+            // Quota is host-authoritative — read it from the village record, not the token.
+            // Resolve the village at the player (FindNearAnchor is graph-independent so it
+            // works on a client). There is no legacy token fallback: the record is the only
+            // source, and a failure to read it is reported rather than papered over.
             var itemPrefab = GetData(item, "wo_item", "");
             var village = ResolveVillageForItem(item);
             m_villageId = village?.VillageId ?? "";
@@ -388,21 +397,23 @@ namespace ValheimVillages.UI.ContextMenus
             }
             else
             {
-                // No record entry: either a pre-Fix-C token that was never migrated, or the
-                // village didn't resolve. Log which, because the two look identical on screen
-                // (both show the token's 1-10) and only the second is a fault.
+                // No record entry. The legacy pre-0.2 in-chest token is no longer supported,
+                // so there is no longer a benign reading of this: the village record is the
+                // only source of a quota, and failing to read it is a fault either way.
+                // Showing the token's 1-10 here is exactly what used to disguise an
+                // unresolvable village as a real order with a default range.
                 if (village == null)
                     Plugin.Log?.LogError(
-                        $"[WorkOrderMenu] no village resolved for {itemPrefab}@{stationRaw}; showing the " +
-                        "token's values, and saving is disabled until the order re-binds.");
+                        $"[WorkOrderMenu] no village resolved for {itemPrefab}@{stationRaw}; " +
+                        "cannot read its quota, and saving is disabled until the order re-binds.");
                 else
-                    Plugin.Log?.LogInfo(
+                    Plugin.Log?.LogError(
                         $"[WorkOrderMenu] no record entry for {itemPrefab}@{stationRaw} in village " +
-                        $"{village.VillageId}; falling back to the legacy token values " +
-                        "(run vv_migrate_workorders to promote it).");
+                        $"{village.VillageId}; cannot read its quota.");
 
-                m_minimum = int.TryParse(GetData(item, "wo_min", "1"), out var min) ? min : 1;
-                m_maximum = int.TryParse(GetData(item, "wo_max", "10"), out var max) ? max : 10;
+                m_minimum = 0;
+                m_maximum = 0;
+                m_unresolved = true;
             }
 
             m_loadedMinimum = m_minimum;
@@ -458,6 +469,14 @@ namespace ValheimVillages.UI.ContextMenus
         private void SaveToItem()
         {
             if (m_currentItem == null) return;
+
+            // The quota never resolved, so there is nothing trustworthy to write back.
+            if (m_unresolved)
+            {
+                Plugin.Log?.LogWarning(
+                    "[WorkOrderMenu] quota was never resolved from the village record; not saving.");
+                return;
+            }
 
             // Only push an actual change. Closing without editing must NOT re-send the loaded
             // value — if it was read a hair before the host's edit replicated, re-sending would

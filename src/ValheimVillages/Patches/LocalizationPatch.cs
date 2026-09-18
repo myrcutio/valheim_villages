@@ -29,7 +29,14 @@ namespace ValheimVillages.Patches
             get
             {
                 if (s_tokens != null) return s_tokens;
-                s_tokens = new Dictionary<string, string> { { "vv_villager", "Villager" } };
+                s_tokens = new Dictionary<string, string>
+                {
+                    { "vv_villager", "Villager" },
+                    // Shown when a work-order token exists but its village record cannot be
+                    // read, so no quota resolves. Previously this silently displayed as a
+                    // 1-10 order, hiding the real fault.
+                    { "vv_workorder_no_record", "Not in the village record — cannot read its quota" },
+                };
                 foreach (var kv in VillagerRegistry.Definitions)
                     if (!string.IsNullOrEmpty(kv.Value.stationName))
                     {

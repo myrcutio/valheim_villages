@@ -49,7 +49,7 @@ namespace ValheimVillages.Behaviors.Crafting
 
         public WorkSubState SubState { get; private set; } = WorkSubState.Idle;
 
-        /// <summary>Last notable workflow event (abandon reason, scan result) for diagnostics — surfaced by vv_get_villagers.</summary>
+        /// <summary>Last notable workflow event (abandon reason, scan result) for diagnostics — surfaced by vv_records -v.</summary>
         public string LastWorkNote { get; private set; } = "(none)";
 
         internal void SetWorkNote(string note) => LastWorkNote = note;
@@ -256,6 +256,15 @@ namespace ValheimVillages.Behaviors.Crafting
 
             if (m_context == null)
             {
+                // A scan in flight is the NORMAL reason there is no context yet: the scheduler
+                // puts the villager into Working the moment it assigns the row, while the
+                // payload that builds the context only arrives when work_order_scan completes a
+                // tick or more later. Abandoning here fired a warning on every dispatch and
+                // bounced the villager to Idle moments before its own work arrived.
+                // ScanPending self-expires on its deadline, so a scan that never returns still
+                // falls through to the abandon below rather than pinning the villager.
+                if (ScanPending) return;
+
                 AbandonWork("lost context");
                 return;
             }

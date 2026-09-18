@@ -12,15 +12,13 @@ namespace ValheimVillages.Villager.AI.Navigation
     ///     <see cref="PatrolRouteBuilder" /> derives from them to JSON, for
     ///     offline verification of the geometric route pipeline (ordering,
     ///     simplification, inset, self-intersection). Run via console command:
-    ///     vv_hna_boundary_dump
+    ///     vv_graph boundary
     /// </summary>
     public static class BoundaryDump
     {
         private static readonly string OutputPath = Path.Combine(
             Paths.ConfigPath, "vv_dumps", "hna_boundary_dump.json");
 
-        [DevCommand("Dump region-graph boundary cells + the derived patrol route to JSON for offline pipeline testing",
-            Name = "vv_hna_boundary_dump")]
         public static void Dump()
         {
             if (!Villages.Entity.VillageRegistry.IsAnyAvailable)

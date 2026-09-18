@@ -304,7 +304,12 @@ namespace ValheimVillages.Attributes
                     continue;
                 }
 
-                new Terminal.ConsoleCommand(name, attr.Description, handler);
+                if (attr.Destructive) handler = GuardDestructive(name, handler);
+
+                var fetcher = BuildOptionsFetcher(type, attr.OptionsProvider, name);
+
+                new Terminal.ConsoleCommand(name, attr.Description, handler,
+                    optionsFetcher: fetcher, alwaysRefreshTabOptions: fetcher != null);
                 s_devCommands.Add((name, attr.Description));
                 count++;
             }
@@ -315,6 +320,80 @@ namespace ValheimVillages.Attributes
         private static string DeriveCommandName(Type type, MethodInfo method)
         {
             return $"{type.Name}_{method.Name}".ToLowerInvariant();
+        }
+
+        /// <summary>
+        ///     Resolves <see cref="DevCommandAttribute.OptionsProvider" /> to a
+        ///     <see cref="Terminal.ConsoleOptionsFetcher" /> supplying first-argument tab
+        ///     completions. Accepts a parameterless static method, property or field on the
+        ///     declaring type whose value is assignable to <c>IEnumerable&lt;string&gt;</c>.
+        ///     Returns null (no completion) when unset; logs and returns null when the name
+        ///     does not resolve, so a typo degrades to today's behaviour rather than
+        ///     dropping the command.
+        /// </summary>
+        private static Terminal.ConsoleOptionsFetcher BuildOptionsFetcher(
+            Type type, string provider, string commandName)
+        {
+            if (string.IsNullOrEmpty(provider)) return null;
+
+            const BindingFlags flags =
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+            Func<object> read = null;
+
+            var m = type.GetMethod(provider, flags, null, Type.EmptyTypes, null);
+            if (m != null) read = () => m.Invoke(null, null);
+
+            if (read == null)
+            {
+                var p = type.GetProperty(provider, flags);
+                if (p != null && p.CanRead) read = () => p.GetValue(null, null);
+            }
+
+            if (read == null)
+            {
+                var f = type.GetField(provider, flags);
+                if (f != null) read = () => f.GetValue(null);
+            }
+
+            if (read == null)
+            {
+                Plugin.Log?.LogWarning(
+                    $"[AttributeScanner] {commandName}: OptionsProvider '{provider}' not found " +
+                    $"on {type.Name} — registering without tab completion");
+                return null;
+            }
+
+            return () =>
+            {
+                try
+                {
+                    return read() is IEnumerable<string> values ? values.ToList() : null;
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log?.LogWarning(
+                        $"[AttributeScanner] {commandName}: OptionsProvider '{provider}' threw: {ex.Message}");
+                    return null;
+                }
+            };
+        }
+
+        /// <summary>
+        ///     Wraps a <see cref="DevCommandAttribute.Destructive" /> command so it refuses
+        ///     to run without an explicit <c>--yes</c>. <c>--dry-run</c> passes through: it
+        ///     is a preview, and gating it would make the safe path harder to reach than
+        ///     the destructive one.
+        /// </summary>
+        private static Terminal.ConsoleEventFailable GuardDestructive(
+            string name, Terminal.ConsoleEventFailable inner)
+        {
+            return args =>
+            {
+                if (DevConfirm.IsConfirmed(args)) return inner(args);
+                DevConfirm.PrintRefusal(name);
+                return null;
+            };
         }
 
         /// <summary>

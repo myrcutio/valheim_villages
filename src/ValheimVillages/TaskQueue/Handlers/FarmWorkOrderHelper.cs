@@ -40,10 +40,17 @@ namespace ValheimVillages.TaskQueue.Handlers
             // that are ready. Scoped to the village footprint (not a radius around
             // whoever is asking), which is the same scan a forage order runs — a
             // ripe plant is a ripe plant whether someone planted it or not.
-            var harvestTarget = ForageHelper.FindNearestRipe(
-                anchorPos, anchorPos, FarmSettings.HarvestScanRadius, outputItem);
-
-            if (harvestTarget != null)
+            //
+            // TryFindHarvestable, NOT FindNearestRipe: the latter explicitly does not consider
+            // reachability, so this offered crops the villager provably could not walk to. The
+            // farm order was then committed, BeginHarvestPass' NavTo failed to resolve an
+            // approach at the crop's own collider, and the scan re-selected the same crop next
+            // cycle — a Raspberry 56m out, inside the footprint but off the region graph, kept
+            // a Farmer idle indefinitely. The forage path already used the reachable variant;
+            // the farm path never got it.
+            if (ForageHelper.TryFindHarvestable(
+                    anchorPos, FarmSettings.HarvestScanRadius, outputItem,
+                    out var harvestTarget, out var harvestApproach))
             {
                 Plugin.Log?.LogInfo(
                     $"[FarmScan:{ai.NpcName}] Found harvestable {outputItem} at " +
@@ -58,6 +65,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                     HarvestedCount = existingCount,
                     IsHarvestingPass = true,
                     CurrentHarvestTarget = harvestTarget,
+                    HarvestApproach = harvestApproach,
                 };
             }
 

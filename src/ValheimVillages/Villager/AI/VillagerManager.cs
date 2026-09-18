@@ -153,7 +153,7 @@ namespace ValheimVillages.Villager.AI
         ///     graph. Call after a partition completes: the boundary may have grown
         ///     or shrunk (e.g. the player walled off a section), but the patrol
         ///     waypoint list is cached at discovery time and is otherwise only
-        ///     re-derived by <c>vv_patrol_reset</c> or the one-shot stuck-waypoint
+        ///     re-derived by <c>vv_reset patrols</c> or the one-shot stuck-waypoint
         ///     auto-heal. Neither of those fires when the OLD waypoints stay
         ///     individually reachable on the new NavMesh, so without this the guard
         ///     keeps patrolling the pre-change route — straight into a now-sealed

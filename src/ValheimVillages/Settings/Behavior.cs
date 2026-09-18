@@ -327,11 +327,6 @@ namespace ValheimVillages.Settings
         /// <summary>Seconds without reaching the work destination (within 2m 3D) before giving up and trying something else.</summary>
         public const float WorkStuckTimeoutSeconds = 20f;
 
-        /// <summary>
-        ///     Radius (from a carpenter's anchor) to scan for damaged structures to
-        ///     repair (meters). Sized to cover a whole village from its anchor.
-        /// </summary>
-        public const float RepairScanRadius = 40f;
     }
 
     /// <summary>

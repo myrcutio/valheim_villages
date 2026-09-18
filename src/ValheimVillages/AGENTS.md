@@ -39,9 +39,10 @@ The helpers live in `partial class DebugLog` split across:
 
 ### Toggling verbose channels at runtime
 
-`ValheimVillages.Settings.LogSettings` exposes runtime-mutable verbosity flags. The dev console command `vv_log_navmesh`
-toggles `VerboseNavMesh` (NavMesh probe-area firehose). Add new flags + commands as new high-volume channels are
-introduced — never leave them on by default.
+`ValheimVillages.Settings.LogSettings` exposes runtime-mutable verbosity flags. The dev console command
+`vv_log <channel> [on|off]` lists and toggles them (bare `vv_log` prints the current state of every channel).
+Add new flags as new high-volume channels are introduced, and register them in the `vv_log` channel table —
+never leave them on by default.
 
 ### Don't
 
@@ -54,16 +55,29 @@ introduced — never leave them on by default.
 - Don't write to `/home/benny/Projects/valheim_villages/.cursor/`. All mod-produced sidecar files belong under
   `<BepInEx>/config/vv_dumps/` (the path
   `DebugLog.List` and the redirected `DebugLog.Append` / `PathTelemetry` /
-  `BoundaryDump.OutputPath` / `SpatialDump.SavePath` all now use).
+  `BoundaryDump.OutputPath` all now use).
 
 ## Dev console commands
 
-All mod-registered dev commands follow the convention `vv_<area>_<verb>` so the Valheim console tab-completes the full
-mod surface area when the player types `vv_`. Add new commands via
-`[DevCommand("description", Name = "vv_<area>_<verb>")]` on a `public static
+All mod-registered dev commands are named `vv_<area>` so the Valheim console tab-completes the full mod surface area
+when the player types `vv_`. Add new commands via `[DevCommand("description", Name = "vv_<area>")]` on a `public static
 void Method()` or `public static void Method(Terminal.ConsoleEventArgs)` — the
 `AttributeScanner` wires it into `Terminal.ConsoleCommand` automatically and caches the (name, description) tuple for
 `vv` to enumerate.
+
+**Prefer a subcommand over a new top-level name** when a command is one of several views of the same subject. The
+groups today are `vv_village <anchors|stations|pois|orders>`, `vv_graph <regions|boundary|bfs>`,
+`vv_viz <path|tri|off>`, `vv_reset <all|stale|patrols|forage|markers>` and `vv_log <channel> [on|off]`. Give the group a
+`OptionsProvider = nameof(SomeStaticMember)` — a static parameterless method, property or field returning
+`IEnumerable<string>` — so the console tab-completes the subcommands. Without it a group *loses* discoverability
+relative to flat names, which is the whole reason the flat convention existed. A group's bare form (no subcommand)
+should list its subcommands rather than doing anything.
+
+**Mark anything that destroys or fabricates state `Destructive = true`.** The scanner then refuses the invocation
+unless it carries `--yes` (or `--dry-run`). Do *not* use Terminal's own `isCheat` flag for this: `IsCheatsEnabled()`
+also requires `ZNet.instance.IsServer()`, so a cheat-gated command is unreachable from a client connected to a
+dedicated server. For a group whose targets differ in blast radius, leave the command unmarked and call
+`DevConfirm.IsConfirmed(args)` / `DevConfirm.PrintRefusal(...)` per target, as `vv_reset` does.
 
 Type `vv` (or `vv help` / `vv --help`) in-game to print every registered command. The list is generated from the live
 `AttributeScanner.GetRegisteredDevCommands()` cache, so a new command becomes self-documenting the moment it's

@@ -32,6 +32,14 @@ namespace ValheimVillages.Behaviors
         /// <summary>Current harvest target (walking to this Pickable).</summary>
         public Pickable CurrentHarvestTarget;
 
+        /// <summary>
+        ///     The resolved standing spot beside <see cref="CurrentHarvestTarget" />, found when
+        ///     the crop was chosen. A Pickable sits inside its own collider, so re-resolving an
+        ///     approach at the crop's own position fails — the same trap the beehive path hit.
+        ///     Resolve once at selection, then walk it with <c>snapToApproach: false</c>.
+        /// </summary>
+        public Vector3 HarvestApproach;
+
         /// <summary>Index into IngredientSources for multi-chest gathering.</summary>
         public int CurrentIngredientIndex;
 
@@ -49,6 +57,15 @@ namespace ValheimVillages.Behaviors
 
         /// <summary>Next position where a seed will be planted.</summary>
         public Vector3? NextPlantPosition;
+
+        /// <summary>
+        ///     Plant spots this session has proven it cannot stand at — either NavTo found no
+        ///     approach, or the villager arrived at the snapped approach still too far from the
+        ///     spot to plant. <see cref="PlantingHelper.FindPlantingPosition" /> scans a
+        ///     deterministic spiral, so without excluding these it hands back the same cell
+        ///     forever and "skipping to find another" skips nothing.
+        /// </summary>
+        public readonly List<Vector3> UnreachablePlantSpots = new();
 
         /// <summary>Time until the next planting iteration</summary>
         public float PlantCooldown;

@@ -29,8 +29,8 @@ namespace ValheimVillages.TaskQueue
         private static readonly TaskPriority[] s_tiersDescending =
             { TaskPriority.High, TaskPriority.Medium, TaskPriority.Low };
 
-        // O(1) dedup: tracks pending (Name, SourceId) pairs
-        private static readonly HashSet<(string, string)> s_pendingKeys = new();
+        // O(1) dedup: tracks pending (Name, SourceId, VillageId) triples — see DedupKey.
+        private static readonly HashSet<(string, string, string)> s_pendingKeys = new();
 
         // Backoff between re-checks of an ITaskPrecondition handler that isn't ready.
         private const float ReadinessRecheckSeconds = 1.5f;
@@ -55,7 +55,7 @@ namespace ValheimVillages.TaskQueue
         {
             if (task == null) return false;
 
-            var key = (task.Name, task.SourceId);
+            var key = DedupKey(task);
             if (s_pendingKeys.Contains(key))
             {
                 Plugin.Log?.LogDebug(
@@ -220,7 +220,7 @@ namespace ValheimVillages.TaskQueue
 
                 // Re-enqueue at back of its tier (bypass dedup since key was removed)
                 s_queues[task.Priority].Enqueue(task);
-                s_pendingKeys.Add((task.Name, task.SourceId));
+                s_pendingKeys.Add(DedupKey(task));
             }
             else
             {
@@ -247,7 +247,28 @@ namespace ValheimVillages.TaskQueue
         /// </summary>
         private static void RemovePendingKey(VillagerTask task)
         {
-            s_pendingKeys.Remove((task.Name, task.SourceId));
+            s_pendingKeys.Remove(DedupKey(task));
+        }
+
+        /// <summary>
+        ///     The identity two pending tasks must share to count as duplicates: name, source
+        ///     AND the village the task is scoped to.
+        ///     <para>
+        ///         Village-scoped work is per-village, so keying on (name, source) alone made
+        ///         a second village's task a "duplicate" of the first's and dropped it. With
+        ///         two villages loaded, <c>vv_repartition</c> enqueued both and only one ever
+        ///         ran, and a structure change in one village was discarded whenever the other
+        ///         already had a partition pending — that village's graph then never rebuilt.
+        ///         Tasks with no village attribute keep the old two-part key.
+        ///     </para>
+        /// </summary>
+        private static (string, string, string) DedupKey(VillagerTask task)
+        {
+            var villageId = task.Attributes != null &&
+                            task.Attributes.TryGetValue("village_id", out var id)
+                ? id
+                : "";
+            return (task.Name, task.SourceId, villageId);
         }
 
         /// <summary>

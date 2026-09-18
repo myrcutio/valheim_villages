@@ -136,8 +136,83 @@ namespace ValheimVillages.Villager.AI.Pathfinding
                 DrawWireOctahedron(DebugPolyline[i] + yOff, NodeMarkerSize * 2f, ColorDebugPolyline);
         }
 
-        [DevCommand("Toggle villager path debug viz. Optional cam=<cameraName> restricts the overlay to that camera (cam=off clears).", Name = "vv_path_debug")]
-        public static void Toggle(Terminal.ConsoleEventArgs args)
+        private static readonly string[] VizModes = { "path", "tri", "off" };
+
+        private static IEnumerable<string> VizModeNames()
+        {
+            return VizModes;
+        }
+
+        /// <summary>
+        ///     One verb for every debug overlay, because they are all one renderer: a single
+        ///     <see cref="PathDebugRenderer" /> instance, one GL material, one
+        ///     <c>OnRenderObject</c>. The former <c>vv_path_debug</c> and <c>vv_tri_debug</c>
+        ///     were two toggles over two static fields of this class, and the <c>cam=</c>
+        ///     filter they set is global — so a filter applied through one of them silently
+        ///     suppressed the other's output.
+        /// </summary>
+        [DevCommand("Toggle debug overlays: vv_viz <path|tri|off> [cam=<cameraName>|cam=off]",
+            Name = "vv_viz", OptionsProvider = nameof(VizModeNames))]
+        public static void Viz(Terminal.ConsoleEventArgs args)
+        {
+            var mode = args.Length > 1 ? args[1].ToLowerInvariant() : null;
+
+            // A bare `cam=` argument with no mode just retargets every overlay at once.
+            if (mode == null || mode.StartsWith("cam=", StringComparison.OrdinalIgnoreCase))
+            {
+                if (TryApplyCameraArg(args, out var camOnly))
+                {
+                    Console.instance?.Print(camOnly);
+                    return;
+                }
+
+                Console.instance?.Print(
+                    $"[vv_viz] modes: {string.Join(", ", VizModes)}  " +
+                    $"(path={(s_enabled ? "ON" : "OFF")}, tri={(s_showTriangulation ? "ON" : "OFF")}" +
+                    $", overlay corners={DebugPolyline.Count}){CamSuffix()}");
+                return;
+            }
+
+            switch (mode)
+            {
+                case "path":
+                    TogglePathOverlay(args);
+                    return;
+                case "tri":
+                    ToggleTriangulation(args);
+                    return;
+                case "off":
+                    TurnAllOverlaysOff();
+                    return;
+                default:
+                    Console.instance?.Print(
+                        $"[vv_viz] unknown mode '{mode}'. Known: {string.Join(", ", VizModes)}");
+                    return;
+            }
+        }
+
+        /// <summary>Clears every overlay and drops the renderer instance.</summary>
+        private static void TurnAllOverlaysOff()
+        {
+            s_enabled = false;
+            s_showTriangulation = false;
+            HighlightedRegions.Clear();
+            DebugPolyline.Clear();
+            if (s_instance != null)
+            {
+                Destroy(s_instance.gameObject);
+                s_instance = null;
+            }
+
+            Console.instance?.Print("[vv_viz] all overlays OFF");
+            Plugin.Log?.LogInfo("[PathDebug] all overlays OFF");
+        }
+
+        /// <summary>
+        ///     Toggles the per-villager agent-route overlay. Reached as <c>vv_viz path</c>;
+        ///     see <see cref="Viz" /> for why the overlays share one verb.
+        /// </summary>
+        private static void TogglePathOverlay(Terminal.ConsoleEventArgs args)
         {
             if (TryApplyCameraArg(args, out var camMsg))
             {
@@ -162,29 +237,15 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             Plugin.Log?.LogInfo($"[PathDebug] Visualization {state}");
         }
 
-        [DevCommand("Overlay the raw slot-31 NavMesh path between two points (magenta). " +
-                    "Usage: vv_drawpath <fromX> <fromZ> <toX> <toZ> | vv_drawpath off", Name = "vv_drawpath")]
-        public static void DrawRawPath(Terminal.ConsoleEventArgs args)
+        /// <summary>
+        ///     Overlays the raw slot-31 NavMesh path between two XZ points as a magenta
+        ///     polyline and returns a one-line status, or null if the endpoints could not
+        ///     be sampled. Called by <c>vv_path ... draw</c>; the former standalone
+        ///     <c>vv_drawpath</c> duplicated vv_pathcompare's endpoint sampling and path
+        ///     computation verbatim, so only the drawing half lives on here.
+        /// </summary>
+        internal static string DrawRawPathBetween(float fx, float fz, float tx, float tz)
         {
-            if (args?.Args != null && args.Args.Length >= 2 &&
-                args.Args[1].Equals("off", StringComparison.OrdinalIgnoreCase))
-            {
-                DebugPolyline.Clear();
-                Console.instance?.Print("[vv_drawpath] cleared");
-                return;
-            }
-
-            var inv = CultureInfo.InvariantCulture;
-            if (args?.Args == null || args.Args.Length < 5
-                || !float.TryParse(args.Args[1], NumberStyles.Float, inv, out var fx)
-                || !float.TryParse(args.Args[2], NumberStyles.Float, inv, out var fz)
-                || !float.TryParse(args.Args[3], NumberStyles.Float, inv, out var tx)
-                || !float.TryParse(args.Args[4], NumberStyles.Float, inv, out var tz))
-            {
-                Console.instance?.Print("Usage: vv_drawpath <fromX> <fromZ> <toX> <toZ> | vv_drawpath off");
-                return;
-            }
-
             var filter = new NavMeshQueryFilter
             {
                 agentTypeID = VillagerAgentType.UnityAgentTypeID,
@@ -192,25 +253,29 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             };
             if (!NavMesh.SamplePosition(new Vector3(fx, 40f, fz), out var fHit, 8f, filter)
                 || !NavMesh.SamplePosition(new Vector3(tx, 40f, tz), out var tHit, 8f, filter))
-            {
-                Console.instance?.Print("[vv_drawpath] endpoint sample failed");
-                return;
-            }
+                return null;
 
             var path = new NavMeshPath();
             NavMesh.CalculatePath(fHit.position, tHit.position, filter, path);
             DebugPolyline.Clear();
             DebugPolyline.AddRange(path.corners);
             EnsureInstance();
-            Console.instance?.Print(
-                $"[vv_drawpath] status={path.status} corners={path.corners.Length} (magenta overlay)");
+            return $"overlay: status={path.status} corners={path.corners.Length} (magenta)";
+        }
+
+        /// <summary>Clears the ad-hoc magenta overlay drawn by <c>vv_path ... draw</c>.</summary>
+        internal static void ClearRawPathOverlay()
+        {
+            DebugPolyline.Clear();
         }
 
 
 
 
-        [DevCommand("Toggle NavMesh triangulation wireframe. Optional cam=<cameraName> restricts the overlay to that camera (cam=off clears).", Name = "vv_tri_debug")]
-        public static void ToggleTriangulation(Terminal.ConsoleEventArgs args)
+        /// <summary>
+        ///     Toggles the NavMesh triangulation wireframe. Reached as <c>vv_viz tri</c>.
+        /// </summary>
+        private static void ToggleTriangulation(Terminal.ConsoleEventArgs args)
         {
             if (TryApplyCameraArg(args, out var camMsg))
             {
@@ -529,8 +594,6 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             return c;
         }
 
-        [DevCommand("Inspect village region graph (use near=x,z or near=player for position-filtered triangle detail)",
-            Name = "vv_tri_inspect")]
         public static void TriInspect(Terminal.ConsoleEventArgs args)
         {
             var nearPos = ParseNearArg(args);

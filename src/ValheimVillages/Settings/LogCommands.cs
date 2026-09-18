@@ -1,41 +1,129 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using ValheimVillages.Attributes;
+using ValheimVillages.Scheduling;
 
 namespace ValheimVillages.Settings
 {
     /// <summary>
-    ///     Dev console commands for toggling runtime logging verbosity.
+    ///     Dev console command for toggling runtime logging verbosity.
     ///     Companion to <see cref="LogSettings" />.
+    ///     <para>
+    ///         Replaces the former one-command-per-flag set (<c>vv_log_navmesh</c>,
+    ///         <c>vv_log_ingredients</c>, <c>vv_log_itemspawns</c>), which were pure
+    ///         toggles: there was no way to set a known state or read the current one.
+    ///     </para>
     /// </summary>
     internal static class LogCommands
     {
-        [DevCommand("Toggle high-volume NavMesh probe-area logging on/off", Name = "vv_log_navmesh")]
-        public static void ToggleVerboseNavMesh(Terminal.ConsoleEventArgs args)
+        /// <summary>
+        ///     The toggleable verbosity channels, by console name. Add an entry here when
+        ///     a new high-volume channel is introduced — the command, its tab completion
+        ///     and its state readout all derive from this table.
+        /// </summary>
+        private static readonly Dictionary<string, LogChannel> Channels =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ingredients"] = new(
+                    "per-container ingredient-scan probes",
+                    () => LogSettings.VerboseIngredientScan,
+                    v => LogSettings.VerboseIngredientScan = v),
+                ["itemspawns"] = new(
+                    "every ItemDrop.Awake spawn",
+                    () => LogSettings.VerboseItemSpawns,
+                    v => LogSettings.VerboseItemSpawns = v),
+                ["training"] = new(
+                    "every scheduler reranker training step",
+                    () => SchedulerSettings.LogTraining,
+                    v => SchedulerSettings.LogTraining = v)
+            };
+
+        private static IEnumerable<string> ChannelNames()
         {
-            LogSettings.VerboseNavMesh = !LogSettings.VerboseNavMesh;
-            var state = LogSettings.VerboseNavMesh ? "ON" : "OFF";
-            var msg = $"[LogSettings] VerboseNavMesh = {state}";
-            Console.instance?.Print(msg);
+            return Channels.Keys;
+        }
+
+        [DevCommand(
+            "Show or toggle verbose log channels: vv_log [channel] [on|off]",
+            Name = "vv_log", OptionsProvider = nameof(ChannelNames))]
+        public static void Log(Terminal.ConsoleEventArgs args)
+        {
+            if (args.Length < 2)
+            {
+                PrintAll();
+                return;
+            }
+
+            var name = args[1];
+            if (!Channels.TryGetValue(name, out var channel))
+            {
+                Print($"[vv_log] unknown channel '{name}'. Known: {string.Join(", ", Channels.Keys)}");
+                return;
+            }
+
+            bool target;
+            if (args.Length < 3)
+            {
+                target = !channel.Get();
+            }
+            else if (!TryParseState(args[2], out target))
+            {
+                Print($"[vv_log] expected on|off, got '{args[2]}'");
+                return;
+            }
+
+            channel.Set(target);
+            var msg = $"[vv_log] {name} = {(target ? "ON" : "OFF")}  ({channel.Description})";
+            Print(msg);
             Plugin.Log?.LogInfo(msg);
         }
 
-        [DevCommand("Toggle per-container ingredient-scan logging on/off", Name = "vv_log_ingredients")]
-        public static void ToggleVerboseIngredientScan(Terminal.ConsoleEventArgs args)
+        private static bool TryParseState(string raw, out bool state)
         {
-            LogSettings.VerboseIngredientScan = !LogSettings.VerboseIngredientScan;
-            var state = LogSettings.VerboseIngredientScan ? "ON" : "OFF";
-            var msg = $"[LogSettings] VerboseIngredientScan = {state}";
-            Console.instance?.Print(msg);
-            Plugin.Log?.LogInfo(msg);
+            switch (raw.ToLowerInvariant())
+            {
+                case "on":
+                case "true":
+                case "1":
+                    state = true;
+                    return true;
+                case "off":
+                case "false":
+                case "0":
+                    state = false;
+                    return true;
+                default:
+                    state = false;
+                    return false;
+            }
         }
 
-        [DevCommand("Toggle per-item ItemDrop.Awake spawn logging on/off", Name = "vv_log_itemspawns")]
-        public static void ToggleVerboseItemSpawns(Terminal.ConsoleEventArgs args)
+        private static void PrintAll()
         {
-            LogSettings.VerboseItemSpawns = !LogSettings.VerboseItemSpawns;
-            var state = LogSettings.VerboseItemSpawns ? "ON" : "OFF";
-            var msg = $"[LogSettings] VerboseItemSpawns = {state}";
-            Console.instance?.Print(msg);
-            Plugin.Log?.LogInfo(msg);
+            Print($"[vv_log] {Channels.Count} channel(s) — vv_log <channel> [on|off]");
+            var width = Channels.Keys.Max(k => k.Length);
+            foreach (var kvp in Channels.OrderBy(c => c.Key))
+                Print($"  {kvp.Key.PadRight(width)}  {(kvp.Value.Get() ? "ON " : "OFF")}  {kvp.Value.Description}");
+        }
+
+        private static void Print(string line)
+        {
+            Console.instance?.Print(line);
+        }
+
+        private sealed class LogChannel
+        {
+            public LogChannel(string description, Func<bool> get, Action<bool> set)
+            {
+                Description = description;
+                Get = get;
+                Set = set;
+            }
+
+            public string Description { get; }
+            public Func<bool> Get { get; }
+            public Action<bool> Set { get; }
         }
     }
 }

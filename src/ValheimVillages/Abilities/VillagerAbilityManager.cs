@@ -146,21 +146,5 @@ namespace ValheimVillages.Abilities
             LearnMountainStride();
         }
 
-        [DevCommand("Log HNA attributes for current player position to BepInEx log (region, bounds, heights)",
-            Name = "vv_hna_debug_player")]
-        public static void LogHnaPlayerPosition(Terminal.ConsoleEventArgs args)
-        {
-            var player = Player.m_localPlayer;
-            if (player == null || player.transform == null)
-            {
-                if (Console.instance != null) Console.instance.Print("No local player.");
-                return;
-            }
-
-            var pos = player.transform.position;
-            PathTelemetry.LogHnaPlayerDebug(pos);
-            if (Console.instance != null)
-                Console.instance.Print($"HNA player debug written: pos=({pos.x:F1},{pos.y:F1},{pos.z:F1})");
-        }
     }
 }

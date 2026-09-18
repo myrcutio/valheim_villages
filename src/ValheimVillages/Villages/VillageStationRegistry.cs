@@ -444,13 +444,11 @@ namespace ValheimVillages.Villages
             Plugin.Log?.LogInfo(msg);
         }
 
-        [DevCommand("Dump cached village stations + HNA approach resolution for each villager anchor",
-            Name = "vv_stations")]
         public static void DumpStations()
         {
             var sb = new System.Text.StringBuilder();
             var anchors = Villager.AI.VillagerAIManager.GetAllAnchorPositions();
-            sb.AppendLine($"[vv_stations] {anchors.Count} anchor(s); {s_stationsByVillage.Count} village(s) cached");
+            sb.AppendLine($"[vv_village stations] {anchors.Count} anchor(s); {s_stationsByVillage.Count} village(s) cached");
 
             foreach (var anchor in anchors)
             {

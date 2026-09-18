@@ -41,13 +41,11 @@ namespace ValheimVillages.Dev
     ///     base loaded around the player. Unloaded-sector chests are reported as
     ///     untouched, not silently skipped.</para>
     ///
-    ///     <para>Usage: <c>vv_drop_all_state [--dry-run]</c> — with <c>--dry-run</c> it
+    ///     <para>Usage: <c>vv_reset all [--yes|--dry-run]</c> — with <c>--dry-run</c> it
     ///     prints the deletion summary and changes nothing.</para>
     /// </summary>
     public static class DropAllStateCommand
     {
-        [DevCommand("Wipe ALL village/villager state to a clean slate. [--dry-run] to preview.",
-            Name = "vv_drop_all_state")]
         public static void DropAll(Terminal.ConsoleEventArgs args)
         {
             var dryRun = HasFlag(args, "--dry-run");
@@ -55,7 +53,7 @@ namespace ValheimVillages.Dev
             var zdoMan = ZDOMan.instance;
             if (zdoMan == null)
             {
-                Print("[vv_drop_all_state] ZDOMan not ready — aborting");
+                Print("[vv_reset all] ZDOMan not ready — aborting");
                 return;
             }
 
@@ -63,12 +61,12 @@ namespace ValheimVillages.Dev
                 .Field<Dictionary<ZDOID, ZDO>>("m_objectsByID").Value;
             if (objectsByID == null)
             {
-                Print("[vv_drop_all_state] m_objectsByID unavailable — aborting");
+                Print("[vv_reset all] m_objectsByID unavailable — aborting");
                 return;
             }
 
             var sb = new StringBuilder();
-            sb.AppendLine($"[vv_drop_all_state]{(dryRun ? " DRY RUN — nothing will be deleted" : "")}");
+            sb.AppendLine($"[vv_reset all]{(dryRun ? " DRY RUN — nothing will be deleted" : "")}");
 
             // --- Classify ZDOs to delete. Snapshot first: deletion mutates the table. ---
             var vvHashes = CollectVvPrefabHashes();
@@ -135,7 +133,6 @@ namespace ValheimVillages.Dev
             VillagerAIManager.Clear();
             VillageStationRegistry.Clear();
             VillagePoiRegistry.Clear();
-            VillageRoomCatalog.Clear();
             VillageAreaManager.Clear();
             BfsAdjacencyStore.Clear();
             RegionBuilder.ClearCachedState();
@@ -150,7 +147,7 @@ namespace ValheimVillages.Dev
             if (skippedNotOwned > 0)
                 sb.AppendLine(
                     $"  ⚠ {skippedNotOwned} village ZDO(s) are host-owned and could NOT be deleted from a " +
-                    "client (ownership is pinned to the host). Run vv_drop_all_state on the SERVER console " +
+                    "client (ownership is pinned to the host). Run vv_reset all --yes on the SERVER console " +
                     "to wipe them.");
             Print(sb.ToString());
         }

@@ -8,13 +8,6 @@ namespace ValheimVillages.Settings
     public static class LogSettings
     {
         /// <summary>
-        ///     When true, NavMesh probe/sampling code emits throttled structured
-        ///     events via <c>DebugLog</c>. When false (default), those high-volume
-        ///     probe logs drop to <c>LogDebug</c> to keep the console quiet.
-        /// </summary>
-        public static bool VerboseNavMesh = false;
-
-        /// <summary>
         ///     When true, the ingredient scan logs its per-container probe ("Looking for
         ///     Nx X across M containers", then one line per container). That is one line
         ///     PER CONTAINER PER SCAN and dominated the log at ~79% of all mod output

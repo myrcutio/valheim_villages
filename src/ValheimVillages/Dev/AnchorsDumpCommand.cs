@@ -8,19 +8,31 @@ namespace ValheimVillages.Dev
     /// <summary>
     ///     Diagnostic dump of a village's anchor triad: founder + triad0/1/2 positions
     ///     (full XYZ) and a pairwise slot-31 connectivity matrix over
-    ///     [founder, triad0, triad1, triad2]. Resolves the village containing the player,
-    ///     falling back to enumerating all registered villages when the player sits in none.
+    ///     [founder, triad0, triad1, triad2]. Reports <paramref name="target" /> when the
+    ///     caller named a village, else the village containing the player, falling back to
+    ///     enumerating all registered villages when the player sits in none.
     /// </summary>
     public static class AnchorsDumpCommand
     {
         // Row/column order for the connectivity matrix and the position dump.
         private static readonly string[] Names = { VillageAnchor.Founder, VillageAnchor.Triad[0], VillageAnchor.Triad[1], VillageAnchor.Triad[2] };
 
-        [DevCommand("Dump the player's village anchor triad (founder + triad0/1/2) full XYZ + pairwise connectivity matrix",
-            Name = "vv_anchors")]
-        public static void DumpAnchors(Terminal.ConsoleEventArgs args)
+        /// <param name="target">
+        ///     The village to report on, or null to resolve it from the player's position.
+        ///     In a multi-village world the positional resolve is ambiguous, so
+        ///     <c>vv_village anchors &lt;id&gt;</c> passes an explicit village through here.
+        /// </param>
+        public static void DumpAnchors(Village target)
         {
             var sb = new StringBuilder();
+
+            if (target != null)
+            {
+                DumpVillage(sb, target);
+                global::Console.instance?.Print(sb.ToString());
+                Plugin.Log?.LogInfo(sb.ToString());
+                return;
+            }
 
             var player = Player.m_localPlayer;
             var village = player != null ? VillageRegistry.GetVillageAt(player.transform.position) : null;
@@ -31,7 +43,7 @@ namespace ValheimVillages.Dev
             }
             else
             {
-                sb.AppendLine("[vv_anchors] no village at player position; enumerating all villages");
+                sb.AppendLine("[vv_village anchors] no village at player position; enumerating all villages");
                 var any = false;
                 foreach (var v in VillageRegistry.EnumerateAll())
                 {
@@ -39,7 +51,7 @@ namespace ValheimVillages.Dev
                     DumpVillage(sb, v);
                 }
 
-                if (!any) sb.AppendLine("[vv_anchors] no registered villages");
+                if (!any) sb.AppendLine("[vv_village anchors] no registered villages");
             }
 
             global::Console.instance?.Print(sb.ToString());
@@ -49,7 +61,7 @@ namespace ValheimVillages.Dev
         private static void DumpVillage(StringBuilder sb, Village village)
         {
             sb.AppendLine(
-                $"[vv_anchors] village {village.VillageId} invalid={village.IsInvalid} " +
+                $"[vv_village anchors] village {village.VillageId} invalid={village.IsInvalid} " +
                 $"needsWall={village.NeedsPerimeterWall}");
 
             // Resolve the four anchors in fixed order; missing ones print as "(unset)".
