@@ -36,10 +36,18 @@ namespace ValheimVillages.Scheduling
         {
             if (s_byVillage.TryGetValue(villageId, out var table))
                 table.Remove(sourceId);
+            // A row that no longer exists can't stay blocked — the next incarnation of the
+            // same SourceId (a piece damaged again after being repaired) must start clean.
+            if (s_blocked.TryGetValue(villageId, out var blocked))
+                blocked.Remove(sourceId);
         }
 
-        /// <summary>Live tasks for a village, evicting expired deadline-bearing rows.</summary>
-        public static List<CandidateTask> Tasks(string villageId, float now)
+        /// <summary>
+        ///     Every live task for a village, blocked ones included, evicting expired
+        ///     deadline-bearing rows. For diagnostics (<c>vv_rerank_dump</c>) — the
+        ///     selection path uses <see cref="UnblockedTasks" />.
+        /// </summary>
+        public static List<CandidateTask> AllTasks(string villageId, float now)
         {
             var result = new List<CandidateTask>();
             if (!s_byVillage.TryGetValue(villageId, out var table)) return result;
@@ -62,6 +70,82 @@ namespace ValheimVillages.Scheduling
                     table.Remove(id);
 
             return result;
+        }
+
+        // --- Blocked tasks: rows a behavior reported UNREACHABLE.
+        //
+        // Reachability is a property of (target, village region graph) — see
+        // RepairBehavior.TryResolveReachableApproach, which never looks at the villager
+        // asking. So a task that couldn't be reached cannot become reachable until that
+        // graph is rebuilt, and rebuilds only happen when the player changes the village
+        // (a piece placed/removed, terrain reshaped) — see RegionGraph.Generation.
+        //
+        // Stored beside the rows rather than ON them because producers re-Upsert a fresh
+        // CandidateTask every scan, which would wipe a flag held on the row itself.
+        // villageId -> sourceId -> graph generation the block was recorded at.
+        private static readonly Dictionary<string, Dictionary<string, uint>> s_blocked = new();
+
+        /// <summary>
+        ///     Record that <paramref name="sourceId" /> had no walkable approach under graph
+        ///     <paramref name="graphGeneration" />. It stays out of selection until the
+        ///     village's graph generation moves on.
+        /// </summary>
+        public static void MarkBlocked(string villageId, string sourceId, uint graphGeneration)
+        {
+            if (string.IsNullOrEmpty(villageId) || string.IsNullOrEmpty(sourceId)) return;
+            if (!s_blocked.TryGetValue(villageId, out var blocked))
+            {
+                blocked = new Dictionary<string, uint>();
+                s_blocked[villageId] = blocked;
+            }
+
+            blocked[sourceId] = graphGeneration;
+        }
+
+        /// <summary>
+        ///     True while this row is blocked under the CURRENT graph. A block recorded
+        ///     against an older generation is stale — the village has been repartitioned
+        ///     since, so the verdict may have changed — and is dropped here so the task is
+        ///     offered again.
+        /// </summary>
+        public static bool IsBlocked(string villageId, string sourceId, uint graphGeneration)
+        {
+            if (!s_blocked.TryGetValue(villageId, out var blocked)) return false;
+            if (!blocked.TryGetValue(sourceId, out var blockedAt)) return false;
+            if (blockedAt == graphGeneration) return true;
+
+            blocked.Remove(sourceId);
+            return false;
+        }
+
+        /// <summary>
+        ///     Tasks eligible for selection: <see cref="AllTasks" /> minus everything
+        ///     currently blocked as unreachable under graph <paramref name="graphGeneration" />.
+        /// </summary>
+        public static List<CandidateTask> UnblockedTasks(string villageId, float now, uint graphGeneration)
+        {
+            var all = AllTasks(villageId, now);
+            if (!s_blocked.TryGetValue(villageId, out var blocked) || blocked.Count == 0) return all;
+
+            var result = new List<CandidateTask>(all.Count);
+            foreach (var t in all)
+                if (!IsBlocked(villageId, t.SourceId, graphGeneration))
+                    result.Add(t);
+
+            return result;
+        }
+
+        /// <summary>How many rows are blocked under the current graph (diagnostics).</summary>
+        public static int BlockedCount(string villageId, uint graphGeneration)
+        {
+            if (!s_blocked.TryGetValue(villageId, out var blocked)) return 0;
+            var n = 0;
+            // Snapshot the keys: IsBlocked evicts stale entries as it goes.
+            foreach (var sourceId in new List<string>(blocked.Keys))
+                if (IsBlocked(villageId, sourceId, graphGeneration))
+                    n++;
+
+            return n;
         }
 
         // --- Task claiming: one villager reserves a task so others don't double-grab.
@@ -97,6 +181,7 @@ namespace ValheimVillages.Scheduling
         {
             s_byVillage.Clear();
             s_claims.Clear();
+            s_blocked.Clear();
         }
     }
 }

@@ -23,7 +23,11 @@ namespace ValheimVillages.Scheduling
     {
         private static readonly Dictionary<string, float> s_lastScan = new();
         private static readonly Dictionary<string, (Mlp mlp, RerankSettings settings)> s_models = new();
-        private static readonly Dictionary<string, (string sourceId, IDirectedBehavior beh)> s_assigned = new();
+        // Keyed by record id, which OUTLIVES the VillagerAI instance (death+revive, zone
+        // stream-out/in and hot reload all rebuild the instance under the same id), so the
+        // owning instance is stored alongside and checked on every lookup — see AssignIfIdle.
+        private static readonly Dictionary<string, (string sourceId, IDirectedBehavior beh, VillagerAI owner)>
+            s_assigned = new();
 
         /// <summary>Seconds between repeats of an UNCHANGED dispatch-bail reason.</summary>
         private const float DiagHeartbeatSeconds = 30f;
@@ -43,7 +47,25 @@ namespace ValheimVillages.Scheduling
                 // Keep an in-progress assignment running; release a completed/abandoned one.
                 if (s_assigned.TryGetValue(villagerId, out var cur))
                 {
-                    if (cur.beh != null && cur.beh.AssignmentActive) return cur.beh;
+                    // A cached behavior belongs to exactly ONE VillagerAI instance. When a
+                    // villager dies and is revived (or streams out and back), a NEW instance
+                    // registers under the same record id while this entry still points at the
+                    // destroyed instance's behavior. Nothing ticks that orphan any more, so its
+                    // AssignmentActive is frozen at whatever it held when the instance died —
+                    // stuck true for anything that was mid-work. Without this identity check the
+                    // dispatcher hands the orphan straight back every tick: the live villager
+                    // reads as busy, never gets dispatched, and (because tier 2 reports handled)
+                    // never falls through to the routine tier either. It stands at its anchor
+                    // doing nothing, with no diagnostic, until the server restarts.
+                    // ReferenceEquals, not ==, so a destroyed instance compares by identity
+                    // rather than through Unity's fake-null operator.
+                    var sameInstance = ReferenceEquals(cur.owner, ai);
+                    if (sameInstance && cur.beh != null && cur.beh.AssignmentActive) return cur.beh;
+
+                    if (!sameInstance)
+                        Plugin.Log?.LogInfo(
+                            $"[Scheduler:{ai.NpcName}] dropped assignment held by a previous " +
+                            $"instance (source={cur.sourceId}); reassigning.");
                     TaskBoard.Release(cur.sourceId);
                     s_assigned.Remove(villagerId);
                 }
@@ -67,10 +89,19 @@ namespace ValheimVillages.Scheduling
                     CraftWorkProducer.Scan(village, village.Anchor, now);
                 }
 
-                var tasks = TaskBoard.Tasks(villageId, now);
+                // Blocks are scoped to the graph that produced them, so read the generation
+                // once and use the same value for the filter and for any block recorded
+                // below — a repartition landing mid-tick must not blame the new graph for a
+                // verdict reached against the old one.
+                var graphGeneration = village.Graph.Generation;
+
+                var tasks = TaskBoard.UnblockedTasks(villageId, now, graphGeneration);
                 if (tasks.Count == 0)
                 {
-                    Diag(ai, "0 tasks on board");
+                    var blocked = TaskBoard.BlockedCount(villageId, graphGeneration);
+                    Diag(ai, blocked > 0
+                        ? $"0 selectable tasks ({blocked} blocked as unreachable until the village changes)"
+                        : "0 tasks on board");
                     return null;
                 }
 
@@ -107,7 +138,8 @@ namespace ValheimVillages.Scheduling
                 }
 
                 TaskBoard.Claim(best.SourceId, villagerId, now);
-                var accepted = beh.BeginAssignment(best);
+                var outcome = beh.BeginAssignment(best);
+                var accepted = outcome == AssignmentResult.Accepted;
 
                 // One training sample per dispatch: did this pick convert into work? Recorded for
                 // BOTH outcomes — learning only from successes would teach the model nothing about
@@ -116,15 +148,31 @@ namespace ValheimVillages.Scheduling
 
                 if (!accepted)
                 {
-                    // No walkable approach right now. Reserve to a sentinel owner so the
-                    // dispatcher rotates to a different piece next tick instead of looping
-                    // on this one; the claim expires after ClaimTtl and it's retried.
-                    TaskBoard.Claim(best.SourceId, "(approach-failed)", now);
-                    Diag(ai, $"BeginAssignment FAILED {best.Kind}@({best.Position.x:F0},{best.Position.z:F0})");
+                    var where = $"{best.Kind}@({best.Position.x:F0},{best.Position.z:F0})";
+                    if (outcome == AssignmentResult.Unreachable)
+                    {
+                        // No walkable approach under this graph, and that verdict is about the
+                        // target, not the villager — so nobody can reach it either, and nothing
+                        // short of a repartition can change the answer. Park it until the graph
+                        // generation moves rather than re-offering it every tick forever.
+                        TaskBoard.Release(best.SourceId);
+                        TaskBoard.MarkBlocked(villageId, best.SourceId, graphGeneration);
+                        Plugin.Log?.LogInfo(
+                            $"[Scheduler:{ai.NpcName}] {where} unreachable; blocked until the " +
+                            $"village is repartitioned (graph gen {graphGeneration})");
+                        return null;
+                    }
+
+                    // Nothing actionable at the target right now. Retryable with no village
+                    // change, so leave it on the board — but reserve it to a sentinel owner so
+                    // this tick rotates to a different row instead of re-picking this one. The
+                    // claim expires after ClaimTtl and it comes back.
+                    TaskBoard.Claim(best.SourceId, "(nothing-actionable)", now);
+                    Diag(ai, $"BeginAssignment not actionable {where}");
                     return null;
                 }
 
-                s_assigned[villagerId] = (best.SourceId, beh);
+                s_assigned[villagerId] = (best.SourceId, beh, ai);
                 Plugin.Log?.LogInfo(
                     $"[Scheduler:{ai.NpcName}] assigned {best.Kind}@({best.Position.x:F0},{best.Position.z:F0}) " +
                     $"cap={best.RequiredCapability}");

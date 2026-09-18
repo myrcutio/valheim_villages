@@ -13,5 +13,22 @@ namespace ValheimVillages.Settings
         ///     probe logs drop to <c>LogDebug</c> to keep the console quiet.
         /// </summary>
         public static bool VerboseNavMesh = false;
+
+        /// <summary>
+        ///     When true, the ingredient scan logs its per-container probe ("Looking for
+        ///     Nx X across M containers", then one line per container). That is one line
+        ///     PER CONTAINER PER SCAN and dominated the log at ~79% of all mod output
+        ///     (4930 of ~7000 lines in one session), evicting everything else from the
+        ///     in-memory ring buffer the MCP log tools read. Off by default: the outcome
+        ///     line still reports what was missing, throttled.
+        /// </summary>
+        public static bool VerboseIngredientScan = false;
+
+        /// <summary>
+        ///     When true, <c>ItemDropAwakePatch</c> logs every ItemDrop spawned. Unbounded
+        ///     — every dropped Wood, Honey and Raspberry in the world — and it was at
+        ///     LogInfo, so it could not be filtered out by level either.
+        /// </summary>
+        public static bool VerboseItemSpawns = false;
     }
 }

@@ -9,7 +9,12 @@ namespace ValheimVillages.Behaviors.Farming
         public const float PlantSearchRadius = 20f;
 
 
-        /// <summary>Radius to scan for harvestable crops around farm locations.</summary>
+        /// <summary>
+        ///     Fallback radius for the ripe-crop scan, used ONLY when the village has no
+        ///     published footprint yet (no partition since world load). Normally the scan is
+        ///     scoped to the whole village footprint instead — a radius around one anchor cuts
+        ///     off the far half of a real settlement.
+        /// </summary>
         public const float HarvestScanRadius = 20f;
 
         /// <summary>

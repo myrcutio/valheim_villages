@@ -52,6 +52,17 @@ namespace ValheimVillages.Schemas
         public List<StationRecipe> stationRecipes = new();
         public List<string> cultivatorExclusions = new();
 
+        /// <summary>
+        ///     Substrings (case-insensitive) that keep a Pickable out of this villager's
+        ///     foraging list, matched against both the pickable prefab name and the item it
+        ///     yields. Same mechanism as <see cref="cultivatorExclusions" />, and needed for the
+        ///     same reason: the Pickable component covers far more than any one job — surtling
+        ///     cores, tar, ore and dungeon loot all use it — so a Farmer's berry-and-mushroom
+        ///     list is defined by what it rules out. Only consulted when the definition carries
+        ///     the <c>recipe:foraging</c> tag.
+        /// </summary>
+        public List<string> forageExclusions = new();
+
         // Behavior composition
         public List<string> behaviors = new();
         public List<string> tags = new();

@@ -13,6 +13,8 @@ namespace ValheimVillages.Tests.Scheduling;
 ///     null" is not a degraded mode — it is a villager doing nothing at all. These pin the
 ///     cases where it must NOT return null, and the two filters that must still bite.
 /// </summary>
+// Calls TaskBoard.Clear(), which wipes shared static state other classes assert on.
+[Collection(TaskBoardCollection.Name)]
 public class SchedulerSelectionTests
 {
     private static Graph PatchAtOrigin(string regionId = "r1")

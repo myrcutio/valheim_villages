@@ -81,20 +81,29 @@ namespace ValheimVillages.Behaviors.Repair
 
         public bool AssignmentActive => m_active;
 
-        public bool BeginAssignment(CandidateTask task)
+        public AssignmentResult BeginAssignment(CandidateTask task)
         {
             // The assigned task carries the piece position; resolve the actual damaged
             // structure there (the on-arrival sweep repairs the whole cluster anyway).
             var wnt = FindDamagedNear(task.Position);
-            if (wnt == null) return false;
-            if (!TryResolveReachableApproach(wnt.transform.position, out var approach)) return false;
+            if (wnt == null) return AssignmentResult.NotActionable;
+
+            // Nav infrastructure not up yet. That is a "can't answer", not a verdict about
+            // this piece, and must never be reported as Unreachable — the dispatcher would
+            // block the row until the next repartition over a transient startup gap.
+            var graph = Villages.Entity.VillageRegistry.GraphAt(m_ai.HomeAnchor);
+            if (!VillagerAgentType.IsRegistered || graph == null)
+                return AssignmentResult.NotActionable;
+
+            if (!TryResolveReachableApproach(graph, wnt.transform.position, out var approach))
+                return AssignmentResult.Unreachable;
 
             m_target = wnt;
             m_approach = approach;
             m_active = true;
             m_navIssued = false;
             m_legDeadline = Time.time + MaxLegSeconds;
-            return true;
+            return AssignmentResult.Accepted;
         }
 
         /// <summary>
@@ -209,13 +218,18 @@ namespace ValheimVillages.Behaviors.Repair
         ///     approach-resolver — that requires a standoff pad and fails for plain
         ///     structural pieces (walls/floors).
         /// </summary>
-        private bool TryResolveReachableApproach(Vector3 piecePos, out Vector3 approach)
+        /// <summary>
+        ///     Resolve a standable approach cell for a piece. Callers pre-check that the nav
+        ///     infrastructure is up and pass the village <paramref name="graph" /> in, so a
+        ///     false here means exactly one thing: this piece has no walkable approach under
+        ///     THAT graph. <see cref="BeginAssignment" /> turns that into
+        ///     <see cref="AssignmentResult.Unreachable" />, which blocks the task until the
+        ///     graph is rebuilt — so it must not be able to mean "infrastructure not ready".
+        /// </summary>
+        private static bool TryResolveReachableApproach(
+            Villager.AI.Navigation.RegionGraph graph, Vector3 piecePos, out Vector3 approach)
         {
             approach = Vector3.zero;
-            if (!VillagerAgentType.IsRegistered) return false;
-
-            var graph = Villages.Entity.VillageRegistry.GraphAt(m_ai.HomeAnchor);
-            if (graph == null) return false;
 
             // Reachable = the approach lies inside this village's operable area (the
             // region graph resolves it). We deliberately DON'T use a raw

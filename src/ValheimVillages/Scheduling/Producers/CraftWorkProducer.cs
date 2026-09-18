@@ -169,6 +169,11 @@ namespace ValheimVillages.Scheduling.Producers
                     ai.HomeAnchor, WorkSettings.ChestScanRadius, itemPrefab, out _, out var hivePos))
                 return hivePos;
 
+            if (physical == ForageHelper.PhysicalStation
+                && ForageHelper.TryFindHarvestable(
+                    ai.HomeAnchor, WorkSettings.ChestScanRadius, itemPrefab, out _, out var ripePos))
+                return ripePos;
+
             if (physical != null && physical != "farm"
                 && VillageStationRegistry.TryFindStation<Smelter>(
                     ai.HomeAnchor, sm => sm != null && StationFinder.GetSmelterPrefab(physical) != null,
@@ -194,8 +199,15 @@ namespace ValheimVillages.Scheduling.Producers
             // A HARVEST order has no ingredients — its precondition is that the thing being
             // harvested has actually produced something. FindIngredients would trivially
             // succeed on the empty requirement list and advertise honey from empty hives.
-            if (VirtualRecipeLoader.GetPhysicalStation(recipe.name) == BeehiveHelper.PhysicalStation)
+            var physical = VirtualRecipeLoader.GetPhysicalStation(recipe.name);
+            if (physical == BeehiveHelper.PhysicalStation)
                 return BeehiveHelper.TryFindHarvestable(
+                    ai.HomeAnchor, WorkSettings.ChestScanRadius, itemPrefabName, out _, out _);
+
+            // Same for a forage order: its precondition is that something in the village is
+            // actually ripe, not that a chest holds ingredients it doesn't have.
+            if (physical == ForageHelper.PhysicalStation)
+                return ForageHelper.TryFindHarvestable(
                     ai.HomeAnchor, WorkSettings.ChestScanRadius, itemPrefabName, out _, out _);
 
             return ContainerScanner.FindIngredients(containers, recipe) != null;

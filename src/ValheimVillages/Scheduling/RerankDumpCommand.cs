@@ -56,7 +56,10 @@ namespace ValheimVillages.Scheduling
                     CraftWorkProducer.Scan(village, village.Anchor, now);
                 }
 
-                var tasks = TaskBoard.Tasks(village.VillageId, now);
+                // AllTasks, not UnblockedTasks: a row blocked as unreachable is exactly what
+                // someone runs this dump to find, so show it and label it rather than hiding it.
+                var graphGeneration = village.Graph?.Generation ?? 0u;
+                var tasks = TaskBoard.AllTasks(village.VillageId, now);
                 var (mlp, settings) = SchedulerModelPersistence.LoadOrCreate(village);
                 var from = ai.Position;
                 var caps = new HashSet<string>(ai.BehaviorTags);
@@ -79,7 +82,7 @@ namespace ValheimVillages.Scheduling
                 var features = new float[TaskReranker.FeatureCount];
                 foreach (var t in tasks)
                 {
-                    var why = Ineligible(in query, t, now);
+                    var why = Ineligible(in query, t, now, village.VillageId, graphGeneration);
                     var hops = RegionHopDistance.Hops(village.Graph, from, t.Position);
                     var hasDeadline = t.ExpiresAt > 0f;
                     var eta = hops * settings.PerHopSeconds;
@@ -120,8 +123,11 @@ namespace ValheimVillages.Scheduling
         ///     Mirrors <see cref="DualEncoderScheduler" />'s capability/claim checks — the
         ///     point of the dump is to show the rows that never reach the rerank at all.
         /// </summary>
-        private static string Ineligible(in VillagerQuery query, CandidateTask task, float now)
+        private static string Ineligible(
+            in VillagerQuery query, CandidateTask task, float now, string villageId, uint graphGeneration)
         {
+            if (TaskBoard.IsBlocked(villageId, task.SourceId, graphGeneration))
+                return $"BLOCKED unreachable (until repartition; graph gen {graphGeneration})";
             if (!string.IsNullOrEmpty(task.OwnerVillagerId) && task.OwnerVillagerId != query.VillagerId)
                 return "owned by another villager";
             if (!string.IsNullOrEmpty(task.RequiredCapability) &&

@@ -466,6 +466,92 @@ namespace ValheimVillages.Behaviors.Crafting
             return true;
         }
 
+        /// <summary>Seconds to wait for a picked plant's drops to hit the ground.</summary>
+        private const float ForageHarvestTimeoutSec = 10f;
+
+        /// <summary>
+        ///     Foraging leg of the Crafting sub-state. A ripe bush has no conversion to wait on —
+        ///     the berries are already on it — so this picks once and then sweeps the ground for
+        ///     the drops, exactly like the beehive above and for the same reason: picking dumps
+        ///     item-drops on the floor rather than handing anything over.
+        /// </summary>
+        private bool TryPollPickable()
+        {
+            if (m_context == null || !m_context.IsForageOrder) return false;
+
+            if (!m_context.PickableHarvestRequested)
+            {
+                if (!ForageHelper.IsRipe(m_context.PickableRef))
+                {
+                    // Picked between the scan offering it and the villager walking over —
+                    // another villager (or the player) got there first, or it was a plant that
+                    // destroys itself when picked. Another plant of the same kind is still
+                    // work, so move to it rather than dropping the order.
+                    if (TryRetargetPickable()) return true;
+                    AbandonWork("nothing ripe left to pick");
+                    return true;
+                }
+
+                if (!ForageHelper.Pick(m_context.PickableRef, m_ai?.Character as Humanoid))
+                {
+                    AbandonWork("cannot pick: villager has no character");
+                    return true;
+                }
+
+                m_context.PickableHarvestRequested = true;
+                return true; // drops arrive with the RPC; sweep on the next poll
+            }
+
+            // The plant itself may already be gone (a pickable with no respawn timer destroys
+            // its own GameObject when picked), so sweep around the point captured at scan time.
+            var collected = CollectGroundOutput(m_context.PickableOutputPoint, OutputBatchPerTrip);
+            if (collected > 0)
+            {
+                m_context.CraftedCount += collected;
+                BeginReturningToChest();
+                return true;
+            }
+
+            // Bounded wait. Nothing is still growing, so if the drops haven't landed by now they
+            // aren't coming (pick lost, drops despawned, someone else swept them) and waiting
+            // forever would pin the villager at the bush.
+            if (Time.time - m_context.CraftStartTime > ForageHarvestTimeoutSec)
+                AbandonWork("nothing appeared after picking");
+
+            return true;
+        }
+
+        /// <summary>
+        ///     Point a forage order at the next ripe plant in the village and start walking.
+        ///     False when nothing of this order's item is ripe any more.
+        ///
+        ///     <para>A forage order's "station" is one specific plant, and picking it strips it.
+        ///     So unlike a smelter, the target CANNOT be reused for the next trip: the villager
+        ///     has to be re-aimed after every load it carries back, or it would walk to a bare
+        ///     bush and abandon an order that still has fruit on it twenty metres away.</para>
+        /// </summary>
+        private bool TryRetargetPickable()
+        {
+            if (m_ai == null || m_context?.WorkOrder == null) return false;
+
+            if (!ForageHelper.TryFindHarvestable(
+                    m_ai.HomeAnchor, Settings.WorkSettings.ChestScanRadius,
+                    m_context.WorkOrder.ItemPrefabName, out var next, out var approach))
+                return false;
+
+            m_context.PickableRef = next;
+            m_context.PickableOutputPoint = ForageHelper.OutputPoint(next);
+            m_context.CraftStationPosition = approach;
+            m_context.PickableHarvestRequested = false;
+
+            Plugin.Log?.LogInfo(
+                $"[Work:{LogName}] Next ripe {m_context.WorkOrder.ItemPrefabName} at " +
+                $"{next.transform.position}");
+
+            BeginTravelingToStation();
+            return true;
+        }
+
         private bool TryPollSmelter()
         {
             var smelter = m_context?.SmelterRef;
@@ -807,8 +893,9 @@ namespace ValheimVillages.Behaviors.Crafting
             m_ai?.ClearWaypoint();
             SetWorkNote($"crafting @ station t={Time.time:F0}");
 
-            // Each trip to the hive is its own extract.
+            // Each trip to the hive is its own extract; each trip to a plant its own pick.
             m_context.BeehiveExtractRequested = false;
+            m_context.PickableHarvestRequested = false;
 
             var smelter = m_context.SmelterRef;
             if (smelter != null && !string.IsNullOrEmpty(m_context.SmelterInputItemName))
@@ -937,10 +1024,22 @@ namespace ValheimVillages.Behaviors.Crafting
                 return;
             }
 
-            if (CountInVillage(quotaItem) < maxQuantity)
-                BeginGatheringIngredients();
-            else
+            if (CountInVillage(quotaItem) >= maxQuantity)
+            {
                 FinishWork();
+                return;
+            }
+
+            // A forage order's target was one specific plant and this trip stripped it, so the
+            // next load has to come from the NEXT ripe one. Nothing else ripe means the order is
+            // done for now — not failed; the plants regrow and the board re-offers it then.
+            if (m_context.IsForageOrder)
+            {
+                if (!TryRetargetPickable()) FinishWork();
+                return;
+            }
+
+            BeginGatheringIngredients();
         }
 
         private int CountInVillage(string prefabName)
@@ -954,10 +1053,10 @@ namespace ValheimVillages.Behaviors.Crafting
         {
             if (m_ai != null && m_context != null)
             {
-                // A hive's CraftStationPosition is already a lookup-grid approach resolved at
-                // scan time (BeehiveHelper.TryResolveHiveApproach); re-resolving it through the
+                // A hive's or a bush's CraftStationPosition is already a lookup-grid approach
+                // resolved at scan time (PieceApproachResolver); re-resolving it through the
                 // station resolver fails and abandons the work. See TryWalkTo.
-                var preResolved = m_context.BeehiveRef != null;
+                var preResolved = m_context.BeehiveRef != null || m_context.IsForageOrder;
                 TryWalkTo(m_context.CraftStationPosition, WorkSubState.TravelingToStation,
                     "craft station", preResolved);
             }

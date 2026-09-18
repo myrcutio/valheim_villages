@@ -107,6 +107,40 @@ namespace ValheimVillages.Schemas
         /// </summary>
         public bool BeehiveExtractRequested;
 
+        /// <summary>
+        ///     True when this order is fulfilled by picking a plant rather than by working a
+        ///     station. Kept as its own flag instead of testing <see cref="PickableRef" />,
+        ///     because that reference can legitimately evaporate mid-order: a plant with no
+        ///     respawn timer destroys its own GameObject the moment it is picked, and a
+        ///     destroyed Unity object reads as null. Testing the reference would then make a
+        ///     forage order look like an ordinary craft and hand it to the fixed craft timer,
+        ///     which produces the item out of nothing.
+        /// </summary>
+        public bool IsForageOrder;
+
+        /// <summary>
+        ///     The ripe pickable (berry bush, mushroom, thistle) this forage order harvests.
+        ///     Set during the scan, re-aimed after every load; null for every other order kind,
+        ///     and null again once a picked plant destroys itself.
+        /// </summary>
+        public Pickable PickableRef;
+
+        /// <summary>
+        ///     Where <see cref="PickableRef" />'s drops will land, captured at the scan BEFORE
+        ///     the pick. A pickable with no respawn timer destroys its own GameObject the
+        ///     instant it is picked, so reading the position off the component afterwards can
+        ///     find nothing to read — and the ground sweep would then search around the origin.
+        /// </summary>
+        public Vector3 PickableOutputPoint;
+
+        /// <summary>
+        ///     True once the pick has been requested for this trip. The drops appear a frame or
+        ///     more later (Interact dispatches RPC_Pick through the network pump), so the
+        ///     workflow picks once and then polls the ground; without this it would re-pick
+        ///     every poll tick.
+        /// </summary>
+        public bool PickableHarvestRequested;
+
         /// <summary>The container where the work order was found.</summary>
         public Container SourceContainer;
 

@@ -7,6 +7,7 @@ using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Items.VirtualRecipes;
 using ValheimVillages.Schemas;
+using ValheimVillages.Villager.AI.Work;
 using ValheimVillages.Villages;
 
 namespace ValheimVillages.TaskQueue.Handlers
@@ -36,10 +37,11 @@ namespace ValheimVillages.TaskQueue.Handlers
             // own — it does NOT need a farm location. A grown crop is a Pickable_X
             // that no longer registers as a Farm PoI, so gating harvest on farm
             // detection (as planting does, below) would miss exactly the crops
-            // that are ready. Anchor the scan on the anchor (village centre) so the
-            // farmer's wandering doesn't move it out of range.
-            var harvestTarget = HarvestHelper.FindNearestHarvestableCrop(
-                anchorPos, outputItem, HarvestHelper.HarvestScanRadius);
+            // that are ready. Scoped to the village footprint (not a radius around
+            // whoever is asking), which is the same scan a forage order runs — a
+            // ripe plant is a ripe plant whether someone planted it or not.
+            var harvestTarget = ForageHelper.FindNearestRipe(
+                anchorPos, anchorPos, FarmSettings.HarvestScanRadius, outputItem);
 
             if (harvestTarget != null)
             {

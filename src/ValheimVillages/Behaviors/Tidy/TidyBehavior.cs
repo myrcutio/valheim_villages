@@ -50,12 +50,15 @@ namespace ValheimVillages.Behaviors.Tidy
 
         public bool AssignmentActive => m_active || m_targetStation != null;
 
-        public bool BeginAssignment(CandidateTask task)
+        public AssignmentResult BeginAssignment(CandidateTask task)
         {
+            // No reachability verdict here: this behavior never resolves an approach, so it
+            // can only ever report "nothing to clear right now" — which must stay retryable
+            // (the next cook cycle re-arms it without any village change).
             var station = FindStationNear(task.Position);
-            if (station == null) return false; // nothing actionable (no Done/burnt item)
+            if (station == null) return AssignmentResult.NotActionable;
             m_targetStation = station;
-            return true;
+            return AssignmentResult.Accepted;
         }
 
         /// <summary>Nearest cooking station near a point that has a Done/burnt item to clear.</summary>

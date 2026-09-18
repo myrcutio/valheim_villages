@@ -106,6 +106,13 @@ namespace ValheimVillages.Items.VirtualRecipes
                     var beeEntries = BeehiveRecipeDiscovery.GetBeehiveRecipes(existingOutputs);
                     count += RegisterDiscoveredEntries(objectDB, station, beeEntries, existingOutputs);
                 }
+
+                if (def.tags != null && TagParser.HasTag(def.tags, "recipe", "foraging"))
+                {
+                    var forageEntries = PickableRecipeDiscovery.GetForagingRecipes(
+                        existingOutputs, GetForageExclusionsLower(def));
+                    count += RegisterDiscoveredEntries(objectDB, station, forageEntries, existingOutputs);
+                }
             }
 
             Plugin.Log?.LogInfo(
@@ -211,6 +218,20 @@ namespace ValheimVillages.Items.VirtualRecipes
                         if (added > 0)
                             Plugin.Log?.LogInfo(
                                 $"VirtualRecipeLoader: Registered {added} beehive-discovered recipes for {def.stationName} (ZNetScene ready)");
+                    }
+                }
+
+                if (TagParser.HasTag(def.tags, "recipe", "foraging"))
+                {
+                    var existingOutputs = CollectExistingOutputs(def.stationName);
+                    var forageEntries = PickableRecipeDiscovery.GetForagingRecipes(
+                        existingOutputs, GetForageExclusionsLower(def));
+                    if (forageEntries.Count > 0)
+                    {
+                        var added = RegisterDiscoveredEntries(objectDB, station, forageEntries, existingOutputs);
+                        if (added > 0)
+                            Plugin.Log?.LogInfo(
+                                $"VirtualRecipeLoader: Registered {added} pickable-discovered recipes for {def.stationName} (ZNetScene ready)");
                     }
                 }
             }
@@ -360,12 +381,22 @@ namespace ValheimVillages.Items.VirtualRecipes
 
         private static IReadOnlyList<string> GetCultivatorExclusionsLower(VillagerDef def)
         {
-            if (def?.cultivatorExclusions == null || def.cultivatorExclusions.Count == 0)
+            return ToLowerList(def?.cultivatorExclusions);
+        }
+
+        private static IReadOnlyList<string> GetForageExclusionsLower(VillagerDef def)
+        {
+            return ToLowerList(def?.forageExclusions);
+        }
+
+        private static IReadOnlyList<string> ToLowerList(List<string> source)
+        {
+            if (source == null || source.Count == 0)
                 return Array.Empty<string>();
-            var lower = new string[def.cultivatorExclusions.Count];
-            for (var i = 0; i < def.cultivatorExclusions.Count; i++)
+            var lower = new string[source.Count];
+            for (var i = 0; i < source.Count; i++)
             {
-                var s = def.cultivatorExclusions[i];
+                var s = source[i];
                 lower[i] = string.IsNullOrEmpty(s) ? "" : s.Trim().ToLowerInvariant();
             }
 

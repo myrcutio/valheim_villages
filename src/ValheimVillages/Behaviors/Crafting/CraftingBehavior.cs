@@ -266,6 +266,7 @@ namespace ValheimVillages.Behaviors.Crafting
             if (TryPollCookingStation()) return;
             if (TryPollSmelter()) return;
             if (TryPollBeehive()) return;
+            if (TryPollPickable()) return;
 
             // Fixed timer for non-cooking stations
             var elapsed = Time.time - m_context.CraftStartTime;

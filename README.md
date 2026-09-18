@@ -15,6 +15,7 @@ Requires [BepInExPack Valheim](https://thunderstore.io/c/valheim/p/denikson/BepI
       - ground items are swept to chests
         - TODO: items are swept to whatever chest is closest, there's no rhyme or reason to it
       - plants are harvested and replanted if necessary
+      - farmers forage anything pickable growing in the village — berry bushes, mushrooms, thistle — whenever it's ripe and something has ordered it
       - refine coal in a kiln
       - smelt ore in a smelter
       - roast meat on a cooking station

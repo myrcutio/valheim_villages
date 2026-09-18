@@ -75,6 +75,16 @@ namespace ValheimVillages.Items.WorkOrders
         private static Vector2 _cleanCraftAnchorMin;
         private static Vector2 _cleanCraftAnchorMax;
 
+        // Craft progress panel: native Valheim hides the Craft button and shows
+        // this panel (a GuiBar) for the duration of a craft. It is laid out for
+        // the full-width Craft button, so once Order shares the row the bar runs
+        // straight over Order. These are the panel's untouched values, captured
+        // once so every resize starts from a clean base and can't compound.
+        private static Vector2 _cleanProgressSizeDelta;
+        private static Vector2 _cleanProgressAnchoredPos;
+        private static float _cleanProgressBarWidth;
+        private static bool _cleanProgressSaved;
+
         private static Dictionary<string, string> s_stationWorkOrderMap;
 
         /// <summary>
@@ -95,6 +105,10 @@ namespace ValheimVillages.Items.WorkOrders
             _buttonCreated = false;
             _cleanSizeDeltaSaved = false;
             _cleanCraftSizeDelta = Vector2.zero;
+            _cleanProgressSaved = false;
+            _cleanProgressSizeDelta = Vector2.zero;
+            _cleanProgressAnchoredPos = Vector2.zero;
+            _cleanProgressBarWidth = 0f;
             s_focus = CraftFocus.List;
             s_craftFrame = null;
             s_orderFrame = null;
@@ -124,6 +138,7 @@ namespace ValheimVillages.Items.WorkOrders
         public static void UpdateCraftingPanelPostfix(InventoryGui __instance)
         {
             RepairCraftButtonIfCorrupted(__instance);
+            CaptureProgressPanelCleanState(__instance);
             EnsureButtonCreated(__instance);
             EnsureFocusFrames(__instance);
             UpdateButtonVisibility(__instance);
@@ -701,6 +716,7 @@ namespace ValheimVillages.Items.WorkOrders
             if (craftRect == null) return;
             craftRect.anchorMin = _cleanCraftAnchorMin;
             craftRect.anchorMax = _cleanCraftAnchorMax;
+            RestoreProgressPanelWidth(gui);
         }
 
         /// <summary>
@@ -741,8 +757,100 @@ namespace ValheimVillages.Items.WorkOrders
             woRect.localScale = craftRect.localScale;
             woRect.anchoredPosition = new Vector2(0f, craftRect.anchoredPosition.y);
 
+            // Craft's stand-in while a craft runs has to shrink with it, or it
+            // covers the Order button we just put beside it.
+            MatchProgressPanelToCraft(gui);
+
             var btn = _workOrderButton.GetComponent<Button>();
             if (btn != null) btn.interactable = true;
+        }
+
+        private static readonly FieldInfo GuiBarWidthField = typeof(GuiBar).GetField(
+            "m_width", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        /// <summary>
+        ///     A GuiBar sizes its fill to an absolute pixel width cached from the
+        ///     prefab (m_width), not to a fraction of its panel, so resizing the
+        ///     panel alone leaves the fill overflowing. This is that cached width.
+        /// </summary>
+        private static float GetGuiBarWidth(GuiBar bar)
+        {
+            return (float)GuiBarWidthField.GetValue(bar);
+        }
+
+        /// <summary>
+        ///     Snapshot the craft progress panel's untouched rect and full-fill bar
+        ///     width, once, before anything splits the action row.
+        /// </summary>
+        private static void CaptureProgressPanelCleanState(InventoryGui gui)
+        {
+            if (_cleanProgressSaved) return;
+
+            var panelRect = gui.m_craftProgressPanel as RectTransform;
+            if (panelRect == null || gui.m_craftProgressBar == null) return;
+
+            _cleanProgressSizeDelta = panelRect.sizeDelta;
+            _cleanProgressAnchoredPos = panelRect.anchoredPosition;
+            _cleanProgressBarWidth = GetGuiBarWidth(gui.m_craftProgressBar);
+            _cleanProgressSaved = true;
+        }
+
+        /// <summary>
+        ///     Hand the craft progress panel its native full-row rect back — the
+        ///     counterpart to <see cref="RestoreCraftButtonWidth" />, for every path
+        ///     where Craft keeps the whole row.
+        /// </summary>
+        private static void RestoreProgressPanelWidth(InventoryGui gui)
+        {
+            if (!_cleanProgressSaved) return;
+
+            var panelRect = gui.m_craftProgressPanel as RectTransform;
+            if (panelRect == null) return;
+
+            panelRect.sizeDelta = _cleanProgressSizeDelta;
+            panelRect.anchoredPosition = _cleanProgressAnchoredPos;
+            gui.m_craftProgressBar.SetWidth(_cleanProgressBarWidth);
+        }
+
+        /// <summary>
+        ///     Size the craft progress panel to the Craft button it stands in for,
+        ///     so the bar occupies exactly the left 3/4 of the row and leaves Order
+        ///     alone.
+        ///
+        ///     Done in pixels rather than anchors (unlike the Craft/Order split): the
+        ///     panel is a separate object with its own anchoring and parent, and
+        ///     SetSizeWithCurrentAnchors yields the same rendered width whichever
+        ///     anchoring it uses, with the centre matched through world space. The
+        ///     GuiBar's fill is an absolute width, so it loses the same number of
+        ///     pixels the panel did — that keeps the panel's frame inset intact.
+        /// </summary>
+        private static void MatchProgressPanelToCraft(InventoryGui gui)
+        {
+            if (!_cleanProgressSaved) return;
+
+            var panelRect = gui.m_craftProgressPanel as RectTransform;
+            var craftRect = gui.m_craftButton.GetComponent<RectTransform>();
+            var parentRect = panelRect != null ? panelRect.parent as RectTransform : null;
+            if (panelRect == null || craftRect == null || parentRect == null) return;
+
+            // Measure from the clean rect so repeated calls converge, never compound.
+            panelRect.sizeDelta = _cleanProgressSizeDelta;
+            panelRect.anchoredPosition = _cleanProgressAnchoredPos;
+
+            var cleanWidth = panelRect.rect.width;
+            var targetWidth = craftRect.rect.width;
+
+            panelRect.SetSizeWithCurrentAnchors(
+                RectTransform.Axis.Horizontal, targetWidth);
+
+            var wantX = parentRect.InverseTransformPoint(
+                craftRect.TransformPoint(craftRect.rect.center)).x;
+            var haveX = parentRect.InverseTransformPoint(
+                panelRect.TransformPoint(panelRect.rect.center)).x;
+            panelRect.anchoredPosition += new Vector2(wantX - haveX, 0f);
+
+            gui.m_craftProgressBar.SetWidth(
+                _cleanProgressBarWidth - (cleanWidth - targetWidth));
         }
 
         private static void SetButtonText(GameObject buttonGO, string text)

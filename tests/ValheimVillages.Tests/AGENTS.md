@@ -36,6 +36,7 @@ ValheimVillages.Tests/
     MlpTrainingTests.cs                -- residual MLP forward/backward, all-zero-gradient guard
     RegionHopDistanceTests.cs          -- hops semantics; an UNRESOLVED endpoint must never read as unreachable
     SchedulerSelectionTests.cs         -- reranker/dual-encoder picks; capability + owner filters still bite
+    TaskBoardBlockingTests.cs          -- unreachable tasks blocked until the graph generation advances
 ```
 
 ## Scheduler invariant

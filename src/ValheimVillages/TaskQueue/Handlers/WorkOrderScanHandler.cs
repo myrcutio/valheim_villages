@@ -233,6 +233,9 @@ namespace ValheimVillages.TaskQueue.Handlers
 
                 Vector3? stationPos;
                 string stationDesc;
+                // A forage order has no station to be missing — what it lacks is a ripe plant,
+                // and the blocker the player reads should say so.
+                var forageOrder = false;
 
                 // Farming recipes route to farm locations instead of crafting stations
                 if (physicalStation == "farm")
@@ -269,6 +272,7 @@ namespace ValheimVillages.TaskQueue.Handlers
 
                 CookingStation cookingStationRef = null;
                 Beehive beehiveRef = null;
+                Pickable pickableRef = null;
                 Smelter smelterRef = null;
                 string smelterInputName = null;
                 FuelNeed? fuelRequirement = null;
@@ -330,6 +334,27 @@ namespace ValheimVillages.TaskQueue.Handlers
 
                     stationDesc = "Beehive";
                 }
+                else if (physicalStation == ForageHelper.PhysicalStation)
+                {
+                    // Foraging: the "station" is whichever pickable in the village is RIPE right
+                    // now AND yields THIS order's item. An unripe bush is not work — the order
+                    // simply isn't offered until the berries are back, the same way an empty
+                    // hive isn't offered.
+                    if (ForageHelper.TryFindHarvestable(
+                            anchorPos, WorkSettings.ChestScanRadius, match.ItemPrefabName,
+                            out var ripe, out var ripeApproach))
+                    {
+                        stationPos = ripeApproach;
+                        pickableRef = ripe;
+                    }
+                    else
+                    {
+                        stationPos = null;
+                    }
+
+                    stationDesc = "ripe " + match.ItemPrefabName;
+                    forageOrder = true;
+                }
                 else if (!string.IsNullOrEmpty(physicalStation)
                          && StationFinder.GetSmelterPrefab(physicalStation) != null)
                 {
@@ -390,13 +415,17 @@ namespace ValheimVillages.TaskQueue.Handlers
                     var unimplemented = physicalStation != null
                                         && physicalStation != "farm"
                                         && physicalStation != "cookingstation"
+                                        && physicalStation != BeehiveHelper.PhysicalStation
+                                        && physicalStation != ForageHelper.PhysicalStation
                                         && StationFinder.GetSmelterPrefab(physicalStation) == null;
                     rejections.Add(new RejectionRecord
                     {
                         ItemPrefab = match.ItemPrefabName,
                         Station = match.StationName,
                         PhysicalStation = physicalStation,
-                        Reason = $"No station '{stationDesc}' in village",
+                        Reason = forageOrder
+                            ? $"No ripe {match.ItemPrefabName} in village"
+                            : $"No station '{stationDesc}' in village",
                         IsUnimplemented = unimplemented,
                         WorkOrderPosition = match.SourceContainer.transform.position,
                     });
@@ -443,6 +472,13 @@ namespace ValheimVillages.TaskQueue.Handlers
                     CraftStationPosition = stationPos.Value,
                     CookingStationRef = cookingStationRef,
                     BeehiveRef = beehiveRef,
+                    IsForageOrder = forageOrder,
+                    PickableRef = pickableRef,
+                    // Captured now, while the plant is certainly still there: a pickable with no
+                    // respawn timer destroys itself the moment it is picked.
+                    PickableOutputPoint = pickableRef != null
+                        ? ForageHelper.OutputPoint(pickableRef)
+                        : Vector3.zero,
                     CookingInputItemName = cookingInputName,
                     CraftedCount = existingCount,
                     CurrentIngredientIndex = 0,

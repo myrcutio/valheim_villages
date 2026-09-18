@@ -5,6 +5,22 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2026-09-18
+
+### New
+- Farmers forage ripe berries, mushrooms and thistle in the village, on a work order
+- Plants become orderable once you've picked one yourself
+
+### Fixed
+- Villagers no longer idle forever after being revived or after a world reload
+- Carpenters no longer retry structures they can't reach; those wait until the village changes
+- Craft progress bar no longer covers the Order button
+- Ripe-crop scan covers the whole village, not a 20m circle around the anchor
+- Harvest orders with nothing ready no longer log as unimplemented
+
+### Changed
+- Far less log spam; per-chest and item-spawn detail moved behind `vv_log_ingredients` and `vv_log_itemspawns`
+
 ## [0.2.7] - 2026-09-15
 
 ### Fixed

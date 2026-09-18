@@ -31,6 +31,8 @@ Items/
     VirtualRecipeDefinition.cs         -- Data class for virtual recipe JSON
     CultivatorRecipeDiscovery.cs       -- Discovers plantable pieces from cultivator for Farmer recipes
     CookingRecipeDiscovery.cs          -- Discovers cooking recipes from ZNetScene for Farmer recipes
+    BeehiveRecipeDiscovery.cs          -- Discovers hive yields (recipe:beekeeping) as zero-input harvest recipes
+    PickableRecipeDiscovery.cs         -- Discovers Pickable yields (recipe:foraging) as zero-input harvest recipes
     PlantPieceRegistry.cs              -- Registry of plantable pieces
   WorkOrders/
     CraftingStationPatch.cs            -- Harmony patch on InventoryGui.UpdateCraftingPanel; adds "Order" button

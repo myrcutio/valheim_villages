@@ -56,6 +56,21 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <summary>Fine-grid cell size for the rasterized point-to-region lookup (m).</summary>
         internal const float LookupCellSize = 1f;
 
+        /// <summary>
+        ///     Bumped every time this graph's contents are (re)committed by
+        ///     <see cref="SetGraph" /> — i.e. a partition finished, or the graph hydrated
+        ///     from its ZDO blob. It is the "the walkable world changed" signal: a player
+        ///     placing a piece or reshaping terrain enqueues a repartition, which commits a
+        ///     new graph and advances this.
+        ///
+        ///     <para>The scheduler keys its unreachable-task blocks on this value, so a
+        ///     block survives exactly as long as the graph that produced it. In-memory and
+        ///     deliberately not serialized: a value that restarted at 0 next session while
+        ///     blocks (also in-memory) were cleared would be comparing against nothing. Any
+        ///     mismatch resolves toward retrying, which is the safe direction.</para>
+        /// </summary>
+        public uint Generation { get; private set; }
+
         #region SetGraph
 
         /// <summary>
@@ -67,6 +82,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             List<(string id, Vector3 center, Vector3 outDir)> boundaryCells = null,
             Dictionary<string, SurfaceKind> regionKinds = null)
         {
+            Generation++;
             ClearInternal();
             if (regionIds != null)
                 foreach (var id in regionIds)

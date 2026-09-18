@@ -36,6 +36,8 @@ Villager/
       DoorHandler.cs, VillagerMovement.cs, VillagerWaypoint.cs, Region*.cs, BoundaryDump.cs, SpatialDump.cs, NavMeshLinkPlacer.cs
     Work/
       ContainerScanner.cs, StationFinder.cs, StationMatcher.cs (reads workStations from VillagerDef)
+      BeehiveHelper.cs, ForageHelper.cs  -- harvest sources that aren't stations (hives, ripe pickables)
+      PieceApproachResolver.cs           -- lookup-grid standing spot beside a plain piece (not a station)
 ```
 
 ## Integration

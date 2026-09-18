@@ -19,9 +19,11 @@ namespace ValheimVillages.Behaviors.Farming
         {
             if (m_context.CurrentHarvestTarget == null)
             {
-                // Try to find more harvestable crops
-                var crop = HarvestHelper.FindNearestHarvestableCrop(
-                    m_ai, m_context.WorkOrder.ItemPrefabName, HarvestHelper.HarvestScanRadius);
+                // Try to find more harvestable crops: nearest to where the farmer is
+                // standing now, anywhere in the village.
+                var crop = ForageHelper.FindNearestRipe(
+                    m_ai.HomeAnchor, m_ai.transform.position,
+                    FarmSettings.HarvestScanRadius, m_context.WorkOrder.ItemPrefabName);
                 if (crop == null)
                 {
                     Plugin.Log?.LogDebug(
@@ -54,7 +56,7 @@ namespace ValheimVillages.Behaviors.Farming
             m_ai.Instance.StopMoving();
 
             var target = m_context.CurrentHarvestTarget;
-            if (target == null || !target.CanBePicked())
+            if (!ForageHelper.IsRipe(target))
             {
                 m_context.CurrentHarvestTarget = null;
                 BeginHarvestPass();
@@ -68,11 +70,15 @@ namespace ValheimVillages.Behaviors.Farming
                     { "targetPos", target.transform.position.ToString() }, { "targetGO", target.gameObject.name },
                 }, "A,D", "run1");
 
+            // Read the drop point BEFORE picking: a plant with no respawn timer (a grown crop
+            // is exactly that) destroys its own GameObject when picked, so the position has to
+            // be in hand before the pick, not after.
+            var harvestPos = ForageHelper.OutputPoint(target);
+
             var character = m_ai.Character as Humanoid;
-            HarvestHelper.HarvestCrop(target, character);
+            ForageHelper.Pick(target, character);
             m_context.CurrentHarvestTarget = null;
 
-            var harvestPos = target.transform.position;
             CollectDropsThenReturnToChest(harvestPos);
         }
 

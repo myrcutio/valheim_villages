@@ -21,11 +21,14 @@ namespace ValheimVillages.Interfaces
         bool CanExecute(TaskKind kind);
 
         /// <summary>
-        ///     Begin executing a scheduler-assigned task. Returns false if it can't start
-        ///     (no reachable approach, nothing actionable at the target), in which case the
-        ///     dispatcher releases the claim.
+        ///     Begin executing a scheduler-assigned task. On anything other than
+        ///     <see cref="AssignmentResult.Accepted" /> the dispatcher releases the claim;
+        ///     the distinction between the two failures decides whether the row is retried
+        ///     next tick or blocked until the region graph changes, so a behavior must not
+        ///     report <see cref="AssignmentResult.Unreachable" /> for a merely transient
+        ///     "nothing to do here right now".
         /// </summary>
-        bool BeginAssignment(CandidateTask task);
+        AssignmentResult BeginAssignment(CandidateTask task);
 
         /// <summary>True while an assignment is in progress (travel + action).</summary>
         bool AssignmentActive { get; }

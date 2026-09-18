@@ -221,9 +221,10 @@ namespace ValheimVillages.Villager.AI.Work
                 var found = 0;
                 Container sourceContainer = null;
 
-                Plugin.Log?.LogDebug(
-                    $"[IngredientScan] Looking for {needed}x '{prefabName}' " +
-                    $"across {containers.Count} containers");
+                if (Settings.LogSettings.VerboseIngredientScan)
+                    Plugin.Log?.LogDebug(
+                        $"[IngredientScan] Looking for {needed}x '{prefabName}' " +
+                        $"across {containers.Count} containers");
 
                 foreach (var container in containers)
                 {
@@ -231,9 +232,10 @@ namespace ValheimVillages.Villager.AI.Work
                     if (inv == null) continue;
 
                     var count = CountByPrefab(inv, prefabName);
-                    Plugin.Log?.LogDebug(
-                        $"[IngredientScan] Container '{container.m_name}': " +
-                        $"{count}x '{prefabName}'");
+                    if (Settings.LogSettings.VerboseIngredientScan)
+                        Plugin.Log?.LogDebug(
+                            $"[IngredientScan] Container '{container.m_name}': " +
+                            $"{count}x '{prefabName}'");
 
                     if (count > 0)
                     {
@@ -245,9 +247,7 @@ namespace ValheimVillages.Villager.AI.Work
 
                 if (found < needed)
                 {
-                    Plugin.Log?.LogDebug(
-                        $"[IngredientScan] MISSING: need {needed}x '{prefabName}', " +
-                        $"found {found}");
+                    LogMissingIngredient(prefabName, needed, found, containers.Count);
                     return null;
                 }
 
@@ -260,6 +260,36 @@ namespace ValheimVillages.Villager.AI.Work
             }
 
             return sources;
+        }
+
+        /// <summary>Seconds before an UNCHANGED missing-ingredient report repeats.</summary>
+        private const float MissingHeartbeatSeconds = 30f;
+
+        /// <summary>
+        ///     Signature -> <c>Time.time</c> it was last reported.
+        /// </summary>
+        private static readonly Dictionary<string, float> s_lastMissingLog = new();
+
+        /// <summary>
+        ///     Report a shortfall, but only when the shortfall CHANGES (or as an occasional
+        ///     heartbeat). A crafter that is short an ingredient re-scans continuously and
+        ///     re-reported an identical line every time — 290 copies of "MISSING: need 5x
+        ///     'Raspberry', found 4" in a single session. The state change is the event
+        ///     worth a line; the steady state is not, and drowning the ring buffer in it
+        ///     hides the diagnostics someone is actually reading.
+        /// </summary>
+        private static void LogMissingIngredient(string prefabName, int needed, int found, int containerCount)
+        {
+            var signature = prefabName + "|" + needed + "|" + found;
+            var now = Time.time;
+            if (s_lastMissingLog.TryGetValue(signature, out var last)
+                && now - last < MissingHeartbeatSeconds)
+                return;
+
+            s_lastMissingLog[signature] = now;
+            Plugin.Log?.LogDebug(
+                $"[IngredientScan] MISSING: need {needed}x '{prefabName}', " +
+                $"found {found} across {containerCount} container(s)");
         }
 
         /// <summary>

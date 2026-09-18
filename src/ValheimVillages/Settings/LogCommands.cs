@@ -17,5 +17,25 @@ namespace ValheimVillages.Settings
             Console.instance?.Print(msg);
             Plugin.Log?.LogInfo(msg);
         }
+
+        [DevCommand("Toggle per-container ingredient-scan logging on/off", Name = "vv_log_ingredients")]
+        public static void ToggleVerboseIngredientScan(Terminal.ConsoleEventArgs args)
+        {
+            LogSettings.VerboseIngredientScan = !LogSettings.VerboseIngredientScan;
+            var state = LogSettings.VerboseIngredientScan ? "ON" : "OFF";
+            var msg = $"[LogSettings] VerboseIngredientScan = {state}";
+            Console.instance?.Print(msg);
+            Plugin.Log?.LogInfo(msg);
+        }
+
+        [DevCommand("Toggle per-item ItemDrop.Awake spawn logging on/off", Name = "vv_log_itemspawns")]
+        public static void ToggleVerboseItemSpawns(Terminal.ConsoleEventArgs args)
+        {
+            LogSettings.VerboseItemSpawns = !LogSettings.VerboseItemSpawns;
+            var state = LogSettings.VerboseItemSpawns ? "ON" : "OFF";
+            var msg = $"[LogSettings] VerboseItemSpawns = {state}";
+            Console.instance?.Print(msg);
+            Plugin.Log?.LogInfo(msg);
+        }
     }
 }

@@ -1,7 +1,4 @@
 using UnityEngine;
-using UnityEngine.AI;
-using ValheimVillages.Villager.AI.Pathfinding;
-using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Villager.AI.Work
 {
@@ -31,12 +28,6 @@ namespace ValheimVillages.Villager.AI.Work
 
         /// <summary>How far from a hive the villager may stand to work it.</summary>
         private const float HarvestReach = 3f;
-
-        /// <summary>
-        ///     Snap radius when landing a resolved region cell onto the agent navmesh.
-        ///     Deliberately small so the approach stays inside the cell we chose.
-        /// </summary>
-        private const float ApproachSnapRadius = 2f;
 
         /// <summary>
         ///     Honey currently sitting in the hive. Reads the ZDO directly because
@@ -95,7 +86,8 @@ namespace ValheimVillages.Villager.AI.Work
 
                 var d = (h.transform.position - center).sqrMagnitude;
                 if (d >= best) continue;
-                if (!TryResolveHiveApproach(center, h.transform.position, out var stand)) continue;
+                if (!PieceApproachResolver.TryResolve(
+                        center, h.transform.position, HarvestReach, out var stand)) continue;
 
                 best = d;
                 hive = h;
@@ -103,51 +95,6 @@ namespace ValheimVillages.Villager.AI.Work
             }
 
             return hive != null;
-        }
-
-        /// <summary>
-        ///     A walkable spot beside the hive, resolved through the region LOOKUP GRID rather
-        ///     than the station approach-resolver.
-        ///
-        ///     <para>A hive is a plain piece, not a station with a standoff pad: its own
-        ///     position sits inside its own collider, and <c>PointToRegionId</c> at the hive
-        ///     comes back unresolved even with walkable floor a metre away — observed on a hive
-        ///     17m from the anchor, which the station resolver rejected outright and reported
-        ///     as "No station 'Beehive' in village". Same shape as the perimeter-piece failure
-        ///     that made the carpenter ignore damaged walls, and the same remedy: walk the
-        ///     lookup grid, which only ever returns cells PointToRegionId agrees with, and take
-        ///     the nearest one within reach that the agent can actually stand on.</para>
-        /// </summary>
-        private static bool TryResolveHiveApproach(Vector3 anchor, Vector3 hivePos, out Vector3 approach)
-        {
-            approach = Vector3.zero;
-            if (!VillagerAgentType.IsRegistered) return false;
-
-            var graph = VillageRegistry.GraphAt(anchor);
-            if (graph == null) return false;
-
-            if (!graph.TryFindNearestLookupCell(
-                    hivePos,
-                    pos => NavMesh.SamplePosition(pos, out _, ApproachSnapRadius, AgentFilter()),
-                    out var cell,
-                    out _,
-                    HarvestReach))
-                return false;
-
-            if (!NavMesh.SamplePosition(cell, out var near, ApproachSnapRadius, AgentFilter()))
-                return false;
-
-            approach = near.position;
-            return true;
-        }
-
-        private static NavMeshQueryFilter AgentFilter()
-        {
-            return new NavMeshQueryFilter
-            {
-                agentTypeID = VillagerAgentType.UnityAgentTypeID,
-                areaMask = NavMesh.AllAreas,
-            };
         }
 
         /// <summary>
