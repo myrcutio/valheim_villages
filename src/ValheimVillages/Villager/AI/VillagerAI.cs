@@ -310,9 +310,15 @@ namespace ValheimVillages.Villager.AI
             {
                 return !IsStranded();
             }
-            catch
+            catch (System.Exception ex)
             {
-                return false; // graph not built / not ready
+                // "Graph not built yet" is an ordinary state and should be a return value,
+                // not an exception — so anything arriving here is a genuine fault worth
+                // seeing. Reported once; the villager stays unsettled, which is the safe
+                // reading of "we could not confirm this villager is on the graph".
+                Diagnostics.VanillaReflection.ReportFailure(
+                    "VillagerAI.IsStranded (spawn-settle gate)", ex);
+                return false;
             }
         }
 
@@ -1261,43 +1267,89 @@ namespace ValheimVillages.Villager.AI
         ///     that no path can free. Snaps to the agent mesh nearest the anchor and
         ///     moves the character (and its advisory agent) there.
         /// </summary>
+        /// <summary>
+        ///     Reposition this villager to <paramref name="dest" />.
+        ///     <para>
+        ///     Both callers previously did <c>transform.position = dest;</c> followed by
+        ///     <c>m_navAgent.transform.Translate(dest)</c>. Translate moves a transform BY a
+        ///     vector, not TO one, so the destination was applied TWICE: a recall to a station
+        ///     at y=38.4 left the villager at y=76.8 and ~270m west of the village, where his
+        ///     zone unloaded and he simply vanished as far as the player could tell. X doubled
+        ///     as well; Z did not, because Translate defaults to LOCAL space so the XZ part
+        ///     came out rotated by whichever way he happened to be facing.
+        ///     </para>
+        ///     <para>
+        ///     <c>NavMeshAgent.Warp</c> is the supported way to reposition an agent: assigning
+        ///     transform.position under an agent that is on a mesh leaves the agent's internal
+        ///     position out of step with the transform.
+        ///     </para>
+        /// </summary>
+        private bool MoveTo(Vector3 dest, string what)
+        {
+            if (m_navAgent == null)
+            {
+                transform.position = dest;
+                return true;
+            }
+
+            if (m_navAgent.Warp(dest)) return true;
+
+            // Warp refuses when the destination is not on the agent's mesh. Move anyway and
+            // say so: leaving the villager where it was is the worse outcome — that is the
+            // state the caller is trying to get it OUT of — and the agent re-acquires the
+            // mesh on its own once it is somewhere sane.
+            Plugin.Log?.LogWarning(
+                $"[AI:{m_villagerName}] {what}: NavMeshAgent refused to warp to " +
+                $"({dest.x:F1},{dest.y:F1},{dest.z:F1}) — moving the transform directly.");
+            transform.position = dest;
+            return true;
+        }
+
         private void TeleportHome()
         {
             if (!OffMeshRescueEnabled) return;
             var dest = m_homeAnchor;
             if (NavMesh.SamplePosition(m_homeAnchor, out var hit, 5f, AgentFilter()))
                 dest = hit.position;
-            transform.position = dest;
-            if (m_navAgent != null && m_navAgent.isOnNavMesh)
-                m_navAgent.transform.Translate(dest);
+            if (!MoveTo(dest, "Rescue")) return;
             Plugin.Log?.LogWarning(
                 $"[AI:{m_villagerName}] Rescue: pathing couldn't free it; teleported home to " +
                 $"({dest.x:F1},{dest.y:F1},{dest.z:F1}).");
         }
 
         /// <summary>
-        ///     Recall this villager to its registry station: relocate it to an
-        ///     HNA-valid approach beside <paramref name="stationPos" /> on the village
-        ///     (slot-31) graph, warp the advisory agent there, and drop to Idle so it
-        ///     re-evaluates behaviors from the station. Uses the same Y-aware approach
-        ///     resolver as spawn, so it can't land on a roof/upper floor. Returns false
-        ///     (and does NOT move the villager) when no reachable approach resolves —
-        ///     we never teleport into a non-walkable spot.
+        ///     Recall this villager to its registry station. IMPERATIVE: the villager ends up
+        ///     at the station, always.
+        ///     <para>
+        ///     It used to be conditional — it resolved an HNA-valid approach beside the
+        ///     station and did nothing at all if none came back, on the reasoning that we
+        ///     should never place a villager somewhere non-walkable. In practice that made
+        ///     the button a coin flip precisely when it was needed: a villager worth
+        ///     recalling is usually one that is stuck, off-graph or somewhere the approach
+        ///     resolver cannot reason about, which is exactly when the resolve fails. A
+        ///     villager standing at the station on imperfect ground is recoverable; one left
+        ///     where it was is not.
+        ///     </para>
+        ///     <para>
+        ///     So the approach resolver is now a preference, not a gate: use the spot it
+        ///     finds when it finds one (it is Y-aware, so it avoids landing on a roof or an
+        ///     upper floor), and otherwise use the station position itself.
+        ///     </para>
         /// </summary>
-        public bool Recall(Vector3 stationPos)
+        public void Recall(Vector3 stationPos)
         {
-            if (!VillagerMovement.TryResolveApproach(stationPos, stationPos, null, out var dest))
-                return false;
+            var resolved = VillagerMovement.TryResolveApproach(
+                stationPos, stationPos, null, out var dest);
+            if (!resolved) dest = stationPos;
 
-            transform.position = dest;
-            if (m_navAgent != null && m_navAgent.isOnNavMesh)
-                m_navAgent.transform.Translate(dest);
+            MoveTo(dest, "Recall");
             // SetState(Idle) clears the stale path, resets recovery/stall timers, and
             // lets the behavior loop re-select from the station next tick.
             SetState(BehaviorState.Idle);
             Plugin.Log?.LogInfo(
-                $"[AI:{m_villagerName}] Recalled to station at ({dest.x:F1},{dest.y:F1},{dest.z:F1}).");
-            return true;
+                $"[AI:{m_villagerName}] Recalled to station at " +
+                $"({dest.x:F1},{dest.y:F1},{dest.z:F1})" +
+                (resolved ? "." : " (no approach resolved — placed at the station itself)."));
         }
 
         /// <summary>

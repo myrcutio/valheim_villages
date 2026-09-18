@@ -354,8 +354,12 @@ namespace ValheimVillages.Diagnostics
                 var pathFi = field?.GetValue(null) as System.Reflection.FieldInfo;
                 return pathFi?.GetValue(ai) as List<Vector3>;
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "IncidentRecorder.cs", ex);
                 return null;
             }
         }
@@ -436,8 +440,12 @@ namespace ValheimVillages.Diagnostics
                     sb.Append("{\"hit\":false}");
                 }
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "IncidentRecorder.cs", ex);
                 sb.Append("null");
             }
         }
@@ -552,8 +560,12 @@ namespace ValheimVillages.Diagnostics
                               + text.Substring(valEnd);
                 File.WriteAllText(idxPath, updated);
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "IncidentRecorder.cs", ex);
                 /* swallow */
             }
         }
@@ -567,8 +579,12 @@ namespace ValheimVillages.Diagnostics
             {
                 root = Paths.ConfigPath;
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "IncidentRecorder.cs", ex);
                 root = ".";
             }
             return Path.Combine(root, "vv_dumps", "incidents");

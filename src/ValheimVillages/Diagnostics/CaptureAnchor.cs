@@ -98,8 +98,12 @@ namespace ValheimVillages.Diagnostics
             {
                 anchors = VillagerAIManager.GetAllAnchorPositions();
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "CaptureAnchor.cs", ex);
                 return Result.NoAnchor("VillagerAIManager threw resolving anchors");
             }
 

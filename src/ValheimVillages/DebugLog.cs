@@ -1,55 +1,21 @@
-using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
-using System.Text;
-using BepInEx;
-
 namespace ValheimVillages
 {
+    /// <summary>
+    ///     Structured diagnostics. Everything goes through <see cref="Event" /> (see
+    ///     DebugLog.Events.cs), which writes one line to the BepInEx log.
+    ///     <para>
+    ///     There used to be a second channel here, <c>Append</c>, writing NDJSON straight to
+    ///     <c>vv_dumps/legacy_debug.ndjson</c> with a <c>File.AppendAllText</c> per line — a
+    ///     synchronous open/write/close on the main thread — wrapped in an empty catch. It
+    ///     was never rotated or size-capped and had accumulated 4.1 GB on the dev machine.
+    ///     Its six callers were stale investigation scaffolding (they still passed dead
+    ///     hypothesis ids like "H3"/"run1"), and one of them logged from a scan that runs
+    ///     every 0.5s per villager for the lifetime of the world. All six now use
+    ///     <see cref="Event" />; the channel is gone rather than fixed, because nothing
+    ///     needed a second one.
+    ///     </para>
+    /// </summary>
     internal static partial class DebugLog
     {
-        private static readonly string LogPath = Path.Combine(
-            Paths.ConfigPath, "vv_dumps", "legacy_debug.ndjson");
-
-        public static void Append(string location, string message, Dictionary<string, object> data, string hypothesisId,
-            string runId)
-        {
-            try
-            {
-                var ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                var sb = new StringBuilder();
-                sb.Append('{');
-                sb.AppendFormat("\"timestamp\":{0}", ts);
-                sb.AppendFormat(",\"location\":\"{0}\"", Esc(location));
-                sb.AppendFormat(",\"message\":\"{0}\"", Esc(message));
-                sb.AppendFormat(",\"hypothesisId\":\"{0}\"", Esc(hypothesisId));
-                sb.AppendFormat(",\"runId\":\"{0}\"", Esc(runId));
-                sb.Append(",\"data\":{");
-                var first = true;
-                foreach (var kv in data)
-                {
-                    if (!first) sb.Append(',');
-                    first = false;
-                    sb.AppendFormat("\"{0}\":", Esc(kv.Key));
-                    if (kv.Value is string s) sb.AppendFormat("\"{0}\"", Esc(s));
-                    else if (kv.Value is bool b) sb.Append(b ? "true" : "false");
-                    else if (kv.Value is float f) sb.Append(f.ToString(CultureInfo.InvariantCulture));
-                    else if (kv.Value is double d) sb.Append(d.ToString(CultureInfo.InvariantCulture));
-                    else sb.Append(kv.Value?.ToString() ?? "null");
-                }
-
-                sb.Append("}}");
-                File.AppendAllText(LogPath, sb + "\n");
-            }
-            catch
-            {
-            }
-        }
-
-        private static string Esc(string v)
-        {
-            return v?.Replace("\\", "\\\\").Replace("\"", "\\\"") ?? "";
-        }
     }
 }

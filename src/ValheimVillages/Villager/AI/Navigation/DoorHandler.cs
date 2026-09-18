@@ -171,16 +171,11 @@ namespace ValheimVillages.Villager.AI.Navigation
             var forward = Vector3.Dot(door.transform.forward, userDir) < 0f;
             var openState = forward ? 1 : -1;
 
-            DebugLog.Append("DoorHandler.cs:open", "open_door", new Dictionary<string, object>
-            {
-                { "npcPos", transform.position.ToString("F2") },
-                { "doorPos", door.transform.position.ToString("F2") },
-                { "doorFwd", door.transform.forward.ToString("F2") },
-                { "userDir", userDir.ToString("F2") },
-                { "dot", Vector3.Dot(door.transform.forward, userDir) },
-                { "forward", forward },
-                { "openState", openState },
-            }, "direction", "run1");
+            DebugLog.Event("Door", "open",
+                ("npcPos", transform.position), ("doorPos", door.transform.position),
+                ("doorFwd", door.transform.forward), ("userDir", userDir),
+                ("dot", Vector3.Dot(door.transform.forward, userDir)),
+                ("forward", forward), ("openState", openState));
 
             nview.GetZDO().Set(ZDOVars.s_state, openState);
 
@@ -266,6 +261,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             Plugin.Log?.LogDebug($"NPC closed door at {door.transform.position}");
         }
 
+        /// <summary>Last door count reported by <see cref="ScanForNearbyDoors" />; -1 = never.</summary>
+        private int m_lastLoggedDoorCount = -1;
+
         private void ScanForNearbyDoors()
         {
             m_nearbyDoors.Clear();
@@ -279,13 +277,17 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (door != null && !m_nearbyDoors.Contains(door)) m_nearbyDoors.Add(door);
             }
 
-            if (m_nearbyDoors.Count > 0)
-                DebugLog.Append("DoorHandler.cs:scan", "scan_result", new Dictionary<string, object>
-                {
-                    { "npcPos", transform.position.ToString("F2") },
-                    { "doorsFound", m_nearbyDoors.Count },
-                    { "scanRadius", DoorSettings.DoorDetectionRadius * 2f },
-                }, "H4", "run1");
+            // Only on CHANGE. This scan runs every 0.5s per villager forever, so logging
+            // each result unconditionally produced a line every half-second per villager for
+            // the lifetime of the world — the bulk of a 4GB debug file.
+            if (m_nearbyDoors.Count != m_lastLoggedDoorCount)
+            {
+                m_lastLoggedDoorCount = m_nearbyDoors.Count;
+                if (m_nearbyDoors.Count > 0)
+                    DebugLog.Event("Door", "scan",
+                        ("npcPos", transform.position), ("doorsFound", m_nearbyDoors.Count),
+                        ("scanRadius", DoorSettings.DoorDetectionRadius * 2f));
+            }
         }
 
         private bool IsDoorClosed(Door door)

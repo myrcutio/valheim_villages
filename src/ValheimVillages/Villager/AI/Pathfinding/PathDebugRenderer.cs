@@ -18,6 +18,7 @@ namespace ValheimVillages.Villager.AI.Pathfinding
     ///     green = path found, yellow = partial/stale, red = no path.
     ///     Toggle with the "vv_path_debug" console command.
     /// </summary>
+    [RegisterModObject("VV_PathDebugRenderer")]
     public class PathDebugRenderer : MonoBehaviour
     {
         private const float NodeMarkerSize = 0.15f;
@@ -251,8 +252,14 @@ namespace ValheimVillages.Villager.AI.Pathfinding
                 agentTypeID = VillagerAgentType.UnityAgentTypeID,
                 areaMask = NavMesh.AllAreas,
             };
-            if (!NavMesh.SamplePosition(new Vector3(fx, 40f, fz), out var fHit, 8f, filter)
-                || !NavMesh.SamplePosition(new Vector3(tx, 40f, tz), out var tHit, 8f, filter))
+
+            // Sample from the ground at each XZ, not from a hardcoded y=40 with an 8m radius.
+            // That constant is roughly the first village's altitude and nothing else: at the
+            // second village (registry y=61.9) both endpoints sat ~22m below the surface,
+            // well outside the radius, so this returned null and the command reported "could
+            // not sample" for two perfectly reachable points.
+            if (!TrySampleGround(fx, fz, filter, out var fHit)
+                || !TrySampleGround(tx, tz, filter, out var tHit))
                 return null;
 
             var path = new NavMeshPath();
@@ -262,6 +269,27 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             EnsureInstance();
             return $"overlay: status={path.status} corners={path.corners.Length} (magenta)";
         }
+
+        /// <summary>
+        ///     Sample the villager navmesh at an XZ column, starting from the terrain height
+        ///     there. <see cref="GroundSampleRadius" /> only has to cover the gap between the
+        ///     heightmap and the baked surface (floors, ramps), not an unknown altitude.
+        /// </summary>
+        private static bool TrySampleGround(
+            float x, float z, NavMeshQueryFilter filter, out NavMeshHit hit)
+        {
+            var y = ZoneSystem.instance != null
+                ? ZoneSystem.instance.GetGroundHeight(new Vector3(x, 0f, z))
+                : 0f;
+            return NavMesh.SamplePosition(
+                new Vector3(x, y, z), out hit, GroundSampleRadius, filter);
+        }
+
+        /// <summary>
+        ///     Vertical reach when snapping an XZ point to the villager navmesh. Covers a
+        ///     multi-storey build above the heightmap without spanning whole hillsides.
+        /// </summary>
+        private const float GroundSampleRadius = 12f;
 
         /// <summary>Clears the ad-hoc magenta overlay drawn by <c>vv_path ... draw</c>.</summary>
         internal static void ClearRawPathOverlay()
@@ -288,9 +316,25 @@ namespace ValheimVillages.Villager.AI.Pathfinding
                 EnsureInstance();
 
             var state = s_showTriangulation ? "ON" : "OFF";
-            var count = RegionBuilder.CachedTriangles?.Count ?? 0;
-            Console.instance?.Print($"Triangulation wireframe {state} ({count} triangles){CamSuffix()}");
+            // Break the count out per village: "2876 triangles" hid the fact that a
+            // second village had contributed none, which is exactly the symptom the
+            // shared-cache bug produced.
+            var perVillage = new List<string>();
+            foreach (var kv in RegionBuilder.TrianglesByVillage())
+                perVillage.Add($"{Shorten(kv.Key)}={kv.Value.Count}");
+            var breakdown = perVillage.Count > 0 ? $" [{string.Join(", ", perVillage)}]" : "";
+            Console.instance?.Print(
+                $"Triangulation wireframe {state} ({RegionBuilder.TotalTriangleCount} triangles " +
+                $"across {perVillage.Count} village(s)){breakdown}{CamSuffix()}");
             Plugin.Log?.LogInfo($"[PathDebug] Triangulation wireframe {state}");
+        }
+
+        /// <summary>First segment of a village GUID — enough to tell two villages apart.</summary>
+        private static string Shorten(string villageId)
+        {
+            if (string.IsNullOrEmpty(villageId)) return "(unkeyed)";
+            var dash = villageId.IndexOf('-');
+            return dash > 0 ? villageId.Substring(0, dash) : villageId;
         }
 
         private static string CamSuffix()
@@ -340,10 +384,30 @@ namespace ValheimVillages.Villager.AI.Pathfinding
                 EnsureInstance();
         }
 
+        /// <summary>
+        ///     The host GameObject's name. The <c>VV_</c> prefix is load-bearing:
+        ///     <c>HotReloadHelper</c>'s orphan sweep only reaps objects matching
+        ///     <c>GetModObjectNames()</c>, that prefix, or the prefab prefix. Without it this
+        ///     host was invisible to the sweep, so every hot reload left the PREVIOUS
+        ///     assembly's renderer alive — still drawing from its own stale triangle cache,
+        ///     and still answering the pre-consolidation <c>vv_tri_debug</c> command bound to
+        ///     it. <c>[RegisterCleanup]</c> alone could not fix that: it only ever sees the
+        ///     current assembly's <c>s_instance</c>, never the orphan.
+        /// </summary>
+        private const string HostName = "VV_PathDebugRenderer";
+
         private static void EnsureInstance()
         {
             if (s_instance != null) return;
-            var go = new GameObject("PathDebugRenderer");
+
+            // Adopt-and-destroy any host left by a previous assembly before making a new
+            // one, the same way NavMeshBakeManager.Holder does — after a reload the orphan's
+            // MonoBehaviour is a different TYPE, so GetComponent<>() cannot find it and a
+            // plain find-or-create would stack renderers.
+            var orphan = GameObject.Find(HostName);
+            if (orphan != null) DestroyImmediate(orphan);
+
+            var go = new GameObject(HostName);
             DontDestroyOnLoad(go);
             s_instance = go.AddComponent<PathDebugRenderer>();
         }
@@ -462,15 +526,19 @@ namespace ValheimVillages.Villager.AI.Pathfinding
 
 
 
+        /// <summary>
+        ///     Wireframe for EVERY village's triangulation, not just the one that
+        ///     partitioned most recently. Region colours are hashed from the region id,
+        ///     which is unique per graph, so two villages never collide visually.
+        /// </summary>
         private void DrawTriangulation()
         {
-            var tris = RegionBuilder.CachedTriangles;
-            if (tris == null || tris.Count == 0) return;
+            if (RegionBuilder.TotalTriangleCount == 0) return;
 
             var yOff = Vector3.up * LineYOffset;
 
             GL.Begin(GL.LINES);
-            foreach (var t in tris)
+            foreach (var t in RegionBuilder.AllTriangles())
             {
                 GL.Color(RegionColor(t.RegionId));
                 // Edge 0-1
@@ -496,7 +564,7 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             {
                 var dy = LineYOffset + 0.05f + pass * 0.02f;
                 var off = Vector3.up * dy;
-                foreach (var t in tris)
+                foreach (var t in RegionBuilder.AllTriangles())
                 {
                     if (!HighlightedRegions.Contains(t.RegionId)) continue;
                     GL.Vertex(t.V0 + off);
@@ -687,10 +755,9 @@ namespace ValheimVillages.Villager.AI.Pathfinding
 
         private static void InspectNearPosition(Vector3 pos)
         {
-            var tris = RegionBuilder.CachedTriangles;
-            if (tris == null || tris.Count == 0)
+            if (RegionBuilder.TotalTriangleCount == 0)
             {
-                Console.instance?.Print("No cached triangles. Run vv_tri_debug first.");
+                Console.instance?.Print("No cached triangles. Run hna_partition first.");
                 return;
             }
 
@@ -698,7 +765,7 @@ namespace ValheimVillages.Villager.AI.Pathfinding
             const float r2 = radius * radius;
 
             var regionTris = new Dictionary<string, List<RegionBuilder.CachedTriangle>>();
-            foreach (var t in tris)
+            foreach (var t in RegionBuilder.AllTriangles())
             {
                 var centroid = (t.V0 + t.V1 + t.V2) / 3f;
                 if ((centroid - pos).sqrMagnitude > r2) continue;
@@ -859,6 +926,10 @@ namespace ValheimVillages.Villager.AI.Pathfinding
                 Destroy(s_instance.gameObject);
                 s_instance = null;
             }
+
+            // Also reap a host from any earlier assembly that this static never knew about.
+            var orphan = GameObject.Find(HostName);
+            if (orphan != null) Destroy(orphan);
         }
     }
 }

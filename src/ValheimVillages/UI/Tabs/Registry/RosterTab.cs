@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using ValheimVillages.Attributes;
 using ValheimVillages.UI.Core;
+using ValheimVillages.Villager;
 using ValheimVillages.Villager.AI;
 using ValheimVillages.Villager.Records;
 
@@ -124,19 +125,32 @@ namespace ValheimVillages.UI.Tabs.Registry
             {
                 if (VillagerAIManager.ActiveVillagers.TryGetValue(recordId, out var ai) && ai != null)
                 {
+                    ai.Recall(stationPos);
                     Player.m_localPlayer?.Message(
-                        MessageHud.MessageType.Center,
-                        ai.Recall(stationPos)
-                            ? $"{name} recalled"
-                            : $"Cannot recall {name} (no reachable spot at the station)");
+                        MessageHud.MessageType.Center, $"{name} recalled");
                     return;
                 }
 
-                // No local instance. Only mark fallen when the villager is host-confirmed
-                // GONE (Missing) — never for one that's merely away (unloaded / loaded on
-                // another peer), which would wrongly kill a perfectly fine villager. Real
-                // in-world deaths are flipped to Dead automatically by VillagerDeathPatch.
-                var current = VillagerLiveness.Resolve(VillagerRecordTable.FindById(recordId));
+                // No local instance. A villager that is merely AWAY is still recallable —
+                // it just has no GameObject here to move, so move its stored position
+                // instead and it arrives already at the station when its zone next loads.
+                // This is the case that matters: a villager worth recalling is often one
+                // that ended up somewhere far enough away that it unloaded, which is
+                // exactly when "try again near the village" is useless advice.
+                var record = VillagerRecordTable.FindById(recordId);
+                var current = VillagerLiveness.Resolve(record);
+                if (current == LivePresence.Away
+                    && VillagerRecall.RecallUnloaded(record, stationPos))
+                {
+                    Player.m_localPlayer?.Message(
+                        MessageHud.MessageType.Center, $"{name} recalled (was away)");
+                    return;
+                }
+
+                // Only mark fallen when the villager is host-confirmed GONE (Missing) —
+                // never for one that's merely away (unloaded / loaded on another peer),
+                // which would wrongly kill a perfectly fine villager. Real in-world deaths
+                // are flipped to Dead automatically by VillagerDeathPatch.
                 if (current == LivePresence.Missing)
                 {
                     VillagerRecordTable.SetStatus(recordId, RecordStatus.Dead);
@@ -148,7 +162,7 @@ namespace ValheimVillages.UI.Tabs.Registry
                 {
                     Player.m_localPlayer?.Message(
                         MessageHud.MessageType.Center,
-                        $"{name} is away (not loaded here) — try again near the village.");
+                        $"Cannot recall {name} ({VillagerLiveness.Tag(current)}).");
                 }
             };
 

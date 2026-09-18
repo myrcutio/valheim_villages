@@ -92,10 +92,8 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             // Per-hop centroid + AABB so we can spatial-locate the bridges.
             // Tris from the cached pool give per-region bounds + center.
-            var cached = RegionBuilder.CachedTriangles;
-            if (cached == null) return;
             var perHopBounds = new Dictionary<string, Bounds>(path.Count);
-            foreach (var ct in cached)
+            foreach (var ct in RegionBuilder.AllTriangles())
             {
                 if (!Enumerable.Contains(path, ct.RegionId)) continue;
                 if (perHopBounds.TryGetValue(ct.RegionId, out var b))

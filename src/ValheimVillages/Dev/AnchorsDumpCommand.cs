@@ -15,7 +15,13 @@ namespace ValheimVillages.Dev
     public static class AnchorsDumpCommand
     {
         // Row/column order for the connectivity matrix and the position dump.
-        private static readonly string[] Names = { VillageAnchor.Founder, VillageAnchor.Triad[0], VillageAnchor.Triad[1], VillageAnchor.Triad[2] };
+        // Registry first: it is THE villager anchor (the founder/triad hang off it), and
+        // leaving it out made this dump quietly disagree with every other view of a village.
+        private static readonly string[] Names =
+        {
+            VillageAnchor.Registry, VillageAnchor.Founder,
+            VillageAnchor.Triad[0], VillageAnchor.Triad[1], VillageAnchor.Triad[2],
+        };
 
         /// <param name="target">
         ///     The village to report on, or null to resolve it from the player's position.
@@ -75,7 +81,20 @@ namespace ValheimVillages.Dev
                     : $"  {Names[i],-8} = (unset)");
             }
 
-            // Pairwise connectivity matrix over [founder, triad0, triad1, triad2].
+            // Pairwise connectivity matrix over [registry, founder, triad0, triad1, triad2].
+            //
+            // AnchorsConnected queries the LIVE slot-31 navmesh, so a reading taken while a
+            // partition is rebaking is meaningless — UpdateNavMeshDataAsync is rewriting the
+            // data underneath it. That used to be a one-frame window; now that a partition is
+            // spread across ~100 frames to keep it off the player's frame, it is wide enough
+            // to hit by hand. Observed: an all-N matrix on a healthy village whose triad
+            // EnsureAnchorTriad had just validated, which re-read all-Y once the bake settled.
+            if (TaskQueue.PartitionRunner.IsAnyRunning)
+                sb.AppendLine(
+                    $"  !! a partition is rebaking ({TaskQueue.PartitionRunner.RunningVillage}); " +
+                    "the matrix below reads a navmesh mid-rewrite and will show false N's. " +
+                    "Re-run once it completes.");
+
             sb.AppendLine("  connectivity (Y/N; '-' if an endpoint is unset):");
             sb.Append("           ");
             for (var c = 0; c < Names.Length; c++) sb.Append($"{Names[c],-8} ");

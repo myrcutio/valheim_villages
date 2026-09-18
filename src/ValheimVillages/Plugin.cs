@@ -46,6 +46,15 @@ namespace ValheimVillages
         /// <summary>Throttle (realtime seconds) for the per-village navmesh-bake sweep in Update.</summary>
         private static float _lastBakeSweep;
 
+        /// <summary>
+        ///     How far outside a village's published footprint a structural change still
+        ///     counts as that village's. Matches RegionPartitionHandler.RegionBuildRadius:
+        ///     the bake reaches that far past the anchors, so a piece placed within it is
+        ///     one the next partition will absorb — an extension wing must dirty the village
+        ///     it extends, and the footprint it will grow into does not exist yet.
+        /// </summary>
+        private const float StructureChangeMargin = 30f;
+
         /// <summary>villageId → realtime when its hna_partition was last enqueued by the bake
         /// sweep, so we don't spam the queue while a bake is in flight / settling.</summary>
         private static readonly Dictionary<string, float> _villageBakeEnqueuedAt = new();
@@ -295,16 +304,18 @@ namespace ValheimVillages
             {
                 _lastBakeSweep = Time.realtimeSinceStartup;
 
-                // A structural change (piece placed/removed) invalidates the affected bake; force
-                // a re-bake of every loaded village this sweep (debounced). Determining the exact
-                // village is not worth the coupling for the handful of villages a world holds.
-                var structureDirty = PieceChangePatch.IsDirty &&
+                // A structural change (piece placed/removed, terrain edited) invalidates the
+                // affected bake. Each change carries its own XZ footprint, so only villages
+                // that change could have touched rebuild — a repartition costs ~700ms per
+                // village (PartitionProfile), and this used to charge every loaded village
+                // for every change anywhere in the world.
+                var changesSettled = PieceChangePatch.IsDirty &&
                     Time.realtimeSinceStartup - PieceChangePatch.LastStructureChangeTime > 3f;
-                if (structureDirty)
-                {
-                    PieceChangePatch.IsDirty = false;
-                    Log?.LogInfo("[Valheim Villages] Structure change detected, re-baking loaded village(s)");
-                }
+                var changesConsumed = true;
+                if (changesSettled)
+                    Log?.LogInfo(
+                        $"[Valheim Villages] {PieceChangePatch.PendingRegions.Count} settled structure " +
+                        "change(s); matching against village footprints");
 
                 foreach (var village in VillageRegistry.EnumerateAll())
                 {
@@ -312,7 +323,22 @@ namespace ValheimVillages
                     if (string.IsNullOrEmpty(id)) continue;
                     var anchor = village.Anchor;
                     if (anchor == Vector3.zero) continue;
+                    // An unloaded village needs no retention bookkeeping for changes it
+                    // missed: a structural change is recorded by THIS peer's patches, which
+                    // only fire for geometry this peer is simulating — so a pending change
+                    // inside an unloaded village cannot exist here. Its cached verdicts stay
+                    // valid across the unload and are reused when it comes back.
                     if (!ZoneSystem.instance.IsZoneLoaded(ZoneSystem.GetZone(anchor))) continue;
+
+                    // Does any settled change land in (or just outside) THIS village? A village
+                    // that has never partitioned has no footprint yet; it is picked up by the
+                    // un-baked branch below, which is what builds its first graph.
+                    float fpMinX = 0f, fpMinZ = 0f, fpMaxX = 0f, fpMaxZ = 0f;
+                    var structureDirty = false;
+                    if (changesSettled && village.TryGetFootprint(
+                            out fpMinX, out fpMinZ, out fpMaxX, out fpMaxZ))
+                        structureDirty = PieceChangePatch.Affects(
+                            fpMinX, fpMinZ, fpMaxX, fpMaxZ, StructureChangeMargin);
 
                     // Skip villages already baked on this peer unless a structure change
                     // invalidated them. (Re-bake retries every ~15s while a village stays
@@ -324,28 +350,56 @@ namespace ValheimVillages
                             Time.realtimeSinceStartup - last < 15f) continue;
                     }
 
+                    var attributes = new Dictionary<string, string>
+                    {
+                        { "village_id", id },
+                        { "anchor_x", anchor.x.ToString("F2", CultureInfo.InvariantCulture) },
+                        { "anchor_z", anchor.z.ToString("F2", CultureInfo.InvariantCulture) },
+                    };
+
+                    // An incremental partition carries the rect it must re-probe. A village
+                    // dirtied for any other reason (never baked yet) gets no rect and so
+                    // rebuilds in full — the cached triangle verdicts it does not have.
+                    if (structureDirty)
+                    {
+                        var rect = PieceChangePatch.UnionAffecting(
+                            fpMinX, fpMinZ, fpMaxX, fpMaxZ, StructureChangeMargin);
+                        attributes["dirty_min_x"] = rect.MinX.ToString("R", CultureInfo.InvariantCulture);
+                        attributes["dirty_min_z"] = rect.MinZ.ToString("R", CultureInfo.InvariantCulture);
+                        attributes["dirty_max_x"] = rect.MaxX.ToString("R", CultureInfo.InvariantCulture);
+                        attributes["dirty_max_z"] = rect.MaxZ.ToString("R", CultureInfo.InvariantCulture);
+                    }
+
                     _villageBakeEnqueuedAt[id] = Time.realtimeSinceStartup;
-                    GlobalTaskQueue.Enqueue(new VillagerTask
+                    var accepted = GlobalTaskQueue.Enqueue(new VillagerTask
                     {
                         Name = "hna_partition",
                         SourceId = "system",
                         Priority = TaskPriority.Low,
                         TimeoutSeconds = TaskSettings.DefaultTimeoutSeconds,
-                        Attributes = new Dictionary<string, string>
-                        {
-                            { "village_id", id },
-                            { "anchor_x", anchor.x.ToString("F2", CultureInfo.InvariantCulture) },
-                            { "anchor_z", anchor.z.ToString("F2", CultureInfo.InvariantCulture) },
-                        },
+                        Attributes = attributes,
                     });
+
+                    // A rejected enqueue means a partition for this village is already
+                    // queued — carrying an OLDER rect that does not cover these changes.
+                    // Keep them pending so the next sweep re-offers them; dropping them
+                    // would leave this geometry never re-probed.
+                    if (!accepted && structureDirty) changesConsumed = false;
+
                     Log?.LogInfo($"[Valheim Villages] Enqueued hna_partition for village {id} " +
-                                 $"(baked={NavMeshBakeManager.HasVillage(id)}, structureDirty={structureDirty})");
+                                 $"(baked={NavMeshBakeManager.HasVillage(id)}, " +
+                                 $"structureDirty={structureDirty}, accepted={accepted})");
                 }
+
+                // Consume the changes only after EVERY village has been matched against
+                // them, or the first village in the enumeration eats them all.
+                if (changesSettled && changesConsumed) PieceChangePatch.ClearPending();
             }
 
             GlobalTaskQueue.ProcessBatch();
 
             PathDebugRenderer.AutoEnable();
+            TaskQueue.PartitionRunner.EnsureHost();
 
             // Keep a non-carving NavMeshObstacle on EVERY player so villager RVO
             // steers around them (a player isn't a NavMeshAgent, so it's otherwise

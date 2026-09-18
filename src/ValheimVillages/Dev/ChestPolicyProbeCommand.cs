@@ -52,10 +52,23 @@ namespace ValheimVillages.Dev
                 if (args.Length > rest + 2 && float.TryParse(args[rest + 2], out var r)) radius = r;
             }
 
-            var containers = ContainerScanner.FindNearbyContainers(origin, radius);
+            // Scope the way PRODUCTION scopes: by the village footprint, falling back to a
+            // radius only where there is no village. A radius probe disagreed with what
+            // villagers actually see — the footprint routinely reaches further than the scan
+            // radius (measured: a Farmer's ingredient chest 23.5m out against a 20m radius),
+            // so this command would report a chest as out of scope that the villager was
+            // using, and vice versa.
+            var village = Villages.Entity.VillageRegistry.GetVillageAt(origin);
+            var containers = ContainerScanner.FindVillageContainers(origin, radius);
+
+            var scope = village != null && village.TryGetFootprint(
+                out var fpMinX, out var fpMinZ, out var fpMaxX, out var fpMaxZ)
+                ? $"village {village.VillageId.Substring(0, 8)} footprint " +
+                  $"x[{fpMinX:F0}..{fpMaxX:F0}] z[{fpMinZ:F0}..{fpMaxZ:F0}]"
+                : $"{radius:F0}m radius (no village footprint here)";
 
             var sb = new StringBuilder();
-            sb.AppendLine($"[vv_chestpolicy] {containers.Count} chest(s) within {radius:F0}m of " +
+            sb.AppendLine($"[vv_chestpolicy] {containers.Count} chest(s) in {scope} from " +
                           $"({origin.x:F1},{origin.z:F1})" +
                           (testItem != null ? $"; testing '{testItem}'" : ""));
 

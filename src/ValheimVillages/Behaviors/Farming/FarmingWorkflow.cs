@@ -139,14 +139,9 @@ namespace ValheimVillages.Behaviors.Farming
 
                 if (m_ai.NavTo(pos.Value, BehaviorState.Working, "plant spot"))
                 {
-                    DebugLog.Append("FarmingWorkflow.cs:TryFindAndWalkToNextPlantSpot",
-                        "Walking to plant spot",
-                        new Dictionary<string, object>
-                        {
-                            { "position", pos.Value.ToString() },
-                            { "seedsRemaining", m_context.SeedsGathered },
-                            { "plantedSoFar", m_context.PlantedThisSession },
-                        }, "H3", "run1");
+                    DebugLog.Event("Farming", "walk_to_plant_spot",
+                        ("position", pos.Value), ("seedsRemaining", m_context.SeedsGathered),
+                        ("plantedSoFar", m_context.PlantedThisSession));
 
                     Plugin.Log?.LogDebug(
                         $"[Farming:{m_ai.NpcName}] Walking to plant spot at {pos.Value}");

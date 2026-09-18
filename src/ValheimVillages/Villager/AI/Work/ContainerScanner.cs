@@ -45,7 +45,7 @@ namespace ValheimVillages.Villager.AI.Work
 
             var result = new List<Container>();
             var seen = new HashSet<ZDOID>();
-            foreach (var container in UnityEngine.Object.FindObjectsOfType<Container>())
+            foreach (var container in UnityEngine.Object.FindObjectsByType<Container>(FindObjectsSortMode.None))
             {
                 if (container == null) continue;
 
@@ -100,7 +100,7 @@ namespace ValheimVillages.Villager.AI.Work
             var seen = new HashSet<ZDOID>();
             var sqrRadius = radius * radius;
 
-            foreach (var container in UnityEngine.Object.FindObjectsOfType<Container>())
+            foreach (var container in UnityEngine.Object.FindObjectsByType<Container>(FindObjectsSortMode.None))
             {
                 if (container == null) continue;
 

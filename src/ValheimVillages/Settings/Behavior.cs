@@ -223,7 +223,7 @@ namespace ValheimVillages.Settings
         ///     player is never moved for a capture. The explicit <c>vv_capture</c>
         ///     console command is unaffected — it still captures on demand.
         /// </summary>
-        public const bool AutoDiagnosticCaptureEnabled = false;
+        public static readonly bool AutoDiagnosticCaptureEnabled = false;
 
         // Time boundaries as day fraction (0-1 where 0.5 = noon)
         // Valheim: 0.25 = 6am, 0.5 = noon, 0.75 = 6pm

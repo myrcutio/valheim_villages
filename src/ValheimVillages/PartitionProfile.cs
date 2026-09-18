@@ -38,6 +38,7 @@ namespace ValheimVillages
         {
             s_active = true;
             s_stages.Clear();
+            LastStage = "(start)";
             SamplePos = 0;
             CheckCapsule = 0;
             CheckSphere = 0;
@@ -61,7 +62,14 @@ namespace ValheimVillages
             if (!s_active) return;
             var ms = (Stopwatch.GetTimestamp() - mark) * 1000.0 / Stopwatch.Frequency;
             s_stages.Add((name, ms));
+            LastStage = name;
         }
+
+        /// <summary>
+        ///     The most recently COMPLETED stage. Read by PartitionRunner to locate a budget
+        ///     overrun: the offending work is whatever runs after this stage finished.
+        /// </summary>
+        public static string LastStage { get; private set; }
 
         /// <summary>Flush the accumulated profile as one structured event, then go inert.</summary>
         public static void Emit(string villageKey)

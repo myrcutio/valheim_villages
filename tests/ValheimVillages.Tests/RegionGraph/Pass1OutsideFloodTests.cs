@@ -14,15 +14,28 @@ public class Pass1OutsideFloodTests
 {
     private static HashSet<long> Flood(
         GridEnv env, int gxMin, int gzMin, int gxMax, int gzMax, out int seeds) =>
-        RubberBandPrune.PerimeterOutsideFlood(
-            gxMin, gzMin, gxMax, gzMax, env.CellY, env.WallBlocks, null, out seeds);
+        Flood(env, gxMin, gzMin, gxMax, gzMax, null, out seeds);
 
-    /// <summary>Flood with an impassable-cell predicate (production passes deep water here).</summary>
+    /// <summary>
+    ///     Flood with an impassable-cell predicate (production passes deep water here).
+    ///     <para>
+    ///     The flood became an iterator so a partition can spread it across frames without
+    ///     stalling the game; <see cref="RubberBandPrune.DrainNow" /> runs it straight
+    ///     through on the calling thread, which is what a test wants. Its results moved from
+    ///     a return value plus an <c>out</c> into a <see cref="RubberBandPrune.FloodResult" />,
+    ///     because an iterator can carry neither.
+    ///     </para>
+    /// </summary>
     private static HashSet<long> Flood(
         GridEnv env, int gxMin, int gzMin, int gxMax, int gzMax,
-        Func<int, int, float, bool> impassable, out int seeds) =>
-        RubberBandPrune.PerimeterOutsideFlood(
-            gxMin, gzMin, gxMax, gzMax, env.CellY, env.WallBlocks, impassable, out seeds);
+        Func<int, int, float, bool>? impassable, out int seeds)
+    {
+        var result = new RubberBandPrune.FloodResult();
+        RubberBandPrune.DrainNow(RubberBandPrune.PerimeterOutsideFlood(
+            gxMin, gzMin, gxMax, gzMax, env.CellY, env.WallBlocks, impassable, result));
+        seeds = result.PerimeterSeedCount;
+        return result.OutsideCells;
+    }
 
     [Fact]
     public void OpenGrid_EveryCellIsOutside()
@@ -127,13 +140,17 @@ public class Pass1OutsideFloodTests
         Func<int, int, int, int, float, float, bool> stepGate =
             (_, _, _, _, ya, yb) => Math.Abs(ya - yb) > 0.5f;
 
-        var flat = RubberBandPrune.PerimeterOutsideFlood(
-            0, 0, 4, 4, (_, _) => 0f, stepGate, null, out _);
-        Assert.Equal(25, flat.Count);
+        var flatResult = new RubberBandPrune.FloodResult();
+        RubberBandPrune.DrainNow(RubberBandPrune.PerimeterOutsideFlood(
+            0, 0, 4, 4, (_, _) => 0f, stepGate, null, flatResult));
+        Assert.Equal(25, flatResult.OutsideCells.Count);
 
-        var stepped = RubberBandPrune.PerimeterOutsideFlood(
-            0, 0, 4, 4, (gx, gz) => gx + gz, stepGate, null, out var seeds);
-        Assert.Equal(seeds, stepped.Count);                   // no expansion past seeds
+        var steppedResult = new RubberBandPrune.FloodResult();
+        RubberBandPrune.DrainNow(RubberBandPrune.PerimeterOutsideFlood(
+            0, 0, 4, 4, (gx, gz) => gx + gz, stepGate, null, steppedResult));
+        var stepped = steppedResult.OutsideCells;
+        // no expansion past seeds
+        Assert.Equal(steppedResult.PerimeterSeedCount, stepped.Count);
         Assert.DoesNotContain(GridEnv.Key(2, 2), stepped);    // interior never reached
     }
 }

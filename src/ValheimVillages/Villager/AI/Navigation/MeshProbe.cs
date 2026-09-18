@@ -82,6 +82,14 @@ namespace ValheimVillages.Villager.AI.Navigation
                 $"[vv_probe] pos=({pos.x:F2}, {pos.y:F2}, {pos.z:F2}) " +
                 $"source={(fromPlayer ? "player" : "args")}");
 
+            // Most sections below read the LIVE navmesh, which a rebake rewrites underneath
+            // them. That used to be a one-frame window; a partition now spreads over ~100
+            // frames to stay off the player's frame, so it is wide enough to hit by hand.
+            if (TaskQueue.PartitionRunner.IsAnyRunning)
+                sb.AppendLine(
+                    $"!! partition rebaking ({TaskQueue.PartitionRunner.RunningVillage}) — " +
+                    "navmesh readings below are mid-rewrite; re-run once it completes.");
+
             sb.AppendLine(
                 $"--- agent slot 31 (agentTypeID={VillagerAgentType.UnityAgentTypeID}, registered={VillagerAgentType.IsRegistered}) ---");
             ReportNavMeshSample(sb, pos, VillagerAgentType.UnityAgentTypeID);
@@ -96,7 +104,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.AppendLine("--- capsule-hit colliders (would trigger rej_blocked) ---");
             ReportCapsuleHits(sb, pos);
 
-            sb.AppendLine("--- RegionBuilder.CachedTriangles within 2m ---");
+            sb.AppendLine("--- RegionBuilder cached triangles (all villages) within 2m ---");
             ReportCachedTriangles(sb, pos);
 
             sb.AppendLine("--- NavMesh bake sources (within 5m) ---");
@@ -238,29 +246,45 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
         }
 
+        /// <summary>First segment of a village GUID — enough to tell two villages apart.</summary>
+        private static string ShortVillageId(string villageId)
+        {
+            if (string.IsNullOrEmpty(villageId)) return "(unkeyed)";
+            var dash = villageId.IndexOf('-');
+            return dash > 0 ? villageId.Substring(0, dash) : villageId;
+        }
+
         private static void ReportCachedTriangles(StringBuilder sb, Vector3 pos)
         {
-            var cached = RegionBuilder.CachedTriangles;
-            if (cached == null || cached.Count == 0)
+            if (RegionBuilder.TotalTriangleCount == 0)
             {
                 sb.AppendLine(
                     "  CachedTriangles is empty — RegionBuilder has not run, or last run produced 0 triangles");
                 return;
             }
 
-            sb.AppendLine($"  (total in cache: {cached.Count})");
+            var perVillage = new List<string>();
+            foreach (var kv in RegionBuilder.TrianglesByVillage())
+                perVillage.Add($"{ShortVillageId(kv.Key)}={kv.Value.Count}");
+            sb.AppendLine(
+                $"  (total in cache: {RegionBuilder.TotalTriangleCount} across " +
+                $"{perVillage.Count} village(s): {string.Join(", ", perVillage.ToArray())})");
 
             // Closest cached triangle (any distance) — tells us how far away the
             // pipeline thinks the nearest walkable surface is, even if it's
-            // well beyond the 2m radius.
+            // well beyond the 2m radius. Attributed to its village, because
+            // "closest is 287m away" reads very differently once you know it
+            // belongs to a DIFFERENT village than the one you are standing in.
             var closestDist = float.MaxValue;
             var closestCentroid = Vector3.zero;
             var closestRegion = "";
+            var closestVillage = "";
             var withinY = 0; // triangles at the same altitude (±2m) within 10m XZ
             var within2m = 0;
             var within5m = 0;
 
-            foreach (var t in cached)
+            foreach (var kv in RegionBuilder.TrianglesByVillage())
+            foreach (var t in kv.Value)
             {
                 var centroid = (t.V0 + t.V1 + t.V2) / 3f;
                 var d = Vector3.Distance(centroid, pos);
@@ -269,6 +293,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     closestDist = d;
                     closestCentroid = centroid;
                     closestRegion = t.RegionId ?? "(none)";
+                    closestVillage = ShortVillageId(kv.Key);
                 }
 
                 if (d <= 2f) within2m++;
@@ -286,7 +311,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             sb.AppendLine(
-                $"  closest cached: ({closestCentroid.x:F2}, {closestCentroid.y:F2}, {closestCentroid.z:F2}) dist={closestDist:F2}m region={closestRegion}");
+                $"  closest cached: ({closestCentroid.x:F2}, {closestCentroid.y:F2}, {closestCentroid.z:F2}) dist={closestDist:F2}m region={closestRegion} village={closestVillage}");
             sb.AppendLine(
                 $"  within 2m: {within2m}    within 5m: {within5m}    same-altitude (±2m Y) within 10m XZ: {withinY}");
 
@@ -530,9 +555,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var triCount = 0;
                 var totalArea = 0f;
                 float yMin = float.MaxValue, yMax = float.MinValue;
-                var cachedTris = RegionBuilder.CachedTriangles;
-                if (cachedTris != null)
-                    foreach (var ct in cachedTris)
+                foreach (var ct in RegionBuilder.AllTriangles())
                     {
                         if (ct.RegionId != resolved) continue;
                         triCount++;
@@ -594,33 +617,35 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         private static void ReportFloodReachability(StringBuilder sb, Vector3 pos)
         {
-            if (!RubberBandPrune.HasSnapshot ||
-                RubberBandPrune.LastOutsideCells == null ||
-                RubberBandPrune.LastXzMaxYTerrain == null ||
-                RubberBandPrune.LastXzMaxY == null ||
-                RubberBandPrune.LastCell <= 0f)
+            // Resolved by POSITION, not "most recent partition". These were last-run-wins
+            // statics, so probing one village printed the other village's flood grid.
+            var snap = RubberBandPrune.SnapshotAt(pos);
+            if (snap?.OutsideCells == null || snap.XzMaxYTerrain == null
+                || snap.XzMaxY == null || snap.Cell <= 0f)
             {
-                sb.AppendLine("  No RubberBandPrune snapshot — run vv_repartition first");
+                sb.AppendLine(
+                    "  No flood snapshot for the village at this point — run vv_repartition, " +
+                    "or this position is not inside a village");
                 return;
             }
 
-            var cell = RubberBandPrune.LastCell;
-            var mask = RubberBandPrune.LastPieceMask;
+            var cell = snap.Cell;
+            var mask = snap.PieceMask;
             var gx = Mathf.FloorToInt(pos.x / cell);
             var gz = Mathf.FloorToInt(pos.z / cell);
             var selfKey = RubberBandPrune.DiagnoseXzKey(gx, gz);
-            var selfOutside = RubberBandPrune.LastOutsideCells.Contains(selfKey);
-            var selfPopulated = RubberBandPrune.LastXzMaxY.ContainsKey(selfKey);
-            var selfY = RubberBandPrune.DiagnoseCellY(gx, gz);
-            var selfSurfaceY = RubberBandPrune.DiagnoseSurfaceMaxY(gx, gz);
+            var selfOutside = snap.OutsideCells.Contains(selfKey);
+            var selfPopulated = snap.XzMaxY.ContainsKey(selfKey);
+            var selfY = RubberBandPrune.DiagnoseCellY(snap, gx, gz);
+            var selfSurfaceY = RubberBandPrune.DiagnoseSurfaceMaxY(snap, gx, gz);
             sb.AppendLine(
                 $"  cell gx={gx} gz={gz}  floodY={selfY:F2} (terrain; what Pass 1 walks on)  " +
                 $"surfaceMaxY={selfSurfaceY:F2} (incl. pieces/roofs)  " +
                 $"populated={(selfPopulated ? "yes" : "no")}  " +
                 $"in_outsideCells={(selfOutside ? "YES" : "NO")}");
             sb.AppendLine(
-                $"  bake bounds gx=[{RubberBandPrune.LastGxMin}..{RubberBandPrune.LastGxMax}] " +
-                $"gz=[{RubberBandPrune.LastGzMin}..{RubberBandPrune.LastGzMax}] " +
+                $"  bake bounds gx=[{snap.GxMin}..{snap.GxMax}] " +
+                $"gz=[{snap.GzMin}..{snap.GzMax}] " +
                 $"cell={cell:F2}m  pieceMask=0x{mask:X}");
 
             string[] cardLabels = { "E ", "W ", "N ", "S " };
@@ -632,28 +657,38 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             sb.AppendLine("  4-connected neighbors (used by Pass 1):");
             for (var i = 0; i < 4; i++)
-                ReportNeighbor(sb, cardLabels[i], gx, gz, cardDx[i], cardDz[i], cell, mask);
-            sb.AppendLine("  8-connected diagonal neighbors (NOT used by Pass 1 today):");
+                ReportNeighbor(sb, snap, cardLabels[i], gx, gz, cardDx[i], cardDz[i], cell, mask, true);
+            // No WallBlocks column for these: the flood is 4-connected, so there IS no
+            // gate on a diagonal step. Probing one meant building a waist box spanning
+            // the wrong volume and reporting its answer as though Pass 1 had consulted it.
+            sb.AppendLine("  8-connected diagonal neighbors (NOT used by Pass 1 — no gate):");
             for (var i = 0; i < 4; i++)
-                ReportNeighbor(sb, diagLabels[i], gx, gz, diagDx[i], diagDz[i], cell, mask);
+                ReportNeighbor(sb, snap, diagLabels[i], gx, gz, diagDx[i], diagDz[i], cell, mask, false);
         }
 
-        private static void ReportNeighbor(StringBuilder sb, string label,
-            int gx, int gz, int dx, int dz, float cell, int mask)
+        private static void ReportNeighbor(StringBuilder sb,
+            RubberBandPrune.FloodSnapshot snap, string label,
+            int gx, int gz, int dx, int dz, float cell, int mask, bool withGate)
         {
             int ngx = gx + dx, ngz = gz + dz;
             var nKey = RubberBandPrune.DiagnoseXzKey(ngx, ngz);
-            var nOutside = RubberBandPrune.LastOutsideCells.Contains(nKey);
-            var nPopulated = RubberBandPrune.LastXzMaxY.ContainsKey(nKey);
-            var yA = RubberBandPrune.DiagnoseCellY(gx, gz);
-            var yB = RubberBandPrune.DiagnoseCellY(ngx, ngz);
-            var blocked = RubberBandPrune.Diagnose(gx, gz, ngx, ngz,
-                yA, yB, cell, mask, out var hits);
-            sb.AppendLine(
-                $"    {label} gx={ngx} gz={ngz}  Y={yB:F2}  " +
-                $"populated={(nPopulated ? "y" : "n")}  outside={(nOutside ? "YES" : "no ")}  " +
-                $"WallBlocks={(blocked ? "TRUE" : "false")}" +
-                (blocked ? $"  hits=[{hits}]" : ""));
+            var nOutside = snap.OutsideCells.Contains(nKey);
+            var nPopulated = snap.XzMaxY.ContainsKey(nKey);
+            var yB = RubberBandPrune.DiagnoseCellY(snap, ngx, ngz);
+
+            var line = $"    {label} gx={ngx} gz={ngz}  Y={yB:F2}  " +
+                       $"populated={(nPopulated ? "y" : "n")}  outside={(nOutside ? "YES" : "no ")}";
+
+            if (withGate)
+            {
+                var yA = RubberBandPrune.DiagnoseCellY(snap, gx, gz);
+                var blocked = RubberBandPrune.Diagnose(gx, gz, ngx, ngz,
+                    yA, yB, cell, mask, out var hits);
+                line += $"  WallBlocks={(blocked ? "TRUE" : "false")}"
+                        + (blocked ? $"  hits=[{hits}]" : "");
+            }
+
+            sb.AppendLine(line);
         }
     }
 }

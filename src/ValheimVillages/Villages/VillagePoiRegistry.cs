@@ -54,7 +54,13 @@ namespace ValheimVillages.Villages
 
             var hullBounds = new Bounds(center,
                 new Vector3(halfExtents.x * 2f, halfExtents.y * 2f, halfExtents.z * 2f));
-            var outsideCells = RubberBandPrune.ComputeOutsideCellsForBake(hullBounds);
+            // Its own cache scope, and never incremental. This flood runs over the PATROL
+            // HULL, not the bake bounds, so its wall-near prefilter is built from a
+            // different box — sharing the bake flood's cached gates could differ at the
+            // rim where a collider straddles one box but not the other. Correctness before
+            // the ~25ms this would save.
+            var outsideCells = RubberBandPrune.ComputeOutsideCellsForHull(
+                hullBounds, area.VillageId + "|poi", null);
 
             var pois = new List<KnownLocation>();
             var hits = Physics.OverlapBox(center, halfExtents, Quaternion.identity);

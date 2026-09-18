@@ -54,8 +54,12 @@ namespace ValheimVillages
                                         ?? plugin.gameObject.AddComponent<DebugCaptureBehaviour>();
                 _captureBehaviour.Enqueue(request);
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "DebugLog.Capture.cs", ex);
                 /* capture must never break the mod */
             }
         }
@@ -267,8 +271,12 @@ namespace ValheimVillages
                 {
                     if (EnvMan.instance != null) worldTime = EnvMan.instance.GetDayFraction();
                 }
-                catch
+                catch (System.Exception ex)
                 {
+                    // Deliberately non-fatal (see below), but no longer silent: a
+                    // diagnostic that fails without a word is worse than no diagnostic.
+                    Diagnostics.SwallowedFailure.Note(
+                        "DebugLog.Capture.cs", ex);
                     /* EnvMan may be missing on early reload */
                 }
 
@@ -295,8 +303,12 @@ namespace ValheimVillages
                 {
                     root = Paths.ConfigPath;
                 }
-                catch
+                catch (System.Exception ex)
                 {
+                    // Deliberately non-fatal (see below), but no longer silent: a
+                    // diagnostic that fails without a word is worse than no diagnostic.
+                    Diagnostics.SwallowedFailure.Note(
+                        "DebugLog.Capture.cs", ex);
                     root = ".";
                 }
 
@@ -305,8 +317,12 @@ namespace ValheimVillages
                     dir = Path.Combine(dir, req.OutputSubdir);
                 Directory.CreateDirectory(dir);
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "DebugLog.Capture.cs", ex);
                 return;
             }
 
@@ -320,8 +336,12 @@ namespace ValheimVillages
                 var png = tex.EncodeToPNG();
                 File.WriteAllBytes(pngPath, png);
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "DebugLog.Capture.cs", ex);
                 /* swallow — sidecar below still useful */
             }
             finally
@@ -353,8 +373,12 @@ namespace ValheimVillages
                 sb.Append('}');
                 File.WriteAllText(jsonPath, sb.ToString());
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "DebugLog.Capture.cs", ex);
                 /* swallow */
             }
         }
@@ -406,8 +430,12 @@ namespace ValheimVillages
                     sb.Append('}');
                 }
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "DebugLog.Capture.cs", ex);
                 /* swallow — diagnostics must never break capture */
             }
             sb.Append(']');
@@ -515,8 +543,12 @@ namespace ValheimVillages
                 cam.transform.position = m_anchorPos;
                 cam.transform.rotation = m_anchorRot;
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "DebugLog.Capture.cs", ex);
                 /* swallow */
             }
         }
@@ -563,8 +595,12 @@ namespace ValheimVillages
             {
                 if (hud != null) savedHudVisible = hud.gameObject.activeSelf;
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "DebugLog.Capture.cs", ex);
                 /* Hud API may differ across Valheim versions; degrade gracefully */
             }
 
@@ -638,8 +674,12 @@ namespace ValheimVillages
                     m_player.transform.rotation = m_savedRot;
                 }
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "DebugLog.Capture.cs", ex);
                 /* swallow — restore must never throw past the capture pipeline */
             }
 
@@ -653,8 +693,12 @@ namespace ValheimVillages
             {
                 if (m_gameCamera != null) m_gameCamera.enabled = m_savedGameCameraEnabled;
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "DebugLog.Capture.cs", ex);
                 /* swallow */
             }
 
@@ -662,8 +706,12 @@ namespace ValheimVillages
             {
                 if (m_hud != null) m_hud.gameObject.SetActive(m_savedHudVisible);
             }
-            catch
+            catch (System.Exception ex)
             {
+                // Deliberately non-fatal (see below), but no longer silent: a
+                // diagnostic that fails without a word is worse than no diagnostic.
+                Diagnostics.SwallowedFailure.Note(
+                    "DebugLog.Capture.cs", ex);
                 /* swallow */
             }
         }

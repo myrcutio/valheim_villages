@@ -1,3 +1,5 @@
+using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -197,7 +199,94 @@ namespace ValheimVillages.TaskQueue.Handlers
             return true;
         }
 
+        /// <summary>Attribute names carrying an incremental partition's changed-area rect.</summary>
+        private static readonly string[] DirtyRectKeys =
+            { "dirty_min_x", "dirty_min_z", "dirty_max_x", "dirty_max_z" };
+
+        /// <summary>
+        ///     Read the changed-area rect off the task. All four bounds or none: a task that
+        ///     carries some of them is malformed, and silently treating it as a full rebuild
+        ///     would turn an enqueuer bug into a permanent, invisible performance regression.
+        /// </summary>
+        private static DirtyRect? ParseDirtyRect(VillagerTask task)
+        {
+            if (task?.Attributes == null) return null;
+
+            var present = 0;
+            var values = new float[DirtyRectKeys.Length];
+            for (var i = 0; i < DirtyRectKeys.Length; i++)
+            {
+                if (!task.Attributes.TryGetValue(DirtyRectKeys[i], out var raw)) continue;
+                if (!float.TryParse(raw, NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out values[i]))
+                    throw new FormatException(
+                        $"hna_partition attribute {DirtyRectKeys[i]}='{raw}' is not a number.");
+                present++;
+            }
+
+            if (present == 0) return null;
+            if (present != DirtyRectKeys.Length)
+                throw new ArgumentException(
+                    $"hna_partition carries {present}/{DirtyRectKeys.Length} dirty-rect bounds; " +
+                    "an incremental partition needs all four or none.");
+
+            return new DirtyRect(values[0], values[1], values[2], values[3]);
+        }
+
+        /// <summary>
+        ///     Start this village's partition and return immediately. The work itself is a
+        ///     coroutine on <see cref="PartitionRunner" /> that yields whenever the frame
+        ///     budget is spent — see that class for why a task that runs to completion inside
+        ///     one Update is the wrong shape for 700ms of work.
+        /// </summary>
         public TaskResult Handle(VillagerTask task, VillagerActivityLog activityLog)
+        {
+            if (task?.Attributes == null
+                || !task.Attributes.TryGetValue("village_id", out var villageId)
+                || string.IsNullOrEmpty(villageId))
+                throw new ArgumentException(
+                    "hna_partition requires a village_id attribute; every enqueue site sets " +
+                    "one, and the in-flight guard and every cache are keyed by it.");
+
+            // A partition is already in flight — for THIS village or any other. Defer:
+            // partitions are one-at-a-time by contract (see PartitionRunner.s_inFlight for
+            // the shared statics that depend on it). The task must be re-queued rather than
+            // dropped, since it may carry a newer dirty rect than the one running.
+            if (PartitionRunner.IsAnyRunning)
+            {
+                task.NotBefore = Time.time + InFlightRetrySeconds;
+                var requeued = GlobalTaskQueue.Enqueue(task);
+                // Logged, not just returned: GlobalTaskQueue never surfaces a handler's
+                // TaskResult.Data anywhere, so without this the guard that keeps two
+                // partitions from running concurrently — the one whose absence corrupted a
+                // village down to 10 regions — has no observable evidence that it fired.
+                DebugLog.Event("Region", "partition_deferred",
+                    ("village_key", villageId),
+                    ("running", PartitionRunner.RunningVillage),
+                    ("requeued", requeued));
+                return TaskResult.Ok(new Dictionary<string, string>
+                {
+                    { "village_key", villageId }, { "reason", "deferred_in_flight" },
+                });
+            }
+
+            PartitionRunner.Run(villageId, PartitionRoutine(task));
+            return TaskResult.Ok(new Dictionary<string, string>
+            {
+                { "village_key", villageId }, { "reason", "started" },
+            });
+        }
+
+        /// <summary>How long a task waits before retrying when this village is mid-partition.</summary>
+        private const float InFlightRetrySeconds = 1f;
+
+        /// <summary>
+        ///     The partition itself. Yields to <see cref="PartitionRunner.ShouldYield" />
+        ///     between stages so no single frame absorbs more than the budget. Its outcome is
+        ///     logged rather than returned: the task it came from completed the moment this
+        ///     coroutine started.
+        /// </summary>
+        private IEnumerator PartitionRoutine(VillagerTask task)
         {
             // Freeze villager movement across the rebuild + settle so a path
             // computed on the old navmesh can't run a villager off a ledge before
@@ -219,19 +308,25 @@ namespace ValheimVillages.TaskQueue.Handlers
             var seedsMark = PartitionProfile.Mark();
             anchors = ResolveWalkableSeeds(anchors);
             PartitionProfile.Since("seeds", seedsMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
             var village = ResolveVillage(task, anchors);
             if (village == null)
             {
                 Plugin.Log?.LogWarning(
                     "[Region] Partition skipped: no existing village resolved for this task " +
                     "(villages are created at registry placement; nothing to partition).");
-                return TaskResult.Ok(new Dictionary<string, string>
-                {
-                    { "regions", "0" }, { "links", "0" }, { "reason", "no_village" },
-                });
+                DebugLog.Event("Region", "partition_done",
+                    ("regions", 0), ("links", 0), ("reason", "no_village"));
+                yield break;
             }
 
             var villageKey = village.VillageId;
+
+            // A task carrying a dirty rect is an INCREMENTAL partition: only geometry near
+            // that rect is re-probed. A task without one is a full rebuild. There is no
+            // middle ground and no recovery mode — a half-specified rect is a bug in the
+            // enqueuer, so ParseDirtyRect throws rather than quietly rebuilding everything.
+            var dirtyRect = ParseDirtyRect(task);
 
             // Seed the box from THIS village's patrol ring only. Resolved after the village
             // (not before, as the combined-bounds version was) because the lookup is keyed by
@@ -277,10 +372,9 @@ namespace ValheimVillages.TaskQueue.Handlers
             else
             {
                 Plugin.Log?.LogInfo("[Region] Partition skipped: no village areas and no villager anchors.");
-                return TaskResult.Ok(new Dictionary<string, string>
-                {
-                    { "regions", "0" }, { "links", "0" }, { "reason", "no_anchors_or_areas" },
-                });
+                DebugLog.Event("Region", "partition_done",
+                    ("regions", 0), ("links", 0), ("reason", "no_anchors_or_areas"));
+                yield break;
             }
 
             // The footprint border is the outside-flood's SEED RING. Anchors +/- RegionBuildRadius
@@ -290,8 +384,9 @@ namespace ValheimVillages.TaskQueue.Handlers
             // NotWalkable, villagers stranded, registry stuck on "needs a perimeter wall"). Grow
             // the box until every player-built piece is inside it.
             var footprintMark = PartitionProfile.Mark();
-            ExpandFootprintToVillagePieces(anchors, ref minX, ref minZ, ref maxX, ref maxZ);
+            ExpandFootprintToVillagePieces(villageKey, anchors, ref minX, ref minZ, ref maxX, ref maxZ);
             PartitionProfile.Since("footprint", footprintMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
 
             // Bake a fresh NavMesh surface for the villager agent (slot 31)
             // over this village's bounds. Without this, RegionBuilder's
@@ -302,10 +397,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                 Plugin.Log?.LogError(
                     $"[Region] Partition aborted: no villager anchors for village '{villageKey}'. " +
                     "Cannot determine bake elevation without anchors — refusing to bake at sea-level fallback.");
-                return TaskResult.Ok(new Dictionary<string, string>
-                {
-                    { "regions", "0" }, { "links", "0" }, { "reason", "no_anchors_for_bake_y" },
-                });
+                DebugLog.Event("Region", "partition_done",
+                    ("regions", 0), ("links", 0), ("reason", "no_anchors_for_bake_y"));
+                yield break;
             }
 
             float bakeMinY = float.MaxValue, bakeMaxY = float.MinValue;
@@ -322,8 +416,12 @@ namespace ValheimVillages.TaskQueue.Handlers
                 new Vector3(maxX, bakeMaxY + bakeYPadding, maxZ));
 
             var bakeMark = PartitionProfile.Mark();
-            var bakeResult = NavMeshBakeManager.BakeVillage(bakeBounds, villageKey);
+            var bakeHolder = new NavMeshBakeManager.BakeResultHolder();
+            yield return NavMeshBakeManager.BakeVillage(
+                bakeBounds, villageKey, dirtyRect, bakeHolder);
+            var bakeResult = bakeHolder.Result;
             PartitionProfile.Since("bake", bakeMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
             DebugLog.Event("NavMeshBake", "village_bake",
                 ("success", bakeResult.Success),
                 ("sources", bakeResult.SourceCount),
@@ -332,6 +430,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("doors_blocked", bakeResult.DoorsBlocked),
                 ("door_pieces_dropped", bakeResult.DoorPiecesDropped),
                 ("beds_blocked", bakeResult.BedsBlocked),
+                ("outside_cells", bakeResult.OutsideCellsCount),
                 ("outside_cells_blocked", bakeResult.OutsideCellsBlocked),
                 ("duration_ms", bakeResult.DurationMs),
                 ("terrain_ms", bakeResult.TerrainDurationMs),
@@ -349,13 +448,21 @@ namespace ValheimVillages.TaskQueue.Handlers
             // surfaces should override raw terrain at the same XZ + height
             // bucket.
             var triTerrainMark = PartitionProfile.Mark();
-            var terrainResult = RegionBuilder.BuildFromTriangulation(
-                SurfaceKind.Terrain, minX, minZ, maxX, maxZ, anchors);
+            var terrainHolder = new RegionBuilder.BuildResultHolder();
+            yield return RegionBuilder.BuildFromTriangulation(
+                villageKey, SurfaceKind.Terrain, minX, minZ, maxX, maxZ, anchors, dirtyRect,
+                terrainHolder);
+            var terrainResult = terrainHolder.Result;
             PartitionProfile.Since("tri_terrain", triTerrainMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
             var triPieceMark = PartitionProfile.Mark();
-            var pieceResult = RegionBuilder.BuildFromTriangulation(
-                SurfaceKind.Piece, minX, minZ, maxX, maxZ, anchors);
+            var pieceHolder = new RegionBuilder.BuildResultHolder();
+            yield return RegionBuilder.BuildFromTriangulation(
+                villageKey, SurfaceKind.Piece, minX, minZ, maxX, maxZ, anchors, dirtyRect,
+                pieceHolder);
+            var pieceResult = pieceHolder.Result;
             PartitionProfile.Since("tri_piece", triPieceMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
 
             // Cross-kind BFS reachability: prune terrain regions not
             // reachable from anchors through the combined terrain↔piece
@@ -373,33 +480,42 @@ namespace ValheimVillages.TaskQueue.Handlers
             var crossKindMark = PartitionProfile.Mark();
             var crossKindAdj = BuildCrossKindAdjacency(terrainResult, pieceResult, anchors);
             PartitionProfile.Since("crosskind", crossKindMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
 
 
             // Combine terrain + piece region sets (union + shadow suppression +
             // cascade) into the inputs the prune/graph stages consume.
             var combineMark = PartitionProfile.Mark();
             RegionBuilder.CombineTerrainAndPiece(
+                villageKey,
                 terrainResult, pieceResult,
                 out var combinedRegionIds, out var combinedCentroids, out var combinedLinks,
                 out var combinedLookup, out var combinedBoundary, out var combinedTriangles,
                 out var kindMap);
             PartitionProfile.Since("combine", combineMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
 
             // Rubber-band prune: drop regions whose footprint sits outside
             // the outermost layer of player-placed wall pieces.
             var pruneMark = PartitionProfile.Mark();
-            var rbStats = RubberBandPrune.Apply(
+            var pruneResult = new RubberBandPrune.PruneResult();
+            yield return RubberBandPrune.Apply(
                 combinedRegionIds, combinedCentroids, combinedLookup,
                 combinedBoundary, combinedLinks, kindMap, combinedTriangles,
                 anchors,
                 minX, minZ, maxX, maxZ,
-                out var droppedRubberBand,
-                out var pass3DiscoveredEdges,
-                out var anchorReachableCells,
-                out var outsideCells,
-                out var prunedPieceKeys,
-                out var gateMarkers);
+                villageKey,
+                dirtyRect,
+                pruneResult);
+            var rbStats = pruneResult.Stats;
+            var droppedRubberBand = pruneResult.DroppedRegionIds;
+            var pass3DiscoveredEdges = pruneResult.Pass3DiscoveredEdges;
+            var anchorReachableCells = pruneResult.AnchorReachableCells;
+            var outsideCells = pruneResult.OutsideCells;
+            var prunedPieceKeys = pruneResult.PrunedPieceKeys;
+            var gateMarkers = pruneResult.GateMarkers;
             PartitionProfile.Since("prune", pruneMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
 
             // Merge Pass 3 discovered edges into the cross-kind adjacency
             // (if it was built) and publish the merged graph to
@@ -491,13 +607,12 @@ namespace ValheimVillages.TaskQueue.Handlers
                         $"existing graph '{existing.RegisteredVillageKey}' ({existing.RegionCount} regions, " +
                         $"{existing.LinkCount} links) — treating as a failed mutation of the same village; " +
                         "keeping the existing graph rather than clobbering it.");
-                    return TaskResult.Ok(new Dictionary<string, string>
-                    {
-                        { "regions", existing.RegionCount.ToString() },
-                        { "links", existing.LinkCount.ToString() },
-                        { "village_key", existing.RegisteredVillageKey ?? villageKey },
-                        { "reason", "degenerate_kept_existing" },
-                    });
+                    DebugLog.Event("Region", "partition_done",
+                        ("regions", existing.RegionCount),
+                        ("links", existing.LinkCount),
+                        ("village_key", existing.RegisteredVillageKey ?? villageKey),
+                        ("reason", "degenerate_kept_existing"));
+                    yield break;
                 }
             }
 
@@ -512,6 +627,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             // only on a populated graph.
             graph.SetClassification(outsideCells, anchorReachableCells, prunedPieceKeys);
             PartitionProfile.Since("commit_graph", commitGraphMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
 
             // Perimeter-wall requirement: if the bake's raw outside flood reaches the
             // registry cell, the village isn't sealed by a wall. Persist the flag so the
@@ -523,11 +639,39 @@ namespace ValheimVillages.TaskQueue.Handlers
             // village?" instead of guessing with a radius around one villager's anchor.
             village.SetFootprint(minX, minZ, maxX, maxZ);
 
-            if (bakeResult.OutsideCells != null &&
-                village.TryGetAnchor(VillageAnchor.Registry, out var registryPos))
+            if (bakeResult.OutsideCells != null)
             {
-                village.NeedsPerimeterWall =
-                    RubberBandPrune.IsOutsideCell(registryPos, bakeResult.OutsideCells);
+                // Test the registry AND the anchor triad, not the registry alone.
+                //
+                // The registry pivot sits inside the registry building's own stone shell —
+                // measured on a deliberately breached village: all four of its neighbouring
+                // cells report WallBlocks=TRUE, so no outside flood can reach it whatever
+                // happens to the perimeter. The flag therefore only ever fired for a village
+                // whose registry still stood in the open, i.e. a brand new one, and read
+                // False for an established village with a hole in its wall — which is
+                // precisely the state it claims to describe.
+                //
+                // The triad is by construction walkable ground inside the village, so the
+                // flood reaching any of it means the village genuinely is not sealed. On a
+                // village's very first partition the triad does not exist yet (
+                // EnsureAnchorTriad runs later in this method), and the registry test alone
+                // is the right answer for that case anyway.
+                var unsealed = false;
+                if (village.TryGetAnchor(VillageAnchor.Registry, out var registryPos))
+                    unsealed = RubberBandPrune.IsOutsideCell(registryPos, bakeResult.OutsideCells);
+
+                if (!unsealed)
+                    foreach (var triad in village.TriadAnchors)
+                        if (RubberBandPrune.IsOutsideCell(triad, bakeResult.OutsideCells))
+                        {
+                            unsealed = true;
+                            break;
+                        }
+
+                if (unsealed != village.NeedsPerimeterWall)
+                    DebugLog.Event("Region", "perimeter_wall_changed",
+                        ("village_key", villageKey), ("needs_wall", unsealed));
+                village.NeedsPerimeterWall = unsealed;
             }
 
             if (gateMarkers.Count > 0)
@@ -556,6 +700,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             var invalidateMark = PartitionProfile.Mark();
             var pathsInvalidated = VillagerAIManager.InvalidatePathsAfterRebake();
             PartitionProfile.Since("invalidate_paths", invalidateMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
             if (pathsInvalidated > 0)
                 Plugin.Log?.LogInfo(
                     $"[Region] Invalidated cached paths for {pathsInvalidated} villager(s) after rebake");
@@ -569,10 +714,12 @@ namespace ValheimVillages.TaskQueue.Handlers
             // TODO: re-enable door links once the region graph is validated
             // RegionBuilder.CollectDoorLinks(graph, minX, minZ, maxX, maxZ, doorLinks);
 
-            var regionCentersStr = BuildRegionCentersString(graph);
-            var linksStr = BuildLinksSummaryString(combinedLinks);
-            PathTelemetry.LogRegionGraph(combinedRegionIds.Count, combinedLinks.Count,
-                minX, minZ, maxX, maxZ, regionCentersStr, linksStr);
+            // Only build the (per-region, per-link) summary strings if something will read
+            // them — they are pure input to a telemetry line that is off by default.
+            if (Settings.DevSettings.WritePathTelemetry)
+                PathTelemetry.LogRegionGraph(combinedRegionIds.Count, combinedLinks.Count,
+                    minX, minZ, maxX, maxZ,
+                    BuildRegionCentersString(graph), BuildLinksSummaryString(combinedLinks));
 
             Plugin.Log?.LogInfo(
                 $"[Region] Partition complete: {combinedRegionIds.Count} regions " +
@@ -586,6 +733,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             var saveMark = PartitionProfile.Mark();
             village.SaveGraph();
             PartitionProfile.Since("save_graph", saveMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
 
             // Now that the graph is rebuilt + saved, create/repair/validate the village's
             // self-healing anchor triad (3 walkable, mutually connected, founder-reachable
@@ -595,10 +743,23 @@ namespace ValheimVillages.TaskQueue.Handlers
             var triadMark = PartitionProfile.Mark();
             VillageRegistry.EnsureAnchorTriad(village);
             PartitionProfile.Since("anchor_triad", triadMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
+
+            // Re-seat every village's orders on the tokens physically inside it. All
+            // villages, not just this one: a token moved OUT of another village has to be
+            // released there, and that village may not repartition for a long time. Each
+            // village only writes its own orders, so doing them together is safe.
+            // Runs here because the footprint it scopes by was just published above.
+            var reseated = Villages.WorkOrderAdoption.ReconcileAll();
+            if (reseated > 0)
+                DebugLog.Event("Region", "work_orders_reseated",
+                    ("triggered_by", villageKey), ("changed", reseated));
+            if (PartitionRunner.ShouldYield()) yield return null;
 
             var areaMark = PartitionProfile.Mark();
             VillageAreaManager.RefreshFromVillage(village);
             PartitionProfile.Since("area_refresh", areaMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
 
             // The boundary may have grown or shrunk (e.g. the player walled off a
             // section). InvalidatePathsAfterRebake above only cleared the low-level
@@ -609,20 +770,20 @@ namespace ValheimVillages.TaskQueue.Handlers
             var patrolMark = PartitionProfile.Mark();
             var routesRebuilt = VillagerAIManager.ResetPatrolRoutesAfterRepartition();
             PartitionProfile.Since("patrol_routes", patrolMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
             if (routesRebuilt > 0)
                 Plugin.Log?.LogInfo(
                     $"[Region] Rebuilt patrol routes for {routesRebuilt} patroller(s) after repartition");
 
             PartitionProfile.Emit(villageKey);
 
-            return TaskResult.Ok(new Dictionary<string, string>
-            {
-                { "regions", combinedRegionIds.Count.ToString() },
-                { "regions_terrain", terrainResult.RegionIds.Count.ToString() },
-                { "regions_piece", pieceResult.RegionIds.Count.ToString() },
-                { "links", combinedLinks.Count.ToString() },
-                { "village_key", villageKey },
-            });
+            DebugLog.Event("Region", "partition_done",
+                ("regions", combinedRegionIds.Count),
+                ("regions_terrain", terrainResult.RegionIds.Count),
+                ("regions_piece", pieceResult.RegionIds.Count),
+                ("links", combinedLinks.Count),
+                ("village_key", villageKey),
+                ("reason", "ok"));
         }
 
         private static string BuildRegionCentersString(RegionGraph graph)
@@ -778,7 +939,32 @@ namespace ValheimVillages.TaskQueue.Handlers
         ///         must NOT drag the footprint outward.
         ///     </para>
         /// </summary>
+        /// <summary>
+        ///     True when <paramref name="pos" /> sits strictly closer to some other village's
+        ///     anchor than to this village's anchor centroid. A plain Voronoi split on XZ —
+        ///     it needs no graph, which matters because this runs while deciding the bounds
+        ///     the graph will be built from.
+        /// </summary>
+        private static bool IsNearerToAnotherVillage(
+            Vector3 pos, float cx, float cz, List<Vector3> rivalAnchors)
+        {
+            if (rivalAnchors.Count == 0) return false;
+
+            var dx = pos.x - cx;
+            var dz = pos.z - cz;
+            var ownSq = dx * dx + dz * dz;
+            for (var i = 0; i < rivalAnchors.Count; i++)
+            {
+                var rdx = pos.x - rivalAnchors[i].x;
+                var rdz = pos.z - rivalAnchors[i].z;
+                if (rdx * rdx + rdz * rdz < ownSq) return true;
+            }
+
+            return false;
+        }
+
         private static void ExpandFootprintToVillagePieces(
+            string villageKey,
             List<Vector3> anchors, ref float minX, ref float minZ, ref float maxX, ref float maxZ)
         {
             if (anchors == null || anchors.Count == 0) return;
@@ -801,13 +987,33 @@ namespace ValheimVillages.TaskQueue.Handlers
                 new Vector3(FootprintScanRadius, 5000f, FootprintScanRadius),
                 Quaternion.identity, mask, QueryTriggerInteraction.Ignore);
 
+            // Other villages' anchors, so a piece can be attributed to the nearest village
+            // rather than swallowed by whichever one happens to be partitioning. The scan box
+            // is FootprintScanRadius (100m) per side, so with two settlements closer than
+            // 200m this village's footprint would otherwise grow to enclose the neighbour's
+            // build — the same class of cross-village bleed that TryGetCombinedBounds caused.
+            var rivalAnchors = new List<Vector3>();
+            foreach (var other in VillageRegistry.EnumerateAll())
+            {
+                if (other == null || other.VillageId == villageKey) continue;
+                var a = other.Anchor;
+                if (a != Vector3.zero) rivalAnchors.Add(a);
+            }
+
             float pMinX = float.MaxValue, pMinZ = float.MaxValue;
             float pMaxX = float.MinValue, pMaxZ = float.MinValue;
             var pieces = 0;
+            var foreignPieces = 0;
             foreach (var col in hits)
             {
                 if (col == null) continue;
                 if (col.GetComponentInParent<Piece>() == null) continue;
+                if (IsNearerToAnotherVillage(col.transform.position, cx, cz, rivalAnchors))
+                {
+                    foreignPieces++;
+                    continue;
+                }
+
                 var b = col.bounds;
                 if (b.min.x < pMinX) pMinX = b.min.x;
                 if (b.min.z < pMinZ) pMinZ = b.min.z;
@@ -815,6 +1021,11 @@ namespace ValheimVillages.TaskQueue.Handlers
                 if (b.max.z > pMaxZ) pMaxZ = b.max.z;
                 pieces++;
             }
+
+            if (foreignPieces > 0)
+                Plugin.Log?.LogInfo(
+                    $"[Region] Footprint scan for {villageKey} ignored {foreignPieces} piece(s) " +
+                    "nearer to another village");
 
             if (pieces == 0) return;
 

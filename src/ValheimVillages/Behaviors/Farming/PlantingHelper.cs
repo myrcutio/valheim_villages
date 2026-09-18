@@ -41,12 +41,9 @@ namespace ValheimVillages.Behaviors.Farming
             // classify the hull).
             var shellGraph = VillageRegistry.GraphAt(center);
 
-            DebugLog.Append("PlantingHelper.cs:FindPlantingPosition", "Spacing check start",
-                new Dictionary<string, object>
-                {
-                    { "plantSpacing", plantSpacing }, { "growRadius", growRadius }, { "searchRadius", searchRadius },
-                    { "center", center.ToString() },
-                }, "H3", "run1");
+            DebugLog.Event("Farming", "plant_spacing_check",
+                ("plantSpacing", plantSpacing), ("growRadius", growRadius),
+                ("searchRadius", searchRadius), ("center", center));
 
             for (var r = 0f; r <= searchRadius; r += plantSpacing)
             {

@@ -49,8 +49,14 @@ namespace ValheimVillages.Villages
             var villageId = zdo.GetString(Village.IdKey);
             if (string.IsNullOrEmpty(villageId)) return;
 
-            var village = VillageRegistry.FindById(villageId);
-            if (village == null || !village.IsInvalid) return; // only reap FAILED villages
+            // A village is reapable once nothing is left of it: no living villagers and no
+            // registry piece. NOT "IsInvalid" — that flag means triad validation failed,
+            // which a live, working village sets whenever its wall is breached, so reaping
+            // on it deleted villages out from under their villagers.
+            //
+            // This runs as a WearNTear.Remove PREFIX, so THIS piece's ZDO still exists and
+            // is discounted by count. The host re-checks once it is actually gone.
+            if (!VillageRegistry.CanDelete(villageId, out _, 1)) return;
 
             RequestDelete(villageId);
         }
@@ -68,11 +74,19 @@ namespace ValheimVillages.Villages
 
             var village = VillageRegistry.FindById(villageId);
             if (village == null) return;
-            if (!village.IsInvalid) return; // never reap a working village
+
+            // Authoritative re-check. Delete() enforces this too; asking first keeps the
+            // reason in the log instead of only a refusal.
+            if (!VillageRegistry.CanDelete(villageId, out var blockedBy))
+            {
+                Plugin.Log?.LogInfo(
+                    $"[VillageCleanup] not reaping {villageId}: {blockedBy} (requestedBy={sender})");
+                return;
+            }
 
             VillageRegistry.Delete(villageId);
             Plugin.Log?.LogInfo(
-                $"[VillageCleanup] reaped invalid village {villageId} after its registry was removed " +
+                $"[VillageCleanup] reaped empty village {villageId} — no villagers, no registry " +
                 $"(requestedBy={sender})");
         }
     }

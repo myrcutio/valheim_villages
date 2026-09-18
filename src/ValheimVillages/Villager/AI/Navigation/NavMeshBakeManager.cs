@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using UnityEngine;
@@ -208,9 +209,42 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     village's prior instance (if any) — other villages' navmeshes are left
         ///     intact so they coexist (needed for a dedicated server holding all villages).
         /// </summary>
-        public static BakeResult BakeVillage(Bounds bounds, string villageId)
+        /// <summary>
+        ///     Carries <see cref="BakeVillage" />'s outcome out of the coroutine, since an
+        ///     iterator cannot return one.
+        /// </summary>
+        internal sealed class BakeResultHolder
         {
+            public BakeResult Result;
+        }
+
+        /// <summary>
+        ///     Bake this village's navmesh, yielding to the partition's frame budget and, on
+        ///     every bake after the first, running the native voxelizer ASYNCHRONOUSLY.
+        ///     <para>
+        ///     The voxelizer is one atomic native call — it cannot be sliced, so it was the
+        ///     one stage a frame budget could not help with (~55-90ms in a single frame).
+        ///     <c>UpdateNavMeshDataAsync</c> moves it off the main thread instead. It rewrites
+        ///     the EXISTING NavMeshData in place, which has a second benefit the old
+        ///     build-and-swap did not: the surface stays live across the rebake, so villagers
+        ///     mid-path are not standing on a removed navmesh for a frame.
+        ///     </para>
+        ///     <para>
+        ///     The first bake for a village has nothing to update, so it uses the synchronous
+        ///     <c>BuildNavMeshData</c>. That is a real one-off hitch on a village's very first
+        ///     partition and there is no async form of it to use instead.
+        ///     </para>
+        /// </summary>
+        internal static IEnumerator BakeVillage(
+            Bounds bounds, string villageId, DirtyRect? dirty, BakeResultHolder outResult)
+        {
+            // NOTE: BakeResult is a STRUCT. It must be published to the holder at EVERY
+            // exit, not once up front — an early publish hands the caller a by-value copy
+            // taken before a single field was filled in, and the caller silently reads
+            // zeros. (It did: every bake reported sources=0 success=false with an empty
+            // failure reason, because the code ran fine and none of its writes escaped.)
             var result = new BakeResult();
+            outResult.Result = result;
             var sw = Stopwatch.StartNew();
 
             if (!VillagerAgentType.IsRegistered)
@@ -218,7 +252,8 @@ namespace ValheimVillages.Villager.AI.Navigation
                 result.FailureReason = "agent_not_registered";
                 sw.Stop();
                 result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
-                return result;
+                outResult.Result = result;
+                yield break;
             }
 
             // NOTE: we do NOT RemoveAll() here — that would wipe every OTHER village's
@@ -281,6 +316,7 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             terrainSw.Stop();
             result.TerrainDurationMs = (float)terrainSw.Elapsed.TotalMilliseconds;
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Piece bake (includes phantom door blockers at the tail) ---
             var pieceSw = Stopwatch.StartNew();
@@ -321,7 +357,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             pieceSources.RemoveAll(s =>
                 s.component != null && s.component.GetComponentInParent<Bed>() != null);
 
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
             var phantomBeds = AddBedBlockers(pieceSources, bounds);
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
             result.BedsBlocked = phantomBeds;
 
             // Carve the flame footprint of every campfire/hearth/bonfire so the
@@ -331,6 +369,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             // floor/cooking-approach cells immediately NEXT TO a hearth stay
             // walkable — a cook must still be able to stand beside it.
             var phantomFires = AddFireBlockers(pieceSources, bounds);
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
             result.FiresBlocked = phantomFires;
 
             // Compute outside cells via a pre-bake perimeter flood (uses
@@ -343,14 +382,19 @@ namespace ValheimVillages.Villager.AI.Navigation
             // real piece colliders, so wall corners and small interior
             // obstacles (chairs, decorations) get carved properly.
             var outsideFloodMark = PartitionProfile.Mark();
-            var outsideCells = ValheimVillages.Villager.AI.Navigation
-                .RubberBandPrune.ComputeOutsideCellsForBake(bounds);
+            var floodHolder = new ValheimVillages.Villager.AI.Navigation.RubberBandPrune.FloodResult();
+            yield return ValheimVillages.Villager.AI.Navigation
+                .RubberBandPrune.ComputeOutsideCellsForBake(bounds, villageId, dirty, floodHolder);
+            var outsideCells = floodHolder.OutsideCells;
             PartitionProfile.Since("bake_outside_flood", outsideFloodMark);
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
             var phantomOutside = AddOutsideCellBlockers(pieceSources, outsideCells, bounds);
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
             result.OutsideCellsBlocked = phantomOutside;
             result.OutsideCellsCount = outsideCells.Count;
             result.OutsideCells = outsideCells;
 
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
             s_pieceSources.Clear();
             s_pieceSources.AddRange(pieceSources);
             // Doors are no longer phantom-blocked (doorways bake walkable); only
@@ -383,14 +427,27 @@ namespace ValheimVillages.Villager.AI.Navigation
             combinedSources.AddRange(pieceSources);
             if (combinedSources.Count > 0)
             {
+                var key = villageId ?? "";
                 var buildMark = PartitionProfile.Mark();
-                var data = NavMeshBuilder.BuildNavMeshData(
-                    settings, combinedSources, bounds, Vector3.zero, Quaternion.identity);
-                PartitionProfile.Since("bake_build", buildMark);
-                if (data != null)
+                var existing = Holder.GetDataForVillage(key);
+                if (existing != null)
                 {
-                    Holder.SetForVillage(villageId ?? "", NavMesh.AddNavMeshData(data));
+                    var op = NavMeshBuilder.UpdateNavMeshDataAsync(
+                        existing, settings, combinedSources, bounds);
+                    while (op != null && !op.isDone) yield return null;
+                    PartitionProfile.Since("bake_build_async", buildMark);
                     LogBakedExtent(bounds, villageId);
+                }
+                else
+                {
+                    var data = NavMeshBuilder.BuildNavMeshData(
+                        settings, combinedSources, bounds, Vector3.zero, Quaternion.identity);
+                    PartitionProfile.Since("bake_build", buildMark);
+                    if (data != null)
+                    {
+                        Holder.SetForVillage(key, NavMesh.AddNavMeshData(data), data);
+                        LogBakedExtent(bounds, villageId);
+                    }
                 }
             }
 
@@ -404,14 +461,15 @@ namespace ValheimVillages.Villager.AI.Navigation
                 result.FailureReason = "no_sources_collected";
                 sw.Stop();
                 result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
-                return result;
+                outResult.Result = result;
+                yield break;
             }
 
             result.Success = Holder.HasAny;
             if (!result.Success) result.FailureReason = "build_returned_null";
             sw.Stop();
             result.DurationMs = (float)sw.Elapsed.TotalMilliseconds;
-            return result;
+            outResult.Result = result;
         }
 
         /// <summary>
@@ -425,6 +483,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// </summary>
         private static void LogBakedExtent(Bounds requested, string villageId)
         {
+            if (!Settings.DevSettings.LogBakedExtent) return;
             var tri = NavMesh.CalculateTriangulation();
             var verts = tri.vertices;
             if (verts == null || verts.Length == 0) return;
@@ -1021,9 +1080,13 @@ namespace ValheimVillages.Villager.AI.Navigation
                 localVerts = mesh.vertices;
                 localTris = mesh.triangles;
             }
-            catch
+            catch (System.Exception ex)
             {
-                // Defensive: even isReadable=true meshes can throw on some builds.
+                // Even isReadable=true meshes can throw on some builds. Skipping the mesh is
+                // the only option, but a silently skipped mesh is a hole in the navmesh that
+                // is otherwise impossible to account for, so say which one.
+                Diagnostics.VanillaReflection.ReportFailure(
+                    $"Mesh.vertices/triangles on '{(mesh != null ? mesh.name : "null")}'", ex);
                 return;
             }
 
@@ -1257,6 +1320,18 @@ namespace ValheimVillages.Villager.AI.Navigation
         // dedicated server can hold every village's navmesh at once.
         private readonly Dictionary<string, NavMeshDataInstance> m_byVillage = new();
 
+        // The NavMeshData behind each instance. NavMeshDataInstance does not expose it, and
+        // NavMeshBuilder.UpdateNavMeshDataAsync needs the data object to rewrite in place —
+        // which is what moves the voxelizer off the main thread AND keeps the surface (and
+        // every agent's path on it) alive across a rebake instead of swapping it out.
+        private readonly Dictionary<string, NavMeshData> m_dataByVillage = new();
+
+        /// <summary>The existing NavMeshData for this village, or null if it has never baked.</summary>
+        internal NavMeshData GetDataForVillage(string villageId)
+        {
+            return villageId != null && m_dataByVillage.TryGetValue(villageId, out var d) ? d : null;
+        }
+
         internal bool HasAny
         {
             get
@@ -1293,15 +1368,17 @@ namespace ValheimVillages.Villager.AI.Navigation
 
         /// <summary>Install <paramref name="instance" /> for <paramref name="villageId" />,
         /// replacing (removing) any prior instance for that same village only.</summary>
-        internal void SetForVillage(string villageId, NavMeshDataInstance instance)
+        internal void SetForVillage(string villageId, NavMeshDataInstance instance, NavMeshData data)
         {
             if (m_byVillage.TryGetValue(villageId, out var prev) && prev.valid)
                 prev.Remove();
             m_byVillage[villageId] = instance;
+            m_dataByVillage[villageId] = data;
         }
 
         internal void RemoveVillage(string villageId)
         {
+            m_dataByVillage.Remove(villageId);
             if (!m_byVillage.TryGetValue(villageId, out var inst)) return;
             if (inst.valid) inst.Remove();
             m_byVillage.Remove(villageId);
@@ -1313,6 +1390,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (inst.valid)
                     inst.Remove();
             m_byVillage.Clear();
+            m_dataByVillage.Clear();
         }
     }
 }

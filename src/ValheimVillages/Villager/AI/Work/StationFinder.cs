@@ -35,8 +35,9 @@ namespace ValheimVillages.Villager.AI.Work
             {
                 return (bool)s_isFireLit.Invoke(station, null);
             }
-            catch
+            catch (System.Exception ex)
             {
+                Diagnostics.VanillaReflection.ReportFailure("CookingStation.IsFireLit", ex);
                 return false;
             }
         }
@@ -191,8 +192,9 @@ namespace ValheimVillages.Villager.AI.Work
             {
                 return (float)s_smelterGetFuel.Invoke(station, null);
             }
-            catch
+            catch (System.Exception ex)
             {
+                Diagnostics.VanillaReflection.ReportFailure("Smelter.GetFuel", ex);
                 return 0f;
             }
         }
@@ -208,8 +210,9 @@ namespace ValheimVillages.Villager.AI.Work
             {
                 return (float)s_getFuel.Invoke(station, null);
             }
-            catch
+            catch (System.Exception ex)
             {
+                Diagnostics.VanillaReflection.ReportFailure("CookingStation.GetFuel", ex);
                 return 0f;
             }
         }

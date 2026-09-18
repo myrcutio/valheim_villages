@@ -144,11 +144,99 @@ namespace ValheimVillages.Villages.Entity
         ///     ownership and villages are host-authoritative, so callers route here via
         ///     VillageCleanupRpc. Idempotent.
         /// </summary>
+        /// <summary>
+        ///     Is this village safe to reap? A village may only be deleted once it has NO
+        ///     villagers left AND no registry piece — those two are what a village IS. This
+        ///     is checked here, at the single destruction point, rather than trusted to each
+        ///     caller.
+        ///     <para>
+        ///     The previous gate was <c>IsInvalid</c>, which is a different question
+        ///     entirely: it means anchor-triad validation failed, and a village is routinely
+        ///     invalid while perfectly alive — a breached wall sets it while villagers carry
+        ///     on working (measured: <c>invalid=True</c> with a live Farmer). Removing the
+        ///     registry in that window deleted the village out from under its villagers,
+        ///     dangling their records, which the record layer explicitly must never do.
+        ///     </para>
+        /// </summary>
+        /// <param name="registryPiecesBeingRemoved">
+        ///     How many of this village's registry pieces the caller is in the middle of
+        ///     removing. A <c>WearNTear.Remove</c> PREFIX runs while the piece's ZDO still
+        ///     exists, so the caller discounts it here rather than the check trying to guess
+        ///     which pieces are about to vanish.
+        /// </param>
+        public static bool CanDelete(
+            string villageId, out string reason, int registryPiecesBeingRemoved = 0)
+        {
+            reason = null;
+            if (string.IsNullOrEmpty(villageId))
+            {
+                reason = "no village id";
+                return false;
+            }
+
+            var living = 0;
+            foreach (var record in Villager.Records.VillagerRecordTable.QueryByVillage(villageId))
+                if (record != null && record.Status == Villager.Records.RecordStatus.Alive)
+                    living++;
+
+            if (living > 0)
+            {
+                reason = $"{living} living villager record(s) still belong to it";
+                return false;
+            }
+
+            var registries = CountRegistryPieces(villageId) - registryPiecesBeingRemoved;
+            if (registries > 0)
+            {
+                reason = $"{registries} registry piece(s) still point at it";
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>Registry pieces in the world whose ZDO names this village.</summary>
+        private static int CountRegistryPieces(string villageId)
+        {
+            var zdoMan = ZDOMan.instance;
+            if (zdoMan == null) return 0;
+
+            var objectsByID = HarmonyLib.Traverse.Create(zdoMan)
+                .Field<Dictionary<ZDOID, ZDO>>("m_objectsByID").Value;
+            if (objectsByID == null) return 0;
+
+            var registryHash = Items.PieceFactory.RegistryPrefabName.GetStableHashCode();
+            var count = 0;
+            foreach (var zdo in objectsByID.Values)
+            {
+                if (zdo == null || zdo.GetPrefab() != registryHash) continue;
+                if (zdo.GetString(Village.IdKey) == villageId) count++;
+            }
+
+            return count;
+        }
+
         public static void Delete(string villageId)
         {
             if (string.IsNullOrEmpty(villageId)) return;
 
+            // Enforced HERE, at the one destruction point, so no caller can route around it.
+            if (!CanDelete(villageId, out var blockedBy))
+            {
+                Plugin.Log?.LogWarning(
+                    $"[VillageRegistry] Refusing to delete village {villageId}: {blockedBy}.");
+                return;
+            }
+
             VillageAreaManager.UnregisterArea(villageId);
+            // Drop the debug wireframe cache too, or the deleted village keeps
+            // drawing its triangulation until the next world load.
+            Villager.AI.Navigation.RegionBuilder.ForgetTriangles(villageId);
+            Villager.AI.Navigation.RegionBuilder.ForgetTriVerdicts(villageId);
+            Villager.AI.Navigation.RubberBandPrune.ForgetFloodCache(villageId);
+            Villager.AI.Navigation.RubberBandPrune.ForgetFloodCache(villageId + "|poi");
+            Villager.AI.Navigation.RubberBandPrune.ForgetFloodCache(villageId + "|pass1");
+            Villager.AI.Navigation.RubberBandPrune.ForgetSnapshot(villageId);
 
             var village = FindById(villageId);
             s_live.Remove(villageId);

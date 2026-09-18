@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -156,12 +157,200 @@ namespace ValheimVillages.Villager.AI.Navigation
             LayerMask.GetMask("Default", "static_solid", "piece");
 
         /// <summary>
-        ///     Filtered triangles from the most recent build, tagged with their
-        ///     region assignment. Consumed by <see cref="PathDebugRenderer" /> for
-        ///     wireframe overlay.
+        ///     Filtered triangles from the most recent build of EACH village, keyed by
+        ///     village id and tagged with their region assignment. Consumed by
+        ///     <see cref="PathDebugRenderer" /> for the wireframe overlay and by the
+        ///     probe/trace commands.
+        ///     <para>
+        ///     Per-village, not a single list: partitions are scoped to one village
+        ///     (see RegionPartitionHandler), so one shared list meant whichever village
+        ///     partitioned last silently erased every other village's triangles — the
+        ///     overlay drew one village and vv_probe reported "closest cached triangle"
+        ///     hundreds of metres away while standing inside a perfectly good graph.
+        ///     </para>
         /// </summary>
-        internal static List<CachedTriangle> CachedTriangles { get; set; }
+        private static readonly Dictionary<string, List<CachedTriangle>> s_trianglesByVillage
             = new();
+
+        /// <summary>
+        ///     Publish a village's triangle set, replacing whatever that village had
+        ///     before and leaving every other village's set untouched. The list is
+        ///     stored by reference because RubberBandPrune trims it in place after the
+        ///     combine stage hands it over.
+        /// </summary>
+        internal static void SetTriangles(string villageKey, List<CachedTriangle> triangles)
+        {
+            if (string.IsNullOrEmpty(villageKey))
+                throw new System.ArgumentException(
+                    "SetTriangles requires a village key — an unkeyed triangle set would " +
+                    "collide with another village's on the next partition.", nameof(villageKey));
+            if (triangles == null)
+                throw new System.ArgumentNullException(nameof(triangles));
+            s_trianglesByVillage[villageKey] = triangles;
+        }
+
+        /// <summary>Every cached triangle across every village, in no particular order.</summary>
+        internal static IEnumerable<CachedTriangle> AllTriangles()
+        {
+            foreach (var kv in s_trianglesByVillage)
+            foreach (var t in kv.Value)
+                yield return t;
+        }
+
+        /// <summary>Total triangle count across every village.</summary>
+        internal static int TotalTriangleCount
+        {
+            get
+            {
+                var total = 0;
+                foreach (var kv in s_trianglesByVillage) total += kv.Value.Count;
+                return total;
+            }
+        }
+
+        /// <summary>Per-village triangle sets, for callers that need to attribute a triangle.</summary>
+        internal static IEnumerable<KeyValuePair<string, List<CachedTriangle>>> TrianglesByVillage()
+        {
+            return s_trianglesByVillage;
+        }
+
+        /// <summary>
+        ///     Outcome of the three EXPENSIVE per-triangle tests: the physics clearance probe
+        ///     (<c>CheckCapsule</c> for terrain / <c>CheckSphere</c> for pieces), the agent
+        ///     NavMesh sample, and the below-terrain test. The cheap geometric tests (normal,
+        ///     slope, bounds) are never cached — they are a few float ops, and the bounds
+        ///     legitimately change between partitions.
+        /// </summary>
+        internal enum TriVerdict : byte
+        {
+            Accepted = 1,
+            RejBlocked = 2,
+            RejAgent = 3,
+            RejTerrain = 4,
+        }
+
+        /// <summary>
+        ///     A triangle's identity: its three vertices quantized to 1cm and sorted, so
+        ///     vertex winding/order cannot change the key. Exact — NOT a hash — because a
+        ///     collision would hand one triangle another's verdict silently.
+        /// </summary>
+        private readonly struct TriKey : System.IEquatable<TriKey>
+        {
+            private readonly long m_a, m_b, m_c;
+
+            public TriKey(Vector3 v0, Vector3 v1, Vector3 v2)
+            {
+                var a = Pack(v0);
+                var b = Pack(v1);
+                var c = Pack(v2);
+                // Sort the three packed vertices ascending.
+                if (a > b) (a, b) = (b, a);
+                if (b > c) (b, c) = (c, b);
+                if (a > b) (a, b) = (b, a);
+                m_a = a;
+                m_b = b;
+                m_c = c;
+            }
+
+            /// <summary>
+            ///     Pack one vertex at 1cm into a long: 21 bits X, 21 bits Z, 18 bits Y.
+            ///     Throws outside that range rather than wrapping — a wrapped key would
+            ///     alias two distant triangles onto one verdict.
+            /// </summary>
+            private static long Pack(Vector3 v)
+            {
+                var xi = Mathf.RoundToInt(v.x * 100f);
+                var zi = Mathf.RoundToInt(v.z * 100f);
+                var yi = Mathf.RoundToInt(v.y * 100f);
+                if (xi < -1048576 || xi > 1048575 || zi < -1048576 || zi > 1048575
+                    || yi < -131072 || yi > 131071)
+                    throw new System.ArgumentOutOfRangeException(
+                        nameof(v),
+                        $"Triangle vertex {v} is outside the packable range " +
+                        "(±10485m XZ, ±1310m Y) — the verdict cache key would wrap.");
+                return ((long)(xi + 1048576) << 39)
+                       | ((long)(zi + 1048576) << 18)
+                       | (uint)(yi + 131072);
+            }
+
+            public bool Equals(TriKey other)
+            {
+                return m_a == other.m_a && m_b == other.m_b && m_c == other.m_c;
+            }
+
+            public override bool Equals(object obj) => obj is TriKey o && Equals(o);
+
+            public override int GetHashCode()
+            {
+                var h = m_a.GetHashCode();
+                h = (h * 397) ^ m_b.GetHashCode();
+                h = (h * 397) ^ m_c.GetHashCode();
+                return h;
+            }
+        }
+
+        private struct TriVerdictEntry
+        {
+            public TriVerdict Verdict;
+            public int Generation;
+        }
+
+        /// <summary>
+        ///     Per (village, surface kind) cache of expensive triangle verdicts, so an
+        ///     incremental partition only re-probes triangles the change could have reached.
+        ///     <para>
+        ///     Safe because the three cached tests are purely local: the physics probe and
+        ///     the NavMesh sample read only the centroid's neighbourhood, and the
+        ///     below-terrain test only the triangle's own vertices. A triangle keyed on its
+        ///     exact geometry that reappears unchanged, with nothing changed within
+        ///     <see cref="VerdictReachMargin" /> of it, provably has the same verdict.
+        ///     </para>
+        ///     <para>
+        ///     Note the direction of the failure mode: any change to a triangle's own
+        ///     geometry changes its key, which MISSES and recomputes. The cache can only be
+        ///     wrong if identical geometry gets a different verdict, which is exactly what
+        ///     the reach margin covers.
+        ///     </para>
+        /// </summary>
+        private static readonly Dictionary<(string village, SurfaceKind kind),
+            Dictionary<TriKey, TriVerdictEntry>> s_triVerdicts = new();
+
+        private static readonly Dictionary<(string village, SurfaceKind kind), int>
+            s_triVerdictGeneration = new();
+
+        /// <summary>
+        ///     How far outside the dirty rect a triangle must still be re-probed, because a
+        ///     changed collider inside the rect can flip a verdict at this distance. Derived,
+        ///     not guessed:
+        ///     <list type="bullet">
+        ///     <item>the agent NavMesh sample reads <see cref="AgentFilterRadius" /> (0.5m)
+        ///     around the centroid, and the mesh it reads was itself eroded by the bake agent
+        ///     radius (0.40 + <c>NavMeshBakeRadiusBuffer</c>) plus one voxel (radius/3);</item>
+        ///     <item>the terrain capsule probe reaches <see cref="CapsuleRadius" /> (0.2m);</item>
+        ///     <item>the piece waist probe reaches <see cref="PieceWaistProbeRadius" /> (0.1m).</item>
+        ///     </list>
+        ///     0.5 + 0.425 + 0.142 ≈ 1.07m; 2m is that with headroom. The triangle's own
+        ///     extent needs no term here because the test uses its full AABB, not its centroid.
+        /// </summary>
+        internal const float VerdictReachMargin = 2f;
+
+        /// <summary>Drop one village's cached triangle verdicts (village deleted / geometry reset).</summary>
+        internal static void ForgetTriVerdicts(string villageKey)
+        {
+            if (string.IsNullOrEmpty(villageKey)) return;
+            foreach (SurfaceKind kind in System.Enum.GetValues(typeof(SurfaceKind)))
+            {
+                s_triVerdicts.Remove((villageKey, kind));
+                s_triVerdictGeneration.Remove((villageKey, kind));
+            }
+        }
+
+        /// <summary>Drop one village's triangles (village deleted / graph cleared).</summary>
+        internal static void ForgetTriangles(string villageKey)
+        {
+            if (!string.IsNullOrEmpty(villageKey))
+                s_trianglesByVillage.Remove(villageKey);
+        }
 
         /// <summary>
         ///     Clear cached per-triangle state on world unload / hot reload.
@@ -173,19 +362,22 @@ namespace ValheimVillages.Villager.AI.Navigation
         [RegisterCleanup]
         public static void ClearCachedState()
         {
-            CachedTriangles.Clear();
+            s_trianglesByVillage.Clear();
+            s_triVerdicts.Clear();
+            s_triVerdictGeneration.Clear();
         }
 
         /// <summary>
         ///     Combine the terrain + piece <see cref="BuildResult" />s into one region
         ///     set: union the IDs/centroids/links/lookup grids, then shadow-suppress
         ///     terrain cells/triangles flush-merged under a piece surface and
-        ///     cascade-drop terrain regions left with no surviving triangle. Sets
-        ///     <see cref="CachedTriangles" /> to the survivor set. Pure region-graph
-        ///     assembly, extracted from RegionPartitionHandler so the task handler
-        ///     stays orchestration-only.
+        ///     cascade-drop terrain regions left with no surviving triangle. Publishes
+        ///     the survivor set as <paramref name="villageKey" />'s cached triangles.
+        ///     Pure region-graph assembly, extracted from RegionPartitionHandler so the
+        ///     task handler stays orchestration-only.
         /// </summary>
         internal static void CombineTerrainAndPiece(
+            string villageKey,
             BuildResult terrainResult, BuildResult pieceResult,
             out HashSet<string> combinedRegionIds,
             out Dictionary<string, Vector3> combinedCentroids,
@@ -393,7 +585,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     survivingTerrainRegions.Add(t.RegionId);
             }
             combinedTriangles.AddRange(pieceResult.Triangles);
-            RegionBuilder.CachedTriangles = combinedTriangles;
+            RegionBuilder.SetTriangles(villageKey, combinedTriangles);
 
             // Pass 2: cascade-drop terrain regions whose every triangle was
             // shadowed. They have no visible footprint, no lookup-grid
@@ -443,11 +635,36 @@ namespace ValheimVillages.Villager.AI.Navigation
                 ("combined_cells", combinedLookup.Count));
         }
 
-        internal static BuildResult BuildFromTriangulation(
+        /// <summary>
+        ///     Build one surface kind's regions from the baked triangulation.
+        ///     <para>
+        ///     <paramref name="dirty" /> scopes the EXPENSIVE per-triangle probes: when it is
+        ///     set, only triangles whose AABB comes within <see cref="VerdictReachMargin" />
+        ///     of it are re-probed and everything else reuses its cached verdict. When it is
+        ///     null this is a full rebuild — the cache is discarded and every triangle
+        ///     re-probed, which is what keeps <c>vv_repartition</c> an honest backstop.
+        ///     </para>
+        /// </summary>
+        /// <summary>Carries <see cref="BuildFromTriangulation" />'s result out of the coroutine.</summary>
+        internal sealed class BuildResultHolder
+        {
+            public BuildResult Result;
+        }
+
+        internal static System.Collections.IEnumerator BuildFromTriangulation(
+            string villageKey,
             SurfaceKind kind,
             float minX, float minZ, float maxX, float maxZ,
-            List<Vector3> anchors)
+            List<Vector3> anchors,
+            DirtyRect? dirty,
+            BuildResultHolder outResult)
         {
+            if (string.IsNullOrEmpty(villageKey))
+                throw new System.ArgumentException(
+                    "BuildFromTriangulation requires a village key — the triangle verdict " +
+                    "cache is per village and an unkeyed build would read another's verdicts.",
+                    nameof(villageKey));
+
             var result = new BuildResult
             {
                 RegionIds = new HashSet<string>(),
@@ -462,7 +679,11 @@ namespace ValheimVillages.Villager.AI.Navigation
                 RegionBounds = new Dictionary<string, Bounds>(),
                 RegionVertexList = new Dictionary<string, List<Vector3>>(),
             };
-            if (anchors == null || anchors.Count == 0) return result;
+            // BuildResult is a STRUCT, so it must be republished at EVERY exit: the copy
+            // taken here shares its reference-typed collections (which is why this mostly
+            // worked by luck) but loses every value-typed field written later.
+            outResult.Result = result;
+            if (anchors == null || anchors.Count == 0) yield break;
 
             var agentTypeId = VillagerAgentType.IsRegistered
                 ? VillagerAgentType.UnityAgentTypeID
@@ -485,8 +706,11 @@ namespace ValheimVillages.Villager.AI.Navigation
             {
                 Plugin.Log?.LogWarning(
                     $"[Region] No baked sources to extract triangles from (kind={kind}) — has NavMeshBakeManager.BakeVillage run?");
-                return result;
+                outResult.Result = result;
+                yield break;
             }
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             var triCount = idx.Length / 3;
 
@@ -510,8 +734,36 @@ namespace ValheimVillages.Villager.AI.Navigation
             // outside-wall leaks. Pieces rely on the bake-bounds reject +
             // the agent NavMesh sample below.
 
+            // Expensive-verdict cache for this (village, kind). A full rebuild (no dirty
+            // rect) discards it so every triangle is re-probed from scratch.
+            var cacheKey = (villageKey, kind);
+            if (!s_triVerdicts.TryGetValue(cacheKey, out var verdicts))
+            {
+                verdicts = new Dictionary<TriKey, TriVerdictEntry>();
+                s_triVerdicts[cacheKey] = verdicts;
+            }
+
+            if (dirty == null) verdicts.Clear();
+
+            s_triVerdictGeneration.TryGetValue(cacheKey, out var generation);
+            generation++;
+            s_triVerdictGeneration[cacheKey] = generation;
+
+            var probeMinX = 0f; var probeMinZ = 0f; var probeMaxX = 0f; var probeMaxZ = 0f;
+            if (dirty.HasValue)
+            {
+                probeMinX = dirty.Value.MinX - VerdictReachMargin;
+                probeMinZ = dirty.Value.MinZ - VerdictReachMargin;
+                probeMaxX = dirty.Value.MaxX + VerdictReachMargin;
+                probeMaxZ = dirty.Value.MaxZ + VerdictReachMargin;
+            }
+
+            var verdictsReused = 0;
+            var verdictsProbed = 0;
+
             for (var t = 0; t < triCount; t++)
             {
+                if (TaskQueue.PartitionRunner.ShouldYieldEvery(t, 256)) yield return null;
                 var v0 = verts[idx[t * 3]];
                 var v1 = verts[idx[t * 3 + 1]];
                 var v2 = verts[idx[t * 3 + 2]];
@@ -544,39 +796,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     continue;
                 }
 
-                if (kind == SurfaceKind.Terrain)
-                {
-                    // Terrain: walker-sized capsule overlap. Catches walls,
-                    // decorative pieces, rocks, and modded items by physical
-                    // collision — independent of prefab name. Expensive
-                    // (Physics broadphase + narrowphase per call), so it runs
-                    // after every cheaper filter has had a chance to reject.
-                    var capP0 = c + Vector3.up * (CapsuleLift + CapsuleRadius);
-                    var capP1 = c + Vector3.up * (CapsuleLift + CapsuleHeight - CapsuleRadius);
-                    PartitionProfile.CheckCapsule++;
-                    if (Physics.CheckCapsule(capP0, capP1, CapsuleRadius, s_blockMask))
-                    {
-                        rejBlocked++;
-                        continue;
-                    }
-                }
-                else
-                {
-                    // Piece: walker-waist clearance check. Tiny sphere
-                    // (0.1m) at the centroid lifted to walker waist height.
-                    // If a piece collider overlaps the sphere, the centroid
-                    // is inside wall material at walker body height — see
-                    // constants block for the geometric rationale.
-                    var waistOrigin = c + Vector3.up * PieceWaistProbeLift;
-                    PartitionProfile.CheckSphere++;
-                    if (Physics.CheckSphere(waistOrigin, PieceWaistProbeRadius,
-                            s_blockMask, QueryTriggerInteraction.Ignore))
-                    {
-                        rejBlocked++;
-                        continue;
-                    }
-                }
-
+                // --- The three expensive probes, cached per triangle ---
                 // Scope note: bake bounds = village anchors + patrol bounds +
                 // 30m pad, set in RegionPartitionHandler. Deliberately
                 // patrol-independent in here — the polygon path re-introduces
@@ -584,22 +804,63 @@ namespace ValheimVillages.Villager.AI.Navigation
                 // anchor-distance drops outlying terrain when the village extends
                 // past 30m from any anchor. Both kinds fall through to the shared
                 // agent NavMesh sample below.
+                var triKey = new TriKey(v0, v1, v2);
 
-                PartitionProfile.SamplePos++;
-                if (!NavMesh.SamplePosition(c, out var hit, AgentFilterRadius, filter) ||
-                    Vector3.Distance(hit.position, c) > AgentFilterRadius)
+                // Reuse only when this triangle's own AABB stays clear of the changed
+                // area grown by the probes' reach. Using the AABB rather than the
+                // centroid is what makes the margin independent of triangle size.
+                var reusable = dirty.HasValue
+                               && !TriangleOverlapsXz(v0, v1, v2,
+                                   probeMinX, probeMinZ, probeMaxX, probeMaxZ);
+
+                TriVerdict verdict;
+                if (reusable && verdicts.TryGetValue(triKey, out var cachedVerdict))
                 {
-                    rejAgent++;
-                    continue;
+                    verdict = cachedVerdict.Verdict;
+                    verdictsReused++;
+                }
+                else
+                {
+                    verdict = ProbeTriangle(kind, v0, v1, v2, c, filter);
+                    verdictsProbed++;
                 }
 
-                if (IsAnyVertexBelowTerrain(v0, v1, v2))
+                verdicts[triKey] = new TriVerdictEntry
                 {
-                    rejTerrain++;
-                    continue;
+                    Verdict = verdict,
+                    Generation = generation,
+                };
+
+                switch (verdict)
+                {
+                    case TriVerdict.RejBlocked:
+                        rejBlocked++;
+                        continue;
+                    case TriVerdict.RejAgent:
+                        rejAgent++;
+                        continue;
+                    case TriVerdict.RejTerrain:
+                        rejTerrain++;
+                        continue;
+                    case TriVerdict.Accepted:
+                        break;
+                    default:
+                        throw new System.InvalidOperationException(
+                            $"Unhandled triangle verdict {verdict} for {kind} triangle at {c}.");
                 }
 
                 rawAccepted.Add(t);
+            }
+
+            // Evict verdicts for triangles that no longer exist (geometry removed, or a
+            // rebake reshaped them). Anything not touched this generation is dead.
+            if (dirty.HasValue)
+            {
+                var stale = new List<TriKey>();
+                foreach (var kv in verdicts)
+                    if (kv.Value.Generation != generation)
+                        stale.Add(kv.Key);
+                for (var i = 0; i < stale.Count; i++) verdicts.Remove(stale[i]);
             }
 
             // --- Deduplicate overlapping triangles ---
@@ -628,8 +889,16 @@ namespace ValheimVillages.Villager.AI.Navigation
                 ("rej_normal", rejNormal), ("rej_bounds", rejBounds),
                 ("rej_agent", rejAgent), ("rej_terrain", rejTerrain),
                 ("rej_steep", rejSteep), ("rej_blocked", rejBlocked),
-                ("rej_dedup", dedupDropped));
-            if (accepted.Count == 0) return result;
+                ("rej_dedup", dedupDropped),
+                ("verdicts_reused", verdictsReused), ("verdicts_probed", verdictsProbed),
+                ("incremental", dirty.HasValue));
+            if (accepted.Count == 0)
+            {
+                outResult.Result = result;
+                yield break;
+            }
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Adjacency from shared edges ---
             var edgeToTris = new Dictionary<long, List<int>>();
@@ -677,6 +946,8 @@ namespace ValheimVillages.Villager.AI.Navigation
                     $"({100f * rejEdge / Mathf.Max(1, rejEdge + edgeToTris.Count):F1}%)");
             }
 
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
+
             // --- Union-Find connected components ---
             var parent = new int[triCount];
             var ufRank = new int[triCount];
@@ -708,6 +979,8 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             Plugin.Log?.LogInfo(
                 $"[Region] Components → {groups.Count} regions (kind={kind}, subdiv {SubdivCellSize}m)");
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Build region centroids ---
             var rIdx = 0;
@@ -743,15 +1016,21 @@ namespace ValheimVillages.Villager.AI.Navigation
                 foreach (var t in tris) triToRegion[t] = regionId;
             }
 
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
+
             // --- Merge coplanar regions split by spatial subdivision ---
             MergeCoplanarRegions(accepted, idx, verts, triCentroids,
                 triToRegion, result, regionToComponentRoot);
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Prune regions smaller than MinRegionArea ---
             PruneSmallRegions(accepted, idx, verts, triToRegion, result);
 
             // --- Prune narrow regions (SurfaceWide=false + small area) ---
             PruneNarrowRegions(accepted, idx, verts, triToRegion, result, filter);
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Prune regions enclosed by a larger coplanar region ---
             PruneEnclosedRegions(accepted, idx, verts, triToRegion, result);
@@ -763,6 +1042,8 @@ namespace ValheimVillages.Villager.AI.Navigation
             // other surviving region.
             if (kind == SurfaceKind.Terrain)
                 PruneIsolatedSmallTerrain(accepted, idx, verts, edgeToTris, triToRegion, result);
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Build per-region adjacency + quantized vertex positions ---
             // Both are consumed by the cross-kind BFS reachability prune
@@ -834,6 +1115,8 @@ namespace ValheimVillages.Villager.AI.Navigation
                 }
             }
 
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
+
             // --- Cross-region links from shared edges ---
             // NOTE: piece-to-piece adjacency between separate prefab
             // instances (e.g., a stair piece and the floor at its top)
@@ -879,11 +1162,17 @@ namespace ValheimVillages.Villager.AI.Navigation
                 }
             }
 
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
+
             // --- Boundary detection ---
             DetectBoundary(edgeToTris, triToRegion, idx, verts, result);
 
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
+
             // --- Rasterized lookup grid ---
             BuildLookupGrid(accepted, idx, verts, triToRegion, result);
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Cache triangles for debug visualization ---
             // Caller (RegionPartitionHandler) is responsible for concatenating
@@ -935,7 +1224,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 $"{result.Links.Count} links, {result.LookupGrid.Count} lookup cells, " +
                 $"{result.BoundaryCells.Count} boundary regions");
 
-            return result;
+            outResult.Result = result;
         }
 
         /// <summary>
@@ -1500,6 +1789,68 @@ namespace ValheimVillages.Villager.AI.Navigation
                 $"{result.RegionIds.Count} regions remaining");
             DebugLog.List("RegionPrune", "isolated_terrain_dropped",
                 dropDetails);
+        }
+
+        /// <summary>True if the triangle's XZ bounding box overlaps the given rectangle.</summary>
+        private static bool TriangleOverlapsXz(
+            Vector3 v0, Vector3 v1, Vector3 v2,
+            float minX, float minZ, float maxX, float maxZ)
+        {
+            var tMinX = Mathf.Min(v0.x, Mathf.Min(v1.x, v2.x));
+            if (tMinX > maxX) return false;
+            var tMaxX = Mathf.Max(v0.x, Mathf.Max(v1.x, v2.x));
+            if (tMaxX < minX) return false;
+            var tMinZ = Mathf.Min(v0.z, Mathf.Min(v1.z, v2.z));
+            if (tMinZ > maxZ) return false;
+            var tMaxZ = Mathf.Max(v0.z, Mathf.Max(v1.z, v2.z));
+            return tMaxZ >= minZ;
+        }
+
+        /// <summary>
+        ///     The three expensive per-triangle tests, in ascending cost order. Extracted so
+        ///     the cached and uncached paths run byte-identical logic — a second copy would
+        ///     drift and the cache would start disagreeing with the full rebuild.
+        /// </summary>
+        private static TriVerdict ProbeTriangle(
+            SurfaceKind kind, Vector3 v0, Vector3 v1, Vector3 v2, Vector3 c,
+            NavMeshQueryFilter filter)
+        {
+            if (kind == SurfaceKind.Terrain)
+            {
+                // Terrain: walker-sized capsule overlap. Catches walls,
+                // decorative pieces, rocks, and modded items by physical
+                // collision — independent of prefab name. Expensive
+                // (Physics broadphase + narrowphase per call), so it runs
+                // after every cheaper filter has had a chance to reject.
+                var capP0 = c + Vector3.up * (CapsuleLift + CapsuleRadius);
+                var capP1 = c + Vector3.up * (CapsuleLift + CapsuleHeight - CapsuleRadius);
+                PartitionProfile.CheckCapsule++;
+                if (Physics.CheckCapsule(capP0, capP1, CapsuleRadius, s_blockMask))
+                    return TriVerdict.RejBlocked;
+            }
+            else
+            {
+                // Piece: walker-waist clearance check. Tiny sphere
+                // (0.1m) at the centroid lifted to walker waist height.
+                // If a piece collider overlaps the sphere, the centroid
+                // is inside wall material at walker body height — see
+                // constants block for the geometric rationale.
+                var waistOrigin = c + Vector3.up * PieceWaistProbeLift;
+                PartitionProfile.CheckSphere++;
+                if (Physics.CheckSphere(waistOrigin, PieceWaistProbeRadius,
+                        s_blockMask, QueryTriggerInteraction.Ignore))
+                    return TriVerdict.RejBlocked;
+            }
+
+            PartitionProfile.SamplePos++;
+            if (!NavMesh.SamplePosition(c, out var hit, AgentFilterRadius, filter) ||
+                Vector3.Distance(hit.position, c) > AgentFilterRadius)
+                return TriVerdict.RejAgent;
+
+            if (IsAnyVertexBelowTerrain(v0, v1, v2))
+                return TriVerdict.RejTerrain;
+
+            return TriVerdict.Accepted;
         }
 
         private static bool IsAnyVertexBelowTerrain(Vector3 v0, Vector3 v1, Vector3 v2)

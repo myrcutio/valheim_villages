@@ -40,6 +40,7 @@ namespace ValheimVillages
 
         private static void Write(string message, string dataJson, string runId)
         {
+            if (!Settings.DevSettings.WritePathTelemetry) return;
             try
             {
                 var ts = (long)(Time.time * 1000);

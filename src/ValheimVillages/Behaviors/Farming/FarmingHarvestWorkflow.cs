@@ -67,12 +67,9 @@ namespace ValheimVillages.Behaviors.Farming
                 return;
             }
 
-            DebugLog.Append("FarmingHarvestWorkflow.cs:OnArrivedAtCrop", "About to harvest crop",
-                new Dictionary<string, object>
-                {
-                    { "targetName", target.m_itemPrefab?.name ?? "NULL" },
-                    { "targetPos", target.transform.position.ToString() }, { "targetGO", target.gameObject.name },
-                }, "A,D", "run1");
+            DebugLog.Event("Farming", "about_to_harvest",
+                ("targetName", target.m_itemPrefab?.name ?? "NULL"),
+                ("targetPos", target.transform.position), ("targetGO", target.gameObject.name));
 
             // Read the drop point BEFORE picking: a plant with no respawn timer (a grown crop
             // is exactly that) destroys its own GameObject when picked, so the position has to
@@ -232,15 +229,12 @@ namespace ValheimVillages.Behaviors.Farming
                 total += take;
             }
 
-            DebugLog.Append("FarmingHarvestWorkflow.cs:CollectItemDropsIntoCarry", "Collect result",
-                new Dictionary<string, object>
-                {
-                    { "prefabName", prefabName }, { "maxTake", maxTake }, { "totalCollected", total },
-                    { "collidersFound", colCount }, { "itemDropsFound", dropCount },
-                    { "nullPrefabCount", nullPrefabCount }, { "nameMismatchCount", nameMismatchCount },
-                    { "mismatchNames", string.Join(";", mismatchNames) }, { "center", center.ToString() },
-                    { "radius", radius },
-                }, "A,D", "run1");
+            DebugLog.Event("Farming", "collect_drops",
+                ("prefabName", prefabName), ("maxTake", maxTake), ("totalCollected", total),
+                ("collidersFound", colCount), ("itemDropsFound", dropCount),
+                ("nullPrefabCount", nullPrefabCount), ("nameMismatchCount", nameMismatchCount),
+                ("mismatchNames", string.Join(";", mismatchNames)), ("center", center),
+                ("radius", radius));
 
             return total;
         }

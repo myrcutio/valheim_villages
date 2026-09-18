@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
@@ -99,8 +100,87 @@ namespace ValheimVillages.Villager.AI.Navigation
         // Populated at end of every Apply(). Cleared on hot reload via
         // [RegisterCleanup]. MeshProbe reads these to answer "could Pass 1 have
         // reached this cell, and if not, what blocked it?".
-        internal static HashSet<long> LastOutsideCells;
-        internal static Dictionary<long, float> LastXzMaxY;
+        /// <summary>
+        ///     Per-village snapshot of the Pass-1 flood, for <c>vv_probe</c>. Keyed by
+        ///     village because these used to be bare last-run-wins statics: probing a village
+        ///     printed whichever village had partitioned most recently. Measured — standing
+        ///     in the village at z=-270 the probe reported <c>bake bounds gz=[-13..121]</c>,
+        ///     the OTHER village's grid, so every populated / outside / WallBlocks value in
+        ///     that section answered about the wrong place.
+        /// </summary>
+        internal sealed class FloodSnapshot
+        {
+            public HashSet<long> OutsideCells;
+            public Dictionary<long, float> XzMaxY;
+            public Dictionary<long, float> XzMaxYTerrain;
+            public int GxMin, GzMin, GxMax, GzMax;
+            public float Cell;
+            public int PieceMask;
+        }
+
+        private static readonly Dictionary<string, FloodSnapshot> s_snapshots = new();
+
+        /// <summary>
+        ///     The snapshot for the village covering <paramref name="pos" />, or null. Resolved
+        ///     by position rather than by "most recent" so a probe answers about the village
+        ///     the caller is actually standing in.
+        /// </summary>
+        internal static FloodSnapshot SnapshotAt(Vector3 pos)
+        {
+            var village = Villages.Entity.VillageRegistry.GetVillageAt(pos);
+            var key = village?.VillageId;
+            return !string.IsNullOrEmpty(key) && s_snapshots.TryGetValue(key, out var snap)
+                ? snap
+                : null;
+        }
+
+        /// <summary>
+        ///     How many cached Pass-1 cell heights to re-derive per partition as a check that
+        ///     the region set they came from has not shifted. Cheap (a dictionary lookup each)
+        ///     and enough to catch a systematic drift; this is an assertion, not a scan.
+        /// </summary>
+        private const int CellYValidationSamples = 64;
+
+        /// <summary>
+        ///     Assert that cached Pass-1 cell heights still match what the CURRENT partition's
+        ///     terrain regions say. Pass 1 reads heights from the region set rather than the
+        ///     heightmap, so caching them across partitions is only valid while that set is
+        ///     stable outside the dirty rect — which holds because the triangle verdict cache
+        ///     makes the triangulation identical there. Throws rather than silently serving a
+        ///     stale height: a wrong height moves the wall probe's waist band, and the flood
+        ///     then walks through walls or stops at open ground, which would surface as an
+        ///     inexplicably collapsed or bloated village.
+        /// </summary>
+        private static void ValidateCellYAgainstCache(
+            Dictionary<long, float> cachedCellY, Dictionary<long, float> xzMaxYTerrain,
+            float cell, string villageKey)
+        {
+            if (cachedCellY.Count == 0) return;
+
+            var checkedCount = 0;
+            foreach (var kv in cachedCellY)
+            {
+                UnpackXz(kv.Key, out var gx, out var gz);
+                var fresh = GetCellY(gx, gz, xzMaxYTerrain, cell);
+                if (!Mathf.Approximately(fresh, kv.Value))
+                    throw new InvalidOperationException(
+                        $"Pass-1 cellY cache for village {villageKey} is stale at cell " +
+                        $"({gx},{gz}): cached {kv.Value:F3}, region set now says {fresh:F3}. " +
+                        "The terrain region set moved outside the dirty rect, which the " +
+                        "triangle verdict cache is supposed to prevent — the two caches have " +
+                        "drifted apart and the flood would read wrong wall-probe heights.");
+
+                if (++checkedCount >= CellYValidationSamples) return;
+            }
+        }
+
+        /// <summary>Drop a village's flood snapshot (village deleted).</summary>
+        internal static void ForgetSnapshot(string villageKey)
+        {
+            if (!string.IsNullOrEmpty(villageKey)) s_snapshots.Remove(villageKey);
+        }
+
+
 
         /// <summary>
         ///     Terrain-only cell heights — the map Pass 1 actually floods on. Kept apart from
@@ -109,25 +189,36 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     for walls at that altitude was testing open sky several metres above the
         ///     surface the flood walks on, and reported WallBlocks=false for real walls.
         /// </summary>
-        internal static Dictionary<long, float> LastXzMaxYTerrain;
-        internal static int LastGxMin, LastGzMin, LastGxMax, LastGzMax;
-        internal static float LastCell;
-        internal static int LastPieceMask;
-        internal static bool HasSnapshot;
+
 
         [RegisterCleanup]
         public static void ClearDiagnosticState()
         {
-            LastOutsideCells = null;
-            LastXzMaxY = null;
-            LastXzMaxYTerrain = null;
-            LastGxMin = LastGzMin = LastGxMax = LastGzMax = 0;
-            LastCell = 0f;
-            LastPieceMask = 0;
-            HasSnapshot = false;
+            s_snapshots.Clear();
+            // Cached flood oracles describe a world that a reload has torn down and
+            // reinstantiated; keeping them would answer from the previous assembly's
+            // colliders.
+            s_floodCaches.Clear();
         }
 
-        public static Stats Apply(
+        /// <summary>
+        ///     Everything <see cref="Apply" /> used to hand back through a return value and
+        ///     six `out` parameters. An iterator can do neither, and the pass is far too
+        ///     expensive (measured 145-290ms) to keep running inside a single frame.
+        /// </summary>
+        public sealed class PruneResult
+        {
+            public Stats Stats;
+            public HashSet<string> DroppedRegionIds;
+            public List<(string fromRid, string toRid, Vector3 startPos, Vector3 endPos)>
+                Pass3DiscoveredEdges;
+            public HashSet<long> AnchorReachableCells;
+            public HashSet<long> OutsideCells;
+            public HashSet<long> PrunedPieceKeys;
+            public List<Vector3> GateMarkers;
+        }
+
+        public static IEnumerator Apply(
             HashSet<string> regionIds,
             Dictionary<string, Vector3> centroids,
             Dictionary<long, string> lookupGrid,
@@ -137,27 +228,40 @@ namespace ValheimVillages.Villager.AI.Navigation
             List<RegionBuilder.CachedTriangle> triangles,
             List<Vector3> anchors,
             float minX, float minZ, float maxX, float maxZ,
-            out HashSet<string> droppedRegionIds,
-            out List<(string fromRid, string toRid,
-                      Vector3 startPos, Vector3 endPos)> pass3DiscoveredEdgeList,
-            out HashSet<long> anchorReachableCellsOut,
-            out HashSet<long> outsideCellsOut,
-            out HashSet<long> prunedPieceKeysOut,
-            out List<Vector3> gateMarkersOut)
+            string villageKey,
+            DirtyRect? dirty,
+            PruneResult outResult)
         {
+            if (string.IsNullOrEmpty(villageKey))
+                throw new ArgumentException(
+                    "Apply needs a village key: its diagnostic flood snapshot is per village, " +
+                    "and an unkeyed one would answer probes about the wrong settlement.",
+                    nameof(villageKey));
+
             var dropped = new HashSet<string>();
-            droppedRegionIds = dropped;
-            // Pre-assign the out so all early-exit paths satisfy the
-            // definite-assignment rule. Pass 3 will overwrite later if it runs.
-            pass3DiscoveredEdgeList = new List<(string fromRid, string toRid,
+            outResult.DroppedRegionIds = dropped;
+            HashSet<string> droppedRegionIds = dropped;
+            // Pre-assign so all early-exit paths still hand the caller a usable result.
+            // Pass 3 will overwrite later if it runs.
+            var pass3DiscoveredEdgeList = new List<(string fromRid, string toRid,
                                                 Vector3 startPos, Vector3 endPos)>();
-            anchorReachableCellsOut = new HashSet<long>();
-            outsideCellsOut = new HashSet<long>();
-            prunedPieceKeysOut = new HashSet<long>();
-            gateMarkersOut = new List<Vector3>();
+            var anchorReachableCellsOut = new HashSet<long>();
+            var outsideCellsOut = new HashSet<long>();
+            var prunedPieceKeysOut = new HashSet<long>();
+            var gateMarkersOut = new List<Vector3>();
             var stats = new Stats();
-            if (regionIds == null || regionIds.Count == 0) return stats;
-            if (lookupGrid == null || lookupGrid.Count == 0) return stats;
+
+            // Publish everything before the first exit: an iterator cannot return a value,
+            // so each `yield break` below must already have handed the caller its result.
+            outResult.Stats = stats;
+            outResult.Pass3DiscoveredEdges = pass3DiscoveredEdgeList;
+            outResult.AnchorReachableCells = anchorReachableCellsOut;
+            outResult.OutsideCells = outsideCellsOut;
+            outResult.PrunedPieceKeys = prunedPieceKeysOut;
+            outResult.GateMarkers = gateMarkersOut;
+
+            if (regionIds == null || regionIds.Count == 0) yield break;
+            if (lookupGrid == null || lookupGrid.Count == 0) yield break;
 
             // Must be the BAKE's notion of solid, not the "piece" layer alone: Valheim puts
             // stone pieces (stone_fence, stone walls) and world rock/cliff props on
@@ -168,7 +272,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             if (pieceMask == 0)
             {
                 Plugin.Log?.LogWarning("[RubberBand] Skipped: no solid layers found");
-                return stats;
+                yield break;
             }
 
             // static_solid layer carries cliffs, rocks, and world props. These
@@ -269,6 +373,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             // geometrically. Published to the caller for the village map.
             var gateSeals = GatherGateSeals(minX, minZ, maxX, maxZ);
             foreach (var g in gateSeals) gateMarkersOut.Add(g.Mid);
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Pass 1: outside-in terrain flood ---
             // Floods inward from every perimeter cell on the terrain layer.
@@ -287,22 +392,50 @@ namespace ValheimVillages.Villager.AI.Navigation
             // (so it can't go stale across partitions / terraforming, and never
             // pollutes the xzMaxY geometry-presence maps) collapses that to one
             // resolve per unique cell.
-            var cellYCache = new Dictionary<long, float>();
-            var outsideCells = PerimeterOutsideFlood(gxMin, gzMin, gxMax, gzMax,
+            // Pass 1's oracles are cached per village across partitions, the same way the
+            // bake flood's are — this is the other half of the OverlapBox storm (measured
+            // ~64k of the ~103k calls left after the bake flood was cached).
+            //
+            // SUBTLETY, and why this cache is keyed separately from the bake flood's: Pass 1's
+            // cellY comes from xzMaxYTerrain — the CURRENT partition's terrain regions, not
+            // the raw heightmap the bake flood reads. So the two floods legitimately disagree
+            // about a cell's height and must never share cached gates.
+            //
+            // Reusing a cached value outside the dirty rect is sound only because
+            // xzMaxYTerrain is itself stable outside the dirty rect, which holds only because
+            // the triangle verdict cache makes the triangulation identical there. That is an
+            // implicit dependency between two caches, so it is asserted rather than assumed:
+            // ValidateCellYAgainstCache re-derives a sample of cached cells and throws if the
+            // region set moved under us.
+            var pass1Cache = GetFloodCache(villageKey + "|pass1", dirty, cell);
+            var pass1CellY = pass1Cache.CellY;
+            var pass1Edges = pass1Cache.EdgeBlocked;
+            ValidateCellYAgainstCache(pass1CellY, xzMaxYTerrain, cell, villageKey);
+
+            var pass1Flood = new FloodResult();
+            yield return PerimeterOutsideFlood(gxMin, gzMin, gxMax, gzMax,
                 (gx, gz) =>
                 {
                     var ck = XzKey(gx, gz);
-                    if (cellYCache.TryGetValue(ck, out var cachedY)) return cachedY;
+                    if (pass1CellY.TryGetValue(ck, out var cachedY)) return cachedY;
                     var cy = GetCellY(gx, gz, xzMaxYTerrain, cell);
-                    cellYCache[ck] = cy;
+                    pass1CellY[ck] = cy;
                     return cy;
                 },
                 (ax, az, bx, bz, ya, yb) =>
-                    WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
-                    || GateBlocksStep(ax, az, bx, bz, cell, gateSeals),
+                {
+                    var ek = CanonicalEdgeKey(ax, az, bx, bz);
+                    if (pass1Edges.TryGetValue(ek, out var cached)) return cached;
+                    var blocked = WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
+                                  || GateBlocksStep(ax, az, bx, bz, cell, gateSeals);
+                    pass1Edges[ek] = blocked;
+                    return blocked;
+                },
                 IsDeepWaterCell,
-                out var perimeterSeeds);
-            stats.PerimeterSeeds = perimeterSeeds;
+                pass1Flood);
+            var outsideCells = pass1Flood.OutsideCells;
+            stats.PerimeterSeeds = pass1Flood.PerimeterSeedCount;
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // dx/dz are reused by Passes 2 and 3 below.
             int[] dx = { 1, -1, 0, 0 };
@@ -311,6 +444,8 @@ namespace ValheimVillages.Villager.AI.Navigation
             foreach (var kv in xzMaxYTerrain)
                 if (outsideCells.Contains(kv.Key))
                     stats.OutsideTerrainCells++;
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Pass 2: inside-out flood from anchors ---
             // Walks any reachable cell in the bake bounds. A villager can
@@ -378,6 +513,8 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             stats.Pass2Seeds = pass2Seeds;
             stats.AnchorReachableTerrainCells = anchorReachableCells.Count;
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Pass 3: anchor-reachable piece flood (bridges through terrain) ---
             // Unified BFS over (XZ, Y) nodes. Seeded from every anchor-reachable
@@ -852,6 +989,8 @@ namespace ValheimVillages.Villager.AI.Navigation
                 stats.Pass3LinksAdded = pass3LinksAdded;
             }
 
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
+
             // --- Pass 5: consolidate linear piece chains ---
             // Detect maximal linear sequences of piece regions where each
             // intermediate node has degree 2 in the piece-only adjacency
@@ -874,27 +1013,32 @@ namespace ValheimVillages.Villager.AI.Navigation
                 boundaryCells, links, kindMap, triangles, pass3EdgePairs,
                 ref stats);
 
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
+
             // --- Pass 4: snap border geometry to the agent NavMesh ---
             SnapBordersToAgentNavMesh(regionIds, links, triangles, ref stats);
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Snapshot for diagnostics ---
             // Combine terrain + piece xzMaxY into a single map for vv_probe;
             // the probe reports cell Y as one number regardless of kind.
-            LastOutsideCells = new HashSet<long>(outsideCells);
             var combinedXzMaxY = new Dictionary<long, float>(xzMaxYTerrain.Count + xzMaxYPiece.Count);
             foreach (var kv in xzMaxYTerrain) combinedXzMaxY[kv.Key] = kv.Value;
             foreach (var kv in xzMaxYPiece)
                 if (!combinedXzMaxY.TryGetValue(kv.Key, out var existing) || kv.Value > existing)
                     combinedXzMaxY[kv.Key] = kv.Value;
-            LastXzMaxY = combinedXzMaxY;
-            LastXzMaxYTerrain = new Dictionary<long, float>(xzMaxYTerrain);
-            LastGxMin = gxMin;
-            LastGzMin = gzMin;
-            LastGxMax = gxMax;
-            LastGzMax = gzMax;
-            LastCell = cell;
-            LastPieceMask = pieceMask;
-            HasSnapshot = true;
+
+            s_snapshots[villageKey] = new FloodSnapshot
+            {
+                OutsideCells = new HashSet<long>(outsideCells),
+                XzMaxY = combinedXzMaxY,
+                XzMaxYTerrain = new Dictionary<long, float>(xzMaxYTerrain),
+                GxMin = gxMin, GzMin = gzMin, GxMax = gxMax, GzMax = gzMax,
+                Cell = cell, PieceMask = pieceMask,
+            };
+
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
             // --- Boundary cells from the perimeter-flood frontier ---
             // The region-edge boundary cells produced upstream (DetectBoundary)
@@ -974,10 +1118,14 @@ namespace ValheimVillages.Villager.AI.Navigation
             // the first bake's voxelizer left walkable. anchorReachableCells is
             // the post-Pass-2 keep set; outsideCells is the Pass-1 perimeter
             // flood result. Both are at LookupCellSize XZ resolution.
-            anchorReachableCellsOut = new HashSet<long>(anchorReachableCells);
-            outsideCellsOut = new HashSet<long>(outsideCells);
-
-            return stats;
+            // Rebound rather than mutated in place: these were `out` parameters before the
+            // conversion, so the pass genuinely replaces the sets it published up front.
+            outResult.AnchorReachableCells = new HashSet<long>(anchorReachableCells);
+            outResult.OutsideCells = new HashSet<long>(outsideCells);
+            outResult.Stats = stats;
+            outResult.Pass3DiscoveredEdges = pass3DiscoveredEdgeList;
+            outResult.PrunedPieceKeys = prunedPieceKeysOut;
+            outResult.GateMarkers = gateMarkersOut;
         }
 
         /// <summary>
@@ -994,23 +1142,24 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     Falls back to <c>ZoneSystem.GetGroundHeight</c> when the cell
         ///     wasn't populated by the last partition.
         /// </summary>
-        internal static float DiagnoseCellY(int gx, int gz)
+        internal static float DiagnoseCellY(FloodSnapshot snap, int gx, int gz)
         {
             // Terrain-only, matching Pass 1's cellY provider. Using the combined map here
             // made every wall probe near a roofed cell fire metres too high.
-            if (LastXzMaxYTerrain == null) return 0f;
-            return GetCellY(gx, gz, LastXzMaxYTerrain,
-                LastCell > 0f ? LastCell : RegionGraph.LookupCellSize);
+            if (snap?.XzMaxYTerrain == null) return 0f;
+            return GetCellY(gx, gz, snap.XzMaxYTerrain,
+                snap.Cell > 0f ? snap.Cell : RegionGraph.LookupCellSize);
         }
 
         /// <summary>
         ///     Highest surface of ANY kind in the cell (terrain or piece) — for display only.
         ///     Never feed this to a wall probe; see <see cref="DiagnoseCellY" />.
         /// </summary>
-        internal static float DiagnoseSurfaceMaxY(int gx, int gz)
+        internal static float DiagnoseSurfaceMaxY(FloodSnapshot snap, int gx, int gz)
         {
-            if (LastXzMaxY == null) return 0f;
-            return GetCellY(gx, gz, LastXzMaxY, LastCell > 0f ? LastCell : RegionGraph.LookupCellSize);
+            if (snap?.XzMaxY == null) return 0f;
+            return GetCellY(gx, gz, snap.XzMaxY,
+                snap.Cell > 0f ? snap.Cell : RegionGraph.LookupCellSize);
         }
 
         /// <summary>
@@ -1025,12 +1174,34 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     <paramref name="perimeterSeedCount" /> reports the seed count
         ///     (set before the BFS expands) for the diagnostic stats.
         /// </summary>
-        internal static HashSet<long> PerimeterOutsideFlood(
+        /// <summary>
+        ///     Carries <see cref="PerimeterOutsideFlood" />'s two results out of the
+        ///     coroutine — an iterator can neither return a value nor take an `out`.
+        /// </summary>
+        internal sealed class FloodResult
+        {
+            public HashSet<long> OutsideCells;
+            public int PerimeterSeedCount;
+        }
+
+        /// <summary>
+        ///     Drive a flood (or any partition iterator) straight to completion on the
+        ///     calling frame, ignoring the frame budget. ONLY for floods small enough that
+        ///     slicing them would cost more in ceremony than it saves — measured, not
+        ///     assumed: the PoI hull flood's BFS is 1.4-5ms, against 120-224ms for the bake
+        ///     flood over the full village footprint.
+        /// </summary>
+        internal static void DrainNow(IEnumerator routine)
+        {
+            while (routine.MoveNext()) { }
+        }
+
+        internal static IEnumerator PerimeterOutsideFlood(
             int gxMin, int gzMin, int gxMax, int gzMax,
             Func<int, int, float> cellY,
             Func<int, int, int, int, float, float, bool> wallBlocks,
             Func<int, int, float, bool> cellImpassable,
-            out int perimeterSeedCount)
+            FloodResult outResult)
         {
             var outsideCells = new HashSet<long>();
             var queue = new Queue<long>();
@@ -1046,12 +1217,20 @@ namespace ValheimVillages.Villager.AI.Navigation
                 EnqueuePerimeterSeed(gxMax, gz, outsideCells, queue);
             }
 
-            perimeterSeedCount = outsideCells.Count;
+            outResult.OutsideCells = outsideCells;
+            outResult.PerimeterSeedCount = outsideCells.Count;
 
             int[] dx = { 1, -1, 0, 0 };
             int[] dz = { 0, 0, 1, -1 };
+            var visited = 0;
             while (queue.Count > 0)
             {
+                // The BFS is the single biggest stage of a partition (measured 224ms over a
+                // 31k-cell footprint), so it yields inside the loop rather than only at its
+                // end. Cell order is unaffected — the queue survives the yield untouched.
+                if (TaskQueue.PartitionRunner.ShouldYieldEvery(visited++, 256))
+                    yield return null;
+
                 var curKey = queue.Dequeue();
                 UnpackXz(curKey, out var gx, out var gz);
                 var curY = cellY(gx, gz);
@@ -1074,8 +1253,6 @@ namespace ValheimVillages.Villager.AI.Navigation
                     queue.Enqueue(nKey);
                 }
             }
-
-            return outsideCells;
         }
 
         /// <summary>
@@ -1188,12 +1365,144 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     agent NavMesh up front instead of leaving the bake to
         ///     produce walkable surface there.
         /// </summary>
-        public static HashSet<long> ComputeOutsideCellsForBake(Bounds bounds)
+        // --- Flood gate cache -------------------------------------------------
+        //
+        // The perimeter flood's whole cost is its two oracles: cellY (a
+        // ZoneSystem.GetGroundHeight raycast) and wallBlocks (a Physics.OverlapBox waist
+        // probe per edge). Measured 171,548 OverlapBox + 49,167 GetGroundHeight calls per
+        // vv_repartition across two villages — ~25% of partition time each for the bake
+        // flood and prune.
+        //
+        // Both oracles are PURE FUNCTIONS OF GEOMETRY at a fixed location, so their results
+        // are cached per village and re-taken only near a change. The BFS itself still runs
+        // in full over every cell, so the flood's output is bit-identical — this memoizes
+        // the inputs, it does not approximate the algorithm.
+        //
+        // Exactness: the waist box is symmetric in its two cells (ComputeWaistProbeBox
+        // builds it from their midpoint), so an undirected edge key is valid. A cell's
+        // height feeds every edge incident to it, so invalidating a cell must invalidate
+        // those edges — which falls out of keying edges by their lower cell and
+        // invalidating by rectangle.
+
+        private sealed class FloodCache
+        {
+            public readonly Dictionary<long, float> CellY = new();
+            public readonly Dictionary<long, bool> EdgeBlocked = new();
+        }
+
+        private static readonly Dictionary<string, FloodCache> s_floodCaches = new();
+
+        /// <summary>
+        ///     How far outside the changed rect the flood oracles must be re-taken. The
+        ///     waist probe box spans half a cell either side of an edge midpoint and
+        ///     <see cref="BuildWallNearCells" /> already pads collider AABBs by one cell, so
+        ///     two cells covers every probe a change inside the rect can reach; four is that
+        ///     with headroom for heightmap bleed at a terrain op's rim.
+        /// </summary>
+        internal const float FloodReachMargin = 4f;
+
+        /// <summary>Drop a village's cached flood oracles (village deleted).</summary>
+        internal static void ForgetFloodCache(string villageKey)
+        {
+            if (!string.IsNullOrEmpty(villageKey)) s_floodCaches.Remove(villageKey);
+        }
+
+        /// <summary>
+        ///     The cache for <paramref name="villageKey" />, with everything inside
+        ///     <paramref name="dirty" /> (grown by <see cref="FloodReachMargin" />) dropped.
+        ///     A null <paramref name="dirty" /> is a full rebuild and empties it.
+        /// </summary>
+        private static FloodCache GetFloodCache(
+            string villageKey, DirtyRect? dirty, float cell)
+        {
+            if (string.IsNullOrEmpty(villageKey))
+                throw new System.ArgumentException(
+                    "The flood cache is per village; an unkeyed flood would read another " +
+                    "village's cached gates.", nameof(villageKey));
+
+            if (!s_floodCaches.TryGetValue(villageKey, out var cache))
+            {
+                cache = new FloodCache();
+                s_floodCaches[villageKey] = cache;
+            }
+
+            if (dirty == null)
+            {
+                cache.CellY.Clear();
+                cache.EdgeBlocked.Clear();
+                return cache;
+            }
+
+            var d = dirty.Value;
+            var gxMin = Mathf.FloorToInt((d.MinX - FloodReachMargin) / cell);
+            var gzMin = Mathf.FloorToInt((d.MinZ - FloodReachMargin) / cell);
+            var gxMax = Mathf.FloorToInt((d.MaxX + FloodReachMargin) / cell);
+            var gzMax = Mathf.FloorToInt((d.MaxZ + FloodReachMargin) / cell);
+
+            for (var gx = gxMin; gx <= gxMax; gx++)
+            for (var gz = gzMin; gz <= gzMax; gz++)
+            {
+                cache.CellY.Remove(XzKey(gx, gz));
+                // Every edge incident to this cell, in both axes and both directions, so a
+                // changed height or a new collider cannot leave a neighbour's gate stale.
+                cache.EdgeBlocked.Remove(EdgeKeyXz(gx, gz, true));
+                cache.EdgeBlocked.Remove(EdgeKeyXz(gx, gz, false));
+                cache.EdgeBlocked.Remove(EdgeKeyXz(gx - 1, gz, true));
+                cache.EdgeBlocked.Remove(EdgeKeyXz(gx, gz - 1, false));
+            }
+
+            return cache;
+        }
+
+        /// <summary>
+        ///     Canonical key for the undirected edge leaving (gx,gz) along +X (
+        ///     <paramref name="alongX" />) or +Z. Callers canonicalize first via
+        ///     <see cref="CanonicalEdgeKey" />.
+        /// </summary>
+        private static long EdgeKeyXz(int gx, int gz, bool alongX)
+        {
+            return XzKey(gx, gz) * 2 + (alongX ? 1 : 0);
+        }
+
+        /// <summary>
+        ///     Key for the edge between two 4-connected cells, independent of which end the
+        ///     flood arrived from. Throws on a non-cardinal pair: the flood is 4-connected,
+        ///     and a diagonal pair here would silently alias onto a cardinal edge's gate.
+        /// </summary>
+        private static long CanonicalEdgeKey(int gxA, int gzA, int gxB, int gzB)
+        {
+            var dgx = gxB - gxA;
+            var dgz = gzB - gzA;
+            if (dgz == 0 && (dgx == 1 || dgx == -1))
+                return EdgeKeyXz(Mathf.Min(gxA, gxB), gzA, true);
+            if (dgx == 0 && (dgz == 1 || dgz == -1))
+                return EdgeKeyXz(gxA, Mathf.Min(gzA, gzB), false);
+            throw new System.ArgumentException(
+                $"CanonicalEdgeKey got a non-cardinal pair ({gxA},{gzA})->({gxB},{gzB}); " +
+                "the perimeter flood is 4-connected.");
+        }
+
+        /// <summary>
+        ///     Synchronous form for the PoI hull flood, which is small enough not to need
+        ///     slicing (see <see cref="DrainNow" /> for the measurement). Runs the identical
+        ///     flood; only the drive differs.
+        /// </summary>
+        public static HashSet<long> ComputeOutsideCellsForHull(
+            Bounds bounds, string villageKey, DirtyRect? dirty)
+        {
+            var holder = new FloodResult();
+            DrainNow(ComputeOutsideCellsForBake(bounds, villageKey, dirty, holder));
+            return holder.OutsideCells ?? new HashSet<long>();
+        }
+
+        public static IEnumerator ComputeOutsideCellsForBake(
+            Bounds bounds, string villageKey, DirtyRect? dirty, FloodResult outResult)
         {
             // Same solid mask as Pass 1 and the bake — see NavMeshBakeManager.SolidMask.
+            outResult.OutsideCells = new HashSet<long>();
             var pieceMask = NavMeshBakeManager.SolidMask;
-            if (pieceMask == 0) return new HashSet<long>();
-            if (ZoneSystem.instance == null) return new HashSet<long>();
+            if (pieceMask == 0) yield break;
+            if (ZoneSystem.instance == null) yield break;
 
             var cell = RegionGraph.LookupCellSize;
             var gxMin = Mathf.FloorToInt(bounds.min.x / cell) - 1;
@@ -1206,8 +1515,12 @@ namespace ValheimVillages.Villager.AI.Navigation
             // the ZoneSystem heightmap (no baked centroids exist yet at bake
             // time). Seal gates the same way so the bake's outside-cell phantom
             // blockers and the HNA partition agree on the village hull.
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
+            var gateSealMark = PartitionProfile.Mark();
             var gateSeals = GatherGateSeals(
                 bounds.min.x, bounds.min.z, bounds.max.x, bounds.max.z);
+            PartitionProfile.Since("flood_gateseals", gateSealMark);
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
             // Memoize per-cell heightmap raycasts: PerimeterOutsideFlood probes
             // each cell's Y once per incident edge, and (unlike Apply's Pass 1)
             // every cell here falls straight to a ZoneSystem.GetGroundHeight
@@ -1216,25 +1529,43 @@ namespace ValheimVillages.Villager.AI.Navigation
             // (this flood is the measured ~55ms bake_outside_flood stage, and it
             // runs again over the hull in VillagePoiRegistry.RefreshFor). Result
             // is identical: GetGroundHeight is pure in (x,z) for a single flood.
+            var wallCellMark = PartitionProfile.Mark();
             var wallCells = BuildWallNearCells(
                 bounds.min.x, bounds.min.z, bounds.max.x, bounds.max.z, cell, pieceMask);
-            var cellYCache = new Dictionary<long, float>();
-            return PerimeterOutsideFlood(gxMin, gzMin, gxMax, gzMax,
+            PartitionProfile.Since("flood_wallcells", wallCellMark);
+            if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
+
+            // Cache survives across partitions of this village; a dirty rect drops only the
+            // cells and edges near the change, a full rebuild drops all of it.
+            var floodCache = GetFloodCache(villageKey, dirty, cell);
+            var cellYCache = floodCache.CellY;
+            var edgeCache = floodCache.EdgeBlocked;
+            var bfsMark = PartitionProfile.Mark();
+            yield return PerimeterOutsideFlood(gxMin, gzMin, gxMax, gzMax,
                 (gx, gz) =>
                 {
                     var ck = XzKey(gx, gz);
                     if (cellYCache.TryGetValue(ck, out var cachedY)) return cachedY;
+                    PartitionProfile.GetGroundHeight++;
                     var cy = ZoneSystem.instance.GetGroundHeight(
                         new Vector3(gx * cell + half, 0f, gz * cell + half));
                     cellYCache[ck] = cy;
                     return cy;
                 },
                 (ax, az, bx, bz, ya, yb) =>
-                    (wallCells.Contains(XzKey(ax, az)) || wallCells.Contains(XzKey(bx, bz)))
-                    && WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
-                    || GateBlocksStep(ax, az, bx, bz, cell, gateSeals),
+                {
+                    var ek = CanonicalEdgeKey(ax, az, bx, bz);
+                    if (edgeCache.TryGetValue(ek, out var cachedBlocked)) return cachedBlocked;
+                    var blocked =
+                        (wallCells.Contains(XzKey(ax, az)) || wallCells.Contains(XzKey(bx, bz)))
+                        && WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask)
+                        || GateBlocksStep(ax, az, bx, bz, cell, gateSeals);
+                    edgeCache[ek] = blocked;
+                    return blocked;
+                },
                 IsDeepWaterCell,
-                out _);
+                outResult);
+            PartitionProfile.Since("flood_bfs", bfsMark);
         }
 
         /// <summary>
@@ -1502,22 +1833,64 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     NavMeshBakeManager.AddDoorBlockers' detection so the partition
         ///     flood and the bake agree on where the gates are.
         /// </summary>
-        internal static List<GateSeal> GatherGateSeals(
-            float minX, float minZ, float maxX, float maxZ)
+        // Every door in the scene, gathered once per partition. The scan is a
+        // whole-scene FindObjectsByType that then discards every door outside the caller's
+        // bounds, and it runs TWICE per partition (the bake flood and the PoI hull flood) —
+        // measured at 70ms a call, the largest single frame spike left after slicing.
+        //
+        // Scoped to PartitionRunner.Epoch rather than to a timer or a structural-change
+        // flag: a partition already reads a snapshot of the world (a change enqueues a fresh
+        // partition rather than mutating the one in flight), so one scan per partition is
+        // exactly the granularity the pipeline already assumes. A timer would be a guess and
+        // a structural-change flag would miss doors that arrive via zone streaming.
+        private static int s_doorScanEpoch = -1;
+        private static List<(Vector3 pos, Vector3 fwd, float halfWidth)> s_allDoors;
+
+        /// <summary>
+        ///     Half-width per door PREFAB. Derived from local collider size x lossyScale, so
+        ///     every instance of a prefab gives the same answer — but it was recomputed per
+        ///     instance with a GetComponentsInChildren walk each time.
+        /// </summary>
+        private static readonly Dictionary<string, float> s_gateHalfWidthByPrefab = new();
+
+        private static List<(Vector3 pos, Vector3 fwd, float halfWidth)> AllDoorsThisPartition()
         {
-            var seals = new List<GateSeal>();
-            var doors = UnityEngine.Object.FindObjectsByType<Door>(
-                FindObjectsInactive.Include, FindObjectsSortMode.None);
+            if (s_doorScanEpoch == TaskQueue.PartitionRunner.Epoch && s_allDoors != null)
+                return s_allDoors;
+
+            var list = new List<(Vector3, Vector3, float)>();
+            var doors = Patches.DoorRegistryPatch.LiveDoors();
             foreach (var door in doors)
             {
                 if (door == null || door.transform == null) continue;
-                var p = door.transform.position;
-                if (p.x < minX || p.x > maxX || p.z < minZ || p.z > maxZ) continue;
                 var fwd = door.transform.forward;
                 fwd.y = 0f;
                 if (fwd.sqrMagnitude < 1e-4f) continue;
                 fwd.Normalize();
-                seals.Add(new GateSeal(p, fwd, GateHalfWidth(door)));
+                list.Add((door.transform.position, fwd, GateHalfWidth(door)));
+            }
+
+            s_allDoors = list;
+            s_doorScanEpoch = TaskQueue.PartitionRunner.Epoch;
+            return list;
+        }
+
+        [RegisterCleanup]
+        public static void ClearDoorScanCache()
+        {
+            s_doorScanEpoch = -1;
+            s_allDoors = null;
+            s_gateHalfWidthByPrefab.Clear();
+        }
+
+        internal static List<GateSeal> GatherGateSeals(
+            float minX, float minZ, float maxX, float maxZ)
+        {
+            var seals = new List<GateSeal>();
+            foreach (var (pos, fwd, halfWidth) in AllDoorsThisPartition())
+            {
+                if (pos.x < minX || pos.x > maxX || pos.z < minZ || pos.z > maxZ) continue;
+                seals.Add(new GateSeal(pos, fwd, halfWidth));
             }
 
             return seals;
@@ -1531,6 +1904,12 @@ namespace ValheimVillages.Villager.AI.Navigation
         // 1.2m door panel when no box collider is found.
         private static float GateHalfWidth(Door door)
         {
+            // Memoized per prefab: the value is derived from LOCAL collider size x
+            // lossyScale, so it is identical for every instance of a given door prefab.
+            var prefabName = door.gameObject.name;
+            if (s_gateHalfWidthByPrefab.TryGetValue(prefabName, out var cachedWidth))
+                return cachedWidth;
+
             var widest = 0f;
             var cols = door.GetComponentsInChildren<Collider>(true);
             foreach (var c in cols)
@@ -1546,7 +1925,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             if (widest <= 0f) widest = 1.2f;
-            return widest * 0.5f + RegionGraph.LookupCellSize * 0.5f;
+            var halfWidth = widest * 0.5f + RegionGraph.LookupCellSize * 0.5f;
+            s_gateHalfWidthByPrefab[prefabName] = halfWidth;
+            return halfWidth;
         }
 
         /// <summary>
@@ -2129,17 +2510,14 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             var dgx = gxB - gxA;
             var dgz = gzB - gzA;
-            if ((dgx != 0 && dgz == 0) || (dgz != 0 && dgx == 0))
-            {
-                halfExtents = new Vector3(half, halfY, half);
-            }
-            else
-            {
-                Plugin.Log?.LogError(
-                    "[RubberBand] ComputeWaistProbeBox called with non-cardinal step " +
-                    $"({gxA},{gzA})->({gxB},{gzB}); 4-neighbour BFS contract violated.");
-                halfExtents = new Vector3(half, halfY, half);
-            }
+            if ((dgx == 0) == (dgz == 0))
+                throw new System.ArgumentException(
+                    "ComputeWaistProbeBox called with non-cardinal step " +
+                    $"({gxA},{gzA})->({gxB},{gzB}); the flood is 4-connected. The box built " +
+                    "for a diagonal step spans the wrong volume, so answering anyway would " +
+                    "report a gate the flood never evaluates.");
+
+            halfExtents = new Vector3(half, halfY, half);
         }
 
         // --- Encoding helpers ---

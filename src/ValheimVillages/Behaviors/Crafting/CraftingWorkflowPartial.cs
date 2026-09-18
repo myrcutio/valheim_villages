@@ -71,8 +71,10 @@ namespace ValheimVillages.Behaviors.Crafting
             {
                 return (int)s_smelterGetProcessedQueueSize.Invoke(smelter, null);
             }
-            catch
+            catch (System.Exception ex)
             {
+                Diagnostics.VanillaReflection.ReportFailure(
+                    "Smelter.GetProcessedQueueSize", ex);
                 return 0;
             }
         }

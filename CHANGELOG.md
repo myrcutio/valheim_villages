@@ -5,7 +5,15 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2026-09-18
+
+### New
+- **Multiple villages work.** Each village keeps its own map, work orders, villagers and
+  schedule, entirely independently — building in one leaves the others alone, and villagers
+  in each get on with their own work. Previously a second village would corrupt the first's
+  territory, and only one of them would ever rebuild its map.
+  Two caveats: this has been tested with two villages on a listen host, not on a dedicated
+  server, and villages closer together than about 200m are untested.
 
 ### Fixed
 - **A second village no longer corrupts the first one's map.** Each village sized its
@@ -16,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **With two or more villages, only one of them would rebuild its map.** A queued rebuild
   for one village counted as a duplicate of another village's and was silently dropped, so
   a second village's layout could stay stale indefinitely after you built there.
+- **Recalling a villager no longer flings it out of the world.** Recall moved the villager to
+  the station and then moved it *again* by the same amount, landing it roughly twice as far
+  out — one recall to a station left a farmer 270m away in mid-air, where his zone unloaded
+  and he appeared to vanish for good. The rescue that exists to drag a stray villager home
+  had the identical fault, so it could not bring him back either. (Present since 0.2.6.)
+- **Recall works on a villager that isn't loaded.** It previously did nothing but say "try
+  again near the village" — useless advice, since a villager worth recalling is usually one
+  that has ended up far enough away to unload. It now moves the villager regardless; it is
+  standing at the station when you next get there.
+- **Recall always moves the villager.** It used to give up silently if it couldn't find a
+  tidy spot beside the station, which is exactly what happens when a villager is stuck or
+  somewhere strange — the one time you actually need it.
 - **Villagers no longer stall forever on work they cannot reach.** A chest, crop or plant
   spot inside the village but off the walkable map was still offered as work; the villager
   committed to it, failed to path there, and picked the identical target again next cycle —
@@ -26,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at, and no longer walk in a loop between the same unreachable spot and the farm.
 - Villagers no longer log a spurious "lost context" warning and drop to idle each time the
   scheduler hands them a job, moments before that job's own scan result arrives.
+- **The `vv_viz tri` wireframe now shows every village at once.** Only one village's grid
+  was ever drawn — whichever rebuilt its map most recently — because all villages shared a
+  single cache that each rebuild overwrote. The same cache fed `vv_probe`, which would
+  report the nearest walkable surface as hundreds of metres away while you stood on a
+  perfectly good one. Both now report per village, and `vv_probe` names which village a
+  triangle belongs to.
 
 ### Removed
 - **Saves from before 0.2 are no longer supported.** The one-time work-order migration
@@ -37,6 +63,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixed.
 
 ### Changed
+- **Building no longer rebuilds the map of villages nowhere near what you changed.** Every
+  piece placed or removed, and every hoe stroke, used to rebuild every loaded village's
+  map — including villages on the other side of the world. Each change now records where it
+  happened, and only villages whose territory it touches rebuild.
+- **Rebuilding a village's map now re-examines only the ground near what you changed.**
+  Working out whether each patch of ground is walkable is the single most query-heavy part
+  of the rebuild, and it was redone from scratch across the whole village every time. Those
+  results are now remembered per patch and only re-taken where something actually changed —
+  96% fewer physics and navmesh queries for a localised edit, for an identical map.
+  `vv_repartition` on its own still re-examines everything, as the check on the fast path.
+- Working out where a village's outer wall line falls is likewise remembered per patch of
+  ground and only re-taken near a change, on both passes that need it — 98% fewer collision
+  queries and over 99% fewer terrain height samples, again for an identical result.
+- **Rebuilding a village's map no longer freezes the game while it happens.** The whole
+  rebuild used to run inside a single frame — around a second of dead screen, twice over
+  with two villages. It now runs in the background across roughly a hundred frames, one
+  village at a time, and the navmesh rebuild itself runs off the main thread. Measured on a
+  two-village world: the rebuild adds about 2.5ms to an average frame, with two brief
+  spikes across the whole rebuild instead of one long freeze.
+- A door's width is now measured once per door type instead of once per door, and the game
+  no longer searches the entire world for doors twice every time a village map is rebuilt.
+- The post-bake navmesh extent check is off by default. It re-examined every village's mesh
+  after each rebuild — the single largest stall left — to produce one diagnostic line.
+- **Diagnostics no longer fill your disk.** Three separate channels wrote to disk as you
+  played, none of them capped or trimmed: a legacy line-per-event file that had reached 4GB,
+  a per-rebuild JSON file that had left 3,451 files behind, and a per-rebuild telemetry line.
+  Each opened and closed a file on the main thread. The first is deleted outright; the other
+  two are off unless you turn them on, and what they recorded is in the normal log anyway.
+  (Existing files already on disk are left alone — delete `BepInEx/config/vv_dumps` if you
+  want the space back.)
+- **A work order now belongs to the village its token is standing in.** Move the token to a
+  chest in another village and the order moves with it, keeping the amounts you set. Take
+  the token out and the order goes; put it back and it returns. Two villages can each run
+  the same order, because each has its own token. An order whose village no longer exists
+  isn't lost either — drop its token in any village's chest and that village takes it on.
+  A token in your pocket is in transit, not gone, so nothing is removed while you carry it.
+- Village territory no longer grows to swallow a neighbouring village's buildings when two
+  settlements are close together; each building is attributed to whichever village it is
+  nearest.
+- `vv_probe`'s wall-flood section reports the village you are standing in rather than
+  whichever village rebuilt most recently, and `vv_village anchors` includes the registry.
+- `vv_path` works away from the first village: it sampled from a fixed height that only
+  suited one village's altitude, and silently reported failure anywhere else.
+- `vv_chestpolicy` scopes chests by village territory, matching what villagers actually see,
+  instead of a radius that disagreed with them.
+- Diagnostics that read the navmesh now warn when a rebuild is in progress, instead of
+  reporting a half-rewritten one as fact.
+- Calls into the game's internals that fail now say so in the log instead of silently
+  reporting "no fire", "no fuel" or "nothing queued" and letting villagers act on it.
+- A village is only ever removed once nothing is left of it — no villagers and no registry.
+  It could previously be removed while villagers still lived there, orphaning their records.
 - A new work order now defaults to **one full stack** of the item it produces, refilling at
   **half a stack**, instead of a flat 1-10. The old default ignored what was being made: it
   ordered a fifth of a stack of something that stacks to 50, and ten separate copies of
