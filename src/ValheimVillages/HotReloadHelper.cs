@@ -293,17 +293,12 @@ namespace ValheimVillages
                                  || !string.IsNullOrEmpty(zdo.GetString("vv_villager_type"));
                 if (!isVillager) continue;
 
-                // Get anchor position from ZDO
-                var anchorPos = zdo.GetVec3("vv_home_position", Vector3.zero);
-                if (anchorPos == Vector3.zero)
-                {
-                    Plugin.Log?.LogWarning(
-                        $"[HotReload] NPC at {nview.transform.position} " +
-                        "has no anchor position stored, skipping");
-                    continue;
-                }
-
-                // Identity (and legacy migration) is resolved inside VillagerRestoration.Restore.
+                // NOTE: this used to bail unless the NPC's own ZDO carried a non-zero
+                // vv_home_position. That guard was both dead (anchorPos was never read again)
+                // and actively harmful: a villager's home lives on its RECORD, not on the NPC
+                // ZDO, so every record-homed villager was skipped by this sweep — including the
+                // ones a hot reload is supposed to re-graft. Home, identity and legacy
+                // migration are all resolved inside VillagerRestoration.Restore.
 
                 // Remove orphaned CraftingStation components from previous
                 // reloads before restoring.  VillagerStation.Initialize adds

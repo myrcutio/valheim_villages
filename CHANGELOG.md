@@ -5,6 +5,18 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-09-18
+
+### Fixed
+- **Villagers no longer turn back into ordinary Dvergr mages on a dedicated server.** A
+  villager's identity lives in a separate record, and on a *client* that record arrives over
+  the network independently of the villager itself. If the villager got there first, the game
+  gave up on it permanently and left it standing in your village as a plain Dvergr — no name,
+  no dialog, nothing to interact with — while the server quietly went on running the real
+  villager. Reconnecting, or walking away and coming back, only re-rolled the same dice. A
+  villager now waits for its record to arrive instead of giving up. Hosts and single-player
+  were never affected. (Present since 0.2.6.)
+
 ## [0.3.0] - 2026-09-18
 
 ### New

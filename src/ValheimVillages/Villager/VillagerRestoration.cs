@@ -1,5 +1,6 @@
 using UnityEngine;
 using ValheimVillages.Schemas;
+using ValheimVillages.TaskQueue.Handlers;
 using ValheimVillages.UI.Interaction;
 using ValheimVillages.Villager.AI.Navigation;
 using ValheimVillages.Villager.Records;
@@ -39,8 +40,18 @@ namespace ValheimVillages.Villager
             // Resolve the authoritative record. New villagers carry a vv_record_id
             // back-reference; legacy ones (saved before the record table) carry
             // vv_villager_id/type/name — migrate those into a fresh record.
-            var record = ResolveOrMigrateRecord(zdo);
-            if (record == null) return false;
+            var record = ResolveOrMigrateRecord(zdo, out var awaitingRecord);
+            if (record == null)
+            {
+                // The record carrier ZDO simply hasn't replicated yet (clients receive it
+                // independently of the NPC's own ZDO). Park the graft until it lands instead
+                // of leaving this NPC a native Dvergr for the rest of the session.
+                if (awaitingRecord)
+                    VillagerRestoreHandler.Enqueue(
+                        zdo.GetString("vv_record_id"), go.GetComponent<ZNetView>());
+                return false;
+            }
+
             var recordId = record.RecordId;
 
             // Idempotency is per-GameObject, not per-record: a portal/zone round-trip
@@ -77,9 +88,14 @@ namespace ValheimVillages.Villager
         ///     Return this NPC's villager record, minting one from legacy
         ///     vv_villager_* keys if it has none (migration). Returns null if the ZDO
         ///     isn't one of ours or the record can't be created.
+        ///     <para>
+        ///         <paramref name="awaitingRecord" /> is set when the NPC names a record that
+        ///         is not in the world YET — the caller should retry rather than give up.
+        ///     </para>
         /// </summary>
-        private static VillagerRecord ResolveOrMigrateRecord(ZDO zdo)
+        private static VillagerRecord ResolveOrMigrateRecord(ZDO zdo, out bool awaitingRecord)
         {
+            awaitingRecord = false;
             var recordId = zdo.GetString("vv_record_id");
             if (!string.IsNullOrEmpty(recordId))
             {
@@ -92,9 +108,16 @@ namespace ValheimVillages.Villager
             if (string.IsNullOrEmpty(legacyType))
             {
                 if (!string.IsNullOrEmpty(recordId))
-                    Plugin.Log?.LogWarning(
-                        $"[VillagerRestoration] vv_record_id '{recordId}' has no record and no legacy " +
-                        "identity to migrate; skipping");
+                {
+                    // Expected and transient on a client: the NPC's ZDO can arrive before its
+                    // record carrier's. Not a warning, and emphatically not a permanent skip —
+                    // the caller defers the graft until the record replicates.
+                    awaitingRecord = true;
+                    Plugin.Log?.LogDebug(
+                        $"[VillagerRestoration] vv_record_id '{recordId}' has no record yet; " +
+                        "deferring graft until the record carrier replicates");
+                }
+
                 return null;
             }
 
