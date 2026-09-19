@@ -1,6 +1,9 @@
+<img src="https://raw.githubusercontent.com/myrcutio/valheim_villages/main/Thunderstore/icon.png" alt="Valheim Villages" width="200">
+
 # Valheim Villages
 
-Add villagers to Valheim.  They map out an enclosed village, locate stations and containers within the walls, and attempt to fulfill work orders using available materials.
+Adds villagers who map your walled village, find your stations and chests, and keep work
+orders stocked from what you have. They farm, cook, smelt, haul, repair and patrol.
 
 > **Early access.** Expect rough edges — see Known Issues.
 
