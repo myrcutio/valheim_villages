@@ -200,7 +200,12 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     and wedge on). Lower than Valheim's permissive Humanoid-cloned
         ///     value.
         /// </summary>
-        private const float NavMeshBakeMaxClimb = 0.2f;
+        /// <summary>
+        ///     The tallest step the agent is considered able to take. Internal rather than
+        ///     private because the reachability prune must use the SAME number: a prune more
+        ///     permissive than the mesh it prunes keeps surfaces the agent can never stand on.
+        /// </summary>
+        internal const float NavMeshBakeMaxClimb = 0.2f;
 
         /// <summary>
         ///     Bake a fresh NavMesh for the villager agent over <paramref name="bounds" />,
@@ -345,6 +350,29 @@ namespace ValheimVillages.Villager.AI.Navigation
             result.DoorPiecesDropped = doorGeometryDropped;
             result.DoorsBlocked = 0;
 
+            // Drop roof geometry for the same reason, one step earlier than every filter
+            // that was supposed to catch it. A Valheim roof piece is a pitched MESH wrapped
+            // in an axis-aligned BOX collider, and the box is what the voxelizer and every
+            // downstream slope test actually see: its top face is dead flat, so a 26° or 45°
+            // roof sails through RegionBuilder's 27° cutoff and bakes as clean walkable floor
+            // a storey above the village. Measured at (-47,-409): wood_roof x7 + wood_roof_45
+            // x3 produced a 37.79m² region at y≈37.4 that no villager could path to from
+            // anywhere on the ground, which the region graph nonetheless offered as somewhere
+            // to stand and to reach from.
+            //
+            // Matched on the prefab NAME because that is the only signal the piece carries —
+            // there is no roof component, and the collider shape is the thing that lies. Every
+            // roof piece in the game has "roof" in its name; the "*wall_roof*" family
+            // (gable ends, turf_roof_wall) is explicitly kept, because those are vertical
+            // WALLS and dropping them would open a hole a villager walks straight through.
+            //
+            // Trade-off, stated: a roof is no longer an obstacle either, so it no longer
+            // denies headroom to a low attic floor, and a roof piece deliberately used as a
+            // ramp stops being walkable. Both are worth it against villagers idling onto
+            // rooftops they cannot reach.
+            var roofGeometryDropped = pieceSources.RemoveAll(s => IsRoofGeometry(s.component));
+            result.RoofPiecesDropped = roofGeometryDropped;
+
             // Drop bed geometry from the bake too. A bed's flat top is a
             // walkable surface to the voxelizer, so it generates navmesh ON the
             // bed — and because that walkable source sits at the SAME location
@@ -388,6 +416,12 @@ namespace ValheimVillages.Villager.AI.Navigation
             var outsideCells = floodHolder.OutsideCells;
             PartitionProfile.Since("bake_outside_flood", outsideFloodMark);
             if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
+            // A Forester's Post claims a patch of outdoors as working ground. Done BEFORE the
+            // blockers are built, because they are what would otherwise carve it away.
+            Behaviors.Forestry.ForesterPost.UnblockWoodlotCells(
+                outsideCells, villageId, null, floodHolder.GateMarkers);
+            // A gate is only a way out if there is ground to step onto beyond it.
+            DoorLinkPlacer.UnblockDoorAprons(outsideCells, bounds);
             var phantomOutside = AddOutsideCellBlockers(pieceSources, outsideCells, bounds);
             if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
             result.OutsideCellsBlocked = phantomOutside;
@@ -705,6 +739,33 @@ namespace ValheimVillages.Villager.AI.Navigation
                 $"[NavMeshBake] terrain weld: {welded} index refs re-pointed across " +
                 $"{verts.Count - posToIndex.Count} merged vertex positions " +
                 $"({verts.Count} total verts, {posToIndex.Count} unique positions)");
+        }
+
+        /// <summary>
+        ///     Is this collider part of a roof piece? Name-matched: the collider shape cannot
+        ///     answer it (roofs are box-wrapped, so they read as flat floor) and no component
+        ///     distinguishes a roof from a floor. "wall_roof" pieces are gable-end WALLS, not
+        ///     roofing, and must stay in the bake so they keep blocking.
+        /// </summary>
+        private static bool IsRoofGeometry(Component component)
+        {
+            if (component == null) return false;
+            var piece = component.GetComponentInParent<Piece>();
+            if (piece == null) return false;
+
+            return IsRoofPrefabName(Utils.GetPrefabName(piece.gameObject));
+        }
+
+        /// <summary>
+        ///     The rule itself, separated from the scene lookup so it can be table-tested
+        ///     against the real prefab list (<c>search_id roof</c>) without a game. Two
+        ///     <c>IndexOf</c> calls carry the whole roof exclusion; they are worth pinning.
+        /// </summary>
+        internal static bool IsRoofPrefabName(string prefabName)
+        {
+            if (string.IsNullOrEmpty(prefabName)) return false;
+            return prefabName.IndexOf("roof", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                   prefabName.IndexOf("wall", StringComparison.OrdinalIgnoreCase) < 0;
         }
 
         /// <summary>
@@ -1277,6 +1338,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int SourceCount;
             public int DoorsBlocked;
             public int DoorPiecesDropped;
+            public int RoofPiecesDropped;
             public int BedsBlocked;
             public int FiresBlocked;
             public int OutsideCellsBlocked;

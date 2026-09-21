@@ -308,6 +308,24 @@ namespace ValheimVillages.Settings
         /// <summary>Time spent at crafting station per craft cycle (seconds).</summary>
         public const float CraftDuration = 2.5f;
 
+        /// <summary>
+        ///     Hard ceiling on a single stationary craft wait (smelting, cooking, a hive
+        ///     extract) before the villager gives up on it.
+        ///
+        ///     <para>Every station poller answers "still waiting" unconditionally — that is
+        ///     correct while the station is working, but it means a craft whose output can
+        ///     never arrive has NO exit: the villager holds its scheduler assignment forever,
+        ///     and because the dispatcher hands a held assignment straight back, it stops
+        ///     considering any other work at all. Observed live: a Farmer stood in a corner
+        ///     for over ten minutes waiting on a cooking station with nothing on it, while a
+        ///     feast went unreplaced ten metres away.</para>
+        ///
+        ///     <para>Generous on purpose — a smelter takes ~30s per bar and the wait ends at
+        ///     the FIRST output, so this only ever fires on a craft that has genuinely
+        ///     stopped.</para>
+        /// </summary>
+        public const float CraftStallTimeout = 300f;
+
         /// <summary>How often to re-scan for work when idle (seconds).</summary>
         public const float WorkScanInterval = 6f;
 

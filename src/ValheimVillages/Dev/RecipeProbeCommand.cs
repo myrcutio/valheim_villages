@@ -47,6 +47,13 @@ namespace ValheimVillages.Dev
                     : "(NONE — hand-craftable)";
                 sb.AppendLine($"  recipe '{r.name}' station={station} enabled={r.m_enabled} " +
                               $"inputs={r.m_resources?.Length ?? 0} minLvl={r.m_minStationLevel}");
+                // Name them. "inputs=4" says a villager needs four things and not WHICH four,
+                // which is the only part that answers "why is this order not being worked?".
+                if (r.m_resources != null)
+                    foreach (var req in r.m_resources)
+                        sb.AppendLine(
+                            $"      needs {(req?.m_resItem != null ? req.m_resItem.name : "?")}" +
+                            $" x{req?.m_amount}");
                 sb.AppendLine($"    player-facing: {DescribePlayerGates(r)}");
             }
 
@@ -103,8 +110,9 @@ namespace ValheimVillages.Dev
 
         private static void Print(string s)
         {
-            global::Console.instance?.Print(s);
-            Plugin.Log?.LogInfo(s);
+            // Capped + chunked: a single oversized write to a headless server's
+            // stdout pipe blocks the main thread. See ConsoleReport.
+            ValheimVillages.Dev.ConsoleReport.Emit(s);
         }
     }
 }

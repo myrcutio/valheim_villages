@@ -280,21 +280,13 @@ namespace ValheimVillages.Attributes
                 if (parameters.Length == 0)
                 {
                     var m = method;
-                    handler = _ =>
-                    {
-                        m.Invoke(null, null);
-                        return null;
-                    };
+                    handler = _ => InvokeGuarded(m, null);
                 }
                 else if (parameters.Length == 1 &&
                          parameters[0].ParameterType == typeof(Terminal.ConsoleEventArgs))
                 {
                     var m = method;
-                    handler = args =>
-                    {
-                        m.Invoke(null, new object[] { args });
-                        return null;
-                    };
+                    handler = args => InvokeGuarded(m, new object[] { args });
                 }
                 else
                 {
@@ -315,6 +307,32 @@ namespace ValheimVillages.Attributes
             }
 
             Plugin.Log?.LogDebug($"[AttributeScanner] Registered {count} dev commands");
+        }
+
+        /// <summary>
+        ///     Run a dev command and say what actually went wrong when it does not.
+        ///
+        ///     <para>Reflection wraps everything a command throws in a
+        ///     <see cref="TargetInvocationException" />, whose own message is the useless
+        ///     "Exception has been thrown by the target of an invocation" — which is all a
+        ///     caller over MCP ever saw, with the real type, message and stack discarded.
+        ///     Unwrapped here once, for every command.</para>
+        /// </summary>
+        private static string InvokeGuarded(MethodInfo method, object[] args)
+        {
+            try
+            {
+                method.Invoke(null, args);
+                return null;
+            }
+            catch (TargetInvocationException ex)
+            {
+                var inner = ex.InnerException ?? ex;
+                Plugin.Log?.LogError(
+                    $"[DevCommand] {method.DeclaringType?.Name}.{method.Name} threw " +
+                    $"{inner.GetType().Name}: {inner.Message}\n{inner.StackTrace}");
+                return $"{inner.GetType().Name}: {inner.Message}";
+            }
         }
 
         private static string DeriveCommandName(Type type, MethodInfo method)

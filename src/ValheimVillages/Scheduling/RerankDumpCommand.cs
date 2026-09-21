@@ -19,15 +19,27 @@ namespace ValheimVillages.Scheduling
     ///     answer, and it must answer it on a dedicated server where there is no local
     ///     player to score from. Scoring from the player's position instead (as this used to)
     ///     described a trip nobody was taking.</para>
+    ///
+    ///     <para><b>Summarised, not dumped.</b> A village routinely carries a hundred-plus
+    ///     rows (one per damaged piece), and printing every one of them for every villager
+    ///     produced a single ~30 KB write that blocked the main thread on a dedicated server's
+    ///     stdout pipe and left it unresponsive — see <see cref="Dev.ConsoleReport" />. The
+    ///     rows that lose on SCORE are the ones worth seeing individually; the rows dropped by
+    ///     the pre-filter are counted by reason instead, which is the same answer in one line.
+    ///     <c>full</c> as a second argument prints every row (still capped).</para>
     /// </summary>
     public static class RerankDumpCommand
     {
         [DevCommand("Dump task-board candidates + reranker score breakdown per villager. " +
-                    "Usage: vv_rerank_dump [villagerName]",
+                    "Usage: vv_rerank_dump [villagerName] [full]",
             Name = "vv_rerank_dump")]
         public static void Dump(Terminal.ConsoleEventArgs args)
         {
-            var filter = args.Length >= 2 ? args[1] : null;
+            var filter = args.Length >= 2 && !IsFull(args[1]) ? args[1] : null;
+            var full = (args.Length >= 2 && IsFull(args[1])) || (args.Length >= 3 && IsFull(args[2]));
+            // Top scorers only, unless asked for everything: the pick is decided at the head
+            // of the ranking, so that is where the explanation lives.
+            const int shown = 8;
             var sb = new StringBuilder();
             var now = Time.time;
             var scanned = new HashSet<string>();
@@ -80,9 +92,20 @@ namespace ValheimVillages.Scheduling
                 };
 
                 var features = new float[TaskReranker.FeatureCount];
+                var skips = new Dictionary<string, int>();
+                var scored = new List<(float total, string line)>();
                 foreach (var t in tasks)
                 {
                     var why = Ineligible(in query, t, now, village.VillageId, graphGeneration);
+                    if (why != null && !full)
+                    {
+                        // Counted, not printed. One "missing capability 'repair'" line is the
+                        // whole story; a hundred of them is just the village's repair list.
+                        skips.TryGetValue(why, out var had);
+                        skips[why] = had + 1;
+                        continue;
+                    }
+
                     var hops = RegionHopDistance.Hops(village.Graph, from, t.Position);
                     var hasDeadline = t.ExpiresAt > 0f;
                     var eta = hops * settings.PerHopSeconds;
@@ -94,14 +117,23 @@ namespace ValheimVillages.Scheduling
                     TaskReranker.BuildFeatures(features, t, hops, eta, slack, in query, settings, now);
                     var residual = mlp != null ? mlp.Forward(features) : 0f;
 
-                    sb.AppendLine(
+                    var line =
                         $"    {t.Kind,-11} {t.TargetItemPrefab ?? "(self-pick)",-16} " +
                         $"pri={t.Priority:F2} hops={hops,3} eta={eta,5:F1}s " +
                         $"slack={(hasDeadline ? slack.ToString("F1") : "--"),-7} " +
                         $"U={closed:F3}{(residual != 0f ? $"{residual:+0.000;-0.000}" : "")} " +
                         $"=> {closed + residual:F3}  @({t.Position.x:F0},{t.Position.z:F0})" +
-                        (why != null ? $"  [SKIPPED: {why}]" : ""));
+                        (why != null ? $"  [SKIPPED: {why}]" : "");
+                    scored.Add((closed + residual, line));
                 }
+
+                scored.Sort((a, b) => b.total.CompareTo(a.total));
+                for (var i = 0; i < scored.Count && (full || i < shown); i++)
+                    sb.AppendLine(scored[i].line);
+                if (!full && scored.Count > shown)
+                    sb.AppendLine($"    … and {scored.Count - shown} more scored lower");
+                if (skips.Count > 0)
+                    sb.AppendLine($"    not eligible: {Histogram(skips)}");
 
                 var pick = DualEncoderScheduler.SelectBestExplained(in query, tasks, mlp, settings, now);
                 sb.AppendLine(pick.Task != null
@@ -115,7 +147,24 @@ namespace ValheimVillages.Scheduling
                     ? $"[vv_rerank_dump] no loaded villager named '{filter}'"
                     : "[vv_rerank_dump] no villagers loaded on this peer");
 
-            Print("[vv_rerank_dump]\n" + sb);
+            Dev.ConsoleReport.Emit("[vv_rerank_dump]", sb);
+        }
+
+        private static bool IsFull(string arg)
+        {
+            return string.Equals(arg, "full", System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string Histogram(Dictionary<string, int> counts)
+        {
+            var sb = new StringBuilder();
+            foreach (var kv in counts)
+            {
+                if (sb.Length > 0) sb.Append(", ");
+                sb.Append($"{kv.Key} ×{kv.Value}");
+            }
+
+            return sb.ToString();
         }
 
         /// <summary>
@@ -139,11 +188,5 @@ namespace ValheimVillages.Scheduling
         }
 
         private static float Sigmoid(float x) => 1f / (1f + Mathf.Exp(-x));
-
-        private static void Print(string s)
-        {
-            global::Console.instance?.Print(s);
-            Plugin.Log?.LogInfo(s);
-        }
     }
 }

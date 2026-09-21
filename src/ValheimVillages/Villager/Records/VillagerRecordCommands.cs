@@ -76,6 +76,23 @@ namespace ValheimVillages.Villager.Records
                     $"  {r.Status,-5} {r.Name} ({r.Type})  village={r.Village}  " +
                     $"live={VillagerLiveness.Tag(presence)}{warn}  id={r.RecordId}  npc={r.NpcZdoId} home={r.HomeAnchor}");
 
+                // An AWAY villager has no runtime block — but its stored position is readable
+                // on the host, and for a villager that has wandered off that is the ONE thing
+                // you want to know. Omitting it meant the tool went quiet in exactly the case
+                // it was needed for: "the Lumberjack walked off into the wild" and nothing
+                // could say where to.
+                if (presence == LivePresence.Away && ZNet.instance != null && ZNet.instance.IsServer())
+                {
+                    var zdo = ZDOMan.instance?.GetZDO(r.NpcZdoId);
+                    if (zdo != null)
+                    {
+                        var at = zdo.GetPosition();
+                        Print($"    stored pos=({at.x:F1},{at.y:F1},{at.z:F1})  " +
+                              $"{Vector3.Distance(at, r.HomeAnchor):F0}m from home  " +
+                              $"owner={zdo.GetOwner()}");
+                    }
+                }
+
                 // Only a record with a live local instance has a runtime block to show.
                 if (!verbose || presence != LivePresence.Live) continue;
                 if (!VillagerAIManager.ActiveVillagers.TryGetValue(r.RecordId, out var ai) || ai == null)
@@ -176,13 +193,14 @@ namespace ValheimVillages.Villager.Records
             Print($"[vv_set_record_status] {args[1]} -> {status}");
         }
 
-        [DevCommand("Recruit a villager of <type> at the player position (test): vv_recruit <type>",
+        [DevCommand("Recruit a villager of <type>: vv_recruit <type> [x] [z] [y]  " +
+                    "(X,Z,[Y] order; defaults to the player position)",
             Name = "vv_recruit")]
         public static void Recruit(Terminal.ConsoleEventArgs args)
         {
             if (args.Length < 2)
             {
-                Print("usage: vv_recruit <type>");
+                Print("usage: vv_recruit <type> [x] [z] [y]   (X,Z,[Y] order)");
                 return;
             }
 
@@ -193,7 +211,32 @@ namespace ValheimVillages.Villager.Records
                 return;
             }
 
-            var pos = Player.m_localPlayer != null ? Player.m_localPlayer.transform.position : Vector3.zero;
+            // Explicit coords, else the player. A dedicated server has no local player, so
+            // without the coords form this command resolved (0,0,0) and always reported
+            // "no village here" — unusable on the very host the villagers actually run on.
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            Vector3 pos;
+            if (args.Length >= 4
+                && float.TryParse(args[2], System.Globalization.NumberStyles.Float, inv, out var rx)
+                && float.TryParse(args[3], System.Globalization.NumberStyles.Float, inv, out var rz))
+            {
+                // global:: — inside this namespace the bare name `Villager` binds to the
+                // TYPE, not the namespace, so the relative path does not resolve.
+                pos = new Vector3(
+                    rx,
+                    global::ValheimVillages.Villager.AI.Navigation.MeshProbe.ResolveY(rx, rz, args, 4, inv),
+                    rz);
+            }
+            else if (Player.m_localPlayer != null)
+            {
+                pos = Player.m_localPlayer.transform.position;
+            }
+            else
+            {
+                Print("[vv_recruit] no local player (headless?) — pass coords: vv_recruit <type> <x> <z> [y]");
+                return;
+            }
+
             // Resolve (never mint) an existing village at the player. Villages are created
             // only by placing a registry station, so dev-recruit requires standing in one.
             var village = Villages.Entity.VillageRegistry.GetVillageCovering(pos)
@@ -248,8 +291,9 @@ namespace ValheimVillages.Villager.Records
 
         private static void Print(string msg)
         {
-            Console.instance?.Print(msg);
-            Plugin.Log?.LogInfo(msg);
+            // Capped + chunked: a single oversized write to a headless server's
+            // stdout pipe blocks the main thread. See ConsoleReport.
+            ValheimVillages.Dev.ConsoleReport.Emit(msg);
         }
     }
 }

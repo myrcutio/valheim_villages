@@ -39,6 +39,26 @@ namespace ValheimVillages.Villager.AI.Navigation
         // How far the resolved seed may snap onto the vanilla navmesh.
         private const float HumanoidSnapRadius = 1f;
 
+        /// <summary>
+        ///     Generous one-off probe used only to decide whether Valheim's navmesh exists at
+        ///     all near the anchor. Much wider than <see cref="HumanoidSnapRadius" /> so a
+        ///     merely awkward anchor is not mistaken for a missing mesh.
+        /// </summary>
+        private const float HumanoidProbeRadius = 12f;
+
+        /// <summary>
+        ///     The "no Humanoid navmesh" notice is a standing property of the host, not an
+        ///     event, and this resolver runs per anchor per partition — so say it once rather
+        ///     than a dozen times a rebuild.
+        /// </summary>
+        private static bool s_warnedHumanoidAbsent;
+
+        [Attributes.RegisterCleanup]
+        public static void ResetWarnings()
+        {
+            s_warnedHumanoidAbsent = false;
+        }
+
         // Ring search: radius 0 first (return the anchor unchanged when it is already
         // clear — idempotent for good seeds), then expanding rings to step just
         // outside the station footprint. Closest qualifying point on the smallest
@@ -52,7 +72,16 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     within range qualifies — callers decide; this never silently hands back
         ///     the blocked anchor as if it were valid.
         /// </summary>
-        public static bool TryResolveWalkableSeed(Vector3 anchor, out Vector3 seed)
+        /// <param name="minRadius">
+        ///     Smallest ring to consider, so a caller whose own piece is a big solid lump can
+        ///     refuse a seed standing ON it. Measured on a live server: a Forester's Post seed
+        ///     landed on top of its own woodpile — the ground ray hits the pile, the capsule
+        ///     above it is clear, so radius 0 "qualifies" — and the reachability flood then
+        ///     found all four neighbours blocked by that same pile (WallBlocks=TRUE
+        ///     hits=[log;log]). The anchor cell became an island: no region, no path, no
+        ///     woodlot.
+        /// </param>
+        public static bool TryResolveWalkableSeed(Vector3 anchor, out Vector3 seed, float minRadius = 0f)
         {
             seed = anchor;
 
@@ -63,8 +92,27 @@ namespace ValheimVillages.Villager.AI.Navigation
                 areaMask = NavMesh.AllAreas,
             };
 
+            // Is Valheim's own navmesh actually present here? On a DEDICATED SERVER it is
+            // not baked at all (measured: Humanoid SamplePosition MISSes everywhere,
+            // including open terrain), while the agent type id still resolves non-zero. The
+            // confirmation below therefore rejected every candidate and this method returned
+            // false for every anchor on a headless host — silently, since callers only see
+            // "no walkable seed found". Probe once, wide, and treat "no mesh anywhere" as
+            // "cannot confirm" rather than "not walkable": the ground raycast and the
+            // capsule clearance are still real evidence on their own.
+            var humanoidAvailable = humanoidId != 0
+                && NavMesh.SamplePosition(anchor, out _, HumanoidProbeRadius, filter);
+            if (humanoidId != 0 && !humanoidAvailable && !s_warnedHumanoidAbsent)
+            {
+                s_warnedHumanoidAbsent = true;
+                Plugin.Log?.LogInfo(
+                    "[SeedResolver] Valheim's Humanoid navmesh is absent here (dedicated server); " +
+                    "confirming seeds from ground + capsule clearance only");
+            }
+
             foreach (var radius in SearchRadii)
             {
+                if (radius < minRadius) continue;
                 var count = radius == 0f ? 1 : Directions;
                 Vector3? bestOnRing = null;
                 var bestDistSq = float.MaxValue;
@@ -78,9 +126,9 @@ namespace ValheimVillages.Villager.AI.Navigation
                     if (!TryGroundPoint(probe, anchor.y, out var ground)) continue;
                     if (!CapsuleClear(ground)) continue;
 
-                    // Confirm the surface is genuinely reachable ground per the vanilla
-                    // navmesh (which, unlike slot 31, is always baked). Snap onto it.
-                    if (humanoidId != 0)
+                    // Confirm against the vanilla navmesh and snap onto it — but only where
+                    // that mesh exists (see humanoidAvailable above).
+                    if (humanoidAvailable)
                     {
                         if (!NavMesh.SamplePosition(ground, out var hit, HumanoidSnapRadius, filter))
                             continue;

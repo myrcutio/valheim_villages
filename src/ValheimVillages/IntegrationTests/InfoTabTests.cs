@@ -5,6 +5,7 @@ using ValheimVillages.Tags;
 using ValheimVillages.Testing;
 using ValheimVillages.UI.Core;
 using ValheimVillages.UI.Interaction;
+using ValheimVillages.UI.Tabs;
 using ValheimVillages.Villager.Registry;
 
 namespace ValheimVillages.IntegrationTests
@@ -27,8 +28,11 @@ namespace ValheimVillages.IntegrationTests
                 "Blacksmith definition should have tab:info tag");
 
             // 2. InfoTab implements IVillagerTabUI so the renderer can display items
+            // Matched by TYPE, not by TabName: the tab's display name is player-facing text
+            // (it became "Tasks" in db12b0c) and this assertion is about registration, so
+            // keying on the label made the test fail for a rename that broke nothing.
             var infoTab = AttributeScanner.GetRegisteredTabs()
-                .FirstOrDefault(t => t.TabName == "Info");
+                .FirstOrDefault(t => t is InfoTab);
             ModAssert.NotNull(infoTab, "Info tab should be registered");
             ModAssert.True(infoTab is IVillagerTabUI,
                 "InfoTab must implement IVillagerTabUI for the renderer to display items");

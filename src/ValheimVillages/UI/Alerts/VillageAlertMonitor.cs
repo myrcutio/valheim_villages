@@ -194,8 +194,12 @@ namespace ValheimVillages.UI.Alerts
                 var recipe = StationMatcher.FindRecipeForNpc(o.ItemPrefabName, ai.VillagerType);
                 if (recipe == null) continue;
 
-                if (!ContainerScanner.TryFindMissingIngredient(
-                        containers, recipe, out var missing, out var needed, out var found))
+                // Measured against what the villager can WALK TO, with every chest it can see
+                // as the second opinion: standing beside a full chest saying "I'm out of
+                // thistle" is worse than saying nothing — it sends the player foraging for
+                // something they already have, when the fix is to move one chest.
+                var reachable = ContainerScanner.FilterReachable(containers, ai.Position);
+                if (!ContainerScanner.TryFindShortfall(reachable, containers, recipe, out var shortfall))
                     continue;
 
                 var output = recipe.m_item?.m_itemData?.m_shared?.m_name;
@@ -203,9 +207,12 @@ namespace ValheimVillages.UI.Alerts
                     ? o.ItemPrefabName
                     : Localization.instance.Localize(output);
 
-                message = found > 0
-                    ? $"I need more {missing} for the {outputName} — only {found} of {needed} left!"
-                    : $"I'm out of {missing} for the {outputName}!";
+                message = shortfall.IsOutOfReach
+                    ? $"I can't reach the {shortfall.DisplayName} for the {outputName}!"
+                    : shortfall.FoundReachable > 0
+                        ? $"I need more {shortfall.DisplayName} for the {outputName} — " +
+                          $"only {shortfall.FoundReachable} of {shortfall.Needed} left!"
+                        : $"I'm out of {shortfall.DisplayName} for the {outputName}!";
                 itemPrefab = o.ItemPrefabName;
                 return true;
             }

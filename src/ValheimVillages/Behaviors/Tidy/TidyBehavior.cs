@@ -183,6 +183,7 @@ namespace ValheimVillages.Behaviors.Tidy
             foreach (var drop in allDrops)
             {
                 if (drop == null || drop.m_itemData == null) continue;
+                if (drop.IsPiece()) continue; // placed by a player, not spat out by the station
                 var dropPrefab = drop.m_itemData.m_dropPrefab?.name
                                  ?? drop.gameObject.name.Replace("(Clone)", "").Trim();
                 if (dropPrefab != slotItemName) continue;

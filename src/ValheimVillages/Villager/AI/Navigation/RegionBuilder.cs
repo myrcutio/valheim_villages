@@ -587,18 +587,51 @@ namespace ValheimVillages.Villager.AI.Navigation
             combinedTriangles.AddRange(pieceResult.Triangles);
             RegionBuilder.SetTriangles(villageKey, combinedTriangles);
 
-            // Pass 2: cascade-drop terrain regions whose every triangle was
-            // shadowed. They have no visible footprint, no lookup-grid
-            // cells (Pass 1a removed those), and any link referencing them
-            // is a dead pointer.
+            // Pass 2: cascade-drop regions that nothing can route to. Two separate ways to
+            // get here, and this used to catch only the first:
+            //
+            //   (a) every triangle shadowed — no visible footprint at all.
+            //
+            //   (b) every LOOKUP CELL gone while a triangle survived. The two tests do not
+            //       agree by construction: a triangle lives if ANY of its footprint cells is
+            //       non-flush, while a lookup cell dies on its own cell-centre sample, so a
+            //       tri straddling a flush floor edge keeps the region "alive" with nothing
+            //       addressable left. On top of that the union above is asymmetric — the
+            //       region set is a UNION but `combinedLookup[key] = pieceValue` OVERWRITES,
+            //       so a piece cell at the same (gx, gz, hb) silently evicts a terrain one
+            //       that no flush test ever looked at.
+            //
+            // Either way the result is a region with an id, a centroid and no way to be
+            // resolved from a position: it inflates RegionCount, it can be linked to, and
+            // nothing can ever be standing in it. Measured on the live village: 8 of them,
+            // reported by RegionGraph's commit invariants as "region(s) had no lookup cell".
             var cascadedRegions = 0;
             var cascadedLinks = 0;
+            var ridsWithCells = new HashSet<string>();
+            foreach (var rid in combinedLookup.Values) ridsWithCells.Add(rid);
+
             var deadTerrainRegions = new HashSet<string>();
             foreach (var rid in terrainResult.RegionIds)
             {
                 if (!survivingTerrainRegions.Contains(rid))
                     deadTerrainRegions.Add(rid);
             }
+
+            // Kind-agnostic: two piece regions can collide on one key just as a piece and a
+            // terrain region can, so this asks the question of every surviving region.
+            var unresolvable = 0;
+            foreach (var rid in combinedRegionIds)
+            {
+                if (ridsWithCells.Contains(rid)) continue;
+                if (!deadTerrainRegions.Add(rid)) continue;
+                unresolvable++;
+            }
+
+            if (unresolvable > 0)
+                Plugin.Log?.LogInfo(
+                    $"[Region] Combine: dropped {unresolvable} region(s) left with no lookup cell " +
+                    "after shadow suppression and the terrain/piece union — nothing could have " +
+                    "resolved to them.");
             if (deadTerrainRegions.Count > 0)
             {
                 cascadedRegions = deadTerrainRegions.Count;

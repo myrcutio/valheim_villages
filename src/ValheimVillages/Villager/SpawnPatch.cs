@@ -154,6 +154,8 @@ namespace ValheimVillages.Villager
             // its OnDamaged/OnDeath handlers, so the VillagerAI (also a BaseAI) can re-register without
             // an "item with the same key has already been added" abort in BaseAI.Awake.
             NativeNpcStripper.Strip(npcObject);
+            // One Lode Core, never the Dvergr loot table underneath.
+            VillagerLoot.Apply(npcObject);
 
             // Add Villager (Awake reads identity from the record + registers VillagerAI),
             // then the bridge / interaction / virtual-station components.

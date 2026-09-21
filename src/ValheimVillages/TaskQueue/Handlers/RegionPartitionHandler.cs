@@ -429,6 +429,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("piece_sources", bakeResult.PieceSourceCount),
                 ("doors_blocked", bakeResult.DoorsBlocked),
                 ("door_pieces_dropped", bakeResult.DoorPiecesDropped),
+                ("roof_pieces_dropped", bakeResult.RoofPiecesDropped),
                 ("beds_blocked", bakeResult.BedsBlocked),
                 ("outside_cells", bakeResult.OutsideCellsCount),
                 ("outside_cells_blocked", bakeResult.OutsideCellsBlocked),
@@ -569,6 +570,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("outside_terrain_cells", rbStats.OutsideTerrainCells),
                 ("pass2_seeds", rbStats.Pass2Seeds),
                 ("anchor_reachable_terrain_cells", rbStats.AnchorReachableTerrainCells),
+                // Emitted so a change to the climb threshold is measurable rather than a
+                // matter of opinion: compare kept-vs-dropped across a repartition.
+                ("max_climb", Villager.AI.Navigation.NavMeshBakeManager.NavMeshBakeMaxClimb),
                 ("pass3_seeds", rbStats.Pass3Seeds),
                 ("anchor_reachable_piece_keys", rbStats.AnchorReachablePieceKeys),
                 ("pass3_piece_keys_dropped", rbStats.Pass3PieceKeysDropped),
@@ -615,6 +619,16 @@ namespace ValheimVillages.TaskQueue.Handlers
                     yield break;
                 }
             }
+
+            // NOTE: there used to be a roof-island prune here, dropping any region that sat a
+            // storey above the village with no link down to it. It was answering the right
+            // question with the wrong oracle. The formal link graph misses edges the navmesh
+            // honours AND invents edges it does not, so the prune did both halves of its job
+            // backwards on one live village: the roof at (-47,-409) SURVIVED on Pass-3 chain
+            // links no villager could walk, while genuine interior regions were dropped and a
+            // building's stairs went missing from the graph while remaining walkable in fact.
+            // Roofs are now excluded from the bake itself (NavMeshBakeManager.IsRoofGeometry),
+            // which is where the problem starts: a roof's box collider reads as flat floor.
 
             var commitGraphMark = PartitionProfile.Mark();
             var graph = village.GetOrCreateGraph();
@@ -711,8 +725,24 @@ namespace ValheimVillages.TaskQueue.Handlers
             if (Settings.VillagerSettings.AutoDiagnosticCaptureEnabled)
                 DebugLog.Capture("repartition");
 
-            // TODO: re-enable door links once the region graph is validated
-            // RegionBuilder.CollectDoorLinks(graph, minX, minZ, maxX, maxZ, doorLinks);
+            // Doors are holes in the bake by design (NavMeshBakeManager.AddDoorBlockers), so a
+            // doorway is only crossable if something bridges it. Both halves of that live here:
+            // a NavMesh link so CalculatePath can route through, and a region link so the graph
+            // agrees the two sides are connected. With neither, a walled village's doors are
+            // walls and its villagers cannot get out of it — measured with a Lumberjack who
+            // could reach the inside of his own gate and nothing beyond it.
+            var doorMark = PartitionProfile.Mark();
+            var doorBounds = new Bounds();
+            doorBounds.SetMinMax(
+                new Vector3(minX - 3f, -1000f, minZ - 3f),
+                new Vector3(maxX + 3f, 1000f, maxZ + 3f));
+            DoorLinkPlacer.Rebuild(doorBounds);
+
+            var doorLinks = new List<RegionLink>();
+            RegionBuilder.CollectDoorLinks(graph, minX, minZ, maxX, maxZ, doorLinks);
+            graph.AddLinks(doorLinks);
+            PartitionProfile.Since("door_links", doorMark);
+            if (PartitionRunner.ShouldYield()) yield return null;
 
             // Only build the (per-region, per-link) summary strings if something will read
             // them — they are pure input to a telemetry line that is off by default.
@@ -1138,6 +1168,14 @@ namespace ValheimVillages.TaskQueue.Handlers
                 if (dx * dx + dz * dz <= r2) filtered.Add(anchor);
             }
 
+            // The cluster radius answers "which anchors belong to THIS village", and it is
+            // deliberately tight so a neighbouring settlement cannot drag its anchors into
+            // this partition. A woodlot is the one thing that legitimately sits further out —
+            // it has to, or felled trees land on the walls — and it brings its own corridor of
+            // stepping stones so the bake stays continuous. Those are this village's OWN named
+            // anchors, read off its record, so including them cannot pull in a neighbour's.
+            AddForestryAnchors(anchorX, anchorZ, filtered);
+
             Plugin.Log?.LogInfo(
                 $"[Region] Scoped anchors to village near ({anchorX:F0},{anchorZ:F0}): " +
                 $"{filtered.Count}/{allAnchors.Count} within {VillageClusterRadius}m");
@@ -1145,6 +1183,36 @@ namespace ValheimVillages.TaskQueue.Handlers
                 Plugin.Log?.LogWarning(
                     $"[Region] No anchors within {VillageClusterRadius}m of ({anchorX:F0},{anchorZ:F0})");
             return filtered;
+        }
+
+        /// <summary>
+        ///     Add the village's Forester's Post anchor and its corridor stones to
+        ///     <paramref name="filtered" /> if the radius filter missed them.
+        /// </summary>
+        private static void AddForestryAnchors(float anchorX, float anchorZ, List<Vector3> filtered)
+        {
+            var probe = new Vector3(anchorX, 0f, anchorZ);
+            var village = Villages.Entity.VillageRegistry.GetVillageAt(probe)
+                          ?? Villages.Entity.VillageRegistry.FindNearAnchor(probe);
+            if (village == null) return;
+
+            foreach (var anchor in village.Anchors)
+            {
+                if (anchor.Name == null) continue;
+                if (anchor.Name != Behaviors.Forestry.ForesterPost.AnchorName &&
+                    !anchor.Name.StartsWith(Behaviors.Forestry.ForesterPostAnchor.LinkAnchorPrefix))
+                    continue;
+
+                var already = false;
+                foreach (var have in filtered)
+                    if ((have - anchor.Position).sqrMagnitude < 0.01f)
+                    {
+                        already = true;
+                        break;
+                    }
+
+                if (!already) filtered.Add(anchor.Position);
+            }
         }
 
         /// <summary>

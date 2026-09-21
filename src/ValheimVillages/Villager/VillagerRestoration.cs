@@ -161,6 +161,8 @@ namespace ValheimVillages.Villager
         private static void StripNativeComponents(GameObject go)
         {
             NativeNpcStripper.Strip(go);
+            // One Lode Core, never the Dvergr loot table underneath.
+            VillagerLoot.Apply(go);
         }
 
         private static void RestoreIdentity(GameObject go, VillagerDef definition)

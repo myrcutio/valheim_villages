@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-using UnityEngine;
+using Newtonsoft.Json;
 using ValheimVillages.Schemas;
 
 namespace ValheimVillages.Villager.Registry
@@ -77,7 +77,12 @@ namespace ValheimVillages.Villager.Registry
                 {
                     using var stream = assembly.GetManifestResourceStream(resourceName);
                     using var reader = new StreamReader(stream);
-                    var def = JsonUtility.FromJson<VillagerDef>(reader.ReadToEnd());
+                    // NOT JsonUtility: Unity's serializer cannot see List<custom class> fields
+                    // in a plugin assembly, so stationRecipes, workbenches, productions and
+                    // tieredBenefits all arrived empty and silently — the Lumberjack's wood
+                    // recipes and the Farmer's flour recipe never registered. Newtonsoft ships
+                    // with the game, on the server too.
+                    var def = JsonConvert.DeserializeObject<VillagerDef>(reader.ReadToEnd());
 
                     if (!string.IsNullOrEmpty(def?.type))
                     {

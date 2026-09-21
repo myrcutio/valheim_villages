@@ -1,0 +1,114 @@
+{
+  "type": "Lumberjack",
+  "category": "Villager",
+  "displayName": "Lumberjack",
+  "description": "Plants, fells and hauls timber from a woodlot outside the walls",
+  "workbenches": [
+    {
+      "name": "Workbench",
+      "minLevel": 1
+    }
+  ],
+  "requiredBiomes": [
+    "BlackForest"
+  ],
+  "preferredBiomes": [
+    "BlackForest",
+    "Meadows"
+  ],
+  "requiresCoastal": false,
+  "minComfortLevel": 2,
+  "materialRequirements": "A Forester's Post outside the walls, and room for trees to fall",
+  "scalingType": "VillagerVariety",
+  "skinColor": "1.55,1.25,0.95",
+  "stationName": "$vv_lumberjack",
+  "stationIcon": "AxeBronze",
+  "workStations": [
+    "$piece_workbench",
+    "$vv_lumberjack"
+  ],
+  "stationRecipes": [
+    {
+      "output": "Wood",
+      "outputAmount": 1,
+      "input": "BeechSeeds",
+      "inputAmount": 1,
+      "minStationLevel": 1
+    },
+    {
+      "output": "RoundLog",
+      "outputAmount": 1,
+      "input": "PineCone",
+      "inputAmount": 1,
+      "minStationLevel": 1
+    },
+    {
+      "output": "FineWood",
+      "outputAmount": 1,
+      "input": "BirchSeeds",
+      "inputAmount": 1,
+      "minStationLevel": 1
+    }
+  ],
+  "behaviors": [
+    "forestry",
+    "tidy",
+    "haul"
+  ],
+  "tags": [
+    "tab:info",
+    "tab:debug",
+    "tab:workorder"
+  ],
+  "dependentOnNpcType": "",
+  "tieredBenefits": [],
+  "productions": [
+    {
+      "requiredLevel": 1,
+      "outputItem": "Wood",
+      "description": "Fells trees at the woodlot and hauls the wood home"
+    }
+  ],
+  "providesLevelTo": [
+    "Carpenter"
+  ],
+  "receivesLevelFrom": [
+    "Blacksmith"
+  ],
+  "interdependenceDescription": "Timber feeds the Carpenter's work; the Blacksmith keeps the axes sharp",
+  "randomTalk": [
+    "Every tree is just a very slow log that hasn't been told yet.",
+    "The trick to felling is deciding where it lands BEFORE you start. The trick to my technique is remembering that.",
+    "People ask if I talk to the trees. I do. It's a short conversation and I do most of it with an axe.",
+    "There's a birch out past the wall that's been leaning the wrong way for six years. We have an understanding. Neither of us moves first.",
+    "Sap gets everywhere. In the beard, in the stew, in places I will not be discussing.",
+    "A sharp axe does the work. A dull axe does nothing.",
+    "I planted a sapling last spring. It's doing nothing. Magnificent, uninterrupted nothing. I'm very proud.",
+    "The Carpenter wants straight timber. The forest grows what it likes. We've agreed to be disappointed in each other.",
+    "You can tell a lot about a person by how they stack wood. I'm not saying what. I'm just saying I've noticed.",
+    "Never stand downhill of a log. That's not wisdom, that's just geometry.",
+    "The greydwarves take it personally when I fell a tree. I've stopped apologising. It wasn't helping.",
+    "Fir splits clean. Pine splits mean. Oak splits when it feels it's earned the right.",
+    "I count rings sometimes. Some of these trees were here before the village. Before me. They don't seem smug about it, which I appreciate.",
+    "My back has opinions about this profession. My back is not in charge.",
+    "Two things fall in this forest: trees, and people who weren't watching the trees.",
+    "Resin's sticky, burns clean, and ruins a good glove. Like most useful things.",
+    "I don't chop firewood angry. I chop it thoroughly. There's a difference and the wood knows it.",
+    "The stumps remember. Walk the woodlot and you can read the whole season in them."
+  ],
+  "randomGreets": [
+    "Mind the drop line, friend. Trees don't check who's standing there.",
+    "Well met! Don't lean on that stack, it's not as settled as it looks.",
+    "Ah, a visitor. Stand upwind, I've been at the resin.",
+    "Hello! If you hear cracking, walk toward me, not away. Trust me on this.",
+    "Greetings. Mind your feet — half this ground is root and the other half is opinion.",
+    "Come to watch? Grand. Just stay behind the post and we'll both go home whole."
+  ],
+  "randomGoodbye": [
+    "Off with you. I've a birch that's been asking for it all morning.",
+    "Safe travels! Keep an eye up when you're under branches.",
+    "Right, back to it. The forest isn't going to fall over on its own. Mostly.",
+    "Farewell. If you pass the woodlot, don't touch the leaning one.",
+    "Go on then. I'll be here, making tall things shorter."
+  ]
+}

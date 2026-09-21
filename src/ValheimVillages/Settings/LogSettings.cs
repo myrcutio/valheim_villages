@@ -23,5 +23,14 @@ namespace ValheimVillages.Settings
         ///     LogInfo, so it could not be filtered out by level either.
         /// </summary>
         public static bool VerboseItemSpawns = false;
+
+        /// <summary>
+        ///     When true, every line a villager speaks is logged, with the gate that let it
+        ///     through. Villagers only talk when idle, with a player nearby and a shared quiet
+        ///     period between lines — three conditions that are invisible from outside, so
+        ///     "why is nobody saying anything?" and "why is he talking while he works?" are
+        ///     both unanswerable without this. Off by default; chatter is not diagnostics.
+        /// </summary>
+        public static bool VerboseTalk = false;
     }
 }

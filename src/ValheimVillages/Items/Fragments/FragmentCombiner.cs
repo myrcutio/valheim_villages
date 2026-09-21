@@ -17,16 +17,48 @@ namespace ValheimVillages.Items.Fragments
         /// <summary>
         ///     Maps biome identifiers to the NPC type that can be rescued there.
         /// </summary>
-        private static readonly Dictionary<string, string> BiomeNpcMap = new()
+        /// <summary>
+        ///     What each biome's map teaches, in order. The FIRST entry is also who the rescue
+        ///     quest is for; the rest are taught alongside it.
+        ///
+        ///     <para>A list rather than one type per biome because villager types outgrew the
+        ///     biomes: the Lumberjack belongs to the Black Forest as surely as the Carpenter
+        ///     does (pine, core wood), and with a 1:1 map a type that arrives after every biome
+        ///     is spoken for has NO unlock path at all — it never appears in the registry and
+        ///     nothing tells the player why. Which is exactly what happened to the Lumberjack:
+        ///     combining Black Forest fragments quietly re-taught the Carpenter.</para>
+        /// </summary>
+        private static readonly Dictionary<string, string[]> BiomeNpcMap = new()
         {
-            { "Meadows", "Farmer" },
-            { "BlackForest", "Carpenter" },
-            { "Swamp", "Blacksmith" },
-            { "Mountain", "Mountaineer" },
-            { "Plains", "Farmer" },
-            { "Mistlands", "Guard" },
-            { "Ashlands", "Guard" },
+            { "Meadows", new[] { "Farmer" } },
+            { "BlackForest", new[] { "Carpenter", "Lumberjack" } },
+            { "Swamp", new[] { "Blacksmith" } },
+            { "Mountain", new[] { "Mountaineer" } },
+            { "Plains", new[] { "Farmer" } },
+            { "Mistlands", new[] { "Guard" } },
+            { "Ashlands", new[] { "Guard" } },
         };
+
+        /// <summary>
+        ///     Types EVERY map teaches, on top of whatever its biome specialises in.
+        ///
+        ///     <para>A Guard is not a regional trade — every village wants one from the day it
+        ///     has anything worth losing, and gating that behind the Mistlands meant the
+        ///     villagers who most need protecting (a Meadows settlement full of farmers) could
+        ///     not have any until the late game. Listed here rather than pasted into all seven
+        ///     biomes so it stays one decision and cannot drift as biomes are added.</para>
+        /// </summary>
+        private static readonly string[] TaughtByEveryMap = { "Guard" };
+
+        /// <summary>Everything a given biome's map teaches: its own roster plus the universal types.</summary>
+        private static string[] TypesTaughtBy(string[] biomeRoster)
+        {
+            var all = new List<string>(biomeRoster);
+            foreach (var type in TaughtByEveryMap)
+                if (!all.Contains(type))
+                    all.Add(type);
+            return all.ToArray();
+        }
 
         /// <summary>
         ///     The biome map(s) a player must complete to learn to recruit a given villager
@@ -35,7 +67,27 @@ namespace ValheimVillages.Items.Fragments
         /// </summary>
         public static IEnumerable<string> BiomesForType(string villagerType)
         {
-            return BiomeNpcMap.Where(kv => kv.Value == villagerType).Select(kv => kv.Key);
+            if (System.Array.IndexOf(TaughtByEveryMap, villagerType) >= 0)
+                return BiomeNpcMap.Keys;
+
+            return BiomeNpcMap
+                .Where(kv => System.Array.IndexOf(kv.Value, villagerType) >= 0)
+                .Select(kv => kv.Key);
+        }
+
+        /// <summary>
+        ///     How to tell the player which fragments teach a type — a whole phrase, because a
+        ///     universal type would otherwise render as "Combine 3 Meadows or BlackForest or
+        ///     Swamp or Mountain or Plains or Mistlands or Ashlands ransom fragments". Null when
+        ///     no map teaches it at all, which the caller reports differently.
+        /// </summary>
+        public static string UnlockHint(string villagerType)
+        {
+            if (System.Array.IndexOf(TaughtByEveryMap, villagerType) >= 0)
+                return "Combine 3 ransom fragments of any one biome";
+
+            var biomes = string.Join(" or ", BiomesForType(villagerType));
+            return string.IsNullOrEmpty(biomes) ? null : $"Combine 3 {biomes} ransom fragments";
         }
 
         /// <summary>
@@ -164,11 +216,16 @@ namespace ValheimVillages.Items.Fragments
             }
 
             // Determine NPC type for this biome
-            if (!BiomeNpcMap.TryGetValue(biome, out var villagerType))
+            if (!BiomeNpcMap.TryGetValue(biome, out var taught) || taught.Length == 0)
             {
                 Plugin.Log?.LogWarning($"No NPC type mapped for biome: {biome}");
-                villagerType = "Farmer";
+                taught = new[] { "Farmer" };
             }
+
+            // The rescue itself is for one villager; the rest of the biome's roster — and the
+            // types every map teaches — are simply learned from the same map.
+            var villagerType = taught[0];
+            taught = TypesTaughtBy(taught);
 
             // Consume 3 fragments across stacks now that the host has confirmed a location.
             var toRemove = RequiredFragments;
@@ -192,13 +249,16 @@ namespace ValheimVillages.Items.Fragments
             // Completing the map still teaches this player to recruit the biome's villager type
             // (per-player unlock) — but quietly. Keep the on-screen text terse and cryptic; the
             // map pin (Valheim's native discovery) is what actually points the player there.
-            var newlyLearned = global::ValheimVillages.Villager.RecruitUnlocks.Unlock(player, villagerType);
+            var newlyLearned = false;
+            foreach (var type in taught)
+                newlyLearned |= global::ValheimVillages.Villager.RecruitUnlocks.Unlock(player, type);
             player.Message(MessageHud.MessageType.Center, "Quest location discovered");
 
             Plugin.Log?.LogInfo(
                 $"Combined {RequiredFragments} {biome} fragments -> rescue quest for {villagerType} " +
                 $"at {questPos} (location '{locationName}', {(isInterior ? "interior" : "surface")}; " +
-                $"recruit recipe {(newlyLearned ? "UNLOCKED" : "already known")})");
+                $"taught [{string.Join(", ", taught)}] — " +
+                $"{(newlyLearned ? "at least one newly UNLOCKED" : "all already known")})");
         }
 
         /// <summary>

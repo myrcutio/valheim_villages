@@ -345,6 +345,10 @@ namespace ValheimVillages.Villager.AI
             if (Villager == null) return false;
             if (!base.UpdateAI(dt)) return false;
 
+            // Before anything else decides what this villager should do, make sure nobody is
+            // still steering him from a tick that is over. See DriveDirect.
+            ExpireDirectMove();
+
             // A villager whose home (anchor) never resolved to a real position is broken
             // (a half-initialised / zombie ZDO). Running its movement AI aims the
             // off-mesh rescue at world origin, where BaseAI.MoveTo throws an NRE every
@@ -392,9 +396,11 @@ namespace ValheimVillages.Villager.AI
                 // Resume rather than stand here forever.
                 if (Time.time >= m_pauseLeaseUntil)
                 {
+                    var routine = m_pauseIsQuiet;
                     SetPaused(false, 0f);
-                    Plugin.Log?.LogInfo(
-                        $"[AI:{m_villagerName}] pause lease expired — resuming.");
+                    if (!routine)
+                        Plugin.Log?.LogInfo(
+                            $"[AI:{m_villagerName}] pause lease expired — resuming.");
                 }
                 else
                 {
@@ -452,13 +458,18 @@ namespace ValheimVillages.Villager.AI
             // instrumented — see NavMeshBake extent logging.)
             var leashDeltaXz = transform.position - m_homeAnchor;
             leashDeltaXz.y = 0f; // XZ only — don't count vertical separation (upper floors)
-            if (leashDeltaXz.sqrMagnitude
-                > VillagerSettings.MaxAnchorLeashMeters * VillagerSettings.MaxAnchorLeashMeters)
+            var leashLimit = LeashLimit();
+            if (leashDeltaXz.sqrMagnitude > leashLimit * leashLimit)
             {
-                Plugin.Log?.LogWarning(
-                    $"[AI:{m_villagerName}] Leash: {leashDeltaXz.magnitude:F0}m (XZ) from " +
-                    $"anchor (> {VillagerSettings.MaxAnchorLeashMeters}m) — teleporting home.");
-                TeleportHome();
+                // Throttled: this fires per tick while a villager is outside the leash, and an
+                // ineffective leash wrote a warning every frame for as long as it took him to
+                // walk to the horizon.
+                DebugLog.ThrottledWindow(
+                    $"leash:{m_villagerName}", System.TimeSpan.FromSeconds(LeashLogWindowSeconds),
+                    "Leash", "recovered",
+                    ("villager", m_villagerName), ("dist", leashDeltaXz.magnitude),
+                    ("limit", leashLimit));
+                TeleportHome(true);
                 return true;
             }
 
@@ -876,9 +887,65 @@ namespace ValheimVillages.Villager.AI
             SetState(newState, waypoint);
         }
 
+        /// <summary>
+        ///     How far a target must move before it counts as a new one for logging. Below this
+        ///     it is the same destination re-asserted.
+        /// </summary>
+        private const float StateLogTargetEpsilon = 0.25f;
+
+        /// <summary>
+        ///     How long a villager may spend on one NavMesh link before it is treated as stuck.
+        ///     A doorway takes a second or two; the cap is generous so a slow crossing is never
+        ///     mistaken for a stall.
+        /// </summary>
+        private const float MaxLinkCrossingSeconds = 8f;
+
+        /// <summary>How often one villager's leash notice repeats while it is out of bounds.</summary>
+        private const float LeashLogWindowSeconds = 30f;
+
+        /// <summary>
+        ///     Room allowed around the furthest village anchor before the leash bites. A
+        ///     Forester's Post may stand 80m out by design and its woodlot reaches another 28m
+        ///     past that, so a fixed 60m leash is smaller than the village it is meant to
+        ///     contain — measured with a Guard whose own patrol route runs to 85m, being
+        ///     "recovered" from a lap he was supposed to be walking.
+        /// </summary>
+        private const float LeashAnchorMargin = 35f;
+
+        /// <summary>Recomputed occasionally rather than per tick; anchors change with the build.</summary>
+        private float m_leashLimit;
+
+        private float m_leashLimitAt;
+
+        /// <summary>
+        ///     How far this villager may get from home before it is pulled back: the furthest
+        ///     anchor its village publishes, plus working room. Falls back to the flat setting
+        ///     when there is no village to ask.
+        /// </summary>
+        private float LeashLimit()
+        {
+            if (m_leashLimit > 0f && Time.time - m_leashLimitAt < 10f) return m_leashLimit;
+            m_leashLimitAt = Time.time;
+            m_leashLimit = VillagerSettings.MaxAnchorLeashMeters;
+
+            var village = Villages.Entity.VillageRegistry.GetVillageAt(m_homeAnchor);
+            if (village != null)
+                foreach (var anchor in village.Anchors)
+                {
+                    var d = Vector3.Distance(anchor.Position, m_homeAnchor) + LeashAnchorMargin;
+                    if (d > m_leashLimit) m_leashLimit = d;
+                }
+
+            return m_leashLimit;
+        }
+
+        /// <summary>When the current link crossing began; 0 when not on one.</summary>
+        private float m_linkStartedAt;
+
         public void SetState(BehaviorState newState, VillagerWaypoint waypoint)
         {
             var prevState = CurrentState;
+            var previousTarget = m_currentWaypoint != null ? m_currentWaypoint.Position : (Vector3?)null;
             CurrentState = newState;
             if (waypoint != null)
             {
@@ -897,6 +964,19 @@ namespace ValheimVillages.Villager.AI
 
             if (newState == BehaviorState.Idle || newState == BehaviorState.NeedsHelp)
                 StopMoving();
+
+            // Only log a CHANGE. This line used to fire on every call, and behaviours
+            // re-assert their state every tick — an alarmed villager standing still wrote the
+            // identical "State -> Alarmed, target=(...)" line every frame, two villagers at
+            // once, and buried the log. The event ring above has always guarded on
+            // prevState != newState; the log simply never did.
+            var stateChanged = prevState != newState;
+            var targetChanged = waypoint != null &&
+                                (!previousTarget.HasValue ||
+                                 Vector3.Distance(previousTarget.Value, waypoint.Position)
+                                 > StateLogTargetEpsilon);
+            if (!stateChanged && !targetChanged) return;
+
             if (waypoint != null)
                 Plugin.Log?.LogDebug(
                     $"[AI:{m_villagerName}] State -> {newState}, target=({waypoint.Position.x:F1},{waypoint.Position.y:F1},{waypoint.Position.z:F1})");
@@ -914,18 +994,36 @@ namespace ValheimVillages.Villager.AI
         ///     to clear it, so the holder renews the lease while the menu is open and it
         ///     lapses on its own otherwise.</para>
         /// </summary>
-        public void SetPaused(bool paused, float leaseSeconds)
+        public void SetPaused(bool paused, float leaseSeconds, bool quiet = false)
         {
             IsPaused = paused;
+            m_pauseIsQuiet = paused && quiet;
             m_pauseLeaseUntil = paused ? Time.time + leaseSeconds : 0f;
             if (paused)
                 StopMoving();
+        }
+
+        /// <summary>
+        ///     Stand still for a moment, on purpose and briefly — currently used so a villager
+        ///     stops walking while it says a line rather than delivering it over its shoulder.
+        ///
+        ///     <para>Same machinery as <see cref="SetPaused" /> with the lease doing the
+        ///     releasing, but marked quiet: an expiring talk-hold is the normal end of a hold,
+        ///     not the "whoever paused this villager never released it" case the expiry log is
+        ///     there to report.</para>
+        /// </summary>
+        public void HoldStill(float seconds)
+        {
+            SetPaused(true, seconds, true);
         }
 
         public bool IsPaused { get; private set; }
 
         /// <summary>When the current pause lapses unless renewed. See <see cref="SetPaused" />.</summary>
         private float m_pauseLeaseUntil;
+
+        /// <summary>Whether the current pause expiring is routine (see <see cref="HoldStill" />).</summary>
+        private bool m_pauseIsQuiet;
 
         /// <summary>
         ///     Ask the AI to run the next behavior-selection/Update tick after
@@ -1305,9 +1403,17 @@ namespace ValheimVillages.Villager.AI
             return true;
         }
 
-        private void TeleportHome()
+        /// <param name="force">
+        ///     True for the LEASH, which is a safety net and not the debug off-mesh rescue.
+        ///     Sharing one method between the two meant <c>vv_rescue off</c> — the default —
+        ///     silently disabled the leash as well: it logged "teleporting home" every frame
+        ///     while the villager kept walking, and a Lumberjack reached 165m from a village
+        ///     whose leash claims to catch him at 60. A safety net with a debug switch on it is
+        ///     not a safety net.
+        /// </param>
+        private void TeleportHome(bool force = false)
         {
-            if (!OffMeshRescueEnabled) return;
+            if (!force && !OffMeshRescueEnabled) return;
             var dest = m_homeAnchor;
             if (NavMesh.SamplePosition(m_homeAnchor, out var hit, 5f, AgentFilter()))
                 dest = hit.position;
@@ -1346,10 +1452,19 @@ namespace ValheimVillages.Villager.AI
             // SetState(Idle) clears the stale path, resets recovery/stall timers, and
             // lets the behavior loop re-select from the station next tick.
             SetState(BehaviorState.Idle);
+
+            // Recall is the player saying "stop what you are doing", so stop holding things.
+            // A pause lease outlives a recall otherwise — the villager arrives and stands
+            // there, which looks exactly like the fault they were recalling it to fix — and
+            // its task claims would sit out their lease before anyone else could take them.
+            SetPaused(false, 0f, true);
+            var released = Scheduling.TaskBoard.ReleaseAllHeldBy(UniqueId);
+
             Plugin.Log?.LogInfo(
                 $"[AI:{m_villagerName}] Recalled to station at " +
                 $"({dest.x:F1},{dest.y:F1},{dest.z:F1})" +
-                (resolved ? "." : " (no approach resolved — placed at the station itself)."));
+                (resolved ? "." : " (no approach resolved — placed at the station itself).") +
+                (released > 0 ? $" Released {released} task claim(s)." : ""));
         }
 
         /// <summary>
@@ -1453,13 +1568,62 @@ namespace ValheimVillages.Villager.AI
                 return;
             }
 
+            // A behaviour is driving the body itself right now — a charge at a tree. The agent
+            // must not steer at the same time: it is still holding the standoff point the
+            // run-up backed off to, so it spent every frame pulling him back to where he
+            // started while the charge pushed him at the trunk. He never closed the last few
+            // metres and every charge ended in "timed out short of the trunk".
+            if (IsDrivingDirectly) return;
+
+            // Off the mesh entirely? Then stop, whatever the agent claims it wants. Every
+            // straight-line drive below — a link crossing, or desiredVelocity from an agent
+            // whose internal state has come adrift — moves the BODY, and the body is not
+            // bounded by the navmesh the way pathing is. Measured: three villagers found
+            // standing on bare terrain with no navmesh within 5m and the nearest region
+            // triangle 78m away. They could not have pathed there; they were driven, and
+            // nothing was checking whether the ground under them still existed.
+            if (!NavMesh.SamplePosition(transform.position, out _, OffMeshStopRadius, AgentFilter()))
+            {
+                DebugLog.ThrottledWindow(
+                    $"offmesh:{m_villagerName}", System.TimeSpan.FromSeconds(30f),
+                    "Movement", "off_mesh_stop",
+                    ("villager", m_villagerName), ("pos", transform.position),
+                    ("note", "no navmesh within " + OffMeshStopRadius + "m — holding position"));
+                StopMoving();
+                return;
+            }
+
             Vector3 dir;
             if (m_navAgent.isOnOffMeshLink)
             {
                 // Drive straight across the link; complete it once we arrive.
                 var end = m_navAgent.currentOffMeshLinkData.endPos;
                 dir = end - transform.position;
-                if (dir.sqrMagnitude < 0.09f) m_navAgent.CompleteOffMeshLink();
+                if (dir.sqrMagnitude < 0.09f)
+                {
+                    m_navAgent.CompleteOffMeshLink();
+                    m_linkStartedAt = 0f;
+                }
+                else
+                {
+                    // A link is the ONE place the agent stops pathing and walks in a straight
+                    // line, so it is the one place an obstacle means walking at it forever. A
+                    // doorway is a couple of metres; anything still on a link after this long
+                    // is not crossing it. Give up, land where we are, and let the normal
+                    // pathfinder have another go.
+                    if (m_linkStartedAt <= 0f) m_linkStartedAt = Time.time;
+                    else if (Time.time - m_linkStartedAt > MaxLinkCrossingSeconds)
+                    {
+                        Plugin.Log?.LogWarning(
+                            $"[AI:{m_villagerName}] stuck crossing a NavMesh link for " +
+                            $"{MaxLinkCrossingSeconds:F0}s — abandoning it and re-pathing.");
+                        m_navAgent.CompleteOffMeshLink();
+                        m_linkStartedAt = 0f;
+                        ClearCachedPath();
+                        StopMoving();
+                        return;
+                    }
+                }
             }
             else
             {
@@ -1488,6 +1652,69 @@ namespace ValheimVillages.Villager.AI
             MoveTowards(dir.normalized, running);
         }
 
+
+        /// <summary>
+        ///     Drive the body DIRECTLY, bypassing the agent and its pathfinding.
+        ///
+        ///     <para><b>The direction persists.</b> <c>BaseAI.MoveTowards</c> hands the
+        ///     Character a move direction and the Character keeps using it until something
+        ///     clears it — there is no "stop after this frame". So a caller that sets one and
+        ///     then stops running, for any reason (preempted by a reactive behaviour, its own
+        ///     early return, a throttled tick), leaves the villager walking that way for as
+        ///     long as it takes someone to notice. That is not hypothetical: it is the shape of
+        ///     the edge cases this AI was built around, and of a Lumberjack found 165m from
+        ///     home at the same spot twice.</para>
+        ///
+        ///     <para>Going through here records WHEN it was steered, so
+        ///     <see cref="ExpireDirectMove" /> can stop him the moment nobody is steering any
+        ///     more. Callers keep calling it every tick for as long as they want movement —
+        ///     which they were doing anyway; the difference is what happens when they stop.</para>
+        /// </summary>
+        public void DriveDirect(Vector3 dir, bool running)
+        {
+            m_directMoveAt = Time.time;
+            MoveTowards(dir, running);
+        }
+
+        /// <summary>
+        ///     How long a direct move survives without being renewed. Longer than a behaviour
+        ///     tick, short enough that an abandoned one costs a step rather than a hillside.
+        /// </summary>
+        private const float DirectMoveGrace = 0.5f;
+
+        /// <summary>
+        ///     How far to look for navmesh under a villager before refusing to move it. Generous
+        ///     — a villager legitimately steps a little off the mesh at ledges and doorways, and
+        ///     this is meant to catch being adrift, not being briefly imprecise.
+        /// </summary>
+        private const float OffMeshStopRadius = 5f;
+
+        private float m_directMoveAt;
+
+        /// <summary>True while a behaviour is steering the body itself, bypassing the agent.</summary>
+        private bool IsDrivingDirectly =>
+            m_directMoveAt > 0f && Time.time - m_directMoveAt <= DirectMoveGrace;
+
+        /// <summary>Stop a direct move that nothing has renewed.</summary>
+        private void ExpireDirectMove()
+        {
+            if (m_directMoveAt <= 0f) return;
+            if (Time.time - m_directMoveAt <= DirectMoveGrace) return;
+
+            m_directMoveAt = 0f;
+
+            // Already stopped? Then whoever was steering ended properly (a charge that
+            // finished or timed out calls Reset → SetState(Idle) → StopMoving) and there is
+            // nothing to rescue. Warning here anyway cried wolf on every normal charge.
+            var moveDir = m_character != null ? m_character.GetMoveDir() : Vector3.zero;
+            moveDir.y = 0f;
+            if (moveDir.sqrMagnitude < 1e-4f) return;
+
+            StopMoving();
+            Plugin.Log?.LogWarning(
+                $"[AI:{m_villagerName}] a direct move was left running with nobody steering it " +
+                "— stopped. (Whatever set it should have stopped it or kept setting it.)");
+        }
 
         /// <summary>
         ///     Clear the cached BaseAI path so the next movement tick falls

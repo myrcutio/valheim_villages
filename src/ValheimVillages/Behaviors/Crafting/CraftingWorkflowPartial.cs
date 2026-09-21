@@ -96,6 +96,12 @@ namespace ValheimVillages.Behaviors.Crafting
             if (m_context != null && m_context.HeldItems.Count > 0)
                 RollbackHeldItems(m_context.HeldItems, reason);
 
+            // Do not come straight back to the same order. Abandoning drops the villager to
+            // Idle, which enqueues a scan, which re-matches what it just failed — with nothing
+            // changed in between. See WorkOrderCooldown.
+            Villager.AI.Work.WorkOrderCooldown.NoteAbandoned(
+                m_ai?.UniqueId, m_context?.WorkOrder?.ItemPrefabName, reason);
+
             m_context = null;
             SubState = WorkSubState.Idle;
             if (m_ai != null)
@@ -390,11 +396,13 @@ namespace ValheimVillages.Behaviors.Crafting
 
             var slotCount = station.m_slots != null ? station.m_slots.Length : 0;
             var zdo = nview.GetZDO();
+            var anythingOnTheStation = false;
             for (var i = 0; i < slotCount; i++)
             {
                 var slotItem = zdo.GetString("slot" + i);
                 if (string.IsNullOrEmpty(slotItem)) continue;
 
+                anythingOnTheStation = true;
                 var status = zdo.GetInt("slotstatus" + i);
                 // Status: 0=NotDone, 1=Done, 2=Burnt
                 if (status >= 1)
@@ -410,8 +418,29 @@ namespace ValheimVillages.Behaviors.Crafting
                 }
             }
 
+            // Nothing on the station at all. Either it never went on, or someone else took it
+            // — a tidy sweep clears Done items off cooking stations, and a player can simply
+            // pick the food up. Waiting on an empty station is waiting for an item that will
+            // never appear, and this poller is the only thing standing between the villager
+            // and the rest of its day, so it has to end here rather than at the stall ceiling.
+            // The grace period covers the frames between placing an item and the slot ZDO
+            // replicating back.
+            if (!anythingOnTheStation &&
+                Time.time - m_context.CraftStartTime > EmptyStationGraceSec)
+            {
+                AbandonWork("nothing left on the cooking station");
+                return true;
+            }
+
             return true;
         }
+
+        /// <summary>
+        ///     How long an apparently-empty cooking station is given before the villager
+        ///     concludes the food is gone. Long enough for the slot write to come back from
+        ///     the owner, short enough that the villager is not stuck for a whole minute.
+        /// </summary>
+        private const float EmptyStationGraceSec = 15f;
 
         /// <summary>Seconds to wait for a hive's extracted honey to hit the ground.</summary>
         private const float BeehiveHarvestTimeoutSec = 10f;
@@ -617,6 +646,10 @@ namespace ValheimVillages.Behaviors.Crafting
             foreach (var drop in allDrops)
             {
                 if (drop == null || drop.m_itemData == null) continue;
+                // Never a placed piece: a player can SET a cooked dish down (ItemDrop.MakePiece
+                // keeps the item's own prefab name), so matching on name alone would sweep the
+                // plate off their table into a chest the moment an order wanted that dish.
+                if (drop.IsPiece()) continue;
                 var dropPrefab = drop.m_itemData.m_dropPrefab?.name
                                  ?? drop.gameObject.name.Replace("(Clone)", "").Trim();
                 if (dropPrefab != outputPrefab) continue;
@@ -676,6 +709,7 @@ namespace ValheimVillages.Behaviors.Crafting
             foreach (var drop in allDrops)
             {
                 if (drop == null || drop.m_itemData == null) continue;
+                if (drop.IsPiece()) continue; // placed by a player, not spat out by the station
                 var dropPrefab = drop.m_itemData.m_dropPrefab?.name
                                  ?? drop.gameObject.name.Replace("(Clone)", "").Trim();
                 if (dropPrefab != slotItemName) continue;

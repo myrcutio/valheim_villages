@@ -273,9 +273,16 @@ namespace ValheimVillages.Villages.Entity
         }
 
         /// <summary>Upsert an anchor by name and persist the whole list to the ZDO.</summary>
-        public void SetAnchor(string name, Vector3 pos)
+        /// <summary>
+        ///     Write a named anchor. Returns FALSE when this peer cannot persist it — which is
+        ///     not an error (clients receive anchors by replication) but IS something callers
+        ///     have to notice: a Forester's Post logged "registered" at boot while this
+        ///     silently dropped the write, because the host had not claimed the village ZDO
+        ///     yet, and the stale anchor survived every restart looking like a live one.
+        /// </summary>
+        public bool SetAnchor(string name, Vector3 pos)
         {
-            if (!CanPersist) return; // host-authoritative; clients receive anchors via replication
+            if (!CanPersist) return false; // host-authoritative; clients receive anchors via replication
             if (!m_anchorsHydrated) HydrateAnchorsFromZdo();
 
             var entry = new VillageAnchor(name, pos);
@@ -292,6 +299,27 @@ namespace ValheimVillages.Villages.Entity
 
             m_zdo.Set(AnchorsKey, VillageAnchorPersistence.Serialize(m_anchors));
             m_zdo.Persistent = true;
+            return true;
+        }
+
+        /// <summary>
+        ///     Drop every anchor whose name starts with <paramref name="prefix" />, returning
+        ///     how many went. Used for anchor sets that are DERIVED rather than placed — the
+        ///     corridor of stepping stones a Forester's Post lays between itself and the
+        ///     village is re-derived on every placement, and stale ones from an old position
+        ///     would go on baking navmesh to nowhere.
+        /// </summary>
+        public int RemoveAnchorsWithPrefix(string prefix)
+        {
+            if (!CanPersist || string.IsNullOrEmpty(prefix)) return 0;
+            if (!m_anchorsHydrated) HydrateAnchorsFromZdo();
+
+            var removed = m_anchors.RemoveAll(a => a.Name != null && a.Name.StartsWith(prefix));
+            if (removed == 0) return 0;
+
+            m_zdo.Set(AnchorsKey, VillageAnchorPersistence.Serialize(m_anchors));
+            m_zdo.Persistent = true;
+            return removed;
         }
 
         /// <summary>

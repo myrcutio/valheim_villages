@@ -69,11 +69,21 @@ namespace ValheimVillages.Dev
             "piece_chest_blackmetal", "piece_chest_treasure", "wood_chest",
         };
 
-        [DevCommand("Read-only headless ZDO/collider audit at a point: finds scan-invisible orphan colliders. vv_zdo_audit <x> <z> [y] [radius]",
+        [DevCommand("Read-only headless ZDO/collider audit at a point: finds scan-invisible orphan colliders. " +
+                    "vv_zdo_audit <x> <z> [y] [radius] [prefab=<substr>]",
             Name = "vv_zdo_audit")]
         public static void Audit(Terminal.ConsoleEventArgs args)
         {
             var inv = CultureInfo.InvariantCulture;
+
+            s_prefabFilter = null;
+            if (args?.Args != null)
+                foreach (var a in args.Args)
+                    if (a != null && a.StartsWith("prefab=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var v = a.Substring("prefab=".Length).Trim();
+                        if (v.Length > 0) s_prefabFilter = v;
+                    }
 
             Vector3 pos;
             var radius = DefaultRadius;
@@ -173,6 +183,12 @@ namespace ValheimVillages.Dev
             // else is summarised below.
             var chestRows = new List<string>();
             var chestPositions = new List<Vector3>();
+            var byPrefab = new Dictionary<string, int>();
+            // Detail-on-request: the histogram answers "what is here", but not "where is
+            // that one thing". Rather than go back to printing every row, a caller can name
+            // the prefab it is hunting and get positions for just those.
+            var wanted = PrefabFilter(sb);
+            var wantedRows = new List<string>();
             int noInstance = 0, inactive = 0, zdoNullCount = 0, ghostCount = 0;
 
             foreach (var zdo in all)
@@ -206,7 +222,25 @@ namespace ValheimVillages.Dev
                 if (zdoNull) zdoNullCount++;
                 if (ghost == true) ghostCount++;
 
-                if (!isChest) continue;
+                if (!isChest)
+                {
+                    // Histogram rather than one row per ZDO. A count alone ("15 ZDOs") does
+                    // not answer the question anyone actually brings to this command —
+                    // "what is here?" — and 185 rows buried it. This does both.
+                    byPrefab.TryGetValue(prefabName, out var seen);
+                    byPrefab[prefabName] = seen + 1;
+
+                    if (wanted != null &&
+                        prefabName.IndexOf(wanted, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        var wp = zdo.GetPosition();
+                        wantedRows.Add(
+                            $"    {prefabName} @ ({wp.x:F1},{wp.y:F1},{wp.z:F1}) " +
+                            $"{Vector3.Distance(wp, pos):F1}m");
+                    }
+
+                    continue;
+                }
 
                 var dist = Vector3.Distance(zdo.GetPosition(), pos);
                 var p = zdo.GetPosition();
@@ -223,8 +257,22 @@ namespace ValheimVillages.Dev
             sb.AppendLine(
                 $"  non-chest ZDOs: {all.Count - chestRows.Count} " +
                 $"(noInstance={noInstance} inactive={inactive} zdoNull={zdoNullCount} ghost={ghostCount})");
+            if (byPrefab.Count > 0)
+            {
+                var prefabParts = new List<string>();
+                foreach (var kv in byPrefab) prefabParts.Add($"{kv.Key}x{kv.Value}");
+                prefabParts.Sort(StringComparer.Ordinal);
+                sb.AppendLine($"    {string.Join(" ", prefabParts.ToArray())}");
+            }
+
             sb.AppendLine($"  chest ZDOs: {chestRows.Count}");
             foreach (var r in chestRows) sb.AppendLine(r);
+
+            if (wanted != null)
+            {
+                sb.AppendLine($"  prefab filter '{wanted}': {wantedRows.Count} match(es)");
+                foreach (var r in wantedRows) sb.AppendLine(r);
+            }
 
             // The actual duplicate-chest signature is two chest ZDOs at the SAME SPOT, not
             // "more than one chest nearby" — a village legitimately has many chests, so a
@@ -495,6 +543,18 @@ namespace ValheimVillages.Dev
         }
 
         /// <summary>
+        ///     Reads an optional <c>prefab=&lt;substring&gt;</c> argument. Held in a static so
+        ///     the sweep can see it without threading another parameter through every report
+        ///     method; set once per invocation, cleared when absent.
+        /// </summary>
+        private static string s_prefabFilter;
+
+        private static string PrefabFilter(StringBuilder sb)
+        {
+            return s_prefabFilter;
+        }
+
+        /// <summary>
         ///     Layers whose colliders are engine-owned and never carry a ZNetView: the
         ///     heightmap and the water plane. A missing ZNetView on these is normal, so
         ///     they must not be reported as broken ownership.
@@ -527,8 +587,8 @@ namespace ValheimVillages.Dev
 
         private static void Print(string msg)
         {
-            global::Console.instance?.Print(msg);
-            Plugin.Log?.LogInfo(msg);
+            // Capped + chunked — this report is what first wedged a dedicated server.
+            ConsoleReport.Emit(msg);
         }
     }
 }

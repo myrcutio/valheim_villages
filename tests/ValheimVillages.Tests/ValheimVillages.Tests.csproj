@@ -19,6 +19,8 @@
 
     <PropertyGroup>
         <ValheimDir>$(HOME)/.local/share/Steam/steamapps/common/Valheim</ValheimDir>
+        <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles</BepInExDir>
+        <R2ModmanProfile>valheim-modding</R2ModmanProfile>
     </PropertyGroup>
 
     <ItemGroup>
@@ -29,6 +31,26 @@
     <ItemGroup>
         <Reference Include="UnityEngine.CoreModule">
             <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+    </ItemGroup>
+
+    <!--
+        BepInEx is needed at RUNTIME even though no test references it. Any production method
+        the tests reach that so much as mentions Plugin.Log has a type reference to BepInEx's
+        ManualLogSource, and the JIT resolves that when it PREPARES the method — whether or not
+        the logging branch is taken. Adding RegionGraph.ValidateInternalConsistency (which logs
+        an error on an inconsistent graph) turned 12 passing tests into
+        FileNotFoundException: 'BepInEx, Version=5.4.23.5' raised from SetGraph, with no test
+        having changed. UnityEngine is the facade assembly BepInEx.Logging itself needs.
+    -->
+    <ItemGroup>
+        <Reference Include="BepInEx">
+            <HintPath>$(BepInExDir)/$(R2ModmanProfile)/BepInEx/core/BepInEx.dll</HintPath>
+            <Private>true</Private>
+        </Reference>
+        <Reference Include="UnityEngine">
+            <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.dll</HintPath>
             <Private>true</Private>
         </Reference>
     </ItemGroup>

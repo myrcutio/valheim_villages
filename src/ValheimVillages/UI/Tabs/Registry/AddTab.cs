@@ -128,10 +128,10 @@ namespace ValheimVillages.UI.Tabs.Registry
             // type's biome map). Revive is NOT gated this way.
             if (!RecruitUnlocks.IsUnlocked(player, def.type))
             {
-                var biomes = string.Join(" or ", FragmentCombiner.BiomesForType(def.type));
-                player?.Message(MessageHud.MessageType.Center, string.IsNullOrEmpty(biomes)
+                var hint = FragmentCombiner.UnlockHint(def.type);
+                player?.Message(MessageHud.MessageType.Center, hint == null
                     ? $"You haven't learned to recruit {name}s."
-                    : $"Combine 3 {biomes} ransom fragments to learn how to recruit a {name}.");
+                    : $"{hint} to learn how to recruit a {name}.");
                 return;
             }
 

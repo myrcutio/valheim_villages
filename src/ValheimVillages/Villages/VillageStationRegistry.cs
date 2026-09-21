@@ -416,8 +416,15 @@ namespace ValheimVillages.Villages
         }
 
 
-        [DevCommand("Diagnose HNA approach resolution to a target from a source (default player). " +
-                    "Usage: vv_approach <tx> <tz> [<sx> <sz>]", Name = "vv_approach")]
+        /// <summary>How far from the given point to look for the piece actually being targeted.</summary>
+        private const float ApproachSnapRadius = 3f;
+
+        /// <summary>Most rejected candidates worth printing. 17 probes twice plus a 37-point reach ring is 71.</summary>
+        private const int MaxRejectionLines = 60;
+
+        [DevCommand("Explain why a target is (un)reachable, gate by gate. " +
+                    "Usage: vv_approach <x> <z> [y] [villagerName]   (X,Z,[Y] order)",
+            Name = "vv_approach")]
         public static void ApproachDiag(Terminal.ConsoleEventArgs args)
         {
             var inv = System.Globalization.CultureInfo.InvariantCulture;
@@ -425,23 +432,127 @@ namespace ValheimVillages.Villages
                 || !float.TryParse(args.Args[1], System.Globalization.NumberStyles.Float, inv, out var tx)
                 || !float.TryParse(args.Args[2], System.Globalization.NumberStyles.Float, inv, out var tz))
             {
-                global::Console.instance?.Print("Usage: vv_approach <tx> <tz> [<sx> <sz>]");
+                Dev.ConsoleReport.Emit(
+                    "Usage: vv_approach <x> <z> [y] [villagerName]   (X,Z,[Y] order)");
                 return;
             }
 
-            var src = Player.m_localPlayer != null ? Player.m_localPlayer.transform.position : Vector3.zero;
-            if (args.Args.Length >= 5
-                && float.TryParse(args.Args[3], System.Globalization.NumberStyles.Float, inv, out var sx)
-                && float.TryParse(args.Args[4], System.Globalization.NumberStyles.Float, inv, out var sz))
-                src = new Vector3(sx, src.y, sz);
+            // Y is a PARAMETER, not the ground. This command used to snap the target to
+            // ZoneSystem ground height, which made it structurally incapable of answering the
+            // question it exists for: a chest on a shelf 2.5m up was probed at floor level, came
+            // back fine, and told you nothing about why the villager could not reach the real one.
+            var ty = 0f;
+            var hasY = args.Args.Length > 3
+                       && float.TryParse(args.Args[3], System.Globalization.NumberStyles.Float, inv,
+                           out ty);
+            var y = hasY
+                ? ty
+                : ZoneSystem.instance != null
+                    ? ZoneSystem.instance.GetGroundHeight(new Vector3(tx, 0f, tz))
+                    : 0f;
 
-            var groundT = ZoneSystem.instance != null
-                ? ZoneSystem.instance.GetGroundHeight(new Vector3(tx, 0f, tz)) : 0f;
-            var target = new Vector3(tx, groundT, tz);
-            var ok = VillagerMovement.TryResolveApproach(target, src, null, out var approach);
-            var msg = $"[vv_approach] ok={ok} approach=({approach.x:F1},{approach.y:F1},{approach.z:F1})";
-            global::Console.instance?.Print(msg);
-            Plugin.Log?.LogInfo(msg);
+            // Optional villager name. WHICH villager asks decides half the answer — the
+            // complete-path gate is measured from wherever they are standing — so a report
+            // about the Farmer's chest must be able to ask as the Farmer.
+            var nameArg = hasY
+                ? args.Args.Length > 4 ? args.Args[4] : null
+                : args.Args.Length > 3 ? args.Args[3] : null;
+
+            var point = new Vector3(tx, y, tz);
+            var sb = new System.Text.StringBuilder();
+
+            // Aim at the PIECE, not the coordinate typed in: the resolver is handed a
+            // container's transform, and a metre of drift changes the answer.
+            var target = point;
+            Piece nearest = null;
+            var nearestDist = float.MaxValue;
+            foreach (var col in Physics.OverlapSphere(point, ApproachSnapRadius,
+                         LayerMask.GetMask("Default", "static_solid", "piece"),
+                         QueryTriggerInteraction.Ignore))
+            {
+                var piece = col.GetComponentInParent<Piece>();
+                if (piece == null) continue;
+                var d = Vector3.Distance(piece.transform.position, point);
+                if (d >= nearestDist) continue;
+                nearestDist = d;
+                nearest = piece;
+            }
+
+            if (nearest != null)
+            {
+                target = nearest.transform.position;
+                sb.AppendLine($"[vv_approach] target: {nearest.m_name} at " +
+                              $"({target.x:F1},{target.y:F1},{target.z:F1}) " +
+                              $"({nearestDist:F1}m from the point given)");
+            }
+            else
+            {
+                sb.AppendLine($"[vv_approach] target: bare point ({target.x:F1},{target.y:F1},{target.z:F1}) " +
+                              $"— no piece within {ApproachSnapRadius:F0}m");
+            }
+
+            // A complete path is measured FROM somewhere, so measure it from whoever would
+            // actually be sent. The old default was the local player, which on a dedicated
+            // server is null — the source silently became (x,0,z), 30m underground, and every
+            // answer was wrong in a way nothing printed.
+            Villager.AI.VillagerAI source = null;
+            var sourceDist = float.MaxValue;
+            foreach (var ai in Villager.AI.VillagerAIManager.ActiveVillagers.Values)
+            {
+                if (ai == null) continue;
+
+                if (!string.IsNullOrEmpty(nameArg))
+                {
+                    var matches = (ai.NpcName != null
+                                   && ai.NpcName.IndexOf(nameArg, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                                  || (ai.VillagerType != null
+                                      && ai.VillagerType.Equals(nameArg, System.StringComparison.OrdinalIgnoreCase));
+                    if (!matches) continue;
+                }
+
+                var d = Vector3.Distance(ai.transform.position, target);
+                if (d >= sourceDist) continue;
+                sourceDist = d;
+                source = ai;
+            }
+
+            if (source == null)
+            {
+                sb.AppendLine(string.IsNullOrEmpty(nameArg)
+                    ? "  no live villager on this peer — nothing to measure a path from."
+                    : $"  no live villager matching '{nameArg}' — try vv_records for the names.");
+                Dev.ConsoleReport.Emit(sb.ToString());
+                return;
+            }
+
+            var from = source.transform.position;
+            sb.AppendLine($"  from: {source.NpcName} at ({from.x:F1},{from.y:F1},{from.z:F1}) " +
+                          $"({sourceDist:F0}m away)");
+
+            var rejections = new System.Text.StringBuilder();
+            var rejected = 0;
+            var ok = VillagerMovement.TryResolveApproach(
+                target, from, null, out var approach, 0f,
+                line =>
+                {
+                    rejected++;
+                    if (rejected <= MaxRejectionLines) rejections.AppendLine("    " + line);
+                });
+
+            sb.AppendLine(ok
+                ? $"  RESULT: reachable — stand at ({approach.x:F1},{approach.y:F1},{approach.z:F1}), " +
+                  $"{Vector3.Distance(approach, target):F1}m from it."
+                : "  RESULT: NO approach.");
+
+            if (rejections.Length > 0)
+            {
+                sb.AppendLine($"  candidates rejected ({rejected}):");
+                sb.Append(rejections);
+                if (rejected > MaxRejectionLines)
+                    sb.AppendLine($"    … {rejected - MaxRejectionLines} more");
+            }
+
+            Dev.ConsoleReport.Emit(sb.ToString());
         }
 
         public static void DumpStations()

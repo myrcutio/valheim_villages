@@ -434,6 +434,26 @@ namespace ValheimVillages.Villager.AI.Navigation
                 IsDeepWaterCell,
                 pass1Flood);
             var outsideCells = pass1Flood.OutsideCells;
+            // The woodlot is outdoors but the village claims it as working ground. This MUST
+            // match the identical call in NavMeshBakeManager: the bake decides where navmesh
+            // exists, this flood decides what is anchor-reachable, and a disagreement between
+            // them is exactly the state we measured — walkable mesh in the grove
+            // (agent 57/57) that the graph still refused (PointToRegionId unresolved),
+            // leaving the Lumberjack unable to path to ground it could physically stand on.
+            // Working ground OUTSIDE the walls: walkable, but not part of the village interior.
+            // Those are two different questions and this used to answer both at once — freeing
+            // a cell from the outside-flood made it "inside" for every purpose, so the hull
+            // frontier (and with it the guard's patrol) marched out to the rim of the woodlot
+            // 100m away. A woodlot is somewhere a villager WORKS, not somewhere the walls are.
+            var extramural = new HashSet<long>();
+            Behaviors.Forestry.ForesterPost.UnblockWoodlotCells(
+                outsideCells, villageKey, extramural, gateMarkersOut);
+            // Must match the identical call in NavMeshBakeManager, for the reason above.
+            var doorBounds = new Bounds();
+            doorBounds.SetMinMax(
+                new Vector3(gxMin * cell, -1000f, gzMin * cell),
+                new Vector3(gxMax * cell, 1000f, gzMax * cell));
+            DoorLinkPlacer.UnblockDoorAprons(outsideCells, doorBounds, extramural);
             stats.PerimeterSeeds = pass1Flood.PerimeterSeedCount;
             if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
@@ -537,258 +557,60 @@ namespace ValheimVillages.Villager.AI.Navigation
             // MaxClimb 1.0m: tight enough to drop the rampart → roof-base
             // bridge (typically ≥2m), still allows 1m-per-cell stair pieces.
             // Bump to 1.25–1.5m if stair connectivity breaks empirically.
+            // Deliberately LOOSER than the bake's own step (NavMeshBakeMaxClimb, 0.2m), and
+            // it has to be: this chains between piece REGION CENTROIDS, not between adjacent
+            // surfaces. A flight of stairs is one region whose centroid sits a metre above the
+            // floor it leaves, so a 0.2m limit severs the building from its own ground.
+            //
+            // Tried and measured: at 0.2m, anchor-reachable piece keys fell 825 → 625, regions
+            // kept 169 → 147, and a whole building went with them — the station registry lost
+            // its workbench, stonecutter and spinning wheel because the regions holding them
+            // were pruned. Rooftops are not this pass's problem: roof geometry is excluded
+            // from the bake up front (NavMeshBakeManager.IsRoofGeometry), so there is no roof
+            // navmesh for the chain to climb onto in the first place.
+            // MaxClimb 1.0m: tight enough to drop the rampart-to-roof-base bridge
+            // (typically 2m+), still allows 1m-per-cell stair pieces. Bump to 1.25-1.5m if
+            // stair connectivity breaks empirically. See PieceReachableFlood for why it is
+            // deliberately looser than the bake's own step, and what 0.2m cost when tried.
             const float MaxClimb = 1.0f;
-            var pieceReachableKeys = new HashSet<long>();
-            var pass3Seeds = 0;
-            // Discovered piece-step adjacency: edges proven walkable by the
-            // cell-level flood (piece A's cell → piece B's neighbour cell at
-            // compatible Y). These become formal RegionLinks below.
-            //
-            // Each pair carries the cell-boundary positions for the link
-            // endpoints — NOT the region centroids. Centroid-anchored links
-            // tell the path planner "shortcut from A's centre to B's centre",
-            // which makes the agent walk through both regions to use the
-            // link; boundary-anchored links are a short ~1m hop between
-            // adjacent cells exactly where the walker transitions.
-            var pass3DiscoveredEdges = new HashSet<string>();
-            var pass3EdgePairs = new List<(string fromRid, string toRid,
-                                           Vector3 startPos, Vector3 endPos)>();
-
-            string CanonicalPair(string a, string b) =>
-                string.CompareOrdinal(a, b) < 0 ? a + "|" + b : b + "|" + a;
-
-            void RecordPass3Edge(string fromRid, string toRid,
-                                 Vector3 startPos, Vector3 endPos)
-            {
-                if (string.IsNullOrEmpty(fromRid) || string.IsNullOrEmpty(toRid)) return;
-                if (fromRid == toRid) return;
-                var key = CanonicalPair(fromRid, toRid);
-                if (pass3DiscoveredEdges.Add(key))
-                    pass3EdgePairs.Add((fromRid, toRid, startPos, endPos));
-            }
-
-            // Helper: terrain region at a given cell XZ (any height bucket).
-            // Returns the first lookup-key-resolved rid — sufficient for
-            // recording adjacency since multiple terrain regions at the same
-            // cell are coplanar-merged upstream.
-            string TerrainRegionAtCell(long xz)
-            {
-                if (!xzToLookupKeysTerrain.TryGetValue(xz, out var keys)) return null;
-                foreach (var lookupKey in keys)
-                    if (lookupGrid.TryGetValue(lookupKey, out var trid)) return trid;
-                return null;
-            }
-
-            // Helper: any piece at a given cell XZ already in
-            // pieceReachableKeys whose centroid Y is within MaxClimb of
-            // targetY. Used as a Pass 3 piece-step source-region fallback
-            // when the current visit is a terrain visit at a cell that
-            // has no terrain region (Pass 2 walks any non-outside cell —
-            // floor pieces commonly shadow terrain so a anchor-reachable
-            // cell can have only piece geometry). Picks the closest-in-Y
-            // candidate so the recorded edge represents the most natural
-            // walker step (smallest Δy).
-            string PieceAtCellInReachable(long xz, float targetY)
-            {
-                if (!xzToLookupKeysPiece.TryGetValue(xz, out var keys)) return null;
-                string bestRid = null;
-                var bestDeltaY = float.MaxValue;
-                foreach (var lookupKey in keys)
+            // The real walk-surface height of every piece lookup cell, taken from the
+            // triangles themselves. A region centroid is the AVERAGE of a region, and for a
+            // merged stair flight that average sits over a metre from the tread you would
+            // actually step onto — which is what pruned a building's whole upper storey. The
+            // height bucket alone is not tight enough to recover it either: buckets are 2m and
+            // MaxClimb is 1m, so a centroid can still sit 1.35m from the surface inside its
+            // own bucket. Runs before the triangle sweep, while the triangles are still all
+            // here; ~3.8k piece tris, one pass.
+            var pieceKeySurfaceY = new Dictionary<long, float>(xzToLookupKeysPiece.Count);
+            if (triangles != null)
+                foreach (var tri in triangles)
                 {
-                    if (!pieceReachableKeys.Contains(lookupKey)) continue;
-                    if (!lookupGrid.TryGetValue(lookupKey, out var prid)) continue;
-                    if (!centroids.TryGetValue(prid, out var pc)) continue;
-                    var delta = Mathf.Abs(pc.y - targetY);
-                    if (delta > MaxClimb) continue;
-                    if (delta < bestDeltaY)
-                    {
-                        bestDeltaY = delta;
-                        bestRid = prid;
-                    }
-                }
-                return bestRid;
-            }
+                    if (string.IsNullOrEmpty(tri.RegionId)) continue;
+                    if (kindMap == null || !kindMap.TryGetValue(tri.RegionId, out var tk)) continue;
+                    if (tk != SurfaceKind.Piece) continue;
 
-            // Helper: compute boundary-anchored link endpoints for a Pass 3
-            // piece-step from cell `fromXz` to cell `toXz`. The endpoints sit
-            // on opposite sides of the shared edge at the from/to surface Y,
-            // separated by a small horizontal epsilon so SamplePosition
-            // snaps each one to the correct cell's NavMesh tile.
-            //
-            // sameCell case: when `lastAddedAtNeighbour` resolved the source,
-            // both pieces are at the SAME cell (sibling pieces stacked at
-            // different Y). There's no horizontal boundary to anchor at, so
-            // the link is a purely vertical hop at the cell centre.
-            void ComputePieceStepLinkPositions(long fromXz, long toXz,
-                float fromY, float toY, float cellSize, bool sameCell,
-                out Vector3 startPos, out Vector3 endPos)
-            {
-                UnpackXz(fromXz, out var fGx, out var fGz);
-                UnpackXz(toXz, out var tGx, out var tGz);
-                var half = cellSize * 0.5f;
-                var fCenterX = fGx * cellSize + half;
-                var fCenterZ = fGz * cellSize + half;
-                var tCenterX = tGx * cellSize + half;
-                var tCenterZ = tGz * cellSize + half;
-                if (sameCell)
-                {
-                    // Pure vertical hop — both endpoints at cell center,
-                    // different Y. SamplePosition will snap each to its
-                    // own NavMesh patch (different height bucket).
-                    startPos = new Vector3(fCenterX, fromY, fCenterZ);
-                    endPos = new Vector3(fCenterX, toY, fCenterZ);
-                }
-                else
-                {
-                    // Boundary midpoint between the two cells, with small
-                    // epsilon offset on each side so each endpoint sits
-                    // unambiguously on its own cell's tile.
-                    const float epsilon = 0.1f;
-                    var boundaryX = (fCenterX + tCenterX) * 0.5f;
-                    var boundaryZ = (fCenterZ + tCenterZ) * 0.5f;
-                    var dirX = Mathf.Sign(tCenterX - fCenterX);
-                    var dirZ = Mathf.Sign(tCenterZ - fCenterZ);
-                    startPos = new Vector3(boundaryX - dirX * epsilon, fromY,
-                                           boundaryZ - dirZ * epsilon);
-                    endPos = new Vector3(boundaryX + dirX * epsilon, toY,
-                                           boundaryZ + dirZ * epsilon);
-                }
-            }
-
-            if (xzToLookupKeysPiece.Count > 0 && anchorReachableCells.Count > 0
-                                              && ZoneSystem.instance != null)
-            {
-                var half = cell * 0.5f;
-                var visitedTerrainXz = new HashSet<long>();
-                // Queue entries are tagged isTerrain so dedup is kind-aware:
-                //   - Terrain visits (seed + bridge) dedup by XZ via
-                //     visitedTerrainXz on dequeue. Each anchor-reachable XZ is
-                //     processed once at ground altitude.
-                //   - Piece visits (piece-step) skip the XZ gate so a column
-                //     with stacked pieces can be re-entered at multiple
-                //     altitudes; pieceReachableKeys dedups per lookup key.
-                //
-                // sourceRid threads the most recently added piece's region id
-                // through piece-step enqueues so the next piece-step can
-                // record (sourceRid, newRid) as a discovered adjacency.
-                // Terrain visits carry null sourceRid — when piece-step fires
-                // from a terrain visit, we look up the terrain region at curXz
-                // and record (terrainRid, newRid) as a piece↔terrain edge.
-                var pieceQueue = new Queue<(long xz, float y, bool isTerrain, string sourceRid)>();
-                foreach (var xz in anchorReachableCells)
-                {
-                    UnpackXz(xz, out var gx, out var gz);
-                    var wx = gx * cell + half;
-                    var wz = gz * cell + half;
-                    // Seed at the surface Pass 2 actually walked (floor pieces
-                    // in a floored village), not the terrain a metre below —
-                    // otherwise the floor pieces sit > MaxClimb above the seed
-                    // and Pass 3 never reaches them.
-                    var ty = anchorReachableCellY.TryGetValue(xz, out var sy)
-                        ? sy
-                        : ZoneSystem.instance.GetGroundHeight(new Vector3(wx, 0f, wz));
-                    pieceQueue.Enqueue((xz, ty, true, null));
+                    var tcx = (tri.V0.x + tri.V1.x + tri.V2.x) / 3f;
+                    var tcy = (tri.V0.y + tri.V1.y + tri.V2.y) / 3f;
+                    var tcz = (tri.V0.z + tri.V1.z + tri.V2.z) / 3f;
+                    var tKey = RegionGraph.PackLookup(
+                        Mathf.FloorToInt(tcx / cell), Mathf.FloorToInt(tcz / cell),
+                        RegionGraph.HeightBucket(tcy));
+                    // Highest tri in the cell: a villager stands ON the surface, and where a
+                    // cell holds a lip or a step the upper face is the one they end up on.
+                    if (!pieceKeySurfaceY.TryGetValue(tKey, out var known) || tcy > known)
+                        pieceKeySurfaceY[tKey] = tcy;
                 }
 
-                while (pieceQueue.Count > 0)
-                {
-                    var (curXz, curY, isTerrain, sourceRid) = pieceQueue.Dequeue();
-                    if (isTerrain && !visitedTerrainXz.Add(curXz)) continue;
-                    UnpackXz(curXz, out var gx, out var gz);
-                    for (var d = 0; d < 4; d++)
-                    {
-                        int ngx = gx + dx[d], ngz = gz + dz[d];
-                        var nXz = XzKey(ngx, ngz);
-                        // (a) Terrain bridge: enqueue as a terrain visit at the
-                        //     neighbour's ground height if it's anchor-reachable and
-                        //     the climb from curY fits within MaxClimb. Terrain
-                        //     bridges propagate sourceRid=null (no piece adjacency
-                        //     created by terrain-walk bridges; they're pure
-                        //     connectivity).
-                        if (anchorReachableCells.Contains(nXz) && !visitedTerrainXz.Contains(nXz))
-                        {
-                            var nwx = ngx * cell + half;
-                            var nwz = ngz * cell + half;
-                            // Bridge at Pass 2's recorded surface Y (same
-                            // reason as the seed loop above).
-                            var tnY = anchorReachableCellY.TryGetValue(nXz, out var nsy)
-                                ? nsy
-                                : ZoneSystem.instance.GetGroundHeight(new Vector3(nwx, 0f, nwz));
-                            if (Mathf.Abs(tnY - curY) <= MaxClimb) pieceQueue.Enqueue((nXz, tnY, true, null));
-                        }
-
-                        // (b) Piece step: walk every piece at neighbour XZ within
-                        //     climb of curY. Dedup via pieceReachableKeys.
-                        if (xzToLookupKeysPiece.TryGetValue(nXz, out var nPieceKeys))
-                        {
-                            // Tracks the most recently added piece in this
-                            // foreach iteration so sibling pieces at the
-                            // same nXz can chain to each other. Without
-                            // this, two pieces stacked at the same cell
-                            // (e.g. a small stair-tread piece next to its
-                            // landing piece, both at gx=-2268,gz=1299) end
-                            // up isolated when added from a no-terrain
-                            // curXz visit — see the p509 hex-fort case.
-                            string lastAddedAtNeighbour = null;
-                            foreach (var pKey in nPieceKeys)
-                            {
-                                if (pieceReachableKeys.Contains(pKey)) continue;
-                                if (!lookupGrid.TryGetValue(pKey, out var rid)) continue;
-                                if (!centroids.TryGetValue(rid, out var c)) continue;
-                                if (Mathf.Abs(c.y - curY) > MaxClimb) continue;
-                                // Don't chain into pieces in outsideCells.
-                                // Pass 1's perimeter flood is the authoritative
-                                // "what's inside the village" signal; pieces
-                                // whose XZ Pass 1 reached are outside the wall
-                                // ring (rogue floors, far-away structures,
-                                // decorations). Without this gate, piece
-                                // chains hop over walls into outside pieces
-                                // via 4-neighbour adjacency. A wall-blocking
-                                // primitive can't distinguish stair risers
-                                // from walls reliably; this perimeter-based
-                                // check sidesteps that ambiguity entirely.
-                                if (outsideCells.Contains(nXz)) continue;
-                                pieceReachableKeys.Add(pKey);
-                                pieceQueue.Enqueue((nXz, c.y, false, rid));
-                                pass3Seeds++;
-
-                                // Resolve fromRid via a fallback chain so
-                                // first-piece-at-cell cases aren't orphaned:
-                                //   1. sourceRid (came from a piece visit).
-                                //   2. Terrain region at curXz (came from a
-                                //      terrain visit with a terrain region
-                                //      present at this cell).
-                                //   3. Any piece at curXz already in
-                                //      pieceReachableKeys within MaxClimb
-                                //      of curY (we're at a no-terrain cell
-                                //      but standing on a floor piece).
-                                //   4. The previous piece added in THIS
-                                //      foreach iteration — sibling pieces
-                                //      at the same nXz chain to each other
-                                //      even when their cell has no terrain
-                                //      and no other prior reachable piece.
-                                var fromRid = sourceRid
-                                              ?? TerrainRegionAtCell(curXz)
-                                              ?? PieceAtCellInReachable(curXz, curY)
-                                              ?? lastAddedAtNeighbour;
-                                // Compute link endpoints AT THE CELL
-                                // BOUNDARY, not the region centroids.
-                                // Centroid-anchored links make the path
-                                // planner route the agent through both
-                                // regions to use the link; boundary-anchored
-                                // links are a short hop exactly where the
-                                // walker transitions cells.
-                                ComputePieceStepLinkPositions(
-                                    curXz, nXz, curY, c.y, cell,
-                                    fromRid == lastAddedAtNeighbour,
-                                    out var startPos, out var endPos);
-                                RecordPass3Edge(fromRid, rid, startPos, endPos);
-                                lastAddedAtNeighbour = rid;
-                            }
-                        }
-                    }
-                }
-            }
+            PieceReachableFlood(
+                xzToLookupKeysPiece, xzToLookupKeysTerrain, lookupGrid, centroids,
+                pieceKeySurfaceY,
+                anchorReachableCells, anchorReachableCellY, outsideCells, cell, MaxClimb,
+                // The pass's one engine dependency, injected. A null oracle skips the pass,
+                // which is exactly what a null ZoneSystem used to do.
+                ZoneSystem.instance == null
+                    ? null
+                    : (x, z) => ZoneSystem.instance.GetGroundHeight(new Vector3(x, 0f, z)),
+                out var pieceReachableKeys, out var pass3EdgePairs, out var pass3Seeds);
 
             stats.Pass3Seeds = pass3Seeds;
             stats.AnchorReachablePieceKeys = pieceReachableKeys.Count;
@@ -1072,12 +894,25 @@ namespace ValheimVillages.Villager.AI.Navigation
                 {
                     var key = XzKey(gx, gz);
                     if (!anchorReachableCells.Contains(key)) continue;
+                    // Carved working ground is outside the walls by definition, so it can never
+                    // BE the wall. Without this the woodlot's own rim became the village
+                    // boundary and the guard dutifully patrolled it.
+                    if (extramural.Contains(key)) continue;
 
                     var outward = Vector3.zero;
                     for (var i = 0; i < 4; i++)
                         for (var step = 1; step <= MaxWallSpan; step++)
                         {
                             var nk = XzKey(gx + fdx[i] * step, gz + fdz[i] * step);
+                            // Checked BEFORE the walkable test: a doorstep or a woodlot lane is
+                            // walkable, so the walkable test would call it interior and hide the
+                            // wall that is standing right there.
+                            if (extramural.Contains(nk))
+                            {
+                                outward += new Vector3(fdx[i], 0f, fdz[i]);
+                                break;
+                            }
+
                             if (anchorReachableCells.Contains(nk)) break; // walkable beyond → interior
                             if (outsideCells.Contains(nk))
                             {
@@ -1182,6 +1017,16 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             public HashSet<long> OutsideCells;
             public int PerimeterSeedCount;
+
+            /// <summary>
+            ///     The gate pivots this flood sealed, for callers that need to know where the
+            ///     village's openings are RIGHT NOW. <c>RegionGraph.m_gates</c> cannot answer
+            ///     that during a partition: it is cleared by <c>SetGraph</c> and only refilled
+            ///     at the very end of the run, and it is not persisted at all, so after a
+            ///     restart it reads empty until a partition has completed. Anything deciding
+            ///     where to carve must use this, not the graph.
+            /// </summary>
+            public List<Vector3> GateMarkers;
         }
 
         /// <summary>
@@ -1353,6 +1198,300 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
         }
 
+
+        /// <summary>
+        ///     Pure Pass-3 "anchor-reachable piece" flood: a unified BFS over (XZ, Y) nodes
+        ///     that decides which PIECE lookup cells a villager can actually walk onto, and
+        ///     records the piece-to-piece and piece-to-terrain adjacency it proved on the way.
+        ///
+        ///     <para>Seeded from every anchor-reachable terrain cell at the surface Pass 2
+        ///     walked. At each visit it tries (a) a terrain BRIDGE to the neighbour XZ — only
+        ///     if that XZ is itself anchor-reachable, and purely for connectivity; terrain
+        ///     decisions belong to Pass 2 alone — and (b) a piece STEP onto any piece at the
+        ///     neighbour XZ regardless of height bucket, gated by
+        ///     <c>|centroidY - curY| &lt;= maxClimb</c>.</para>
+        ///
+        ///     <para><b>This is the pass that decides whether a building keeps its floors.</b>
+        ///     It chains between region CENTROIDS, not between adjacent surfaces, which is why
+        ///     <paramref name="maxClimb" /> has to be looser than the bake's own step height:
+        ///     a flight of stairs is one region whose centroid sits about a metre above the
+        ///     floor it leaves. Measured at 0.2m, anchor-reachable piece keys fell 825 to 625,
+        ///     regions kept 169 to 147, and a whole building went with them — the station
+        ///     registry lost its workbench, stonecutter and spinning wheel. Pass-3 tests pin
+        ///     that trade-off from both sides; see Pass3PieceReachableTests.</para>
+        ///
+        ///     <para>Engine-free by construction. Its ONLY former dependency was
+        ///     <c>ZoneSystem.instance.GetGroundHeight</c>, now injected as
+        ///     <paramref name="groundY" />; a null oracle skips the pass exactly as a null
+        ///     ZoneSystem used to. Everything else is the lookup grid, the centroids and the
+        ///     two cell sets Passes 1 and 2 produced.</para>
+        /// </summary>
+        /// <param name="groundY">
+        ///     (x, z) world position to walk-surface height. Only consulted for cells Pass 2
+        ///     recorded no surface Y for.
+        /// </param>
+        /// <param name="pieceKeysAdded">
+        ///     How many piece lookup keys the flood claimed. Reported as <c>pass3_seeds</c>.
+        /// </param>
+        internal static void PieceReachableFlood(
+            Dictionary<long, List<long>> xzToLookupKeysPiece,
+            Dictionary<long, List<long>> xzToLookupKeysTerrain,
+            Dictionary<long, string> lookupGrid,
+            Dictionary<string, Vector3> centroids,
+            Dictionary<long, float> keySurfaceY,
+            HashSet<long> anchorReachableCells,
+            Dictionary<long, float> anchorReachableCellY,
+            HashSet<long> outsideCells,
+            float cell,
+            float maxClimb,
+            Func<float, float, float> groundY,
+            out HashSet<long> pieceReachableKeys,
+            out List<(string fromRid, string toRid, Vector3 startPos, Vector3 endPos)> edgePairs,
+            out int pieceKeysAdded)
+        {
+            // Assigned up front so every early return still hands the caller usable results.
+            var reachable = new HashSet<long>();
+            var pairs = new List<(string fromRid, string toRid, Vector3 startPos, Vector3 endPos)>();
+            pieceReachableKeys = reachable;
+            edgePairs = pairs;
+            pieceKeysAdded = 0;
+
+            if (xzToLookupKeysPiece == null || xzToLookupKeysPiece.Count == 0) return;
+            if (anchorReachableCells == null || anchorReachableCells.Count == 0) return;
+            if (lookupGrid == null || centroids == null) return;
+            if (groundY == null) return;
+
+            var added = 0;
+            var discovered = new HashSet<string>();
+
+            void RecordEdge(string fromRid, string toRid, Vector3 startPos, Vector3 endPos)
+            {
+                if (string.IsNullOrEmpty(fromRid) || string.IsNullOrEmpty(toRid)) return;
+                if (fromRid == toRid) return;
+                if (discovered.Add(CanonicalPair(fromRid, toRid)))
+                    pairs.Add((fromRid, toRid, startPos, endPos));
+            }
+
+            // Terrain region at a given cell XZ (any height bucket). The first
+            // lookup-key-resolved rid is sufficient for recording adjacency, since multiple
+            // terrain regions at one cell are coplanar-merged upstream.
+            string TerrainRegionAtCell(long xz)
+            {
+                if (xzToLookupKeysTerrain == null) return null;
+                if (!xzToLookupKeysTerrain.TryGetValue(xz, out var keys)) return null;
+                foreach (var lookupKey in keys)
+                    if (lookupGrid.TryGetValue(lookupKey, out var trid)) return trid;
+                return null;
+            }
+
+            // The height a step is judged against is the surface AT THE CANDIDATE CELL, not
+            // the candidate REGION's average height. A lookup key encodes its own height
+            // bucket, so the region centroid is clamped into that bucket: for a small flat
+            // region the two are identical and nothing changes, and for a tall merged region —
+            // a whole stair flight, a ramp, a multi-level floor slab — it yields the part of
+            // the region that is actually HERE instead of its distant mean.
+            //
+            // Measured: the flight up to a first floor merges into one region whose centroid
+            // sits about 2m above the corridor it leaves, so the step read as 2m, failed a 1m
+            // climb, and took the entire storey above it with it — 448 regions built, 119
+            // committed. Gating on the region average made a region's SIZE decide whether a
+            // villager could step onto it, which is not a property of the step.
+            float CellSurfaceY(long lookupKey, float centroidY)
+            {
+                if (keySurfaceY != null && keySurfaceY.TryGetValue(lookupKey, out var exact))
+                    return exact;
+
+                // No triangle recorded for this cell — it has a lookup entry and no geometry,
+                // which is itself a fault the graph invariants report. Estimate from the key's
+                // own height bucket rather than trusting a region average that may be metres
+                // away: clamping the centroid into the bucket is never worse than the centroid
+                // and is exact whenever the region lies in one bucket.
+                RegionGraph.UnpackLookup(lookupKey, out _, out _, out var hb);
+                var bucketMin = hb * RegionGraph.HeightBucketSize;
+                return Mathf.Clamp(centroidY, bucketMin, bucketMin + RegionGraph.HeightBucketSize);
+            }
+
+            // Any piece at a given cell XZ already reached, whose centroid Y is within
+            // maxClimb of targetY. The piece-step source-region fallback for a terrain visit
+            // at a cell that has no terrain region — Pass 2 walks any non-outside cell, and
+            // floor pieces commonly shadow terrain, so an anchor-reachable cell can hold only
+            // piece geometry. Picks the closest in Y, so the recorded edge is the most natural
+            // walker step.
+            string PieceAtCellInReachable(long xz, float targetY)
+            {
+                if (!xzToLookupKeysPiece.TryGetValue(xz, out var keys)) return null;
+                string bestRid = null;
+                var bestDeltaY = float.MaxValue;
+                foreach (var lookupKey in keys)
+                {
+                    if (!reachable.Contains(lookupKey)) continue;
+                    if (!lookupGrid.TryGetValue(lookupKey, out var prid)) continue;
+                    if (!centroids.TryGetValue(prid, out var pc)) continue;
+                    var delta = Mathf.Abs(CellSurfaceY(lookupKey, pc.y) - targetY);
+                    if (delta > maxClimb) continue;
+                    if (delta < bestDeltaY)
+                    {
+                        bestDeltaY = delta;
+                        bestRid = prid;
+                    }
+                }
+
+                return bestRid;
+            }
+
+            var half = cell * 0.5f;
+            var visitedTerrainXz = new HashSet<long>();
+            // Queue entries are tagged isTerrain so dedup is kind-aware:
+            //   - Terrain visits (seed + bridge) dedup by XZ on dequeue, so each
+            //     anchor-reachable XZ is processed once at ground altitude.
+            //   - Piece visits (piece-step) skip the XZ gate so a column with stacked pieces
+            //     can be re-entered at multiple altitudes; `reachable` dedups per lookup key.
+            //
+            // sourceRid threads the most recently added piece's region id through piece-step
+            // enqueues so the next piece-step can record (sourceRid, newRid) as a discovered
+            // adjacency. Terrain visits carry a null sourceRid — when a piece-step fires from
+            // a terrain visit we look up the terrain region at curXz instead.
+            var pieceQueue = new Queue<(long xz, float y, bool isTerrain, string sourceRid)>();
+            foreach (var xz in anchorReachableCells)
+            {
+                UnpackXz(xz, out var gx, out var gz);
+                // Seed at the surface Pass 2 actually walked (floor pieces in a floored
+                // village), not the terrain a metre below — otherwise the floor pieces sit
+                // more than maxClimb above the seed and the flood never reaches them.
+                var ty = anchorReachableCellY != null && anchorReachableCellY.TryGetValue(xz, out var sy)
+                    ? sy
+                    : groundY(gx * cell + half, gz * cell + half);
+                pieceQueue.Enqueue((xz, ty, true, null));
+            }
+
+            int[] dx = { 1, -1, 0, 0 };
+            int[] dz = { 0, 0, 1, -1 };
+            while (pieceQueue.Count > 0)
+            {
+                var (curXz, curY, isTerrain, sourceRid) = pieceQueue.Dequeue();
+                if (isTerrain && !visitedTerrainXz.Add(curXz)) continue;
+                UnpackXz(curXz, out var gx, out var gz);
+                for (var d = 0; d < 4; d++)
+                {
+                    int ngx = gx + dx[d], ngz = gz + dz[d];
+                    var nXz = XzKey(ngx, ngz);
+
+                    // (a) Terrain bridge: enqueue as a terrain visit at the neighbour's
+                    //     surface height if it is anchor-reachable and the climb fits.
+                    //     Bridges propagate sourceRid=null — they create no piece adjacency,
+                    //     they are pure connectivity.
+                    if (anchorReachableCells.Contains(nXz) && !visitedTerrainXz.Contains(nXz))
+                    {
+                        var tnY = anchorReachableCellY != null &&
+                                  anchorReachableCellY.TryGetValue(nXz, out var nsy)
+                            ? nsy
+                            : groundY(ngx * cell + half, ngz * cell + half);
+                        if (Mathf.Abs(tnY - curY) <= maxClimb)
+                            pieceQueue.Enqueue((nXz, tnY, true, null));
+                    }
+
+                    // (b) Piece step: walk every piece at the neighbour XZ within climb of
+                    //     curY, deduped by lookup key.
+                    if (!xzToLookupKeysPiece.TryGetValue(nXz, out var nPieceKeys)) continue;
+
+                    // Tracks the most recently added piece in this iteration so sibling
+                    // pieces at the same nXz can chain to each other. Without it, two pieces
+                    // stacked at one cell (a stair tread beside its landing) end up isolated
+                    // when added from a no-terrain curXz visit — the p509 hex-fort case.
+                    string lastAddedAtNeighbour = null;
+                    foreach (var pKey in nPieceKeys)
+                    {
+                        if (reachable.Contains(pKey)) continue;
+                        if (!lookupGrid.TryGetValue(pKey, out var rid)) continue;
+                        if (!centroids.TryGetValue(rid, out var c)) continue;
+                        var stepY = CellSurfaceY(pKey, c.y);
+                        if (Mathf.Abs(stepY - curY) > maxClimb) continue;
+                        // Don't chain into pieces in outsideCells. Pass 1's perimeter flood is
+                        // the authoritative "what is inside the village" signal; pieces whose
+                        // XZ Pass 1 reached are outside the wall ring (rogue floors, far-away
+                        // structures, decorations). Without this gate, piece chains hop over
+                        // walls into outside pieces via 4-neighbour adjacency. A wall-blocking
+                        // primitive cannot tell stair risers from walls reliably; this
+                        // perimeter-based check sidesteps that ambiguity entirely.
+                        if (outsideCells != null && outsideCells.Contains(nXz)) continue;
+                        reachable.Add(pKey);
+                        pieceQueue.Enqueue((nXz, stepY, false, rid));
+                        added++;
+
+                        // Resolve fromRid through a fallback chain so first-piece-at-cell
+                        // cases are not orphaned:
+                        //   1. sourceRid (we came from a piece visit),
+                        //   2. the terrain region at curXz (terrain visit, terrain present),
+                        //   3. any already-reached piece at curXz within climb (we are at a
+                        //      no-terrain cell but standing on a floor piece),
+                        //   4. the previous piece added in THIS iteration, so sibling pieces
+                        //      at one cell chain even with no terrain and nothing prior.
+                        var fromRid = sourceRid
+                                      ?? TerrainRegionAtCell(curXz)
+                                      ?? PieceAtCellInReachable(curXz, curY)
+                                      ?? lastAddedAtNeighbour;
+                        PieceStepLinkPositions(
+                            curXz, nXz, curY, stepY, cell,
+                            fromRid == lastAddedAtNeighbour,
+                            out var startPos, out var endPos);
+                        RecordEdge(fromRid, rid, startPos, endPos);
+                        lastAddedAtNeighbour = rid;
+                    }
+                }
+            }
+
+            pieceKeysAdded = added;
+        }
+
+        /// <summary>
+        ///     Boundary-anchored endpoints for a Pass-3 piece step from cell
+        ///     <paramref name="fromXz" /> to cell <paramref name="toXz" />. The endpoints sit
+        ///     on opposite sides of the shared edge at the from/to surface Y, separated by a
+        ///     small horizontal epsilon so <c>SamplePosition</c> snaps each to the correct
+        ///     cell's NavMesh tile.
+        ///
+        ///     <para>Centroid-anchored links would tell the path planner "shortcut from A's
+        ///     centre to B's centre", which makes the agent walk through both regions to use
+        ///     the link. Boundary-anchored links are a short hop exactly where the walker
+        ///     transitions cells.</para>
+        ///
+        ///     <para><paramref name="sameCell" />: when the source was resolved from a sibling
+        ///     piece, both pieces are at the SAME cell (stacked at different Y). There is no
+        ///     horizontal boundary to anchor at, so the link is a purely vertical hop at the
+        ///     cell centre and each endpoint snaps to its own height bucket.</para>
+        /// </summary>
+        private static void PieceStepLinkPositions(
+            long fromXz, long toXz, float fromY, float toY, float cellSize, bool sameCell,
+            out Vector3 startPos, out Vector3 endPos)
+        {
+            UnpackXz(fromXz, out var fGx, out var fGz);
+            UnpackXz(toXz, out var tGx, out var tGz);
+            var half = cellSize * 0.5f;
+            var fCenterX = fGx * cellSize + half;
+            var fCenterZ = fGz * cellSize + half;
+            var tCenterX = tGx * cellSize + half;
+            var tCenterZ = tGz * cellSize + half;
+
+            if (sameCell)
+            {
+                startPos = new Vector3(fCenterX, fromY, fCenterZ);
+                endPos = new Vector3(fCenterX, toY, fCenterZ);
+                return;
+            }
+
+            const float epsilon = 0.1f;
+            var boundaryX = (fCenterX + tCenterX) * 0.5f;
+            var boundaryZ = (fCenterZ + tCenterZ) * 0.5f;
+            var dirX = Mathf.Sign(tCenterX - fCenterX);
+            var dirZ = Mathf.Sign(tCenterZ - fCenterZ);
+            startPos = new Vector3(boundaryX - dirX * epsilon, fromY, boundaryZ - dirZ * epsilon);
+            endPos = new Vector3(boundaryX + dirX * epsilon, toY, boundaryZ + dirZ * epsilon);
+        }
+
+        /// <summary>Order-independent key for a pair of region ids.</summary>
+        private static string CanonicalPair(string a, string b) =>
+            string.CompareOrdinal(a, b) < 0 ? a + "|" + b : b + "|" + a;
+
         /// <summary>
         ///     Compute the outside-cell set for a bake using only
         ///     <c>ZoneSystem.GetGroundHeight</c> for cell Y values.
@@ -1519,6 +1658,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             var gateSealMark = PartitionProfile.Mark();
             var gateSeals = GatherGateSeals(
                 bounds.min.x, bounds.min.z, bounds.max.x, bounds.max.z);
+            var bakeGateMarkers = new List<Vector3>(gateSeals.Count);
+            foreach (var g in gateSeals) bakeGateMarkers.Add(g.Mid);
+            outResult.GateMarkers = bakeGateMarkers;
             PartitionProfile.Since("flood_gateseals", gateSealMark);
             if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
             // Memoize per-cell heightmap raycasts: PerimeterOutsideFlood probes

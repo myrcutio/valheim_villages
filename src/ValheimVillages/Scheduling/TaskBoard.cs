@@ -176,6 +176,26 @@ namespace ValheimVillages.Scheduling
             if (!string.IsNullOrEmpty(sourceId)) s_claims.Remove(sourceId);
         }
 
+        /// <summary>
+        ///     Drop every claim this villager holds. Claims expire on their own after
+        ///     <see cref="SchedulerSettings.ClaimTtl" />, so this is not about correctness — it
+        ///     is about a recalled villager not leaving its work reserved behind it. Recall is
+        ///     the player saying "stop what you are doing"; another villager should be able to
+        ///     pick the task up at once rather than waiting out a lease nobody is using.
+        /// </summary>
+        public static int ReleaseAllHeldBy(string villagerId)
+        {
+            if (string.IsNullOrEmpty(villagerId)) return 0;
+
+            var held = new List<string>();
+            foreach (var kv in s_claims)
+                if (kv.Value.villager == villagerId)
+                    held.Add(kv.Key);
+
+            foreach (var sourceId in held) s_claims.Remove(sourceId);
+            return held.Count;
+        }
+
         [RegisterCleanup]
         public static void Clear()
         {

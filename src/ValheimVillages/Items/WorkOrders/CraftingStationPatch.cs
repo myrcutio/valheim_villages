@@ -8,7 +8,9 @@ using ValheimVillages.Items.Icons;
 using ValheimVillages.UI.Core;
 using ValheimVillages.Villager;
 using ValheimVillages.Villager.AI.Work;
+using ValheimVillages.Villager.Records;
 using ValheimVillages.Villager.Registry;
+using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Items.WorkOrders
 {
@@ -545,11 +547,20 @@ namespace ValheimVillages.Items.WorkOrders
 
         /// <summary>
         ///     Enabled villager types that (a) can work this station (per workStations) AND
-        ///     (b) the local player has unlocked via the fragment map (RecruitUnlocks). These
+        ///     (b) the player can actually staff — either unlocked via the fragment map
+        ///     (RecruitUnlocks) or ALREADY LIVING in the village this station stands in. These
         ///     are the villagers who would actually fulfill an order placed at this station;
-        ///     an empty list means the player hasn't discovered a capable villager yet, so the
-        ///     Order button stays hidden. Capability is per-station, so this is computed on the
-        ///     event-driven UpdateCraftingPanel path (no per-frame cost).
+        ///     an empty list means nobody would, so the Order button stays hidden.
+        ///
+        ///     <para>The "already living here" half matters: the unlock gates RECRUITING, and a
+        ///     villager can arrive by other routes (a dev recruit, a rescue, reviving an old
+        ///     record). Without it, a Lumberjack standing in the woodlot could not be given a
+        ///     single order — the station showed no Order button and, being virtual, no Craft
+        ///     button either, so the panel had no action at all.</para>
+        ///
+        ///     <para>Capability is per-station, so this is computed on the event-driven
+        ///     UpdateCraftingPanel path; the record scan behind it walks every ZDO, so it is
+        ///     memoised for a couple of seconds rather than repeated per panel event.</para>
         /// </summary>
         private static List<string> UnlockedCapableTypeNames(string stationName)
         {
@@ -557,9 +568,37 @@ namespace ValheimVillages.Items.WorkOrders
             if (string.IsNullOrEmpty(stationName)) return names;
             foreach (var def in VillagerRegistry.EnabledDefinitions)
                 if (StationMatcher.CanWorkStation(def.type, stationName) &&
-                    RecruitUnlocks.IsUnlockedLocal(def.type))
+                    (RecruitUnlocks.IsUnlockedLocal(def.type) || LivesInThisVillage(def.type)))
                     names.Add(string.IsNullOrEmpty(def.displayName) ? def.type : def.displayName);
             return names;
+        }
+
+        private static readonly HashSet<string> _typesInVillage = new();
+        private static float _typesInVillageAt = -1f;
+
+        /// <summary>
+        ///     Does the village around the player already have a villager of this type on its
+        ///     roster? Records, not live instances — an unloaded villager still works here.
+        /// </summary>
+        private static bool LivesInThisVillage(string villagerType)
+        {
+            var player = Player.m_localPlayer;
+            if (player == null) return false;
+
+            if (_typesInVillageAt < 0f || Time.time - _typesInVillageAt > 2f)
+            {
+                _typesInVillage.Clear();
+                _typesInVillageAt = Time.time;
+
+                var village = VillageRegistry.GetVillageAt(player.transform.position)
+                              ?? VillageRegistry.FindNearAnchor(player.transform.position);
+                if (village != null)
+                    foreach (var record in VillagerRecordTable.QueryByVillage(village.VillageId))
+                        if (record.Status != RecordStatus.Dead && !string.IsNullOrEmpty(record.Type))
+                            _typesInVillage.Add(record.Type);
+            }
+
+            return _typesInVillage.Contains(villagerType);
         }
 
         /// <summary>Hover text naming the villager type(s) that will fulfill an order here.</summary>

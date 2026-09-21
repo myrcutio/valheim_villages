@@ -26,6 +26,8 @@ namespace ValheimVillages.Behaviors
             { "tidy", ai => new TidyBehavior(ai) },
             { "repair", ai => new RepairBehavior(ai) },
             { "haul", ai => new HaulBehavior(ai) },
+            { "forestry", ai => new Forestry.ForestryBehavior(ai) },
+            { "feast", ai => new Feasts.FeastBehavior(ai) },
             { "wander", ai => new Wander.WanderBehavior(ai) },
             { "relax", ai => new Relax.RelaxBehavior(ai) },
         };

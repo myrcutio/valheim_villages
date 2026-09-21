@@ -58,6 +58,17 @@
 
     <!-- Unity Engine Assemblies -->
     <ItemGroup>
+        <!--
+            The game ships Newtonsoft.Json (client AND dedicated server, verified in both
+            Managed folders), and the villager definitions need a real parser: Unity's
+            JsonUtility silently drops every List<custom class> field from a plugin assembly
+            - measured, it does not even emit them on ToJson - which left every villager's
+            stationRecipes, workbenches and productions empty.
+        -->
+        <Reference Include="Newtonsoft.Json">
+            <HintPath>$(ValheimDir)/valheim_Data/Managed/Newtonsoft.Json.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
         <Reference Include="UnityEngine">
             <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.dll</HintPath>
             <Private>false</Private>
@@ -130,6 +141,7 @@
         <EmbeddedResource Include="Villager\Registry\Definitions\carpenter.json"/>
         <EmbeddedResource Include="Villager\Registry\Definitions\farmer.json"/>
         <EmbeddedResource Include="Villager\Registry\Definitions\guard.json"/>
+        <EmbeddedResource Include="Villager\Registry\Definitions\lumberjack.json"/>
         <EmbeddedResource Include="Villager\Registry\Definitions\miner.json"/>
         <EmbeddedResource Include="Villager\Registry\Definitions\mountaineer.json"/>
         <EmbeddedResource Include="Villager\Registry\Definitions\scout.json"/>

@@ -87,6 +87,8 @@ namespace ValheimVillages.Scheduling
                     CookRescueProducer.Scan(village, village.Anchor, now);
                     RepairTaskProducer.Scan(village, village.Anchor, now);
                     CraftWorkProducer.Scan(village, village.Anchor, now);
+                    ForestryTaskProducer.Scan(village, village.Anchor, now);
+                    FeastTaskProducer.Scan(village, village.Anchor, now);
                 }
 
                 // Blocks are scoped to the graph that produced them, so read the generation

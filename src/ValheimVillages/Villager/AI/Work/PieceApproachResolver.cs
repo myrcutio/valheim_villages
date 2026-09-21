@@ -32,6 +32,22 @@ namespace ValheimVillages.Villager.AI.Work
         private const float ApproachSnapRadius = 2f;
 
         /// <summary>
+        ///     How far above or below the thing a standing spot may be.
+        ///
+        ///     <para><see cref="RegionGraph.TryFindNearestLookupCell" /> measures distance in XZ
+        ///     ONLY — its cap parameter is named <c>maxXzDist</c> — so without a vertical bound
+        ///     the cell directly overhead is "within reach" no matter how many storeys up it
+        ///     is. Measured: a dandelion on the ground at y=32.0 resolved a standing spot at
+        ///     y=37.6, on a first floor with no stairs, 0.5m away in XZ and 5.6m away in the
+        ///     direction that mattered. The Farmer stood three metres from the flower for
+        ///     several minutes, holding a route to a roof.</para>
+        ///
+        ///     <para>One height bucket of slack on top of the reach, because a cell's Y is its
+        ///     bucket centre rather than the true surface height.</para>
+        /// </summary>
+        private const float MaxVerticalSlack = Navigation.RegionGraph.HeightBucketSize;
+
+        /// <summary>
         ///     A standing spot within <paramref name="reach" /> of <paramref name="piecePos" />
         ///     that belongs to the village graph at <paramref name="anchor" /> and that the
         ///     villager agent can path onto. False when the piece is out of the graph's reach —
@@ -45,9 +61,14 @@ namespace ValheimVillages.Villager.AI.Work
             var graph = VillageRegistry.GraphAt(anchor);
             if (graph == null) return false;
 
+            // The vertical test is ours to make: the grid search is XZ-only by design (its
+            // other callers, like the flee clamp, want exactly that), so a caller who means
+            // "stand NEXT to this" has to say so.
+            var maxRise = reach + MaxVerticalSlack;
             if (!graph.TryFindNearestLookupCell(
                     piecePos,
-                    pos => NavMesh.SamplePosition(pos, out _, ApproachSnapRadius, AgentFilter()),
+                    pos => Mathf.Abs(pos.y - piecePos.y) <= maxRise
+                           && NavMesh.SamplePosition(pos, out _, ApproachSnapRadius, AgentFilter()),
                     out var cell,
                     out _,
                     reach))

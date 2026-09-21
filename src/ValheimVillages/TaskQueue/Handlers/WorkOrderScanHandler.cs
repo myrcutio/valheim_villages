@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEngine;
 using ValheimVillages.Attributes;
 using ValheimVillages.Items.VirtualRecipes;
+using ValheimVillages.Items.WorkOrders;
 using ValheimVillages.Schemas;
 using ValheimVillages.Settings;
 using ValheimVillages.TaskQueue.ActivityLog;
@@ -189,6 +190,24 @@ namespace ValheimVillages.TaskQueue.Handlers
                     ? have
                     : ContainerScanner.CountAcrossContainers(containers, match.ItemPrefabName);
 
+                // An order this villager just failed is left alone for a while, so a fault it
+                // cannot get past costs a line a minute rather than a hot loop.
+                if (ContainerScanner.IsOnCooldown(villagerId, match.ItemPrefabName,
+                        out var coolReason, out var coolLeft))
+                {
+                    rejections.Add(new RejectionRecord
+                    {
+                        ItemPrefab = match.ItemPrefabName,
+                        Station = match.StationName,
+                        PhysicalStation = null,
+                        Reason = $"Tried and could not finish it ({coolReason}). " +
+                                 $"Trying again in {coolLeft:F0}s.",
+                        IsUnimplemented = false,
+                        WorkOrderPosition = match.SourceContainer.transform.position,
+                    });
+                    continue;
+                }
+
                 if (existingCount >= match.MaxQuantity)
                 {
                     rejections.Add(new RejectionRecord
@@ -196,8 +215,10 @@ namespace ValheimVillages.TaskQueue.Handlers
                         ItemPrefab = match.ItemPrefabName,
                         Station = match.StationName,
                         PhysicalStation = null,
-                        Reason = $"Already have {existingCount}/{match.MaxQuantity}",
+                        Reason = $"Stocked {existingCount} of {match.MaxQuantity}. " +
+                                 "Raise the order's maximum if you want more.",
                         IsUnimplemented = false,
+                        IsSatisfied = true,
                         WorkOrderPosition = match.SourceContainer.transform.position,
                     });
                     continue;
@@ -207,12 +228,21 @@ namespace ValheimVillages.TaskQueue.Handlers
                 var recipe = StationMatcher.FindRecipeForNpc(match.ItemPrefabName, villagerType);
                 if (recipe == null)
                 {
+                    // Name the villager who COULD do it. "No recipe for 'X'" leaves the player
+                    // with nothing to act on: they cannot tell a typo from a missing craftsman.
+                    var maker = StationMatcher.VillagerTypeForStation(match.StationName);
+                    var noRecipe = !string.IsNullOrEmpty(maker) && maker != villagerType
+                        ? $"A {villagerType} does not make this — a {maker} does. " +
+                          "Recruit one, or move the order to a station this villager works."
+                        : $"No villager here knows how to make {ItemDisplay.Name(match.ItemPrefabName)}. " +
+                          "Remove the order, or recruit the villager who does.";
+
                     rejections.Add(new RejectionRecord
                     {
                         ItemPrefab = match.ItemPrefabName,
                         Station = match.StationName,
                         PhysicalStation = null,
-                        Reason = $"No recipe for '{match.ItemPrefabName}'",
+                        Reason = noRecipe,
                         IsUnimplemented = false,
                         WorkOrderPosition = match.SourceContainer.transform.position,
                     });
@@ -232,7 +262,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                         ItemPrefab = match.ItemPrefabName,
                         Station = match.StationName,
                         PhysicalStation = null,
-                        Reason = "Output chest full",
+                        Reason = $"No chest in the village has room for {ItemDisplay.Name(match.ItemPrefabName)}. " +
+                                 "Empty one, or put another chest near the station.",
                         IsUnimplemented = false,
                         WorkOrderPosition = match.SourceContainer.transform.position,
                     });
@@ -253,12 +284,20 @@ namespace ValheimVillages.TaskQueue.Handlers
                 var ingredients = ContainerScanner.FindIngredients(reachable, recipe);
                 if (ingredients == null && physicalStation != "farm")
                 {
+                    // Say WHICH ingredient, and whether the village actually has it — a chest
+                    // that is in the footprint but off the region graph reads as an empty
+                    // village otherwise, and the player has no way to tell the two apart.
+                    var reason = ContainerScanner.TryFindShortfall(
+                        reachable, containers, recipe, out var shortfall)
+                        ? shortfall.Describe()
+                        : $"Missing ingredients for {match.ItemPrefabName}";
+
                     rejections.Add(new RejectionRecord
                     {
                         ItemPrefab = match.ItemPrefabName,
                         Station = match.StationName,
                         PhysicalStation = null,
-                        Reason = $"Missing ingredients for {match.ItemPrefabName}",
+                        Reason = reason,
                         IsUnimplemented = false,
                         WorkOrderPosition = match.SourceContainer.transform.position,
                     });
@@ -275,7 +314,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                 if (physicalStation == "farm")
                 {
                     var farmContext = FarmWorkOrderHelper.BuildFarmingContext(
-                        ai, match, recipe, ingredients, existingCount);
+                        ai, match, recipe, ingredients, existingCount, out var farmBlocked);
                     if (farmContext == null)
                     {
                         rejections.Add(new RejectionRecord
@@ -283,7 +322,7 @@ namespace ValheimVillages.TaskQueue.Handlers
                             ItemPrefab = match.ItemPrefabName,
                             Station = match.StationName,
                             PhysicalStation = physicalStation,
-                            Reason = "No farm location in memory",
+                            Reason = farmBlocked ?? "The farm has nothing to do right now.",
                             IsUnimplemented = false,
                             WorkOrderPosition = match.SourceContainer.transform.position,
                         });
@@ -458,8 +497,10 @@ namespace ValheimVillages.TaskQueue.Handlers
                         Station = match.StationName,
                         PhysicalStation = physicalStation,
                         Reason = forageOrder
-                            ? $"No ripe {match.ItemPrefabName} in village"
-                            : $"No station '{stationDesc}' in village",
+                            ? $"No ripe {ItemDisplay.Name(match.ItemPrefabName)} to pick in the village. " +
+                              "Wait for it to grow, or plant more."
+                            : $"There is no {stationDesc} in the village. " +
+                              "Build one inside the walls for this villager to work at.",
                         IsUnimplemented = unimplemented,
                         WorkOrderPosition = match.SourceContainer.transform.position,
                     });
@@ -482,8 +523,11 @@ namespace ValheimVillages.TaskQueue.Handlers
                             ItemPrefab = match.ItemPrefabName,
                             Station = match.StationName,
                             PhysicalStation = physicalStation,
-                            Reason = $"Quota met incl. in-flight: {existingCount}+{inFlight}/{match.MaxQuantity}",
+                            Reason = $"Stocked {existingCount}, with {inFlight} more still cooking, " +
+                                     $"against a maximum of {match.MaxQuantity}. " +
+                                     "Raise the order's maximum if you want more.",
                             IsUnimplemented = false,
+                            IsSatisfied = true,
                             WorkOrderPosition = match.SourceContainer.transform.position,
                         });
                         continue;
@@ -567,24 +611,32 @@ namespace ValheimVillages.TaskQueue.Handlers
         {
             if (rejections.Count == 0) return;
 
-            var anyUnimplemented = rejections.Any(r => r.IsUnimplemented);
-            var lines = rejections.Select(r =>
+            // A satisfied order is not a blocker. Counting the two together produced
+            // "blocked on 1 orders: Sausages — Stocked 20 of 20", which reads as a failure
+            // and is the opposite of one.
+            var blockers = rejections.Where(r => !r.IsSatisfied).ToList();
+            if (blockers.Count > 0)
             {
-                var stationDisplay = r.PhysicalStation ?? r.Station;
-                return $"  {r.ItemPrefab} [{stationDisplay}] — {r.Reason}";
-            });
-            var summary = $"[WorkOrderScan] {ai.NpcName} blocked on {rejections.Count} orders:\n"
-                          + string.Join("\n", lines);
+                var anyUnimplemented = blockers.Any(r => r.IsUnimplemented);
+                var lines = blockers.Select(r =>
+                {
+                    var stationDisplay = r.PhysicalStation ?? r.Station;
+                    return $"  {r.ItemPrefab} [{stationDisplay}] — {r.Reason}";
+                });
+                var summary = $"[WorkOrderScan] {ai.NpcName} blocked on {blockers.Count} order(s):\n"
+                              + string.Join("\n", lines);
 
-            if (anyUnimplemented)
-                Plugin.Log?.LogWarning(summary);
-            else
-                Plugin.Log?.LogInfo(summary);
+                if (anyUnimplemented)
+                    Plugin.Log?.LogWarning(summary);
+                else
+                    Plugin.Log?.LogInfo(summary);
+            }
 
             foreach (var r in rejections)
             {
                 var stationDisplay = r.PhysicalStation ?? r.Station;
-                activityLog.RecordBlocked(villagerId, TaskName, r.ItemPrefab, stationDisplay, r.Reason, r.WorkOrderPosition);
+                activityLog.RecordBlocked(villagerId, TaskName, r.ItemPrefab, stationDisplay,
+                    r.Reason, r.WorkOrderPosition, r.IsSatisfied);
             }
         }
 
@@ -595,6 +647,9 @@ namespace ValheimVillages.TaskQueue.Handlers
             public string PhysicalStation;
             public string Reason;
             public bool IsUnimplemented;
+
+            /// <summary>The order was skipped because it is DONE — not a problem to report.</summary>
+            public bool IsSatisfied;
             public Vector3 WorkOrderPosition;
         }
 

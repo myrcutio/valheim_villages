@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
@@ -113,7 +114,115 @@ namespace ValheimVillages.Villager.AI.Navigation
                 m_originZ = sz / regionCentroids.Count;
             }
 
+            ValidateInternalConsistency();
             m_initialized = true;
+        }
+
+        /// <summary>
+        ///     When true, a graph that fails <see cref="ValidateInternalConsistency" /> THROWS
+        ///     instead of repairing itself. Off in the game, where taking a village offline
+        ///     over a partial prune is worse than a logged error; on in tests, where a silent
+        ///     repair is the difference between a caught bug and a shipped one.
+        /// </summary>
+        internal static bool StrictInvariants;
+
+        /// <summary>
+        ///     The graph's parts must agree with each other: every lookup cell, link endpoint
+        ///     and kind entry must name a region the graph actually has, and every region must
+        ///     have somewhere to be (a centroid) and somewhere to be found (a lookup cell).
+        ///
+        ///     <para>Nothing used to check, so a prune that removed regions without removing
+        ///     the cells pointing at them left GHOSTS — ids that <see cref="PointToRegionId" />
+        ///     still answers with, for regions carrying no links and no centroid. Every caller
+        ///     that asks "did I get a region id?" then believes a villager standing there is on
+        ///     the graph. Measured: a roof kept resolving to p1101 after the roof-island prune
+        ///     had dropped it from everywhere else.</para>
+        ///
+        ///     <para>The orphans are removed so the graph is self-consistent, and the fact is
+        ///     logged as an ERROR naming the count — that combination is deliberate. Silently
+        ///     repairing would hide the prune that caused it; refusing to build the graph at
+        ///     all would take a village offline over a partial prune.</para>
+        /// </summary>
+        internal void ValidateInternalConsistency()
+        {
+            // --- Dangling references: something names a region the graph does not have. ---
+            var orphanCells = new List<long>();
+            var orphanRegions = new HashSet<string>();
+            foreach (var kv in m_lookupGrid)
+            {
+                if (m_regionIds.Contains(kv.Value)) continue;
+                orphanCells.Add(kv.Key);
+                orphanRegions.Add(kv.Value);
+            }
+
+            var orphanLinks = m_links.RemoveAll(l =>
+                !m_regionIds.Contains(l.FromRegionId) || !m_regionIds.Contains(l.ToRegionId));
+
+            var orphanKinds = new List<string>();
+            foreach (var id in m_regionKinds.Keys)
+                if (!m_regionIds.Contains(id))
+                    orphanKinds.Add(id);
+
+            // --- Incomplete regions: the graph has a region that cannot be used. ---
+            // A region with no CENTROID cannot be scored, seeded or linked from; a region with
+            // no LOOKUP CELL can never be resolved from a position, so nothing can ever be
+            // standing in it. Both are how a half-finished prune presents one step before the
+            // dangling-reference symptom above shows up. Neither was checked, and the ghost
+            // that prompted this validator had both.
+            var centroidless = new List<string>();
+            var unreachableByLookup = new HashSet<string>(m_regionIds);
+            foreach (var rid in m_lookupGrid.Values) unreachableByLookup.Remove(rid);
+            foreach (var id in m_regionIds)
+                if (!m_regionCentroids.ContainsKey(id))
+                    centroidless.Add(id);
+
+            var selfLinks = m_links.RemoveAll(l => l.FromRegionId == l.ToRegionId);
+
+            var faults = orphanCells.Count + orphanLinks + orphanKinds.Count +
+                         centroidless.Count + unreachableByLookup.Count + selfLinks;
+            if (faults == 0) return;
+
+            var report =
+                $"[RegionGraph] Graph was committed inconsistent: {orphanCells.Count} lookup cell(s) " +
+                $"pointed at {orphanRegions.Count} region(s) not in the graph; {orphanLinks} link(s) " +
+                $"referenced missing regions; {selfLinks} link(s) joined a region to itself; " +
+                $"{orphanKinds.Count} kind entr(ies) named missing regions; {centroidless.Count} " +
+                $"region(s) had no centroid; {unreachableByLookup.Count} region(s) had no lookup " +
+                "cell, so nothing can ever resolve to them.";
+
+            // Throwing is for tests. In game, a village that half-pruned is still a village
+            // and taking it offline helps nobody — but the error must name the fault loudly,
+            // because silently repairing is what let the p1101 ghost ship.
+            if (StrictInvariants)
+                throw new InvalidOperationException(
+                    report + " (StrictInvariants) Whatever pruned those regions must clear " +
+                    "every structure that referenced them, in the same pass.");
+
+            foreach (var key in orphanCells) m_lookupGrid.Remove(key);
+            foreach (var id in orphanKinds) m_regionKinds.Remove(id);
+
+            Plugin.Log?.LogError(
+                report + " Dropped what could be dropped so the graph agrees with itself — but " +
+                "whatever pruned those regions should have cleared these too.");
+        }
+
+        /// <summary>
+        ///     Append links to an already-built graph, without rebuilding it.
+        ///
+        ///     <para>Door links are resolved AFTER the graph exists, because finding them means
+        ///     asking which region sits either side of each door — so they cannot be part of the
+        ///     <see cref="SetGraph" /> call that creates it. Appending avoids a second
+        ///     <see cref="Generation" /> bump, which the scheduler reads as "the world changed,
+        ///     re-try everything you marked unreachable".</para>
+        /// </summary>
+        public void AddLinks(List<RegionLink> links)
+        {
+            if (links == null || links.Count == 0) return;
+            m_links.AddRange(links);
+            // Door links are resolved against the graph, so they can name a region a later
+            // prune removed. Appending used to skip validation entirely, which left exactly
+            // the dangling endpoints SetGraph is careful to reject.
+            ValidateInternalConsistency();
         }
 
         #endregion

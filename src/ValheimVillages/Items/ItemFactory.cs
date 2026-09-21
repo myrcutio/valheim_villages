@@ -31,6 +31,10 @@ namespace ValheimVillages.Items
                 ("$piece_cauldron", "cauldron", "Cauldron", "Cauldron"),
                 ("$piece_artisanstation", "artisan", "Artisan Table", "ArtisanTable"),
                 ("$piece_stonecutter", "stonecutter", "Stonecutter", "Stonecutter"),
+                // Feasts are crafted here and nowhere else (Recipe_Feast* all name this
+                // station), so without it the table offers no Order button and a Farmer has no
+                // way to be asked for a feast.
+                ("$piece_preptable", "preptable", "Food Preparation Table", "PrepTable"),
             };
 
         /// <summary>

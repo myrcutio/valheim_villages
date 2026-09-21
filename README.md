@@ -19,6 +19,8 @@ Requires [BepInExPack Valheim](https://thunderstore.io/c/valheim/p/denikson/BepI
       - crops are harvested and replanted
       - farmers forage ripe berries, mushrooms and thistle growing inside the village
       - coal refined in a kiln, ore smelted in a smelter, meat roasted on a cooking station
+      - lumberjacks work a woodlot outside the walls: planting saplings from your tree seeds, felling the grown trees, and hauling the wood home
+      - an eaten-out feast is replaced from your stores, if you have one spare
     - they find their way through doors, up stairs you built, across walls and ramparts, and over terrain you've reshaped
     - they can fight, badly — guards shoot crossbows, everyone else runs and cowers
   - multiple villages
@@ -60,6 +62,13 @@ complaint about missing materials, and draws the village the villager has mapped
 with their position and where they're headed.
 
 ![Tasks tab showing current activity, state and the village map](https://raw.githubusercontent.com/myrcutio/valheim_villages/main/public/imgs/task-details.png)
+
+**Mark out a woodlot.** A Forester's Post is a woodpile under a green banner, planted outside
+your walls where a falling trunk won't take a roof with it. Your Lumberjack works the ground
+around it — sowing saplings from your seed stock, felling them once grown, and hauling the
+wood home.
+
+![A Forester's Post, a woodpile under a green banner, standing in a birch wood](https://raw.githubusercontent.com/myrcutio/valheim_villages/main/public/imgs/forestry-post.png)
 
 ### Known Issues
 If you are looking here you probably noticed something dreadfully wrong and broken, and for that I am sorry.

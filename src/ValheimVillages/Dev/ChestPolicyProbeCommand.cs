@@ -79,8 +79,23 @@ namespace ValheimVillages.Dev
                 var free = inv != null ? inv.GetEmptySlots() : 0;
                 var total = inv != null ? inv.GetWidth() * inv.GetHeight() : 0;
 
+                // How much of the tested item is in here, and whether a villager could get to
+                // it. Policy alone answers "would this chest ACCEPT the item"; the two
+                // questions that actually decide whether an order can be worked are "where IS
+                // the item" and "can anyone reach it" — and chasing those meant toggling a
+                // debug log channel and reading a hundred lines of per-container probe.
+                var held = testItem != null && inv != null
+                    ? ContainerScanner.CountByPrefab(inv, testItem)
+                    : 0;
+                var reachable = Villager.AI.Navigation.VillagerMovement.TryResolveApproach(
+                    p, origin, null, out var approach);
+
                 sb.AppendLine($"  {c.m_name} @ ({p.x:F1},{p.y:F1},{p.z:F1}) " +
-                              $"d={Vector3.Distance(origin, p):F1}m free={free}/{total}");
+                              $"d={Vector3.Distance(origin, p):F1}m free={free}/{total}" +
+                              (testItem != null ? $" holds={held}x" : "") +
+                              (reachable
+                                  ? $" approach=({approach.x:F1},{approach.y:F1},{approach.z:F1})"
+                                  : " approach=NONE"));
 
                 var allowed = WorkOrderChestPolicy.Describe(c);
                 if (allowed == null)
@@ -124,8 +139,9 @@ namespace ValheimVillages.Dev
 
         private static void Print(string s)
         {
-            global::Console.instance?.Print(s);
-            Plugin.Log?.LogInfo(s);
+            // Capped + chunked: a single oversized write to a headless server's
+            // stdout pipe blocks the main thread. See ConsoleReport.
+            ValheimVillages.Dev.ConsoleReport.Emit(s);
         }
     }
 }

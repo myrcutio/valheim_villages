@@ -199,21 +199,22 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        ///     The first ingredient of <paramref name="recipe" /> the containers cannot cover,
-        ///     as a localized display name plus how many are needed and held. Returns false when
-        ///     everything is available.
+        ///     The first ingredient of <paramref name="recipe" /> the villager cannot cover, and
+        ///     — the part that decides what the player should DO about it — whether the village
+        ///     HAS the thing in a chest nobody can walk to.
         ///
         ///     <para>Separate from <see cref="FindIngredients" /> because that one answers
-        ///     "can I start?" and throws away WHICH requirement failed — this is what tells the
-        ///     player the shortfall by name.</para>
+        ///     "can I start?" and throws away WHICH requirement failed.</para>
         /// </summary>
-        public static bool TryFindMissingIngredient(
-            List<Container> containers, Recipe recipe,
-            out string displayName, out int needed, out int found)
+        /// <param name="reachable">Chests the villager can actually walk to.</param>
+        /// <param name="inVillage">
+        ///     Every chest in the village footprint. Pass null to skip the out-of-reach check.
+        /// </param>
+        public static bool TryFindShortfall(
+            List<Container> reachable, List<Container> inVillage, Recipe recipe,
+            out IngredientShortfall shortfall)
         {
-            displayName = null;
-            needed = 0;
-            found = 0;
+            shortfall = default;
             if (recipe?.m_resources == null) return false;
 
             foreach (var req in recipe.m_resources)
@@ -221,22 +222,26 @@ namespace ValheimVillages.Villager.AI.Work
                 if (req.m_resItem == null) continue;
 
                 var prefabName = req.m_resItem.gameObject.name;
-                var have = 0;
-                foreach (var container in containers)
-                {
-                    var inv = container.GetInventory();
-                    if (inv == null) continue;
-                    have += CountByPrefab(inv, prefabName);
-                }
-
+                var have = CountAcrossContainers(reachable, prefabName);
                 if (have >= req.m_amount) continue;
 
                 var token = req.m_resItem.m_itemData?.m_shared?.m_name;
-                displayName = string.IsNullOrEmpty(token)
-                    ? prefabName
-                    : Localization.instance.Localize(token);
-                needed = req.m_amount;
-                found = have;
+                shortfall = new IngredientShortfall
+                {
+                    PrefabName = prefabName,
+                    DisplayName = string.IsNullOrEmpty(token)
+                        ? prefabName
+                        : Localization.instance.Localize(token),
+                    Needed = req.m_amount,
+                    FoundReachable = have,
+                    FoundInVillage = inVillage != null
+                        ? CountAcrossContainers(inVillage, prefabName)
+                        : have,
+                };
+
+                if (shortfall.FoundInVillage >= req.m_amount)
+                    shortfall.OutOfReachHolder = FindUnreachableHolder(inVillage, reachable, prefabName);
+
                 return true;
             }
 
@@ -244,8 +249,45 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
-        ///     Check if required ingredients for a recipe exist across the given containers.
-        ///     Returns a list describing where each ingredient can be found, or null if missing.
+        ///     The chest the player should move: one holding the item that the villager has no
+        ///     approach to. Falls back to any holder, so the report always names a place.
+        /// </summary>
+        private static Container FindUnreachableHolder(
+            List<Container> inVillage, List<Container> reachable, string prefabName)
+        {
+            if (inVillage == null) return null;
+
+            Container anyHolder = null;
+            foreach (var container in inVillage)
+            {
+                var inv = container?.GetInventory();
+                if (inv == null || CountByPrefab(inv, prefabName) <= 0) continue;
+
+                anyHolder ??= container;
+                if (reachable == null || !reachable.Contains(container)) return container;
+            }
+
+            return anyHolder;
+        }
+
+        /// <summary>
+        ///     Where to collect each of a recipe's ingredients, or null when the containers
+        ///     cannot cover it.
+        ///
+        ///     <para><b>One entry per CHEST, not per ingredient.</b> This used to total an
+        ///     ingredient across every container while remembering only the last chest it saw
+        ///     any in, then record that one chest as the source for the FULL amount. Whenever a
+        ///     stack was split across chests the total said yes and the withdrawal said no:
+        ///     <c>RemoveIngredients</c> verifies before removing (deliberately — a partial
+        ///     withdrawal would let the workflow fabricate a held item), so the villager
+        ///     abandoned with "ingredient X no longer available", went Idle, rescanned, matched
+        ///     the same order, and did it again. Measured on a live server: a Farmer looping on
+        ///     TurnipStew several times a second, seven log lines an iteration, having never
+        ///     picked up a single turnip.</para>
+        ///
+        ///     <para>The gathering workflows walk this list one chest at a time
+        ///     (<c>CurrentIngredientIndex</c>), so several entries for one ingredient simply
+        ///     means several stops.</para>
         /// </summary>
         public static List<IngredientSource> FindIngredients(
             List<Container> containers, Recipe recipe)
@@ -260,8 +302,8 @@ namespace ValheimVillages.Villager.AI.Work
 
                 var prefabName = req.m_resItem.gameObject.name;
                 var needed = req.m_amount;
-                var found = 0;
-                Container sourceContainer = null;
+                var remaining = needed;
+                var picks = new List<IngredientSource>();
 
                 if (Settings.LogSettings.VerboseIngredientScan)
                     Plugin.Log?.LogDebug(
@@ -279,29 +321,42 @@ namespace ValheimVillages.Villager.AI.Work
                             $"[IngredientScan] Container '{container.m_name}': " +
                             $"{count}x '{prefabName}'");
 
-                    if (count > 0)
+                    if (count <= 0) continue;
+
+                    // Take only what this chest can actually give, so the recorded amount is
+                    // one the withdrawal can satisfy.
+                    var take = Mathf.Min(count, remaining);
+                    picks.Add(new IngredientSource
                     {
-                        sourceContainer = container;
-                        found += count;
-                        if (found >= needed) break;
-                    }
+                        PrefabName = prefabName,
+                        Amount = take,
+                        Container = container,
+                    });
+
+                    remaining -= take;
+                    if (remaining <= 0) break;
                 }
 
-                if (found < needed)
+                if (remaining > 0)
                 {
-                    LogMissingIngredient(prefabName, needed, found, containers.Count);
+                    LogMissingIngredient(prefabName, needed, needed - remaining, containers.Count);
                     return null;
                 }
 
-                sources.Add(new IngredientSource
-                {
-                    PrefabName = prefabName,
-                    Amount = needed,
-                    Container = sourceContainer,
-                });
+                sources.AddRange(picks);
             }
 
             return sources;
+        }
+
+        /// <summary>
+        ///     Convenience passthrough to <see cref="WorkOrderCooldown.IsCoolingDown" />, so the
+        ///     scan asks one type about work-order availability rather than two.
+        /// </summary>
+        public static bool IsOnCooldown(
+            string villagerId, string itemPrefab, out string reason, out float secondsLeft)
+        {
+            return WorkOrderCooldown.IsCoolingDown(villagerId, itemPrefab, out reason, out secondsLeft);
         }
 
         /// <summary>Seconds before an UNCHANGED missing-ingredient report repeats.</summary>

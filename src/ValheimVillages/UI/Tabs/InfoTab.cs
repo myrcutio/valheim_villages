@@ -85,11 +85,24 @@ namespace ValheimVillages.UI.Tabs
         ///     "Patrolling (8 waypoints)") and falls back to the raw behavior
         ///     state when no behavior is active or it reports nothing.
         /// </summary>
-        private static string CurrentActivityLabel(VillagerBehaviorBridge villager)
+        private string CurrentActivityLabel(VillagerBehaviorBridge villager)
         {
-            var status = villager?.AI?.ActiveBehavior?.GetStatusText();
+            if (villager == null) return "Idle";
+
+            var status = villager.AI?.ActiveBehavior?.GetStatusText();
             if (!string.IsNullOrEmpty(status)) return status;
-            return villager != null ? villager.CurrentState.ToString() : "Idle";
+
+            if (villager.CurrentState != Enums.BehaviorState.Idle)
+                return villager.CurrentState.ToString();
+
+            // "Idle" alone is the same dead end as "Missing ingredients": it says the villager
+            // is doing nothing and leaves the player to work out whether that is fine. A
+            // villager standing about because every order is stocked and one standing about
+            // because it cannot reach its chest look identical, and only one of them wants
+            // doing something about.
+            return m_issues.Count == 0
+                ? "Nothing to do — every order is stocked"
+                : $"Nothing to do — {m_issues.Count} order(s) need attention";
         }
 
         public TabDetailDataUI GetDetail(

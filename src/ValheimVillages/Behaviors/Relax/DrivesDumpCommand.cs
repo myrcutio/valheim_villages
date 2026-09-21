@@ -97,8 +97,9 @@ namespace ValheimVillages.Behaviors.Relax
 
         private static void Print(string text)
         {
-            global::Console.instance?.Print(text);
-            Plugin.Log?.LogInfo(text);
+            // Capped + chunked: a single oversized write to a headless server's
+            // stdout pipe blocks the main thread. See ConsoleReport.
+            ValheimVillages.Dev.ConsoleReport.Emit(text);
         }
     }
 }

@@ -5,6 +5,49 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-09-21
+
+### New
+- **Lumberjack.** A new villager who plants, fells and hauls timber from a woodlot, replanting from your seed stock. Work orders for every lumber type.
+- **Villagers keep a feast on the table.** A Farmer lays out a fresh one from your stores when it has been eaten down to nothing.
+- **The Food Preparation Table takes work orders**, the same way a cauldron does.
+- **Villagers can walk through your gates.** Doorways are bridged again, so a walled village no longer traps its own villagers.
+- **Villagers can reach a chest or station out of their plane** — a shelf above head height, a station on a foundation — by standing beside and below it, up to 3m, where they can see it.
+
+### Changed
+- **Guards are taught by any biome map**, not only the Mistlands and Ashlands.
+- **A Forester's Post can stand 80m out**, up from 50m, laying a line of anchors home to keep the walkable ground continuous.
+- **A woodlot claims less ground** — 20m around the post plus a 4m lane from the nearest gate.
+- **Lumberjacks carry an armful, not a handful** — nearby drops are swept into one pile and carried a full stack at a time.
+- **Lumberjacks wait for felled timber to settle**, and break up whichever log is nearest them first.
+- **Villagers speak less, and only when idle** — roughly one line every two minutes, with a shared quiet period so a busy village isn't a chorus.
+
+### Fixed
+- **Villagers no longer drop Mistlands loot.** The inherited Dvergr drop table is stripped; the Lode Core still comes back on death.
+- **Rooftops are no longer walkable.** A roof's collider is a plain box, so its flat top read as floor and villagers were sent to stand on it.
+- **A building's upper floor is no longer pruned away.** A step was judged against a staircase's average height rather than the tread underfoot, so the stairs and everything above them were dropped.
+- **Villagers no longer stand on the floor above the thing they are reaching for.**
+- **The lane out to a distant woodlot leaves through a gate** instead of running at solid palisade.
+- **Villagers no longer wander off.** The leash was silently disabled by a debug switch, unnavigated movement had no distance limit, and a villager already off the navmesh was driven further off it.
+- **Lumberjacks connect with the tree they charge**, and give up if they overshoot it or leave the navmesh.
+- **A Lumberjack no longer stands idle in a woodlot full of trees** — the round considers several trees and logs, not just the nearest of each.
+- **Guards patrol the walls, not the woodlot.** Ground a village works but does not enclose now stays outside the boundary.
+- **Recall works from a client**, and from the console with `vv_recall <name>`. It moves an unloaded villager too, and marks one that cannot be found as fallen so Revive can restore it.
+- **A split stack of ingredients no longer stalls an order forever.**
+- **Blocked orders say what is wrong and what to do about it**, including when an ingredient is in the village but out of reach.
+- **A satisfied order no longer reads as blocked.**
+- **Villager station recipes load again.** Every villager's recipe list was silently dropped, so their stations looked empty.
+- **The Lumberjack can be unlocked** — a biome map can teach more than one villager type, and the Black Forest teaches both.
+- **A Forester's Post no longer reports itself registered without saving anything.**
+- **Carpenters stop "repairing" undamaged buildings** past world level 0.
+- **A villager no longer freezes waiting on a station** that will never produce.
+- **Villagers leave placed feasts and dishes where you put them.**
+- **The Order button appears for any villager you have**, not only types unlocked from a map.
+- **Farmers plant near your buildings again.**
+- **Dedicated servers no longer stall on log floods** from per-frame villager state, approach and repair diagnostics.
+- **A diagnostic console command no longer takes a dedicated server down.**
+- **The Forester's Post no longer has a plank floating over it.**
+
 ## [0.3.1] - 2026-09-18
 
 ### Fixed

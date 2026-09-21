@@ -121,7 +121,7 @@ namespace ValheimVillages.Behaviors.Repair
             {
                 if (!IsValid(wnt)) continue;
                 if (IsBlacklisted(wnt)) continue;
-                if (wnt.GetHealthPercentage() >= DamagedThreshold) continue;
+                if (PieceHealth.Fraction(wnt) >= DamagedThreshold) continue;
                 var d = (wnt.transform.position - pos).sqrMagnitude;
                 if (d < bestSq)
                 {
@@ -159,7 +159,11 @@ namespace ValheimVillages.Behaviors.Repair
             if ((m_ai.Position - m_target.transform.position).sqrMagnitude
                 <= RepairRange * RepairRange)
             {
-                DoRepairSweep();
+                // Nothing repaired means this piece is not actually damaged, whatever the
+                // scan believed. Park it briefly instead of letting the dispatcher hand it
+                // straight back: that loop repaired nothing, moved nobody, and wrote a
+                // thousand "assigned RepairPiece" lines for the same two metres of wall.
+                if (DoRepairSweep() == 0) Blacklist();
                 Reset();
                 return;
             }
@@ -180,7 +184,7 @@ namespace ValheimVillages.Behaviors.Repair
 
         public void OnArrival(float dt)
         {
-            DoRepairSweep();
+            if (DoRepairSweep() == 0) Blacklist();
             Reset();
         }
 
@@ -189,7 +193,7 @@ namespace ValheimVillages.Behaviors.Repair
         ///     targeted piece plus its neighbours (and a roof overhead), so a whole
         ///     building is patched from one safe ground spot.
         /// </summary>
-        private void DoRepairSweep()
+        private int DoRepairSweep()
         {
             var seen = new HashSet<WearNTear>();
             var repaired = 0;
@@ -202,6 +206,8 @@ namespace ValheimVillages.Behaviors.Repair
 
             if (repaired > 0)
                 Plugin.Log?.LogInfo($"[Repair:{m_ai.NpcName}] Repaired {repaired} structure(s).");
+
+            return repaired;
         }
 
         public string GetStatusText()

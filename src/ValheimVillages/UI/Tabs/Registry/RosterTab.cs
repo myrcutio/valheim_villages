@@ -119,51 +119,16 @@ namespace ValheimVillages.UI.Tabs.Registry
             // Recall: bring the villager back to this station. Record id == VillagerAI.UniqueId.
             detail.ActionText = "Recall";
             var recordId = r.RecordId;
-            var name = r.Name;
             var stationPos = context.RegistryPosition;
             detail.OnAction = () =>
             {
-                if (VillagerAIManager.ActiveVillagers.TryGetValue(recordId, out var ai) && ai != null)
-                {
-                    ai.Recall(stationPos);
-                    Player.m_localPlayer?.Message(
-                        MessageHud.MessageType.Center, $"{name} recalled");
-                    return;
-                }
-
-                // No local instance. A villager that is merely AWAY is still recallable —
-                // it just has no GameObject here to move, so move its stored position
-                // instead and it arrives already at the station when its zone next loads.
-                // This is the case that matters: a villager worth recalling is often one
-                // that ended up somewhere far enough away that it unloaded, which is
-                // exactly when "try again near the village" is useless advice.
-                var record = VillagerRecordTable.FindById(recordId);
-                var current = VillagerLiveness.Resolve(record);
-                if (current == LivePresence.Away
-                    && VillagerRecall.RecallUnloaded(record, stationPos))
-                {
-                    Player.m_localPlayer?.Message(
-                        MessageHud.MessageType.Center, $"{name} recalled (was away)");
-                    return;
-                }
-
-                // Only mark fallen when the villager is host-confirmed GONE (Missing) —
-                // never for one that's merely away (unloaded / loaded on another peer),
-                // which would wrongly kill a perfectly fine villager. Real in-world deaths
-                // are flipped to Dead automatically by VillagerDeathPatch.
-                if (current == LivePresence.Missing)
-                {
-                    VillagerRecordTable.SetStatus(recordId, RecordStatus.Dead);
-                    Player.m_localPlayer?.Message(
-                        MessageHud.MessageType.Center,
-                        $"{name} is gone — marked fallen. Use Revive to restore.");
-                }
-                else
-                {
-                    Player.m_localPlayer?.Message(
-                        MessageHud.MessageType.Center,
-                        $"Cannot recall {name} ({VillagerLiveness.Tag(current)}).");
-                }
+                // Recall is the player's failsafe for a villager in a bad state, so it must
+                // work from wherever they are — which on a dedicated server is a client, where
+                // neither of the two questions this used to ask can be answered. A client
+                // cannot tell "away" from "gone" (both read as Unknown), and cannot write a
+                // host-authoritative villager ZDO even once it has decided. So it no longer
+                // decides: the host is asked, and the host replies. See VillagerRecallRpc.
+                VillagerRecallRpc.RequestRecall(recordId, stationPos);
             };
 
             return detail;

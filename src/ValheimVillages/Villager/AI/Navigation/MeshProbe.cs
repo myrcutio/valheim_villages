@@ -321,9 +321,20 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.AppendLine(
                 $"  within 2m: {within2m}    within 5m: {within5m}    same-altitude (±2m Y) within 10m XZ: {withinY}");
 
+            // The cache is read AFTER the prune has swept it, so an empty neighbourhood has
+            // TWO possible causes and this line used to assert the wrong one. RegionBuilder
+            // logs its accepted triangle count and Y range at BUILD time; RubberBandPrune then
+            // removes every triangle whose lookup key Pass 3 did not reach. A surface that was
+            // built and then pruned looks identical here to one that was never built, and
+            // saying "RegionBuilder filter rejected this" sent a real investigation down the
+            // wrong path — the upper floor at (-71,-373,42.4) was inside the piece TriCache's
+            // logged Y range [20.5, 42.4], so it was built, then swept.
             if (within2m == 0)
                 sb.AppendLine(
-                    "  → RegionBuilder filter rejected this surface (see [Region] triangulation rej_* counters)");
+                    "  → no surface here in the post-prune cache. Either RegionBuilder's filter " +
+                    "rejected it (check [Region] triangulation rej_* counters) or Pass 3 never " +
+                    "reached it and the prune swept it (check the [Region] TriCache Y range for " +
+                    "this kind — inside that range means it was BUILT, then pruned).");
         }
 
         private static void ReportBakeSources(StringBuilder sb, Vector3 pos)
@@ -545,6 +556,16 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             var regionValid = !string.IsNullOrEmpty(resolved) && graph.IsValidRegion(resolved);
             sb.AppendLine($"  graphOrigin={graph.GetOrigin(out _, out _)} regionValid={regionValid}");
+
+            // A resolved id for a region the graph does not have is a GHOST: the lookup grid
+            // still points at something the region set has dropped. It reads as "on the graph"
+            // to every caller that only checks PointToRegionId for null, so say it loudly
+            // rather than leaving two contradictory lines next to each other to be noticed.
+            if (!string.IsNullOrEmpty(resolved) && !regionValid)
+                sb.AppendLine(
+                    $"  ⚠ GHOST REGION: the lookup grid still maps this cell to '{resolved}', " +
+                    "but the graph has no such region (no links, no centroid). Anything testing " +
+                    "PointToRegionId != null will wrongly believe a villager here is on the graph.");
             if (regionValid)
             {
                 if (graph.GetRegionBounds(resolved, out var bMinX, out var bMaxX, out var bMinZ, out var bMaxZ))

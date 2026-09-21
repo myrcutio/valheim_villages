@@ -43,7 +43,9 @@ namespace ValheimVillages.Scheduling.Producers
                     continue;
                 }
 
-                var hp = wnt.GetHealthPercentage();
+                // NOT GetHealthPercentage(): its cached value reads every intact piece as
+                // damaged once a world is past world level 0. See PieceHealth.
+                var hp = Behaviors.Repair.PieceHealth.Fraction(wnt);
                 if (hp >= DamagedThreshold)
                 {
                     // Healthy (or freshly repaired) — drop any stale task.

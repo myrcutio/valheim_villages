@@ -21,6 +21,21 @@ namespace ValheimVillages.Scheduling
         ///     crafter exists so the scheduler offers it the slot.
         /// </summary>
         CraftWork,
+
+        /// <summary>
+        ///     The village's woodlot needs working — wood on the ground, a log to break, a
+        ///     grown tree to fell, or a gap to plant into. Which of those is decided by
+        ///     <c>ForestryBehavior.ChooseErrand</c>; the producer only flags that a
+        ///     Forester's Post exists and the woodlot is not idle.
+        /// </summary>
+        Forestry,
+
+        /// <summary>
+        ///     A feast in the village has been eaten down to nothing and the stores hold
+        ///     another one to put in its place. Only EMPTY feasts qualify — a feast with
+        ///     servings left is the player's, and stays.
+        /// </summary>
+        FeastRefresh,
     }
 
     /// <summary>

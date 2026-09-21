@@ -306,8 +306,25 @@ namespace ValheimVillages.Behaviors.Tidy
         private static bool IsDropValid(ItemDrop drop)
         {
             if (drop == null || drop.m_itemData == null) return false;
+            if (IsPlaced(drop)) return false;
             var nview = drop.GetComponent<ZNetView>();
             return nview != null && nview.IsValid();
+        }
+
+        /// <summary>
+        ///     Something the player PUT there, not litter someone dropped.
+        ///
+        ///     <para>A placed feast is an <c>ItemDrop</c>, a <c>Piece</c> and a
+        ///     <c>WearNTear</c> on one object with no rigidbody — which is exactly what
+        ///     <c>ItemDrop.IsPiece()</c> tests, and it is how the game itself tells the two
+        ///     apart (its own despawn timer skips pieces). To a plain "ItemDrop within the haul
+        ///     radius" scan it looked like a dropped stack, so villagers carried feasts,
+        ///     platters and anything else set out for show off to a chest. Loose drops keep
+        ///     their rigidbody, so nothing that IS litter is caught by this.</para>
+        /// </summary>
+        private static bool IsPlaced(ItemDrop drop)
+        {
+            return drop.IsPiece() || drop.GetComponent<Feast>() != null;
         }
 
         private static string DropName(ItemDrop drop)

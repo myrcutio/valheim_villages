@@ -6,6 +6,7 @@ using ValheimVillages.Behaviors.Farming;
 using ValheimVillages.Enums;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Items.VirtualRecipes;
+using ValheimVillages.Items.WorkOrders;
 using ValheimVillages.Schemas;
 using ValheimVillages.Villager.AI.Work;
 using ValheimVillages.Villages;
@@ -23,13 +24,21 @@ namespace ValheimVillages.TaskQueue.Handlers
         ///     Checks for harvestable crops first, then planting needs.
         ///     Returns null if no farming action is possible (no farm location, etc.).
         /// </summary>
+        /// <param name="blockedReason">
+        ///     Why nothing could be built, phrased for the player. Four different situations end
+        ///     here — no ground, an unplantable item, no seeds, no room — and the caller used to
+        ///     report all four as "No farm location in memory", which is the wrong cause three
+        ///     times out of four and tells the player nothing they can act on.
+        /// </param>
         public static FarmingContext BuildFarmingContext(
             IVillagerWorkContext ai,
             WorkOrderMatch match,
             Recipe recipe,
             List<IngredientSource> ingredients,
-            int existingCount)
+            int existingCount,
+            out string blockedReason)
         {
+            blockedReason = null;
             var outputItem = match.ItemPrefabName;
             var anchorPos = ai.HomeAnchor;
 
@@ -88,6 +97,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                 {
                     Plugin.Log?.LogDebug(
                         $"[FarmScan:{ai.NpcName}] No ready crop, farm location, or cultivated ground found");
+                    blockedReason = "Nothing ripe to pick and nowhere to plant. " +
+                                    "Till some ground with a cultivator near the village.";
                     return null;
                 }
 
@@ -102,6 +113,8 @@ namespace ValheimVillages.TaskQueue.Handlers
             {
                 Plugin.Log?.LogDebug(
                     $"[FarmScan:{ai.NpcName}] No plant piece for {outputItem}");
+                blockedReason = $"{ItemDisplay.Name(outputItem)} cannot be grown — nothing plants it. " +
+                                "Remove this order from the farm.";
                 return null;
             }
 
@@ -110,6 +123,8 @@ namespace ValheimVillages.TaskQueue.Handlers
             {
                 Plugin.Log?.LogDebug(
                     $"[FarmScan:{ai.NpcName}] No seeds for {outputItem}");
+                blockedReason = $"No seeds for {ItemDisplay.Name(outputItem)}. " +
+                                "Put some in a village chest the farmer can reach.";
                 return null;
             }
 
@@ -124,6 +139,8 @@ namespace ValheimVillages.TaskQueue.Handlers
             {
                 Plugin.Log?.LogDebug(
                     $"[FarmScan:{ai.NpcName}] No planting positions near farm");
+                blockedReason = $"The farm at ({farmPosition.x:F0},{farmPosition.z:F0}) has no free " +
+                                "space left to plant. Harvest what is growing, or till more ground.";
                 return null;
             }
 

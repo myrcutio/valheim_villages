@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.Villages;
@@ -7,144 +5,60 @@ using ValheimVillages.Villages;
 namespace ValheimVillages.Abilities.SpawnBlock
 {
     /// <summary>
-    ///     Harmony patch on SpawnSystem.UpdateSpawnList to prevent non-raid enemy spawns
-    ///     inside protected village areas.
-    ///     SpawnSystem.UpdateSpawnList is called with eventSpawners=false for normal spawns
-    ///     and eventSpawners=true for raid/event spawns. We only suppress normal spawns.
+    ///     Keeps ordinary monster spawns out of a village, by vetoing the SPAWN POINT.
+    ///
+    ///     <para><c>SpawnSystem.Spawn</c> is the last step before the creature is
+    ///     instantiated, and it is handed the final position and whether this is an event
+    ///     spawn — so a prefix here can refuse exactly the spawns that would land inside the
+    ///     walls and leave every other spawn in the world alone.</para>
+    ///
+    ///     <para><b>Why not the spawner list.</b> This used to patch
+    ///     <c>UpdateSpawnList</c> and disable whole spawners while a player stood in a
+    ///     village. That was both too blunt and, in practice, inert: it required six of eight
+    ///     sample points on a 60m ring around the player to be inside the village area, and
+    ///     the area is the patrol hull — the walls — so a 60m ring from anywhere inside a
+    ///     normal village mostly falls outside it and nothing was ever disabled. Greylings
+    ///     went on appearing between the houses. Testing the position that is actually about
+    ///     to be used needs no sampling and cannot miss.</para>
+    ///
+    ///     <para>Raids and events are deliberately untouched: a village that cannot be raided
+    ///     is not defended, it is just safe.</para>
     /// </summary>
-    [HarmonyPatch(typeof(SpawnSystem), "UpdateSpawnList")]
+    [HarmonyPatch(typeof(SpawnSystem), "Spawn")]
     public static class SpawnProtectionPatch
     {
-        private static readonly List<int> s_disabledSpawnerIndices = new();
-        private static List<SpawnSystem.SpawnData> s_lastSpawners;
-
-        // Extra buffer (m) beyond the village boundary that still counts as the
-        // protected no-spawn zone, so enemies can't spawn right up against the wall.
+        /// <summary>
+        ///     Extra buffer (m) beyond the village boundary that still counts as protected, so
+        ///     nothing spawns pressed up against the outside of the wall.
+        /// </summary>
         private const float SpawnBlockMargin = 10f;
 
-        /// <summary>
-        ///     Prefix: if this is NOT an event spawn, check if we should suppress spawning
-        ///     by temporarily filtering the spawn list to remove spawners whose spawn position
-        ///     would fall inside a village area.
-        ///     We use a Postfix-compatible approach: we don't skip the method, we just
-        ///     set m_nospawn temporarily for spawns inside villages.
-        /// </summary>
-        private static void Prefix(
-            List<SpawnSystem.SpawnData> spawners,
-            DateTime currentTime,
-            bool eventSpawners,
-            SpawnSystem __instance)
+        /// <summary>How often the running total of blocked spawns is reported.</summary>
+        private const float ReportIntervalSeconds = 60f;
+
+        private static int s_blocked;
+        private static float s_nextReport;
+
+        private static bool Prefix(Vector3 spawnPoint, bool eventSpawner)
         {
-            // Never interfere with event/raid spawns (rule 4)
-            if (eventSpawners) return;
+            // Raids come through with eventSpawner=true and are none of our business.
+            if (eventSpawner) return true;
+            if (VillageAreaManager.AreaCount == 0) return true;
+            if (!VillageAreaManager.IsNearAnyVillage(spawnPoint, SpawnBlockMargin)) return true;
 
-            // No village areas registered -- nothing to protect
-            if (VillageAreaManager.AreaCount == 0) return;
-
-            // Store the original enabled state and disable spawners whose positions
-            // would be inside a village area. We check the player positions since
-            // spawns occur near players.
-            s_disabledSpawnerIndices.Clear();
-
-            var players = Player.GetAllPlayers();
-            if (players == null || players.Count == 0) return;
-
-            // Check if any player is inside a village area
-            var anyPlayerInVillage = false;
-            foreach (var player in players)
+            // Counted and reported periodically rather than logged per spawn: this runs on
+            // every spawn attempt in the world, and a line each would bury the log — the
+            // failure mode a dedicated server cannot afford.
+            s_blocked++;
+            if (Time.time >= s_nextReport)
             {
-                if (player == null) continue;
-                if (VillageAreaManager.IsInsideAnyVillage(player.transform.position))
-                {
-                    anyPlayerInVillage = true;
-                    break;
-                }
+                s_nextReport = Time.time + ReportIntervalSeconds;
+                Plugin.Log?.LogInfo(
+                    $"[SpawnBlock] Refused {s_blocked} spawn(s) inside a village so far " +
+                    $"(margin {SpawnBlockMargin:F0}m; raids are never blocked)");
             }
 
-            if (!anyPlayerInVillage) return;
-
-            // Temporarily disable all non-event spawners when a player is in a village.
-            // SpawnSystem spawns at random points 40-80m from players, so we check
-            // sample spawn positions against village areas.
-            for (var i = 0; i < spawners.Count; i++)
-            {
-                var spawner = spawners[i];
-                if (spawner == null || !spawner.m_enabled) continue;
-
-                // Check spawn positions around each player inside a village
-                var shouldDisable = true;
-                foreach (var player in players)
-                {
-                    if (player == null) continue;
-                    var playerPos = player.transform.position;
-
-                    // If the player is inside a village, spawns near them should be suppressed
-                    if (VillageAreaManager.IsInsideAnyVillage(playerPos))
-                    {
-                        // Sample several potential spawn positions around the player
-                        // Spawns occur 40-80m from players, so check at those distances
-                        if (!AllSpawnPositionsInsideVillage(playerPos))
-                        {
-                            shouldDisable = false;
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        shouldDisable = false;
-                        break;
-                    }
-                }
-
-                if (shouldDisable)
-                {
-                    spawner.m_enabled = false;
-                    s_disabledSpawnerIndices.Add(i);
-                }
-            }
-
-            s_lastSpawners = spawners;
-        }
-
-        /// <summary>
-        ///     Postfix: re-enable any spawners we temporarily disabled.
-        /// </summary>
-        private static void Postfix()
-        {
-            if (s_lastSpawners == null || s_disabledSpawnerIndices.Count == 0) return;
-
-            foreach (var index in s_disabledSpawnerIndices)
-                if (index < s_lastSpawners.Count && s_lastSpawners[index] != null)
-                    s_lastSpawners[index].m_enabled = true;
-
-            s_disabledSpawnerIndices.Clear();
-            s_lastSpawners = null;
-        }
-
-        /// <summary>
-        ///     Check if all typical spawn positions around a player would be inside a village.
-        ///     Samples 8 directions at spawn distance to determine coverage.
-        /// </summary>
-        private static bool AllSpawnPositionsInsideVillage(Vector3 playerPos)
-        {
-            var spawnDist = 60f; // Midpoint of 40-80m spawn range
-            var insideCount = 0;
-
-            for (var i = 0; i < 8; i++)
-            {
-                var angle = i * 45f * Mathf.Deg2Rad;
-                var samplePos = playerPos + new Vector3(
-                    Mathf.Cos(angle) * spawnDist,
-                    0f,
-                    Mathf.Sin(angle) * spawnDist
-                );
-
-                if (VillageAreaManager.IsNearAnyVillage(samplePos, SpawnBlockMargin))
-                    insideCount++;
-            }
-
-            // If most spawn positions are inside the village, suppress spawning
-            return insideCount >= 6;
+            return false;
         }
     }
 }

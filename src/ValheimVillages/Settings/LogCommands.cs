@@ -33,6 +33,10 @@ namespace ValheimVillages.Settings
                     "every ItemDrop.Awake spawn",
                     () => LogSettings.VerboseItemSpawns,
                     v => LogSettings.VerboseItemSpawns = v),
+                ["talk"] = new(
+                    "every line a villager speaks",
+                    () => LogSettings.VerboseTalk,
+                    v => LogSettings.VerboseTalk = v),
                 ["training"] = new(
                     "every scheduler reranker training step",
                     () => SchedulerSettings.LogTraining,

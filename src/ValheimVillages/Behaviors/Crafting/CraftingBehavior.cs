@@ -271,6 +271,18 @@ namespace ValheimVillages.Behaviors.Crafting
 
             if (SubState != WorkSubState.Crafting) return;
 
+            // Ceiling FIRST, because every poller below reports "still waiting" unconditionally
+            // and the fixed timer after them is unreachable while one does. A craft that can
+            // never finish otherwise pins the villager: the sub-state keeps AssignmentActive
+            // true, and the dispatcher returns a held assignment without re-selecting, so the
+            // villager takes no other work — it just stands wherever it happens to be.
+            var stalled = Time.time - m_context.CraftStartTime;
+            if (stalled > WorkSettings.CraftStallTimeout)
+            {
+                AbandonWork($"craft stalled at the station for {stalled:F0}s");
+                return;
+            }
+
             // Cooking station: poll for done items instead of using a fixed timer
             if (TryPollCookingStation()) return;
             if (TryPollSmelter()) return;

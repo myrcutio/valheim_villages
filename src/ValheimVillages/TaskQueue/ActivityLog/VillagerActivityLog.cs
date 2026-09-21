@@ -64,9 +64,16 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         ///     entries are removed before the new one is appended so the Info-tab
         ///     "Work Issues" view doesn't grow unbounded as scans repeat.
         /// </summary>
-        public void RecordBlocked(string villagerId, string taskName, string itemPrefab, string stationName, string reason, Vector3? workOrderPosition)
+        /// <param name="satisfied">
+        ///     True when the order was skipped because it is DONE, not because something is
+        ///     wrong. Recorded under a separate action so a finished order stops wearing a
+        ///     warning triangle — "Stocked 20 of 20" is not an issue, and listing it beside
+        ///     real blockers teaches the player to ignore the list.
+        /// </param>
+        public void RecordBlocked(string villagerId, string taskName, string itemPrefab, string stationName, string reason, Vector3? workOrderPosition, bool satisfied = false)
         {
             if (string.IsNullOrEmpty(villagerId)) return;
+            var action = satisfied ? "satisfied" : "blocked";
 
             if (!m_logs.TryGetValue(villagerId, out var entries))
             {
@@ -77,7 +84,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
             entries.RemoveAll(e =>
                 e.VillagerId == villagerId &&
                 e.TaskName == taskName &&
-                e.Action == "blocked" &&
+                e.Action == action &&
                 e.ItemPrefab == itemPrefab &&
                 e.StationName == stationName &&
                 e.Reason == reason);
@@ -99,7 +106,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                 Timestamp = Time.time,
                 VillagerId = villagerId,
                 TaskName = taskName,
-                Action = "blocked",
+                Action = action,
                 Description = description,
                 ItemPrefab = itemPrefab,
                 StationName = stationName,
@@ -111,7 +118,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
             });
 
             Plugin.Log?.LogDebug(
-                $"[ActivityLog:{villagerId}] {taskName}/blocked: {description}");
+                $"[ActivityLog:{villagerId}] {taskName}/{action}: {description}");
         }
 
         /// <summary>

@@ -43,6 +43,8 @@ STATIONS = {
     "artisantable": (85,  140, 185),   # light artisan blue
     "farmer":       (55,  135, 55),    # crop green
     "tavernkeeper": (160, 55,  40),    # wine / mead red
+    "preptable":    (200, 150, 60),    # butter / bread gold
+    "lumberjack":   (95,  120, 60),    # forest green
 }
 
 # ── station symbols (small bitmaps drawn as ink next to the seal) ─
@@ -104,6 +106,23 @@ STATION_SYMBOLS = {
         "..#..",
         ".###.",
         ".###.",
+    ],
+    "preptable": [     # Knife over a board
+        "....#.",
+        "...##.",
+        "..##..",
+        ".##...",
+        "......",
+        "######",
+    ],
+    "lumberjack": [    # Axe
+        "..###.",
+        ".####.",
+        "..###.",
+        "..#...",
+        "..#...",
+        "..#...",
+        "..#...",
     ],
 }
 

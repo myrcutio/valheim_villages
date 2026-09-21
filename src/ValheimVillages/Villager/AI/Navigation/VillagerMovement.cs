@@ -157,12 +157,19 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     <paramref name="approach"/> = target) when no probe in the ring is both walkable
         ///     AND reachable from <paramref name="pathSource"/>.
         /// </summary>
+        /// <param name="trace">
+        ///     Optional diagnostic sink. When non-null, every candidate reports which gate
+        ///     rejected it. This is why <c>vv_approach</c> can explain a failure instead of
+        ///     guessing at it: the command drives THIS resolver rather than a second copy of
+        ///     the rules that would drift from it.
+        /// </param>
         public static bool TryResolveApproach(
             Vector3 target,
             Vector3 pathSource,
             System.Func<Vector3, bool> hullPredicate,
             out Vector3 approach,
-            float minClearance = 0f)
+            float minClearance = 0f,
+            System.Action<string> trace = null)
         {
             approach = target;
             var probes = s_probeOffsets;
@@ -182,26 +189,245 @@ namespace ValheimVillages.Villager.AI.Navigation
             // The fallback pass matters: rejecting outright would make a station with no roomy
             // approach simply unreachable, which is worse than a tight approach that usually
             // works. Preference, not veto.
+            // Pass 3 is the REACH pass — see TryReachApproach. It runs only when the first two
+            // find nothing, so ordinary ground-level targets behave exactly as before.
             for (var pass = 0; pass < 2; pass++)
             {
                 var requireEdgeRoom = pass == 0;
                 for (var i = 0; i < probes.Length; i++)
                 {
                     var probe = target + probes[i];
-                    if (!TryFindReachableApproach(probe, ApproachProbeRadius, out var hit, minClearance)) continue;
-                    if (requireEdgeRoom && !HasEdgeClearance(hit)) continue;
-                    if (hullPredicate != null && !hullPredicate(hit)) continue;
-                    if (!TryFindCompletePath(pathSource, hit, pathBuffer)) continue;
+                    if (!TryFindReachableApproach(probe, ApproachProbeRadius, out var hit, minClearance))
+                    {
+                        trace?.Invoke($"p{pass}#{i} {Where(probe)}: no navmesh within {ApproachProbeRadius:F1}m");
+                        continue;
+                    }
+
+                    if (requireEdgeRoom && !HasEdgeClearance(hit))
+                    {
+                        trace?.Invoke($"p{pass}#{i} {Where(hit)}: too close to a navmesh edge");
+                        continue;
+                    }
+
+                    if (hullPredicate != null && !hullPredicate(hit))
+                    {
+                        trace?.Invoke($"p{pass}#{i} {Where(hit)}: outside the village hull");
+                        continue;
+                    }
+
+                    if (!TryFindCompletePath(pathSource, hit, pathBuffer))
+                    {
+                        trace?.Invoke($"p{pass}#{i} {Where(hit)}: no complete path from the villager");
+                        continue;
+                    }
 
                     if (!requireEdgeRoom)
-                        Plugin.Log?.LogDebug(
-                            $"[Approach] ({target.x:F1},{target.z:F1}): no edge-clear approach; " +
-                            $"falling back to a tight one at ({hit.x:F1},{hit.z:F1}) — " +
-                            "villager may stall short.");
+                        // Throttled per target, because this resolves EVERY frame for every
+                        // candidate a villager weighs: unthrottled, three awkward targets in one
+                        // village wrote three lines a frame and buried the log — the failure mode
+                        // that wedges a headless server through its 64KiB pipe.
+                        DebugLog.ThrottledWindow(
+                            $"approach-tight:{target.x:F0},{target.z:F0}",
+                            System.TimeSpan.FromSeconds(ApproachLogWindowSeconds),
+                            "Approach", "tight",
+                            ("target", target), ("standing", hit),
+                            ("note", "no edge-clear approach; villager may stall short"));
 
                     approach = hit;
                     return true;
                 }
+            }
+
+            return TryReachApproach(target, pathSource, hullPredicate, pathBuffer, minClearance,
+                out approach, trace);
+        }
+
+        /// <summary>
+        ///     Last resort: stand BESIDE-AND-BELOW something and reach it.
+        ///
+        ///     <para>The probes above all sit at the target's own height and snap within
+        ///     <see cref="ApproachProbeRadius" /> (1.5m), so anything mounted out of the
+        ///     villager's plane is simply unreachable — a chest on a shelf 2.46m up reads as
+        ///     "no approach" and every order depending on it starves, while the player opens it
+        ///     from underneath without noticing. Valheim itself allows
+        ///     <c>Player.m_maxInteractDistance</c> = 5m; this takes a deliberately shorter
+        ///     <see cref="InteractReach" /> so a chest on a high balcony is not suddenly
+        ///     "reachable" from the ground below it.</para>
+        ///
+        ///     <para><b>Line of sight is the gate.</b> Reach without it would let a villager
+        ///     work through a wall, which is worse than the starvation it fixes: the standing
+        ///     point must SEE the target, tested by raycast from the villager's eye with
+        ///     nothing solid in between. A few aim points are tried up the target's face,
+        ///     because the lip of the shelf a chest stands on will occlude its base from
+        ///     below while its front is in plain view.</para>
+        ///
+        ///     <para><b>Find the floor by looking DOWN, not by asking the navmesh what is
+        ///     nearest.</b> This pass first probed at the target's own height and let
+        ///     <c>SamplePosition</c> fall to whatever mesh was closest in 3D. Measured with
+        ///     <c>vv_approach</c> on a shelf chest: the floor 2.5m below lost every time to a
+        ///     1.4m-high navmesh sliver on a neighbouring structure, which then read as 3.2m
+        ///     from the target and was rejected as out of reach — so the one standing spot that
+        ///     works (and demonstrably works, for the chest beside it) was never even tested.
+        ///     Raycasting down from each probe finds the surface a villager would actually
+        ///     stand on, and a tight snap radius keeps the sample on THAT surface.</para>
+        /// </summary>
+        private static bool TryReachApproach(
+            Vector3 target,
+            Vector3 pathSource,
+            System.Func<Vector3, bool> hullPredicate,
+            List<Vector3> pathBuffer,
+            float minClearance,
+            out Vector3 approach,
+            System.Action<string> trace = null)
+        {
+            approach = target;
+
+            for (var i = 0; i < s_reachOffsets.Length; i++)
+            {
+                var probe = target + s_reachOffsets[i];
+                if (!TryGroundBelow(probe, target.y, out var ground))
+                {
+                    trace?.Invoke($"reach#{i} {Where(probe)}: nothing to stand on below it");
+                    continue;
+                }
+
+                if (!TryFindReachableApproach(ground, ReachSnapRadius, out var hit, minClearance))
+                {
+                    trace?.Invoke($"reach#{i} {Where(ground)}: floor here, but no navmesh within " +
+                                  $"{ReachSnapRadius:F1}m of it");
+                    continue;
+                }
+
+                var reach = Vector3.Distance(hit, target);
+                if (reach > InteractReach)
+                {
+                    trace?.Invoke($"reach#{i} {Where(hit)}: {reach:F1}m away, out of reach ({InteractReach:F1}m)");
+                    continue;
+                }
+
+                if (!HasLineOfSight(hit, target))
+                {
+                    trace?.Invoke($"reach#{i} {Where(hit)}: {reach:F1}m away but something solid is in the way"
+                                  + SightBlocker(hit, target));
+                    continue;
+                }
+
+                if (hullPredicate != null && !hullPredicate(hit))
+                {
+                    trace?.Invoke($"reach#{i} {Where(hit)}: outside the village hull");
+                    continue;
+                }
+
+                if (!TryFindCompletePath(pathSource, hit, pathBuffer))
+                {
+                    trace?.Invoke($"reach#{i} {Where(hit)}: no complete path from the villager");
+                    continue;
+                }
+
+                DebugLog.ThrottledWindow(
+                    $"approach-reach:{target.x:F0},{target.y:F0},{target.z:F0}",
+                    System.TimeSpan.FromSeconds(ApproachLogWindowSeconds),
+                    "Approach", "reach",
+                    ("target", target), ("standing", hit),
+                    ("dist", Vector3.Distance(hit, target)),
+                    ("note", "nothing at its own height; reaching with line of sight"));
+                approach = hit;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        ///     How far a villager will reach for something it cannot stand level with. Short of
+        ///     the player's own 5m on purpose.
+        /// </summary>
+        private const float InteractReach = 3f;
+
+        /// <summary>
+        ///     How far the reach pass will snap from the floor point it raycast to. Deliberately
+        ///     tight: the point of raycasting down was to choose the surface, so a generous snap
+        ///     would hand the choice straight back to whatever mesh happens to be nearest.
+        /// </summary>
+        private const float ReachSnapRadius = 1f;
+
+        /// <summary>Headroom above the target the floor-finding ray starts from.</summary>
+        private const float ReachProbeUp = 0.5f;
+
+        private static int s_groundMask;
+
+        /// <summary>
+        ///     The surface a villager would stand on at <paramref name="probe" />'s XZ, found by
+        ///     raycasting down from just above the target. Only looks as far down as a villager
+        ///     can reach up, so a chest on a balcony does not resolve to the ground floor.
+        /// </summary>
+        private static bool TryGroundBelow(Vector3 probe, float topY, out Vector3 ground)
+        {
+            ground = probe;
+            if (s_groundMask == 0)
+                s_groundMask = LayerMask.GetMask("Default", "static_solid", "piece", "terrain");
+
+            var origin = new Vector3(probe.x, topY + ReachProbeUp, probe.z);
+            if (!Physics.Raycast(origin, Vector3.down, out var hit,
+                    ReachProbeUp + InteractReach, s_groundMask, QueryTriggerInteraction.Ignore))
+                return false;
+
+            ground = hit.point;
+            return true;
+        }
+
+        /// <summary>Villager eye height, where the sight ray starts.</summary>
+        private const float EyeHeight = 1.5f;
+
+        /// <summary>
+        ///     Heights up the target to aim at. A chest's origin is at its base, which the shelf
+        ///     it stands on hides from anyone below; its front face does not.
+        /// </summary>
+        private static readonly float[] SightAimHeights = { 0.1f, 0.45f, 0.8f };
+
+        /// <summary>How close to the target the ray stops, so the target's own collider is not the blocker.</summary>
+        private const float TargetSkin = 0.5f;
+
+        private static int s_sightMask;
+
+        private static string Where(Vector3 p) => $"({p.x:F1},{p.y:F1},{p.z:F1})";
+
+        /// <summary>
+        ///     Names what the sight ray hit, for diagnostics only. "Something is in the way" is
+        ///     useless advice; "the fermenter is in the way" tells you what to move.
+        /// </summary>
+        private static string SightBlocker(Vector3 standing, Vector3 target)
+        {
+            var eye = standing + Vector3.up * EyeHeight;
+            var aim = target + Vector3.up * SightAimHeights[0];
+            var delta = aim - eye;
+            var distance = delta.magnitude;
+            if (distance <= TargetSkin) return "";
+            if (!Physics.Raycast(eye, delta / distance, out var hit, distance - TargetSkin,
+                    s_sightMask, QueryTriggerInteraction.Ignore))
+                return "";
+
+            var piece = hit.collider.GetComponentInParent<Piece>();
+            var name = piece != null ? piece.m_name : hit.collider.name;
+            return $" — {name} at {Where(hit.point)}";
+        }
+
+        private static bool HasLineOfSight(Vector3 standing, Vector3 target)
+        {
+            if (s_sightMask == 0)
+                s_sightMask = LayerMask.GetMask("Default", "static_solid", "piece");
+
+            var eye = standing + Vector3.up * EyeHeight;
+            foreach (var aimHeight in SightAimHeights)
+            {
+                var aim = target + Vector3.up * aimHeight;
+                var delta = aim - eye;
+                var distance = delta.magnitude;
+                if (distance <= TargetSkin) return true;
+
+                if (!Physics.Raycast(eye, delta / distance, distance - TargetSkin, s_sightMask,
+                        QueryTriggerInteraction.Ignore))
+                    return true;
             }
 
             return false;
@@ -230,9 +456,39 @@ namespace ValheimVillages.Villager.AI.Navigation
             return edge.distance >= AgentEdgeClearance;
         }
 
+        /// <summary>
+        ///     How long the same approach notice stays quiet for one target. Long, because these
+        ///     describe a standing property of the geometry, not an event.
+        /// </summary>
+        private const float ApproachLogWindowSeconds = 300f;
+
         private const float ApproachProbeRadius = 1.5f;
 
         private static readonly Vector3[] s_probeOffsets = BuildProbeOffsets();
+
+        /// <summary>
+        ///     Ring for the REACH pass. Finer and tighter than
+        ///     <see cref="s_probeOffsets" />: every candidate has to end up within
+        ///     <see cref="InteractReach" /> of the target, so a 4m ring (5.7m on the diagonal)
+        ///     is wasted effort, while 45 degrees of angular resolution at 2m spacing steps
+        ///     clean over the metre-wide gap that is the only place to stand.
+        /// </summary>
+        private static readonly Vector3[] s_reachOffsets = BuildReachOffsets();
+
+        private static Vector3[] BuildReachOffsets()
+        {
+            var list = new List<Vector3> { Vector3.zero };
+            float[] rings = { 1f, 1.75f, 2.5f };
+            const int directions = 12;
+            foreach (var r in rings)
+                for (var i = 0; i < directions; i++)
+                {
+                    var angle = 360f / directions * i * Mathf.Deg2Rad;
+                    list.Add(new Vector3(Mathf.Cos(angle) * r, 0f, Mathf.Sin(angle) * r));
+                }
+
+            return list.ToArray();
+        }
 
         private static Vector3[] BuildProbeOffsets()
         {

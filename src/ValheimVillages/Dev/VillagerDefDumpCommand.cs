@@ -125,8 +125,9 @@ namespace ValheimVillages.Dev
 
         private static void Print(string s)
         {
-            global::Console.instance?.Print(s);
-            Plugin.Log?.LogInfo(s);
+            // Capped + chunked: a single oversized write to a headless server's
+            // stdout pipe blocks the main thread. See ConsoleReport.
+            ValheimVillages.Dev.ConsoleReport.Emit(s);
         }
     }
 }

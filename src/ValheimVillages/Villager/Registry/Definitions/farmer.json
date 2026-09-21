@@ -27,6 +27,7 @@
   "workStations": [
     "$piece_workbench",
     "$piece_cauldron",
+    "$piece_preptable",
     "$vv_farmer"
   ],
   "stationRecipes": [
@@ -97,6 +98,7 @@
   ],
   "behaviors": [
     "craft",
+    "feast",
     "tidy",
     "haul"
   ],
@@ -212,4 +214,3 @@
     "Farewell! I've got a date with a hoe. The gardening kind. Obviously."
   ]
 }
-

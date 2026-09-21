@@ -26,8 +26,8 @@ using ValheimVillages.Villages.Entity;
 [assembly: AssemblyCompany("Myrcutio")]
 [assembly: AssemblyProduct("ValheimVillages")]
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
-[assembly: AssemblyVersion("0.3.1")]
-[assembly: AssemblyFileVersion("0.3.1")]
+[assembly: AssemblyVersion("0.3.2")]
+[assembly: AssemblyFileVersion("0.3.2")]
 [assembly: InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
@@ -37,7 +37,7 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.3.1";
+        public const string PluginVersion = "0.3.2";
 
         private static bool _recipeRefreshEnqueued;
         private static bool _recordIndexEnqueued;
@@ -211,6 +211,7 @@ namespace ValheimVillages
             // Register the server-authoritative villager-spawn RPC handler on the current
             // ZRoutedRpc (recreated per world session). Cheap no-op once registered.
             Villager.VillagerRecruitRpc.EnsureRegistered();
+            Villager.VillagerRecallRpc.EnsureRegistered();
             Villager.WorkOrderConfigRpc.EnsureRegistered();
             Villager.VillagerPauseRpc.EnsureRegistered();
             Villages.VillageCleanupRpc.EnsureRegistered();

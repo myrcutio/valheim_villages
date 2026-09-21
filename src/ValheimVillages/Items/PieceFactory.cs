@@ -460,7 +460,12 @@ namespace ValheimVillages.Items
             light.shadows = LightShadows.None;
         }
 
-        private static void AddToHammerTable(GameObject piece)
+        /// <summary>
+        ///     Internal, not private: every mod piece must go through THIS method, because of
+        ///     the destroyed-entry purge below. A second copy of this logic that forgot the
+        ///     purge would re-break every inventory change after a hot reload.
+        /// </summary>
+        internal static void AddToHammerTable(GameObject piece)
         {
             var hammer = ObjectDB.instance?.GetItemPrefab("Hammer")?.GetComponent<ItemDrop>();
             var table = hammer?.m_itemData?.m_shared?.m_buildPieces;
@@ -604,7 +609,12 @@ namespace ValheimVillages.Items
                 Object.DestroyImmediate(t.gameObject);
         }
 
-        private static GameObject ClonePrefab(GameObject basePrefab, string newName)
+        /// <summary>
+        ///     Internal so other factories reuse the exact SetActive/parenting dance below
+        ///     rather than reinventing it — getting it wrong makes the template awake at world
+        ///     origin.
+        /// </summary>
+        internal static GameObject ClonePrefab(GameObject basePrefab, string newName)
         {
             var wasActive = basePrefab.activeSelf;
             basePrefab.SetActive(false);
