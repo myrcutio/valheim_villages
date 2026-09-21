@@ -179,7 +179,12 @@ namespace ValheimVillages.Behaviors.Farming
                     continue;
                 }
 
-                var distSq = (candidate - col.ClosestPoint(candidate)).sqrMagnitude;
+                // Via ClosestPointSafe: most pieces here carry a non-convex MeshCollider,
+                // which ClosestPoint can't handle — it logged a warning per collider per
+                // candidate cell and returned the input point (distance 0), which read as
+                // "overlapping" and rejected the cell. The bounds fallback under-estimates
+                // the distance, so spacing stays conservative.
+                var distSq = PhysicsHelper.SqrDistanceTo(col, candidate);
                 if (distSq < growRadiusSq)
                     return false;
             }

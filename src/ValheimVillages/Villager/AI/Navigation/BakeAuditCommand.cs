@@ -257,32 +257,36 @@ namespace ValheimVillages.Villager.AI.Navigation
             hits.Sort((a, b) => Vector3.Distance(a.bounds.center, pos)
                 .CompareTo(Vector3.Distance(b.bounds.center, pos)));
 
+            // Counted by layer rather than listed. The per-collider rows were ~21 lines of
+            // walls; the cross-reference below already names any collider that matters.
+            // MeshColliders ARE still listed individually: a non-readable sharedMesh is
+            // collected as a bake source but contributes no geometry, and convex changes
+            // the PhysX shape — neither is visible from a count.
+            var byLayer = new Dictionary<string, int>();
+            var meshRows = new List<string>();
             foreach (var c in hits)
             {
                 var go = c.gameObject;
-                var rootName = go.transform.root != null ? go.transform.root.name : "(no root)";
                 var layerName = LayerMask.LayerToName(go.layer);
                 if (string.IsNullOrEmpty(layerName)) layerName = "(unnamed)";
-                var b = c.bounds;
-                // For mesh colliders, surface the two properties that decide
-                // whether NavMeshBuilder can voxelize them: a non-readable
-                // sharedMesh is collected as a source but contributes nothing
-                // to the bake (no carve), and convex changes the PhysX shape.
-                var meshInfo = "";
-                if (c is MeshCollider mc)
-                {
-                    var m = mc.sharedMesh;
-                    meshInfo = m != null
-                        ? $" mesh[readable={m.isReadable},convex={mc.convex},tris={(m.isReadable ? m.triangles.Length / 3 : -1)}]"
-                        : " mesh[null]";
-                }
+                byLayer.TryGetValue(layerName, out var n);
+                byLayer[layerName] = n + 1;
 
-                sb.AppendLine(
-                    $"  '{go.name}' root='{rootName}' layer={go.layer}:{layerName} " +
-                    $"colliderType={c.GetType().Name} bounds=center({b.center.x:F1},{b.center.y:F1},{b.center.z:F1}) " +
-                    $"size({b.size.x:F2},{b.size.y:F2},{b.size.z:F2}) " +
-                    $"dist={Vector3.Distance(b.center, pos):F2}m{meshInfo}");
+                if (!(c is MeshCollider mc)) continue;
+                var m = mc.sharedMesh;
+                var info = m != null
+                    ? $"readable={m.isReadable} convex={mc.convex} tris={(m.isReadable ? m.triangles.Length / 3 : -1)}"
+                    : "null";
+                meshRows.Add(
+                    $"    MeshCollider '{go.name}' layer={go.layer}:{layerName} " +
+                    $"dist={Vector3.Distance(c.bounds.center, pos):F2}m mesh[{info}]");
             }
+
+            var parts = new List<string>();
+            foreach (var kv in byLayer) parts.Add($"{kv.Key}={kv.Value}");
+            parts.Sort();
+            sb.AppendLine($"  {hits.Count} collider(s) by layer: {string.Join(" ", parts.ToArray())}");
+            foreach (var r in meshRows) sb.AppendLine(r);
         }
 
         private static void ReportBakeSources(
@@ -310,14 +314,9 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (!TryGetSourceBounds(terrain[i], out var b)) continue;
                 if (!b.Intersects(queryBounds)) continue;
                 terrainHits++;
-                var src = terrain[i];
-                var componentName = src.component != null ? src.component.gameObject.name : "(synth)";
-                var componentLayer = src.component != null ? src.component.gameObject.layer : -1;
-                sb.AppendLine(
-                    $"  terrain[#{i}] shape={src.shape} area={src.area} comp='{componentName}' " +
-                    $"layer={componentLayer} bounds=center({b.center.x:F1},{b.center.y:F1},{b.center.z:F1}) " +
-                    $"size({b.size.x:F2},{b.size.y:F2},{b.size.z:F2})");
-                if (src.component != null) sourceMatches.Add(src.component.gameObject);
+                // Counted, not listed: the cross-reference below reports these from the
+                // runtime-collider side, which is the direction that can reveal a problem.
+                if (terrain[i].component != null) sourceMatches.Add(terrain[i].component.gameObject);
             }
 
             var realPieceCount = piece.Count - phantomCount;
@@ -327,14 +326,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (!TryGetSourceBounds(piece[i], out var b)) continue;
                 if (!b.Intersects(queryBounds)) continue;
                 pieceHits++;
-                var src = piece[i];
-                var componentName = src.component != null ? src.component.gameObject.name : "(synth)";
-                var componentLayer = src.component != null ? src.component.gameObject.layer : -1;
-                sb.AppendLine(
-                    $"  piece[#{i}] shape={src.shape} area={src.area} comp='{componentName}' " +
-                    $"layer={componentLayer} bounds=center({b.center.x:F1},{b.center.y:F1},{b.center.z:F1}) " +
-                    $"size({b.size.x:F2},{b.size.y:F2},{b.size.z:F2})");
-                if (src.component != null) sourceMatches.Add(src.component.gameObject);
+                if (piece[i].component != null) sourceMatches.Add(piece[i].component.gameObject);
             }
 
             // Phantom tail: door blockers first, then bed blockers, then outside-cell blockers.
@@ -371,6 +363,13 @@ namespace ValheimVillages.Villager.AI.Navigation
             var pieceMask = LayerMask.GetMask("Default", "static_solid", "piece");
             var terrainMask = LayerMask.GetMask("terrain");
 
+            // Only the last bucket is a finding. A collider on a non-bake layer, or one
+            // smaller than two voxels, is SUPPOSED to be absent from the bake — printing a
+            // row for each just buried the handful that matter (13 [OK] + 8 expected
+            // [MISS] rows to surface 0 real ones, in the run that prompted this).
+            int captured = 0, outOfMask = 0, subVoxelMiss = 0;
+            var unexplained = new List<string>();
+
             foreach (var c in runtimeHits)
             {
                 var go = c.gameObject;
@@ -379,29 +378,30 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var sizeMax = Mathf.Max(c.bounds.size.x, c.bounds.size.y, c.bounds.size.z);
                 var subVoxel = sizeMax < voxel * 2f;
 
-                if (sourceMatches.Contains(go))
-                {
-                    sb.AppendLine($"  [OK]   '{go.name}' (layer {go.layer}) - captured in bake");
-                }
-                else if (!inMask)
-                {
-                    sb.AppendLine(
-                        $"  [MISS] '{go.name}' (layer {go.layer}:{LayerMask.LayerToName(go.layer)}) - " +
-                        $"layer NOT in bake mask (piece={LayerMaskToString(pieceMask)}, terrain={LayerMaskToString(terrainMask)})");
-                }
-                else if (subVoxel)
-                {
-                    sb.AppendLine(
-                        $"  [MISS] '{go.name}' (layer {go.layer}) - sub-voxel " +
-                        $"(maxSize {sizeMax:F2}m < {voxel * 2f:F2}m = 2x voxel); likely voxelized away");
-                }
+                if (sourceMatches.Contains(go)) captured++;
+                else if (!inMask) outOfMask++;
+                else if (subVoxel) subVoxelMiss++;
                 else
-                {
-                    sb.AppendLine(
-                        $"  [MISS] '{go.name}' (layer {go.layer}) - in mask, not sub-voxel, " +
-                        $"but absent from bake (collider inactive at bake time, or spawned/enabled after partition)");
-                }
+                    unexplained.Add(
+                        $"    '{go.name}' (layer {go.layer}:{LayerMask.LayerToName(go.layer)}) " +
+                        $"maxSize={sizeMax:F2}m");
             }
+
+            sb.AppendLine(
+                $"  {runtimeHits.Count} collider(s): captured={captured} " +
+                $"expected-miss(layer off bake mask)={outOfMask} " +
+                $"expected-miss(sub-voxel <{voxel * 2f:F2}m)={subVoxelMiss} " +
+                $"UNEXPLAINED={unexplained.Count}");
+            if (unexplained.Count == 0)
+            {
+                sb.AppendLine("  → no bake-vs-runtime mismatch here");
+                return;
+            }
+
+            sb.AppendLine(
+                "  → in mask, not sub-voxel, yet absent from the bake (inactive at bake time, " +
+                "or spawned/enabled after partition):");
+            foreach (var r in unexplained) sb.AppendLine(r);
         }
 
         private static void ReportPhantomCoverage(

@@ -59,6 +59,10 @@ namespace ValheimVillages.Dev
         /// <summary>A bake source counts as "at" an object if within this distance.</summary>
         private const float BakeMatchTolerance = 0.75f;
 
+        /// <summary>Two chest ZDOs closer than this are occupying one spot — the actual
+        /// duplicate signature this command exists to find.</summary>
+        private const float CoLocatedChestM = 0.5f;
+
         private static readonly string[] FallbackChestPrefabs =
         {
             "piece_chest_wood", "piece_chest", "piece_chest_private",
@@ -127,7 +131,7 @@ namespace ValheimVillages.Dev
                 "but absent here is the expected host-vs-client asymmetry, not a command bug.");
 
             var sweep = ReportSectorSweep(sb, zdoMan, scene, pos, radius, localSession,
-                out var chestUids, out var liveContainers);
+                out var chestUids, out var liveContainers, out var closestChestPairM);
             var ghostInstances = ReportGhostInstances(sb, scene, pos, radius);
             var orphanColliders = ReportColliderBridge(sb, pos, radius);
             ReportPrefabCrossCheck(sb, zdoMan, scene, pos, radius, sweep);
@@ -137,14 +141,15 @@ namespace ValheimVillages.Dev
             sb.AppendLine(
                 $"  zdos={sweep.Count} chestUids={chestUids.Count} liveContainers={liveContainers} " +
                 $"orphanColliders={orphanColliders} ghostInstances={ghostInstances} bakeSources={bakeSources}");
-            sb.AppendLine(DecisionHint(chestUids.Count, orphanColliders, ghostInstances));
+            sb.AppendLine(DecisionHint(chestUids.Count, closestChestPairM, orphanColliders, ghostInstances));
 
             Print(sb.ToString());
         }
 
         /// <summary>Per-ZDO table from the authoritative ZDOMan sector sweep.</summary>
         private static List<ZDO> ReportSectorSweep(StringBuilder sb, ZDOMan zdoMan, ZNetScene scene,
-            Vector3 pos, float radius, long localSession, out HashSet<ZDOID> chestUids, out int liveContainers)
+            Vector3 pos, float radius, long localSession, out HashSet<ZDOID> chestUids, out int liveContainers,
+            out float closestChestPairM)
         {
             chestUids = new HashSet<ZDOID>();
             liveContainers = 0;
@@ -161,9 +166,14 @@ namespace ValheimVillages.Dev
                 .ToList();
 
             sb.AppendLine($"--- ZDOMan sector sweep within {radius:F1}m (count={all.Count}) ---");
-            sb.AppendLine(
-                "  uid | prefab | dist | owner(class) | P D | dataRev/ownRev | inst active | " +
-                "zVld zdoNull ghost | Container | scanVisible");
+
+            // Only CHEST rows are printed. The sweep used to print one row per ZDO, which
+            // in a village is ~185 rows of walls and floors that nobody reads and that
+            // nothing in this command keys off. The chests are the subject; everything
+            // else is summarised below.
+            var chestRows = new List<string>();
+            var chestPositions = new List<Vector3>();
+            int noInstance = 0, inactive = 0, zdoNullCount = 0, ghostCount = 0;
 
             foreach (var zdo in all)
             {
@@ -191,15 +201,45 @@ namespace ValheimVillages.Dev
                                   && container.GetComponent<ZNetView>()?.GetZDO() != null;
                 if (scanVisible) liveContainers++;
 
+                if (!hasInst) noInstance++;
+                else if (!active) inactive++;
+                if (zdoNull) zdoNullCount++;
+                if (ghost == true) ghostCount++;
+
+                if (!isChest) continue;
+
                 var dist = Vector3.Distance(zdo.GetPosition(), pos);
-                sb.AppendLine(
-                    $"  {zdo.m_uid} | {prefabName}{(isChest ? "*CHEST*" : "")} | {dist:F2}m | " +
+                var p = zdo.GetPosition();
+                chestPositions.Add(p);
+                chestRows.Add(
+                    $"  {zdo.m_uid} | {prefabName} | {dist:F2}m @ ({p.x:F2},{p.y:F2},{p.z:F2}) | " +
                     $"{owner}({ownerClass}) | {(zdo.Persistent ? "P" : "-")}{(zdo.Distant ? "D" : "-")} | " +
                     $"{zdo.DataRevision}/{zdo.OwnerRevision} | " +
-                    $"inst={(hasInst ? "y" : "n")} act={(active ? "T" : "F")} | " +
+                    $"inst={(hasInst ? "y" : "n")} act={(active ? "T" : "F")} " +
                     $"zVld={(zValid ? "T" : "F")} zdoNull={(zdoNull ? "T" : "F")} ghost={GhostStr(ghost)} | " +
                     $"{containerState} | scanVisible={(scanVisible ? "Y" : "N")}");
             }
+
+            sb.AppendLine(
+                $"  non-chest ZDOs: {all.Count - chestRows.Count} " +
+                $"(noInstance={noInstance} inactive={inactive} zdoNull={zdoNullCount} ghost={ghostCount})");
+            sb.AppendLine($"  chest ZDOs: {chestRows.Count}");
+            foreach (var r in chestRows) sb.AppendLine(r);
+
+            // The actual duplicate-chest signature is two chest ZDOs at the SAME SPOT, not
+            // "more than one chest nearby" — a village legitimately has many chests, so a
+            // raw count says nothing (at radius 10 it found 10 and cried duplicate).
+            closestChestPairM = float.MaxValue;
+            for (var i = 0; i < chestPositions.Count; i++)
+            for (var j = i + 1; j < chestPositions.Count; j++)
+            {
+                var d = Vector3.Distance(chestPositions[i], chestPositions[j]);
+                if (d < closestChestPairM) closestChestPairM = d;
+            }
+
+            if (chestPositions.Count >= 2)
+                sb.AppendLine($"  closest chest-to-chest pair: {closestChestPairM:F2}m " +
+                              $"(< {CoLocatedChestM:F2}m means two ZDOs share one spot = duplicate)");
 
             return all;
         }
@@ -274,13 +314,21 @@ namespace ValheimVillages.Dev
             }
 
             int liveContainer = 0, zdoButNoLiveContainer = 0, znetviewNoZdo = 0, noZnetview = 0, farParent = 0;
+            var engineGeometry = 0;
             var orphanRows = new List<string>();
 
-            Array.Sort(cols, (a, b) =>
-                (a.ClosestPoint(pos) - pos).sqrMagnitude.CompareTo((b.ClosestPoint(pos) - pos).sqrMagnitude));
+            // Distance key computed ONCE per collider, not inside a comparator (which would
+            // evaluate it ~2·n·log(n) times), and through ClosestPointSafe so terrain and
+            // non-convex piece meshes don't each log a warning. The two together are what
+            // hung the dedicated server when this command was last run.
+            var keys = new float[cols.Length];
+            for (var i = 0; i < cols.Length; i++)
+                keys[i] = PhysicsHelper.SqrDistanceTo(cols[i], pos);
+            Array.Sort(keys, cols);
 
-            foreach (var c in cols)
+            for (var i = 0; i < cols.Length; i++)
             {
+                var c = cols[i];
                 if (c == null) continue;
                 var nv = c.GetComponentInParent<ZNetView>();
                 var attributed = nv != null
@@ -291,15 +339,31 @@ namespace ValheimVillages.Dev
                                     && container.gameObject.activeInHierarchy
                                     && container.GetComponent<ZNetView>()?.GetZDO() != null;
 
-                bool isOrphan;
+                // "Anomalous" = a collider whose ownership is actually broken, which is what
+                // this command hunts. ZDO-but-no-live-Container is NOT that: it is every wall,
+                // floor, pillar and beam in the village (229 of 246 at radius 10), so it is
+                // counted and never printed. Printing it buried the 3 rows that mattered and
+                // was what made this report 70KB.
+                bool anomalous;
                 string kind;
-                if (nv == null) { noZnetview++; kind = "no-ZNetView"; isOrphan = true; }
-                else if (!attributed) { farParent++; kind = "far-parent(suspect)"; isOrphan = true; }
-                else if (nv.GetZDO() == null) { znetviewNoZdo++; kind = "ZNetView-no-ZDO"; isOrphan = true; }
-                else if (containerLive) { liveContainer++; kind = "live-Container"; isOrphan = false; }
-                else { zdoButNoLiveContainer++; kind = "ZDO-but-no-live-Container"; isOrphan = true; }
+                if (nv == null && IsEngineGeometry(c.gameObject.layer))
+                {
+                    // Terrain and water are never ZDO-backed, so "no ZNetView" is their
+                    // normal state, not a finding. Counting them as anomalous made the
+                    // verdict fire on every single run.
+                    engineGeometry++;
+                    kind = "engine-geometry";
+                    anomalous = false;
+                }
+                else if (nv == null) { noZnetview++; kind = "no-ZNetView"; anomalous = true; }
+                else if (!attributed) { farParent++; kind = "far-parent(suspect)"; anomalous = true; }
+                else if (nv.GetZDO() == null) { znetviewNoZdo++; kind = "ZNetView-no-ZDO"; anomalous = true; }
+                else if (containerLive) { liveContainer++; kind = "live-Container"; anomalous = false; }
+                else { zdoButNoLiveContainer++; kind = "ZDO-but-no-live-Container"; anomalous = false; }
 
-                if (!isOrphan) continue;
+                // IsOnBake below is O(bake sources) per row; skipping the bulk bucket
+                // drops ~229 such scans as well as ~229 lines.
+                if (!anomalous) continue;
 
                 var piece = c.GetComponentInParent<Piece>();
                 var b = c.bounds;
@@ -307,15 +371,17 @@ namespace ValheimVillages.Dev
                 orphanRows.Add(
                     $"    [{kind}] go={c.gameObject.name} piece={(piece != null ? piece.gameObject.name : "none")} " +
                     $"layer={c.gameObject.layer}:{SafeLayer(c.gameObject.layer)} type={c.GetType().Name} " +
-                    $"dist={Vector3.Distance(c.ClosestPoint(pos), pos):F2}m " +
+                    $"dist={Mathf.Sqrt(keys[i]):F2}m " +
                     $"nview={(nv != null ? nv.name : "none")} Container={ClassifyContainer(container)} " +
                     $"bounds_y=[{b.min.y:F2}..{b.max.y:F2}] onBake={(onBake ? "yes" : "no")}");
             }
 
             sb.AppendLine(
                 $"  bucket: live-Container={liveContainer} ZDO-but-no-live-Container={zdoButNoLiveContainer} " +
-                $"ZNetView-no-ZDO={znetviewNoZdo} no-ZNetView={noZnetview} far-parent={farParent}");
-            sb.AppendLine($"  ORPHAN colliders (collider present but NOT a scan-visible live Container): {orphanRows.Count}");
+                $"ZNetView-no-ZDO={znetviewNoZdo} no-ZNetView={noZnetview} far-parent={farParent} " +
+                $"engine-geometry={engineGeometry}");
+            sb.AppendLine(
+                $"  ANOMALOUS colliders (broken ownership — no ZNetView, no ZDO, or far parent): {orphanRows.Count}");
             foreach (var r in orphanRows) sb.AppendLine(r);
 
             return orphanRows.Count;
@@ -428,16 +494,35 @@ namespace ValheimVillages.Dev
             return string.IsNullOrEmpty(n) ? "(unnamed)" : n;
         }
 
-        private static string DecisionHint(int chestUids, int orphanColliders, int ghostInstances)
+        /// <summary>
+        ///     Layers whose colliders are engine-owned and never carry a ZNetView: the
+        ///     heightmap and the water plane. A missing ZNetView on these is normal, so
+        ///     they must not be reported as broken ownership.
+        /// </summary>
+        private static bool IsEngineGeometry(int layer)
         {
-            if (chestUids >= 2)
-                return "  DECISION: ≥2 distinct chest ZDO uids → H1 (a second persistent chest ZDO). " +
-                       "Confirm host=2 vs client=1; the supernumerary uid is the corruptor.";
-            if (chestUids == 1 && (orphanColliders > 0 || ghostInstances > 0))
-                return "  DECISION: 1 chest uid + orphan/ghost present → H2/H3 (hollow/preserved instance) " +
-                       "or H4 (non-chest collider). Inspect the ORPHAN row's prefab/Container.";
-            return "  DECISION: no duplicate signature at this point/radius. Re-run on host AND client and " +
-                   "diff chestUids + orphanColliders; widen radius if the chest sits >5m away.";
+            var n = LayerMask.LayerToName(layer);
+            return n == "terrain" || n == "Water" || n == "WaterVolume";
+        }
+
+        /// <summary>
+        ///     The verdict keys off CO-LOCATION, not the chest count. The count test
+        ///     ("&gt;=2 chest uids -> duplicate") fired on every village — 10 ordinary chests
+        ///     at radius 10 produced a confident "H1, a second persistent chest ZDO", which
+        ///     is simply what a village looks like.
+        /// </summary>
+        private static string DecisionHint(int chestUids, float closestChestPairM,
+            int anomalousColliders, int ghostInstances)
+        {
+            if (chestUids >= 2 && closestChestPairM < CoLocatedChestM)
+                return $"  DECISION: two chest ZDOs {closestChestPairM:F2}m apart → H1 (a second " +
+                       "persistent chest ZDO). Confirm host vs client; the supernumerary uid is the corruptor.";
+            if (anomalousColliders > 0 || ghostInstances > 0)
+                return "  DECISION: no co-located chests, but anomalous collider(s)/ghost(s) present → " +
+                       "H2/H3 (hollow or preserved instance) or H4 (non-chest collider). Inspect the rows above.";
+            return $"  DECISION: no duplicate signature here ({chestUids} chest(s), closest pair " +
+                   $"{(chestUids >= 2 ? closestChestPairM.ToString("F2") + "m" : "n/a")}). Re-run on host AND " +
+                   "client and diff; widen radius if the chest sits outside it.";
         }
 
         private static void Print(string msg)

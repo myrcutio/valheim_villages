@@ -110,11 +110,17 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.AppendLine("--- NavMesh bake sources (within 5m) ---");
             ReportBakeSources(sb, pos);
 
+            // Extracted ONCE and shared by the two sections that read it. Each call
+            // materialises the whole bake (every terrain tile + piece mesh, ~32k tris
+            // for one village) into fresh world-space arrays, so doing it per-section
+            // doubled the command's cost and allocation for identical data.
+            var extracted = NavMeshBakeManager.ExtractBakedTriangles();
+
             sb.AppendLine("--- raw extracted triangles (within 5m, pre-filter) ---");
-            ReportRawExtracted(sb, pos);
+            ReportRawExtracted(sb, pos, extracted);
 
             sb.AppendLine("--- filter trace: upward-facing triangles within 3m ---");
-            ReportFilterTrace(sb, pos);
+            ReportFilterTrace(sb, pos, extracted);
 
             sb.AppendLine("--- RegionGraph at this point ---");
             ReportRegionGraph(sb, pos);
@@ -176,13 +182,14 @@ namespace ValheimVillages.Villager.AI.Navigation
                 return;
             }
 
-            // Sort by distance from probe point for readability.
-            Array.Sort(cols, (a, b) =>
-            {
-                var da = (a.ClosestPoint(pos) - pos).sqrMagnitude;
-                var db = (b.ClosestPoint(pos) - pos).sqrMagnitude;
-                return da.CompareTo(db);
-            });
+            // Sort by distance from probe point for readability. The key is computed ONCE
+            // per collider rather than inside the comparator: a comparator would evaluate
+            // it ~2·n·log(n) times, and each evaluation on an unsupported collider used to
+            // emit a log warning (see PhysicsHelper.ClosestPointSafe).
+            var keys = new float[cols.Length];
+            for (var i = 0; i < cols.Length; i++)
+                keys[i] = PhysicsHelper.SqrDistanceTo(cols[i], pos);
+            Array.Sort(keys, cols);
 
             const int maxShown = 8;
             var shown = Mathf.Min(cols.Length, maxShown);
@@ -191,8 +198,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var c = cols[i];
                 var layerName = LayerMask.LayerToName(c.gameObject.layer);
                 if (string.IsNullOrEmpty(layerName)) layerName = "(unnamed)";
-                var closest = c.ClosestPoint(pos);
-                var dist = Vector3.Distance(closest, pos);
+                var dist = Mathf.Sqrt(keys[i]);
                 sb.AppendLine(
                     $"  [layer={c.gameObject.layer}:{layerName}] {c.gameObject.name} " +
                     $"({c.GetType().Name}) dist={dist:F2}m");
@@ -361,9 +367,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.AppendLine($"  Box sources at this altitude (±{yTol:F0}m Y): {boxNearAndY}");
         }
 
-        private static void ReportRawExtracted(StringBuilder sb, Vector3 pos)
+        private static void ReportRawExtracted(StringBuilder sb, Vector3 pos,
+            (Vector3[] vertices, int[] indices, int[] triangleLayers) extracted)
         {
-            var (verts, idx, _) = NavMeshBakeManager.ExtractBakedTriangles();
+            var (verts, idx, _) = extracted;
             if (verts == null || verts.Length == 0)
             {
                 sb.AppendLine("  Extractor produced 0 vertices");
@@ -398,9 +405,10 @@ namespace ValheimVillages.Villager.AI.Navigation
                 $"(upward-facing: {nearAndUpward}, at this altitude ±{yTol:F0}m: {nearAndY})");
         }
 
-        private static void ReportFilterTrace(StringBuilder sb, Vector3 pos)
+        private static void ReportFilterTrace(StringBuilder sb, Vector3 pos,
+            (Vector3[] vertices, int[] indices, int[] triangleLayers) extracted)
         {
-            var (verts, idx, _) = NavMeshBakeManager.ExtractBakedTriangles();
+            var (verts, idx, _) = extracted;
             if (verts == null || verts.Length == 0)
             {
                 sb.AppendLine("  No extracted triangles");
@@ -429,7 +437,9 @@ namespace ValheimVillages.Villager.AI.Navigation
             int total = 0, passBounds = 0, passDist = 0, pass05 = 0, pass10 = 0, pass20 = 0;
             int passSteep = 0, passBlocked = 0;
             var shown = 0;
-            const int maxShown = 8;
+            // Exemplars, not a listing — the `totals` line below is what gets read. Three
+            // is enough to see the shape of a rejection; eight was just more scrolling.
+            const int maxShown = 3;
 
             // Match the RegionBuilder terrain-pass constants so the trace
             // reflects what kind=Terrain would actually accept.
@@ -658,12 +668,20 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.AppendLine("  4-connected neighbors (used by Pass 1):");
             for (var i = 0; i < 4; i++)
                 ReportNeighbor(sb, snap, cardLabels[i], gx, gz, cardDx[i], cardDz[i], cell, mask, true);
-            // No WallBlocks column for these: the flood is 4-connected, so there IS no
-            // gate on a diagonal step. Probing one meant building a waist box spanning
-            // the wrong volume and reporting its answer as though Pass 1 had consulted it.
-            sb.AppendLine("  8-connected diagonal neighbors (NOT used by Pass 1 — no gate):");
+            // Summarised, not listed. The flood is 4-connected, so there IS no gate on a
+            // diagonal step — these four rows stated an answer Pass 1 never consults, which
+            // is four lines of output that can only mislead. The counts are kept because
+            // "all four diagonals are outside" is still a useful shape hint.
+            int diagOutside = 0, diagPopulated = 0;
             for (var i = 0; i < 4; i++)
-                ReportNeighbor(sb, snap, diagLabels[i], gx, gz, diagDx[i], diagDz[i], cell, mask, false);
+            {
+                var key = RubberBandPrune.DiagnoseXzKey(gx + diagDx[i], gz + diagDz[i]);
+                if (snap.OutsideCells.Contains(key)) diagOutside++;
+                if (snap.XzMaxY.ContainsKey(key)) diagPopulated++;
+            }
+
+            sb.AppendLine(
+                $"  diagonals (NOT used by Pass 1 — no gate): outside={diagOutside}/4 populated={diagPopulated}/4");
         }
 
         private static void ReportNeighbor(StringBuilder sb,
