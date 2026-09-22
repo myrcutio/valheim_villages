@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using ValheimVillages.Attributes;
@@ -57,10 +59,65 @@ namespace ValheimVillages.Items.WorkOrders
 
         private static RectTransform CheckGrid(InventoryGrid grid)
         {
-            if (grid == null) return null;
+            if (grid == null || !CanQueryGamepadSelection(grid)) return null;
             var element = grid.GetGamepadSelectedElement();
             if (element == null) return null;
             return IsWorkOrder(grid.GetGamepadSelectedItem()) ? element : null;
+        }
+
+        // GetGamepadSelectedElement() ends with GetElement(...).transform, and GetElement
+        // returns null once y*width+x reaches m_elements.Count. Vanilla bounds-checks
+        // m_selected against m_width/m_height but never against the element list, so a grid
+        // whose elements lag its dimensions throws inside the getter - null-checking the
+        // result cannot help. All four fields are private, hence the reflection.
+        private static readonly FieldInfo GridWidthField =
+            AccessTools.Field(typeof(InventoryGrid), "m_width");
+
+        private static readonly FieldInfo GridHeightField =
+            AccessTools.Field(typeof(InventoryGrid), "m_height");
+
+        private static readonly FieldInfo GridSelectedField =
+            AccessTools.Field(typeof(InventoryGrid), "m_selected");
+
+        private static readonly FieldInfo GridElementsField =
+            AccessTools.Field(typeof(InventoryGrid), "m_elements");
+
+        private static bool s_layoutFieldsReported;
+
+        /// <summary>
+        ///     True when <see cref="InventoryGrid.GetGamepadSelectedElement" /> can be called
+        ///     without throwing: vanilla's own precondition plus the element-count test it omits.
+        /// </summary>
+        private static bool CanQueryGamepadSelection(InventoryGrid grid)
+        {
+            // Vanilla's first line dereferences this unconditionally.
+            if (grid.m_uiGroup == null || !grid.m_uiGroup.IsActive) return false;
+
+            if (GridWidthField == null || GridHeightField == null
+                                       || GridSelectedField == null || GridElementsField == null)
+            {
+                // An API change, not a runtime condition: say so once, not every frame.
+                if (!s_layoutFieldsReported)
+                {
+                    s_layoutFieldsReported = true;
+                    Plugin.Log?.LogError(
+                        "[WorkOrderEditHint] InventoryGrid's m_width/m_height/m_selected/"
+                        + "m_elements no longer resolve; re-point these names. The gamepad "
+                        + "work-order hint stays hidden until then.");
+                }
+
+                return false;
+            }
+
+            var selected = (Vector2i)GridSelectedField.GetValue(grid);
+            var width = (int)GridWidthField.GetValue(grid);
+            var height = (int)GridHeightField.GetValue(grid);
+            if (selected.x < 0 || selected.x >= width || selected.y < 0 || selected.y >= height)
+                return false;
+
+            // The check vanilla is missing: m_elements can be shorter than width*height.
+            return GridElementsField.GetValue(grid) is ICollection elements
+                   && selected.y * width + selected.x < elements.Count;
         }
 
         private static bool IsWorkOrder(ItemDrop.ItemData item)

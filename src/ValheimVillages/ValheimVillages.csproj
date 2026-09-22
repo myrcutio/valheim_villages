@@ -6,15 +6,23 @@
         <RootNamespace>ValheimVillages</RootNamespace>
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 
-        <R2ModmanProfile>valheim-modding</R2ModmanProfile>
+        <Configurations>Debug;Release;Issues</Configurations>
+
+        <!-- The dev profile is chosen by Configuration: a plain `dotnet build` targets the
+             main modding profile, `dotnet build -c Issues` targets vv-issues (the lean
+             profile kept for reproducing reported issues). Both are hot-reload profiles, so
+             either build lands in that profile's BepInEx/scripts and its own BepInEx/core
+             supplies the references. -p:R2ModmanProfile=<name> overrides the choice. -->
+        <R2ModmanProfile Condition="'$(Configuration)' == 'Issues'">vv-issues</R2ModmanProfile>
+        <R2ModmanProfile Condition="'$(R2ModmanProfile)' == ''">valheim-modding</R2ModmanProfile>
         <R2ModmanReleaseProfile>valheim-server</R2ModmanReleaseProfile>
 
         <!-- Paths - adjust if needed -->
         <ValheimDir>$(HOME)/.local/share/Steam/steamapps/common/Valheim</ValheimDir>
         <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles</BepInExDir>
 
-        <!-- Dev builds land in the profile actually being tested (valheim-modding), whose
-             BepInEx/scripts dir ScriptEngine watches for hot reload. Release builds
+        <!-- Dev builds land in the profile actually being tested (R2ModmanProfile above),
+             whose BepInEx/scripts dir ScriptEngine watches for hot reload. Release builds
              (scripts/package.sh) stage into the server profile's plugins dir instead, so
              packaging never overwrites the DLL the running game is hot-reloading.
              These were two unconditional OutputPath lines — last one won — which meant

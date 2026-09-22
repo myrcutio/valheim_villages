@@ -214,13 +214,27 @@ namespace ValheimVillages.UI.Core
                     gui.m_craftingStationLevelRoot.gameObject.SetActive(false);
             }
 
-            // Native UpdateCraftingPanel re-activates the real Upgrade tab button
-            // (and its RTrigger hint glyph) whenever the Orders/craft tab is
-            // active. We drive tabs via clones, so force the native tab buttons
-            // hidden every frame — otherwise a stray RT glyph shows on the middle
+            // Native UpdateCraftingPanel re-activates the real Upgrade tab button (and its
+            // RTrigger hint glyph) whenever the Orders/craft tab is active, so the natives
+            // get re-hidden every frame — otherwise a stray RT glyph shows on the middle
             // tab. Our own trigger hints (first/last tab) show only on a gamepad.
-            if (gui.m_tabCraft != null) gui.m_tabCraft.gameObject.SetActive(false);
-            if (gui.m_tabUpgrade != null) gui.m_tabUpgrade.gameObject.SetActive(false);
+            //
+            // Hidden, but NOT deactivated, and the interactable flags stay honest: vanilla
+            // encodes "this tab is current" as InCraftTab() == (!m_tabCraft.interactable &&
+            // activeSelf), which is the contract other UI mods read. SetActive(false) pinned
+            // it false forever, so mods believed nobody was ever on the craft tab.
+            var activeTab = m_tabHandler != null ? m_tabHandler.GetActiveTab() : -1;
+            if (gui.m_tabCraft != null)
+            {
+                SetNativeTabHidden(gui.m_tabCraft, true);
+                gui.m_tabCraft.interactable = !(m_hasCraftingRecipes && activeTab == 0);
+            }
+
+            if (gui.m_tabUpgrade != null)
+            {
+                SetNativeTabHidden(gui.m_tabUpgrade, true);
+                gui.m_tabUpgrade.interactable = !(m_hasCraftingRecipes && activeTab == 1);
+            }
             var gamepadActive = ZInput.IsGamepadActive();
             foreach (var hint in m_triggerHints)
                 if (hint != null) hint.SetActive(gamepadActive);
@@ -270,22 +284,27 @@ namespace ValheimVillages.UI.Core
 
             if (m_hasCraftingRecipes)
             {
-                gui.m_tabCraft.gameObject.SetActive(false);
-                gui.m_tabUpgrade.gameObject.SetActive(false);
+                SetNativeTabHidden(gui.m_tabCraft, true);
+                SetNativeTabHidden(gui.m_tabUpgrade, true);
                 AddNativeTabClone(gui, gui.m_tabCraft, true);
                 AddNativeTabClone(gui, gui.m_tabUpgrade, false);
                 m_firstCustomTabIndex = 2;
             }
             else
             {
-                gui.m_tabCraft?.gameObject.SetActive(false);
-                gui.m_tabUpgrade?.gameObject.SetActive(false);
+                SetNativeTabHidden(gui.m_tabCraft, true);
+                SetNativeTabHidden(gui.m_tabUpgrade, true);
                 m_firstCustomTabIndex = 0;
             }
 
             AddCustomTabs(gui);
+
+            // Subscribe before Init: its first SetActiveTab must run the full OnTabChanged,
+            // or a native default tab opens uninitialised (no RestoreCraftingPanel, no
+            // OnTab*Pressed) and the first click is spent setting it up instead of selecting.
             m_tabHandler.ActiveTabChanged += OnTabChanged;
             m_tabHandler.Init(true);
+
             ConfigureGamepadTabNav(gui);
             AddTriggerHints(gui);
         }
@@ -395,8 +414,8 @@ namespace ValheimVillages.UI.Core
             // (the old code) is an invalid state — InCraftTab() == !m_tabCraft.interactable
             // then reads false, so the next vanilla station the player opens is stuck on
             // the Upgrade tab. Restoring the snapshot returns them to their last vanilla tab.
-            gui.m_tabCraft?.gameObject.SetActive(true);
-            gui.m_tabUpgrade?.gameObject.SetActive(true);
+            SetNativeTabHidden(gui.m_tabCraft, false);
+            SetNativeTabHidden(gui.m_tabUpgrade, false);
             if (m_savedTabStateValid)
             {
                 if (gui.m_tabCraft != null)
@@ -423,6 +442,42 @@ namespace ValheimVillages.UI.Core
         #endregion
 
         #region Tab Button Helpers
+
+        /// <summary>
+        ///     Hide a native tab button without deactivating it, so vanilla's
+        ///     <c>InCraftTab()</c> - which requires <c>gameObject.activeSelf</c> - stays honest.
+        /// </summary>
+        private static void SetNativeTabHidden(Button tab, bool hidden)
+        {
+            if (tab == null) return;
+
+            if (!tab.gameObject.activeSelf) tab.gameObject.SetActive(true);
+
+            // Called every frame from LateUpdate, so only write on a real change: assigning
+            // CanvasGroup.interactable re-broadcasts OnCanvasGroupChanged to every child.
+            // Blocking selection matters as well as raycasts, or the EventSystem selects the
+            // hidden native alongside our clone and ButtonSfx plays a second click. This
+            // clears Selectable.IsInteractable() only; the .interactable property that
+            // InCraftTab() reads is left alone.
+            var group = tab.GetComponent<CanvasGroup>();
+            if (group == null) group = tab.gameObject.AddComponent<CanvasGroup>();
+            var alpha = hidden ? 0f : 1f;
+            if (group.alpha != alpha) group.alpha = alpha;
+            if (group.blocksRaycasts == hidden) group.blocksRaycasts = !hidden;
+            if (group.interactable == hidden) group.interactable = !hidden;
+
+            // The CanvasGroup cannot reach the gamepad hint: UIGamePad.m_hint is a separate
+            // GameObject, not necessarily a child. Left alone it renders beside our tab row as
+            // "MISSING BUTTON DEF". Disable the pad first - a disabled UIGamePad leaves its
+            // glyph frozen visible, so the hint must be hidden after, not before.
+            var pad = tab.GetComponent<UIGamePad>();
+            if (pad != null)
+            {
+                if (pad.enabled == hidden) pad.enabled = !hidden;
+                if (pad.m_hint != null && pad.m_hint.activeSelf == hidden)
+                    pad.m_hint.SetActive(!hidden);
+            }
+        }
 
         private void AddNativeTabClone(InventoryGui gui, Button template, bool isDefault)
         {
@@ -476,6 +531,13 @@ namespace ValheimVillages.UI.Core
             var go = Instantiate(template.gameObject, template.transform.parent);
             var cg = go.GetComponent<CanvasGroup>() ?? go.AddComponent<CanvasGroup>();
             cg.ignoreParentGroups = true;
+            // Instantiate copies the template's components, including the hidden CanvasGroup
+            // SetNativeTabHidden put on the native tab - so clones are born invisible and
+            // non-interactable. A clone is always the live one, so set all three outright
+            // rather than inherit whatever state the template happens to be in.
+            cg.alpha = 1f;
+            cg.blocksRaycasts = true;
+            cg.interactable = true;
             var btn = go.GetComponent<Button>();
             if (btn != null) btn.onClick = new Button.ButtonClickedEvent();
             // Instantiate copies the native Craft/Upgrade button's UIGamePad
@@ -522,26 +584,33 @@ namespace ValheimVillages.UI.Core
         {
             foreach (var t in m_tabs) t.OnDeselected();
 
+            if (TrySelectCustomTab(index)) return;
+
+            RestoreCraftingPanel();
+            var gui = InventoryGui.instance;
+            if (gui != null)
+            {
+                if (index == 0) gui.OnTabCraftPressed();
+                else if (index == 1) gui.OnTabUpgradePressed();
+            }
+        }
+
+        /// <summary>
+        ///     Render the custom tab at <paramref name="index" />. False when the index
+        ///     names one of the native Craft/Upgrade clones, which the caller handles.
+        /// </summary>
+        private bool TrySelectCustomTab(int index)
+        {
             var ci = index - m_firstCustomTabIndex;
-            if (ci >= 0 && ci < m_tabs.Count)
-            {
-                m_selectedListIndex = -1;
-                // Force a list rebuild for the new tab — the previous tab's elements are
-                // still in m_listElements, so the change-detection must not short-circuit.
-                m_renderedListSignature = null;
-                m_tabs[ci].OnSelected(CurrentSubject);
-                RefreshCustomContent(ci);
-            }
-            else
-            {
-                RestoreCraftingPanel();
-                var gui = InventoryGui.instance;
-                if (gui != null)
-                {
-                    if (index == 0) gui.OnTabCraftPressed();
-                    else if (index == 1) gui.OnTabUpgradePressed();
-                }
-            }
+            if (ci < 0 || ci >= m_tabs.Count) return false;
+
+            m_selectedListIndex = -1;
+            // Force a list rebuild for the new tab — the previous tab's elements are
+            // still in m_listElements, so the change-detection must not short-circuit.
+            m_renderedListSignature = null;
+            m_tabs[ci].OnSelected(CurrentSubject);
+            RefreshCustomContent(ci);
+            return true;
         }
 
         #endregion

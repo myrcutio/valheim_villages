@@ -19,6 +19,19 @@ namespace ValheimVillages.Items.VirtualRecipes
         private static readonly List<Recipe> _registeredRecipes = new();
         private static readonly Dictionary<string, string> _physicalStationMap = new();
 
+        /// <summary>
+        ///     Recipe instances a previous assembly load left in ObjectDB, keyed by name, so a
+        ///     re-registration reuses them instead of minting replacements. Other mods cache
+        ///     against the <see cref="Recipe" /> object and invalidate on
+        ///     <c>m_recipes.Count</c>, so swapping N recipes for N replacements leaves their
+        ///     caches full of dead keys. Reusing the instances keeps them valid, and a real
+        ///     change to the set still moves the count. Also stops us orphaning a full set of
+        ///     ScriptableObjects per reload - nothing here destroys the ones we drop.
+        /// </summary>
+        private static readonly Dictionary<string, Recipe> _adoptable = new();
+
+        private static int _adoptedCount;
+
 
         /// <summary>
         ///     Clear cached recipe state on world unload / hot reload so the
@@ -33,6 +46,7 @@ namespace ValheimVillages.Items.VirtualRecipes
         {
             _registeredRecipes.Clear();
             _physicalStationMap.Clear();
+            _adoptable.Clear();
         }
 
         private static bool IsExcludedFromCraftMenu(string output)
@@ -59,7 +73,7 @@ namespace ValheimVillages.Items.VirtualRecipes
                 return;
             }
 
-            RemoveOurRecipesFrom(objectDB);
+            DetachAndIndexExisting(objectDB);
 
             var count = 0;
 
@@ -116,7 +130,10 @@ namespace ValheimVillages.Items.VirtualRecipes
             }
 
             Plugin.Log?.LogInfo(
-                $"VirtualRecipeLoader: Registered {count} virtual recipes");
+                $"VirtualRecipeLoader: Registered {count} virtual recipes "
+                + $"({_adoptedCount} adopted, {count - _adoptedCount} newly created, "
+                + $"{_adoptable.Count} obsolete dropped)");
+            _adoptable.Clear();
 
             RefreshPlayerKnownRecipes();
         }
@@ -418,13 +435,43 @@ namespace ValheimVillages.Items.VirtualRecipes
                     $"VirtualRecipeLoader: Re-added {added} virtual recipes");
         }
 
-        private static void RemoveOurRecipesFrom(ObjectDB objectDB)
+        private static bool IsOurs(Recipe recipe)
         {
-            var removed = objectDB.m_recipes.RemoveAll(r =>
-                r != null && !string.IsNullOrEmpty(r.name) && r.name.StartsWith("VV_Recipe_"));
-            if (removed > 0)
-                Plugin.Log?.LogInfo(
-                    $"VirtualRecipeLoader: Removed {removed} existing virtual recipes before re-register");
+            return recipe != null && !string.IsNullOrEmpty(recipe.name)
+                                  && recipe.name.StartsWith("VV_Recipe_");
+        }
+
+        /// <summary>
+        ///     Detach every VV recipe in ObjectDB and index it by name. Each is re-added as
+        ///     <see cref="CreateRecipe" /> claims it; whatever is left is obsolete and stays out.
+        /// </summary>
+        private static void DetachAndIndexExisting(ObjectDB objectDB)
+        {
+            _adoptable.Clear();
+            _adoptedCount = 0;
+
+            // Index before removing - RemoveAll would drop the only references we have.
+            foreach (var recipe in objectDB.m_recipes)
+                // First name wins; a same-named stray is simply never re-added.
+                if (IsOurs(recipe) && !_adoptable.ContainsKey(recipe.name))
+                    _adoptable[recipe.name] = recipe;
+
+            if (_adoptable.Count == 0) return;
+
+            objectDB.m_recipes.RemoveAll(IsOurs);
+        }
+
+        /// <summary>Reuse the same-named instance from a previous load, else mint one.</summary>
+        private static Recipe AdoptOrCreate(string recipeName)
+        {
+            if (_adoptable.TryGetValue(recipeName, out var existing) && existing != null)
+            {
+                _adoptable.Remove(recipeName);
+                _adoptedCount++;
+                return existing;
+            }
+
+            return ScriptableObject.CreateInstance<Recipe>();
         }
 
         private static Recipe CreateRecipe(
@@ -482,7 +529,7 @@ namespace ValheimVillages.Items.VirtualRecipes
                 }
 
             var recipeName = $"VV_Recipe_{station.m_name}_{entry.output}";
-            var recipe = ScriptableObject.CreateInstance<Recipe>();
+            var recipe = AdoptOrCreate(recipeName);
             recipe.name = recipeName;
             recipe.m_item = outputItemDrop;
             recipe.m_amount = entry.outputAmount;

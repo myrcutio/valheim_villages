@@ -6,6 +6,7 @@
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
+        <Configurations>Debug;Release;Issues</Configurations>
     </PropertyGroup>
 
     <ItemGroup>
@@ -20,7 +21,10 @@
     <PropertyGroup>
         <ValheimDir>$(HOME)/.local/share/Steam/steamapps/common/Valheim</ValheimDir>
         <BepInExDir>$(HOME)/.config/r2modmanPlus-local/Valheim/profiles</BepInExDir>
-        <R2ModmanProfile>valheim-modding</R2ModmanProfile>
+        <!-- Mirrors the main csproj so a solution-wide `-c Issues` build resolves BepInEx
+             from the same profile the plugin is being built against. -->
+        <R2ModmanProfile Condition="'$(Configuration)' == 'Issues'">vv-issues</R2ModmanProfile>
+        <R2ModmanProfile Condition="'$(R2ModmanProfile)' == ''">valheim-modding</R2ModmanProfile>
     </PropertyGroup>
 
     <ItemGroup>

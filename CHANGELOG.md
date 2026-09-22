@@ -5,6 +5,15 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-09-22
+
+### Fixed
+- **Villager menus work alongside ZenUI.** The Orders tab opens inside ZenUI's crafting panel and stays there, instead of appearing for a frame and going blank. Villagers had been telling every UI mod that the crafting tab was never open, so those mods cleared the pane out from under them.
+- **Navigating your inventory with a controller no longer floods the log with errors**, whether or not another mod is managing the panel.
+- **The Order button's controller glyph no longer reads "MISSING BUTTON DEF"** once you put the controller down.
+- **The villager tab row stays visible and clickable** while another mod is drawing the crafting panel.
+- **Switching villager tabs takes one click again**, not two.
+
 ## [0.3.2] - 2026-09-21
 
 ### New

@@ -234,6 +234,8 @@ namespace ValheimVillages.Items.WorkOrders
             if (_orderReplacesCraft && __instance.m_craftButton != null)
                 __instance.m_craftButton.gameObject.SetActive(false);
 
+            HideOrderGlyphWithoutGamepad();
+
             if (!FocusNavActive(__instance))
             {
                 // Preserve focus through a transient craft (the Craft button is
@@ -350,6 +352,20 @@ namespace ValheimVillages.Items.WorkOrders
             var orderFocused = s_focus == CraftFocus.Order;
             SetGamepadEnabled(_workOrderButton, orderFocused);
             SetGamepadEnabled(gui.m_craftButton.gameObject, !orderFocused);
+        }
+
+        /// <summary>
+        ///     Localization resolves $KEY_ButtonX to a glyph only while a gamepad is active;
+        ///     with none it falls through to the bare name and bakes in
+        ///     MISSING BUTTON DEF "ButtonX". So a hint left visible after the player switches
+        ///     back to mouse/keyboard shows that text. Only ever hides - UIGamePad still owns
+        ///     showing it, under the same rule.
+        /// </summary>
+        private static void HideOrderGlyphWithoutGamepad()
+        {
+            if (_workOrderButton == null || ZInput.IsGamepadActive()) return;
+            var hint = _workOrderButton.GetComponent<UIGamePad>()?.m_hint;
+            if (hint != null && hint.activeSelf) hint.SetActive(false);
         }
 
         private static void SetGamepadEnabled(GameObject go, bool enabled)

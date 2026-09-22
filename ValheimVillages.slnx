@@ -1,4 +1,12 @@
 <Solution>
+    <!-- Issues builds the plugin into the vv-issues r2modman profile (see the csproj);
+         Debug/Release must be listed once any BuildType is declared explicitly. -->
+    <Configurations>
+        <Platform Name="Any CPU"/>
+        <BuildType Name="Debug"/>
+        <BuildType Name="Release"/>
+        <BuildType Name="Issues"/>
+    </Configurations>
     <Folder Name="/src/">
         <Project Path="src/ValheimVillages/ValheimVillages.csproj"/>
     </Folder>
