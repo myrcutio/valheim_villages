@@ -5,6 +5,22 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-09-23
+
+### Changed
+- **The Carpenter works through the whole village in one round.** Instead of a separate job per damaged piece, the Carpenter takes one repair round, walks to the nearest damaged piece it can reach, fixes everything around it, and moves straight on to the next, until nothing reachable is left.
+- **Lumberjacks no longer charge trees.** They fell and split once in reach, and the trunk still falls away from them. The run-up kept failing — backing off to a spot in mid-air, or running off the walkable ground — and the Lumberjack spent whole rounds retrying the same tree.
+
+### Fixed
+- **Villagers no longer freeze on a job forever.** A villager interrupted mid-task (by a monster, for example) could stay "busy" with nothing left to finish it — a Farmer stood idle for a whole day. Any job still running after 10 minutes is now dropped and the villager moves on.
+- **Guards return to patrol after a fight.** When a target died or left the guard zone, the Guard was left standing where the fight ended — sometimes for as long as the server ran — until something else happened to move it.
+- **Fleeing villagers go back to work.** A scare now lasts at most 30 seconds; a monster still close by simply starts a new one.
+- **Villagers are not hurt by falling trees or rolling logs.** Monsters and weapons still hurt them.
+- **The Carpenter no longer walks a loop between pieces it can't reach.** A piece it can't get to is skipped for 10 minutes instead of 30 seconds, and a stalled walk is noticed within seconds rather than after 20.
+- **Villagers no longer wedge themselves against a door frame.** Doorway crossings now run down the middle of the door, clear of the frame posts.
+- **Villagers can make raw fish from any caught fish.** The prep table's raw fish recipe takes any one fish, but villagers read it as needing one of every kind, so a chest of Pike could never be used.
+- **"I'm out of…" alerts count every chest in the village.** They only looked 20m around the village centre, so a stocked order in a farther chest (102 Silver against a quota of 100) read as empty and the villager asked for ore it didn't need.
+
 ## [0.3.3] - 2026-09-22
 
 ### Fixed

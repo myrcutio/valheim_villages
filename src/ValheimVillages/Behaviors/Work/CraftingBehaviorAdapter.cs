@@ -55,6 +55,16 @@ namespace ValheimVillages.Behaviors.Work
         // the claim. ScanPending self-expires, so a dropped scan cannot pin this true.
         public bool AssignmentActive => (Crafting?.IsWorking ?? false) || (Crafting?.ScanPending ?? false);
 
+        // Farming rides inside the crafting adapter, so end whichever of the two is running.
+        public void AbandonAssignment(string reason)
+        {
+            if (Crafting == null) return;
+            if (Crafting.FarmingBehavior?.IsWorking == true)
+                Crafting.FarmingBehavior.AbandonWorkPublic(reason);
+            if (Crafting.SubState != WorkSubState.Idle)
+                Crafting.AbandonWorkPublic(reason);
+        }
+
         public AssignmentResult BeginAssignment(CandidateTask task)
         {
             // Every failure below is NotActionable, never Unreachable: this adapter resolves

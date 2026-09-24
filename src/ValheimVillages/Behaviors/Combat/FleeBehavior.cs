@@ -46,6 +46,9 @@ namespace ValheimVillages.Behaviors.Combat
         private bool m_watchingForAllClear;
         private float m_nextAllClearAt;
 
+        // When the current flee episode began (0 = none). Bounded by FleeMaxSeconds.
+        private float m_episodeStartedAt;
+
         public FleeBehavior(VillagerAI ai)
         {
             m_ai = ai;
@@ -58,6 +61,19 @@ namespace ValheimVillages.Behaviors.Combat
 
         public bool WantsControl(BehaviorContext ctx)
         {
+            // One episode may hold control for at most FleeMaxSeconds. Release to the
+            // scheduler; a hostile still inside the danger radius re-triggers a fresh episode
+            // on the next scan, so this only ends panics that have outlived their threat.
+            if (m_episodeStartedAt > 0f &&
+                Time.time - m_episodeStartedAt > CombatSettings.FleeMaxSeconds)
+            {
+                Plugin.Log?.LogInfo(
+                    $"[Flee:{m_ai.NpcName}] flee timed out after " +
+                    $"{Time.time - m_episodeStartedAt:F0}s — returning to work");
+                Calm();
+                return false;
+            }
+
             // Keep fleeing while the current threat is still within the (larger)
             // clear radius — hysteresis so panic doesn't flicker at the boundary.
             if (IsStillDangerous(m_threat))
@@ -84,6 +100,7 @@ namespace ValheimVillages.Behaviors.Combat
                 m_threat = FindNearestThreat(CombatSettings.FleeDangerRadius);
                 if (m_threat != null)
                 {
+                    if (m_episodeStartedAt <= 0f) m_episodeStartedAt = Time.time;
                     m_watchingForAllClear = false;
                     return true;
                 }
@@ -321,6 +338,7 @@ namespace ValheimVillages.Behaviors.Combat
             m_threat = null;
             m_runningToGuard = false;
             m_watchingForAllClear = false;
+            m_episodeStartedAt = 0f;
             if (m_ai.CurrentState != BehaviorState.Idle)
                 m_ai.SetState(BehaviorState.Idle);
         }

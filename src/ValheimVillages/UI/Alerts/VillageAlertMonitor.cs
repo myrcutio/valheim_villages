@@ -86,8 +86,12 @@ namespace ValheimVillages.UI.Alerts
             var village = VillageRegistry.GetVillageAt(villagers[0].HomeAnchor);
             if (village == null) return;
 
-            // Village-wide chests for the storage figure...
-            var villageContainers = ContainerScanner.FindNearbyContainers(
+            // The village's own chests — its published footprint, the same set the crafting
+            // flow reads (ContainerScanner.FindVillageContainers). This used a 20m radius around
+            // the anchor, which missed a Blacksmith's reserved Silver chest 24.6m out: the
+            // alert counted 0 of 102 Silver and complained about Silver Ore the villager was
+            // never short of.
+            var villageContainers = ContainerScanner.FindVillageContainers(
                 village.Anchor, WorkSettings.ChestScanRadius);
 
             var storageTight = IsStorageTight(villageContainers, out var freeSlots, out var totalSlots);
@@ -105,12 +109,10 @@ namespace ValheimVillages.UI.Alerts
                 var marker = EnsureMarker(ai);
                 if (marker == null) continue;
 
-                // ...but the shortfall is scanned from the VILLAGER's own anchor, with the same
-                // radius the crafting flow uses. Scanning from the village anchor instead could
-                // report a shortage the villager cannot actually see (or miss one it can), so
-                // the alert would contradict the behavior it is describing.
-                var mine = ContainerScanner.FindNearbyContainers(
-                    ai.HomeAnchor, WorkSettings.ChestScanRadius);
+                // Same chest set the villager crafts from, so the alert cannot contradict the
+                // behavior it describes. Per-villager reachability is still applied below
+                // (FilterReachable against the villager's position).
+                var mine = villageContainers;
 
                 // A chest with no room to deposit into blocks the villager outright — the work
                 // order scan rejects with "Output chest full" before it even looks at a station,

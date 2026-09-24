@@ -217,6 +217,9 @@ namespace ValheimVillages.Villager.AI.Work
             shortfall = default;
             if (recipe?.m_resources == null) return false;
 
+            if (recipe.m_requireOnlyOneIngredient)
+                return TryFindAnyOfShortfall(reachable, inVillage, recipe, out shortfall);
+
             foreach (var req in recipe.m_resources)
             {
                 if (req.m_resItem == null) continue;
@@ -246,6 +249,58 @@ namespace ValheimVillages.Villager.AI.Work
             }
 
             return false;
+        }
+
+        /// <summary>
+        ///     Shortfall for an "any one of these" recipe (<c>m_requireOnlyOneIngredient</c> —
+        ///     the prep table's raw fish takes any single fish). Short only when NO listed
+        ///     ingredient is covered; reported against the alternative the village holds most
+        ///     of, and named as "X or N other kinds" so the player is not told to fetch one
+        ///     particular fish.
+        /// </summary>
+        private static bool TryFindAnyOfShortfall(
+            List<Container> reachable, List<Container> inVillage, Recipe recipe,
+            out IngredientShortfall shortfall)
+        {
+            shortfall = default;
+            Piece.Requirement best = null;
+            int bestReachable = -1, bestInVillage = -1, alternatives = 0;
+            foreach (var req in recipe.m_resources)
+            {
+                if (req.m_resItem == null) continue;
+                alternatives++;
+
+                var prefabName = req.m_resItem.gameObject.name;
+                var have = CountAcrossContainers(reachable, prefabName);
+                if (have >= req.m_amount) return false;
+
+                var inV = inVillage != null ? CountAcrossContainers(inVillage, prefabName) : have;
+                if (inV > bestInVillage || (inV == bestInVillage && have > bestReachable))
+                {
+                    best = req;
+                    bestReachable = have;
+                    bestInVillage = inV;
+                }
+            }
+
+            if (best == null) return false;
+
+            var bestPrefab = best.m_resItem.gameObject.name;
+            var token = best.m_resItem.m_itemData?.m_shared?.m_name;
+            var name = string.IsNullOrEmpty(token) ? bestPrefab : Localization.instance.Localize(token);
+            shortfall = new IngredientShortfall
+            {
+                PrefabName = bestPrefab,
+                DisplayName = alternatives > 1 ? $"{name} (or {alternatives - 1} other kinds)" : name,
+                Needed = best.m_amount,
+                FoundReachable = bestReachable,
+                FoundInVillage = bestInVillage,
+            };
+
+            if (shortfall.FoundInVillage >= best.m_amount)
+                shortfall.OutOfReachHolder = FindUnreachableHolder(inVillage, reachable, bestPrefab);
+
+            return true;
         }
 
         /// <summary>
@@ -295,6 +350,23 @@ namespace ValheimVillages.Villager.AI.Work
             if (recipe?.m_resources == null) return null;
 
             var sources = new List<IngredientSource>();
+
+            // "Any one of these" (m_requireOnlyOneIngredient): the prep table's raw fish lists
+            // all twelve fish and takes a single one. Read as an ordinary recipe it demanded
+            // one of EVERY fish, so three Pike in a chest could never become raw fish.
+            if (recipe.m_requireOnlyOneIngredient)
+            {
+                foreach (var req in recipe.m_resources)
+                {
+                    if (req.m_resItem == null) continue;
+                    var picks = CollectFrom(containers, req.m_resItem.gameObject.name, req.m_amount);
+                    if (picks != null) return picks;
+                }
+
+                LogMissingIngredient("any of " + recipe.m_resources.Length + " alternatives",
+                    1, 0, containers.Count);
+                return null;
+            }
 
             foreach (var req in recipe.m_resources)
             {
@@ -347,6 +419,32 @@ namespace ValheimVillages.Villager.AI.Work
             }
 
             return sources;
+        }
+
+        /// <summary>
+        ///     Per-chest picks covering <paramref name="needed" /> of one item, or null when the
+        ///     containers hold less. Same one-entry-per-chest rule as <see cref="FindIngredients" />.
+        /// </summary>
+        private static List<IngredientSource> CollectFrom(
+            List<Container> containers, string prefabName, int needed)
+        {
+            var picks = new List<IngredientSource>();
+            var remaining = needed;
+            foreach (var container in containers)
+            {
+                var inv = container.GetInventory();
+                if (inv == null) continue;
+
+                var count = CountByPrefab(inv, prefabName);
+                if (count <= 0) continue;
+
+                var take = Mathf.Min(count, remaining);
+                picks.Add(new IngredientSource { PrefabName = prefabName, Amount = take, Container = container });
+                remaining -= take;
+                if (remaining <= 0) return picks;
+            }
+
+            return null;
         }
 
         /// <summary>

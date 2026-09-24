@@ -46,7 +46,8 @@ namespace ValheimVillages.Dev
                     ? $"'{r.m_craftingStation.m_name}'"
                     : "(NONE — hand-craftable)";
                 sb.AppendLine($"  recipe '{r.name}' station={station} enabled={r.m_enabled} " +
-                              $"inputs={r.m_resources?.Length ?? 0} minLvl={r.m_minStationLevel}");
+                              $"inputs={r.m_resources?.Length ?? 0} minLvl={r.m_minStationLevel}" +
+                              (r.m_requireOnlyOneIngredient ? " anyOneOf=True" : ""));
                 // Name them. "inputs=4" says a villager needs four things and not WHICH four,
                 // which is the only part that answers "why is this order not being worked?".
                 if (r.m_resources != null)

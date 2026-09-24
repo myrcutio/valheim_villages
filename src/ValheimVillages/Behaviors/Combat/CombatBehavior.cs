@@ -90,6 +90,13 @@ namespace ValheimVillages.Behaviors.Combat
             // Acquire/keep a target. A fresh target is engaged at full priority.
             if (!IsValidTarget(m_target))
             {
+                // The target died or left the guard zone. Clean up HERE: returning false
+                // means Update never runs again to Disengage, and a fight leaves the guard
+                // with its waypoint cleared (fire-in-place) in Patrolling or Alarmed — a
+                // state nothing moves him out of. Observed: a guard frozen by a gate for 12+
+                // minutes, "Alarmed" with no target; later "Patrolling" with no waypoint.
+                if (m_target != null) Disengage();
+
                 if (Time.time - m_lastScanTime < CombatSettings.TargetRescanInterval)
                     return false;
                 m_lastScanTime = Time.time;

@@ -13,29 +13,49 @@ using ValheimVillages.Villager.AI.Pathfinding;
 namespace ValheimVillages.Behaviors.Repair
 {
     /// <summary>
-    ///     The carpenter's upkeep behavior: wander the village, find damaged
-    ///     structures (pieces whose <see cref="WearNTear"/> health is below full) and
-    ///     repair them. Walk to a ground spot near a damaged cluster, repair every
-    ///     damaged piece within reach, then re-scan for the next — which reads as the
-    ///     carpenter wandering around fixing things.
+    ///     The carpenter's upkeep round. The board carries ONE repair task per village
+    ///     (<see cref="Scheduling.Producers.RepairTaskProducer" />); on assignment the carpenter
+    ///     works through the village itself — nearest reachable damaged piece, repair every
+    ///     damaged piece within reach of where he stands, then straight on to the next —
+    ///     until nothing reachable is left or the round runs long.
     ///
     ///     <para>Crucially it only targets a piece it can reach by a COMPLETE ground
     ///     path, so it never tries to climb onto a roof/beam to reach an elevated
     ///     piece (which strands it). Repair is a ZDO health restore with no range/LOS
     ///     requirement, so an elevated piece (a roof) is repaired from the ground
     ///     beside the building via the on-arrival radius sweep.</para>
-    ///     <para>Which piece to repair is chosen here, but WHETHER to repair is the
-    ///     scheduler's call: this behavior never self-discovers work, it only acts on a
-    ///     <see cref="TaskKind.RepairPiece" /> assignment. Tag: "repair", Priority: 35.</para>
+    ///     <para>A piece he cannot get to is skipped for <see cref="StuckCooldown" />, long
+    ///     enough that it cannot come back round within the same round: a short skip let
+    ///     three unreachable wall pieces keep him walking a loop between them forever.
+    ///     Tag: "repair", Priority: 35.</para>
     /// </summary>
     [RegisterBehavior("repair")]
     public class RepairBehavior : IBehavior, IDirectedBehavior
     {
-        private const float MaxLegSeconds = 20f;
-        private const float UnreachableCooldown = 30f;
+        /// <summary>Outer bound on one walk to one piece.</summary>
+        private const float MaxLegSeconds = 30f;
 
-        // Repair anything below this fraction of full health (avoids float jitter at 1.0).
-        private const float DamagedThreshold = 0.99f;
+        /// <summary>
+        ///     A walk that has not closed on the piece by <see cref="ProgressEpsilon" /> in this
+        ///     long is stuck — typically the agent reached the clamped end of a partial path and
+        ///     stands there out of reach. Far quicker to detect than waiting out the leg.
+        /// </summary>
+        private const float StallSeconds = 6f;
+
+        private const float ProgressEpsilon = 0.5f;
+
+        /// <summary>How long a piece that could not be reached (or approached) is skipped.</summary>
+        private const float StuckCooldown = 600f;
+
+        /// <summary>How long a piece the sweep could not repair is skipped.</summary>
+        private const float NoEffectCooldown = 120f;
+
+        /// <summary>
+        ///     One round ends after this long even with work left, handing the villager back to
+        ///     the scheduler (the village task stays on the board, so the next round picks up
+        ///     where this left off). Well inside the dispatcher's assignment ceiling.
+        /// </summary>
+        private const float MaxRoundSeconds = 300f;
 
         // On arrival, repair every damaged piece within this 3D range — clears a
         // cluster (a building's walls + the roof above) from one ground spot.
@@ -48,14 +68,18 @@ namespace ValheimVillages.Behaviors.Repair
 
         private readonly VillagerAI m_ai;
 
-        // Structures we couldn't reach recently, so we don't keep re-targeting them.
+        // Pieces we recently gave up on, so the round moves past them.
         private readonly Dictionary<ZDOID, float> m_skipUntil = new();
 
         private bool m_active;
         private Vector3 m_approach;
         private float m_legDeadline;
+        private float m_roundEndsAt;
         private bool m_navIssued;
         private WearNTear m_target;
+        private float m_bestDistance;
+        private float m_lastProgressAt;
+        private int m_repairedThisRound;
 
         public RepairBehavior(VillagerAI ai)
         {
@@ -68,7 +92,7 @@ namespace ValheimVillages.Behaviors.Repair
         // fills idle time. Combat/flee (100) still preempt.
         public int Priority => 35;
 
-        // The scheduler owns target selection — act only on an assignment (m_active set by
+        // The scheduler owns WHETHER to repair — act only on an assignment (m_active set by
         // BeginAssignment), never self-discover. Deliberately identical to
         // AssignmentActive: the dispatcher holds a claim while that is true, so if the two
         // could disagree the villager would be "busy" to the dispatcher and idle to the
@@ -81,71 +105,77 @@ namespace ValheimVillages.Behaviors.Repair
 
         public bool AssignmentActive => m_active;
 
+        public void AbandonAssignment(string reason) => Reset();
+
         public AssignmentResult BeginAssignment(CandidateTask task)
         {
-            // The assigned task carries the piece position; resolve the actual damaged
-            // structure there (the on-arrival sweep repairs the whole cluster anyway).
-            var wnt = FindDamagedNear(task.Position);
-            if (wnt == null) return AssignmentResult.NotActionable;
-
-            // Nav infrastructure not up yet. That is a "can't answer", not a verdict about
-            // this piece, and must never be reported as Unreachable — the dispatcher would
-            // block the row until the next repartition over a transient startup gap.
+            // Every failure is NotActionable, never Unreachable: this one task stands for the
+            // whole village, so blocking it until a repartition would stop all repairs because
+            // some pieces are awkward. Unreachable pieces are skipped individually instead.
             var graph = Villages.Entity.VillageRegistry.GraphAt(m_ai.HomeAnchor);
             if (!VillagerAgentType.IsRegistered || graph == null)
                 return AssignmentResult.NotActionable;
 
-            if (!TryResolveReachableApproach(graph, wnt.transform.position, out var approach))
-                return AssignmentResult.Unreachable;
+            if (!TryPickNext(graph)) return AssignmentResult.NotActionable;
 
-            m_target = wnt;
-            m_approach = approach;
             m_active = true;
-            m_navIssued = false;
-            m_legDeadline = Time.time + MaxLegSeconds;
+            m_repairedThisRound = 0;
+            m_roundEndsAt = Time.time + MaxRoundSeconds;
             return AssignmentResult.Accepted;
         }
 
         /// <summary>
-        ///     Nearest still-damaged structure within repair range of a point, skipping
-        ///     pieces this carpenter recently gave up reaching. The blacklist check lives
-        ///     here because this is now the ONLY place a repair target is chosen — the
-        ///     scheduler dispatches the task, but which piece to actually swing at is still
-        ///     resolved locally, and a piece that timed out must not be re-picked instantly.
+        ///     Choose the nearest damaged piece in the village that is not being skipped and has
+        ///     a walkable approach, and aim the next leg at it. Pieces with no approach are
+        ///     skipped as they are found, so one pass settles them for the whole round.
         /// </summary>
-        private WearNTear FindDamagedNear(Vector3 pos)
+        private bool TryPickNext(Villager.AI.Navigation.RegionGraph graph)
         {
-            WearNTear best = null;
-            var bestSq = float.MaxValue;
-            foreach (var wnt in PhysicsHelper.GetAllInRadius<WearNTear>(pos, RepairRange))
+            var village = Villages.Entity.VillageRegistry.GetVillageAt(m_ai.HomeAnchor);
+            var damaged = VillageRepairs.FindDamaged(village);
+            var from = m_ai.Position;
+            damaged.Sort((a, b) =>
+                (a.piece.transform.position - from).sqrMagnitude.CompareTo(
+                    (b.piece.transform.position - from).sqrMagnitude));
+
+            foreach (var (piece, _) in damaged)
             {
-                if (!IsValid(wnt)) continue;
-                if (IsBlacklisted(wnt)) continue;
-                if (PieceHealth.Fraction(wnt) >= DamagedThreshold) continue;
-                var d = (wnt.transform.position - pos).sqrMagnitude;
-                if (d < bestSq)
+                if (IsSkipped(piece)) continue;
+                if (!TryResolveReachableApproach(graph, piece.transform.position, out var approach))
                 {
-                    bestSq = d;
-                    best = wnt;
+                    Skip(piece, StuckCooldown, "no_approach");
+                    continue;
                 }
+
+                m_target = piece;
+                m_approach = approach;
+                m_navIssued = false;
+                m_legDeadline = Time.time + MaxLegSeconds;
+                m_bestDistance = Vector3.Distance(from, piece.transform.position);
+                m_lastProgressAt = Time.time;
+                return true;
             }
 
-            return best;
+            return false;
+        }
+
+        /// <summary>Move on to the next piece, or end the round when there is none.</summary>
+        private void NextOrFinish()
+        {
+            var graph = Villages.Entity.VillageRegistry.GraphAt(m_ai.HomeAnchor);
+            if (Time.time < m_roundEndsAt && graph != null && TryPickNext(graph)) return;
+
+            DebugLog.Event("Repair", "round_done",
+                ("vid", DebugLog.Vid(m_ai.UniqueId)), ("repaired", m_repairedThisRound));
+            Reset();
         }
 
         public void Update(float dt)
         {
-            if (!IsValid(m_target))
+            if (!IsValid(m_target) || PieceHealth.Fraction(m_target) >= VillageRepairs.DamagedThreshold)
             {
-                Reset();
-                return;
-            }
-
-            if (Time.time > m_legDeadline)
-            {
-                // Stuck reaching this structure too long — skip it for a while.
-                Blacklist();
-                Reset();
+                // Gone, or someone else fixed it first.
+                NextOrFinish();
                 return;
             }
 
@@ -156,15 +186,32 @@ namespace ValheimVillages.Behaviors.Repair
             // Repair as soon as we're within reach — DON'T wait for a PathComplete
             // "arrival" (AgentHasArrived), which never fires for the link-stitched
             // (PathPartial) routes that most cross-region targets produce.
-            if ((m_ai.Position - m_target.transform.position).sqrMagnitude
-                <= RepairRange * RepairRange)
+            var distance = Vector3.Distance(m_ai.Position, m_target.transform.position);
+            if (distance <= RepairRange)
             {
-                // Nothing repaired means this piece is not actually damaged, whatever the
-                // scan believed. Park it briefly instead of letting the dispatcher hand it
-                // straight back: that loop repaired nothing, moved nobody, and wrote a
-                // thousand "assigned RepairPiece" lines for the same two metres of wall.
-                if (DoRepairSweep() == 0) Blacklist();
-                Reset();
+                SweepAndContinue();
+                return;
+            }
+
+            // Knocked out of Traveling mid-leg (a flee settles the villager to Idle and leaves
+            // our waypoint behind with movement stopped): walk the leg again, and don't count
+            // the time spent away as a stall.
+            if (m_navIssued && m_ai.CurrentState != BehaviorState.Traveling)
+            {
+                m_navIssued = false;
+                m_lastProgressAt = Time.time;
+            }
+
+            if (distance < m_bestDistance - ProgressEpsilon)
+            {
+                m_bestDistance = distance;
+                m_lastProgressAt = Time.time;
+            }
+
+            if (Time.time - m_lastProgressAt > StallSeconds || Time.time > m_legDeadline)
+            {
+                Skip(m_target, StuckCooldown, "stuck");
+                NextOrFinish();
                 return;
             }
 
@@ -173,8 +220,8 @@ namespace ValheimVillages.Behaviors.Repair
                 if (!m_ai.NavTo(m_approach, BehaviorState.Traveling, "repair: go to structure",
                         snapToApproach: false))
                 {
-                    Blacklist();
-                    Reset();
+                    Skip(m_target, StuckCooldown, "nav_refused");
+                    NextOrFinish();
                     return;
                 }
 
@@ -184,8 +231,29 @@ namespace ValheimVillages.Behaviors.Repair
 
         public void OnArrival(float dt)
         {
-            if (DoRepairSweep() == 0) Blacklist();
-            Reset();
+            if (!m_active || !IsValid(m_target)) return;
+
+            // Arrival can re-fire for the PREVIOUS leg's waypoint after TryPickNext has already
+            // aimed at a new piece, and an approach can land just short of reach. Either way
+            // sweeping here would repair nothing and wrongly skip the new target; leave it to
+            // Update, which re-walks the leg (and stall-skips it if it never closes).
+            if (Vector3.Distance(m_ai.Position, m_target.transform.position) > RepairRange)
+            {
+                m_navIssued = false;
+                return;
+            }
+
+            SweepAndContinue();
+        }
+
+        private void SweepAndContinue()
+        {
+            // Nothing repaired means this piece is not actually repairable from here, whatever
+            // its health reads. Skip it rather than walking straight back to it.
+            var repaired = DoRepairSweep();
+            if (repaired == 0) Skip(m_target, NoEffectCooldown, "no_effect");
+            m_repairedThisRound += repaired;
+            NextOrFinish();
         }
 
         /// <summary>
@@ -291,7 +359,7 @@ namespace ValheimVillages.Behaviors.Repair
             return nview != null && nview.GetZDO() != null ? nview.GetZDO().m_uid : ZDOID.None;
         }
 
-        private bool IsBlacklisted(WearNTear wnt)
+        private bool IsSkipped(WearNTear wnt)
         {
             var id = PieceId(wnt);
             if (id == ZDOID.None) return false;
@@ -305,11 +373,15 @@ namespace ValheimVillages.Behaviors.Repair
             return true;
         }
 
-        private void Blacklist()
+        private void Skip(WearNTear wnt, float seconds, string reason)
         {
-            var id = PieceId(m_target);
-            if (id != ZDOID.None)
-                m_skipUntil[id] = Time.time + UnreachableCooldown;
+            var id = PieceId(wnt);
+            if (id == ZDOID.None) return;
+            m_skipUntil[id] = Time.time + seconds;
+            var pos = wnt.transform.position;
+            DebugLog.Event("Repair", "skip_piece",
+                ("vid", DebugLog.Vid(m_ai.UniqueId)), ("reason", reason),
+                ("pos", $"{pos.x:F0},{pos.z:F0}"), ("for_s", seconds));
         }
 
         private void Reset()

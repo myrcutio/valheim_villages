@@ -1,68 +1,56 @@
 using UnityEngine;
-using ValheimVillages.Villager.AI.Navigation;
+using ValheimVillages.Behaviors.Repair;
 using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Scheduling.Producers
 {
     /// <summary>
-    ///     Produces <see cref="TaskKind.RepairPiece" /> tasks from damaged structures
-    ///     (any <see cref="WearNTear" /> below full health). No deadline — durability
-    ///     loss is gradual — so priority is the damage fraction and the reranker trades
-    ///     it off against distance. Reachability is left to the reranker (a piece whose
-    ///     position resolves to no region scores as unreachable and is skipped).
+    ///     Posts ONE <see cref="TaskKind.RepairPiece" /> task per village while anything in it
+    ///     is damaged, and removes it once nothing is. Which piece to fix is the carpenter's
+    ///     call (<see cref="RepairBehavior" /> walks the village until everything reachable is
+    ///     patched), not the board's.
+    ///
+    ///     <para>It used to post one row per damaged piece. With a few dozen of them the board
+    ///     was mostly repair rows every other villager had to score and skip, and a piece the
+    ///     carpenter could not actually reach came straight back every time its short
+    ///     blacklist lapsed — three unreachable wall pieces kept him walking a 20-second loop
+    ///     indefinitely without repairing anything.</para>
     /// </summary>
     public static class RepairTaskProducer
     {
-        private const float ScanRadius = 60f;
-
-        // Below full health (1.0); the small margin avoids float jitter at full.
-        private const float DamagedThreshold = 0.99f;
         private const string Capability = "repair";
 
         public static void Scan(Village village, Vector3 center, float now)
         {
             if (village == null) return;
             var villageId = village.VillageId;
-            var graph = village.Graph;
+            var sourceId = SourceIdFor(villageId);
 
-            foreach (var wnt in PhysicsHelper.GetAllInRadius<WearNTear>(center, ScanRadius))
+            var damaged = VillageRepairs.FindDamaged(village);
+            if (damaged.Count == 0)
             {
-                var nview = wnt != null ? wnt.GetComponent<ZNetView>() : null;
-                if (nview == null || !nview.IsValid() || nview.GetZDO() == null) continue;
-
-                var sourceId = nview.GetZDO().m_uid.ToString();
-                var pos = wnt.transform.position;
-
-                // Don't burn cycles repairing world-spawn pieces outside the village's
-                // outer shell (rocks/ruins beyond the walls). Boundary + interior cells
-                // are kept (IsOutsideCell is false for them). Only when a classification
-                // exists, else we'd risk filtering everything.
-                if (graph != null && graph.HasClassification && VillageShell.IsOutside(graph, pos))
-                {
-                    TaskBoard.Remove(villageId, sourceId);
-                    continue;
-                }
-
-                // NOT GetHealthPercentage(): its cached value reads every intact piece as
-                // damaged once a world is past world level 0. See PieceHealth.
-                var hp = Behaviors.Repair.PieceHealth.Fraction(wnt);
-                if (hp >= DamagedThreshold)
-                {
-                    // Healthy (or freshly repaired) — drop any stale task.
-                    TaskBoard.Remove(villageId, sourceId);
-                    continue;
-                }
-
-                TaskBoard.Upsert(villageId, new CandidateTask
-                {
-                    SourceId = sourceId,
-                    Kind = TaskKind.RepairPiece,
-                    Position = pos,
-                    Priority = 1f - hp, // more damaged = higher base importance
-                    ExpiresAt = 0f, // no deadline
-                    RequiredCapability = Capability,
-                });
+                TaskBoard.Remove(villageId, sourceId);
+                return;
             }
+
+            // Position and priority come from the worst piece: position only feeds the
+            // reranker's travel estimate, and the carpenter chooses its own route on arrival.
+            var worst = damaged[0];
+            foreach (var d in damaged)
+                if (d.health < worst.health)
+                    worst = d;
+
+            TaskBoard.Upsert(villageId, new CandidateTask
+            {
+                SourceId = sourceId,
+                Kind = TaskKind.RepairPiece,
+                Position = worst.piece.transform.position,
+                Priority = 1f - worst.health, // more damaged = higher base importance
+                ExpiresAt = 0f, // no deadline
+                RequiredCapability = Capability,
+            });
         }
+
+        private static string SourceIdFor(string villageId) => $"repair:{villageId}";
     }
 }

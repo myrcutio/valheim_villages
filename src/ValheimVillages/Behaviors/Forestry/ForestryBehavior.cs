@@ -57,50 +57,16 @@ namespace ValheimVillages.Behaviors.Forestry
         /// <summary>How far from a log/tree centre to look for standable ground.</summary>
         private const float BulkSnapRadius = 8f;
 
-        // --- the charge ---
-
-        /// <summary>How far back he squares up from the trunk before running at it.</summary>
-        private const float ChargeBackoff = 5f;
-
-        /// <summary>Seconds spent stamping and kicking up dust before the run.</summary>
-        private const float WindupSeconds = 0.9f;
-
-        /// <summary>Distance at which the charge counts as a hit.</summary>
-        private const float ImpactRange = 1.6f;
-
-        /// <summary>A charge that never connects must not strand the errand.</summary>
-        private const float ChargeTimeout = 6f;
-
         /// <summary>
-        ///     How much further than the run-up he may travel before the charge is called off.
-        ///     He starts <see cref="ChargeBackoff" /> from the trunk and runs at it, so getting
-        ///     FURTHER away than he began means the target is not where he is going.
+        ///     How long a tree or log is left alone after a leg to it timed out. Without this the
+        ///     next errand pick chooses the same nearest target, fails to reach it, and repeats —
+        ///     the hot loop this codebase keeps rediscovering. Short enough that a transient
+        ///     cause (someone standing in the way) clears on its own.
         /// </summary>
-        private const float ChargeOvershoot = 3f;
+        private const float FailedTargetRetrySeconds = 120f;
 
-        /// <summary>
-        ///     How long a tree or log is left alone after a charge at it was called off. Without
-        ///     this the next errand pick chooses the same nearest target, charges it, aborts,
-        ///     and repeats — the hot loop this codebase keeps rediscovering. Short enough that a
-        ///     transient cause (someone standing in the way) clears on its own.
-        /// </summary>
-        private const float ChargeRetrySeconds = 120f;
-
-        /// <summary>Instance ids of charge targets recently given up on → when to allow a retry.</summary>
-        private readonly Dictionary<int, float> m_chargeFailures = new();
-
-        /// <summary>Dust kicked up during the wind-up. Present in every world.</summary>
-        private const string DustEffect = "vfx_SawDust";
-
-        private ChargePhase m_charge;
-
-        /// <summary>Hard deadline for the whole charge.</summary>
-        private float m_chargeDeadline;
-
-        /// <summary>When the current PHASE ends (only the wind-up uses it).</summary>
-        private float m_windupUntil;
-
-        private Vector3 m_chargeTarget;
+        /// <summary>Instance ids of trees/logs recently given up on → when to allow a retry.</summary>
+        private readonly Dictionary<int, float> m_failedTargets = new();
 
         private readonly VillagerAI m_ai;
 
@@ -141,6 +107,8 @@ namespace ValheimVillages.Behaviors.Forestry
         public bool CanExecute(TaskKind kind) => kind == TaskKind.Forestry;
 
         public bool AssignmentActive => m_active;
+
+        public void AbandonAssignment(string reason) => Reset();
 
         public AssignmentResult BeginAssignment(CandidateTask task)
         {
@@ -237,8 +205,8 @@ namespace ValheimVillages.Behaviors.Forestry
             // These used to offer the single nearest tree and the single nearest log, so ONE
             // unusable target was indistinguishable from an empty woodlot: the assignment came
             // back NotActionable, the scheduler parked the row, and a Lumberjack stood idle
-            // beside sixty trees. Any reason the nearest one fails — no approach, a charge that
-            // just failed at it, a log wedged somewhere awkward — now simply moves to the next.
+            // beside sixty trees. Any reason the nearest one fails — no approach, a leg that
+            // timed out on it, a log wedged somewhere awkward — now simply moves to the next.
             // Nearest to HIM, not to the post: a log lying between the villager and his next
             // job is an obstacle the pathfinder has to detour around, and breaking it up is
             // both the job and the way through. Clearing the far side of the woodlot first
@@ -318,17 +286,11 @@ namespace ValheimVillages.Behaviors.Forestry
 
         public void Update(float dt)
         {
-            // A charge owns the villager outright until it lands or times out.
-            if (m_charge != ChargePhase.None)
-            {
-                TickCharge();
-                return;
-            }
-
             if (Time.time > m_legDeadline)
             {
                 Plugin.Log?.LogWarning(
                     $"[Forestry:{m_ai.NpcName}] gave up on {m_errand} (leg timed out)");
+                NoteFailure();
                 Reset();
                 return;
             }
@@ -358,11 +320,6 @@ namespace ValheimVillages.Behaviors.Forestry
 
         public void OnArrival(float dt)
         {
-            // A charge is already running the show — re-entering Act() here would call
-            // BeginCharge() again, snap the phase back to BackingOff while he is ALREADY at
-            // the standoff point, and re-announce the wind-up. That livelocked the charge and
-            // spammed the log every tick.
-            if (m_charge != ChargePhase.None) return;
             Act();
         }
 
@@ -397,9 +354,13 @@ namespace ValheimVillages.Behaviors.Forestry
                     Reset();
                     break;
                 case Errand.Fell:
+                    // The hit drops the trunk away from where he stands (see TreeFelling).
+                    DoFell();
+                    Reset();
+                    break;
                 case Errand.BreakLog:
-                    // He does not chop — he squares up and runs the thing down.
-                    BeginCharge();
+                    DoBreakLog();
+                    Reset();
                     break;
                 case Errand.Collect:
                     // Two legs: pick the wood up, then carry it to a chest.
@@ -467,193 +428,23 @@ namespace ValheimVillages.Behaviors.Forestry
                 $"[Forestry:{m_ai.NpcName}] pulled up a {name} that could not grow there ({status})");
         }
 
-        // --- the charge ---
-        //
-        // A Dvergr has no chopping animation (player weapon anims do not retarget onto the
-        // rig — the same wall the crossbow work hit), so a Lumberjack who "chops" would stand
-        // motionless while trees fell over for no visible reason. Instead he backs off, stamps
-        // up some dust, and runs the trunk down shoulder-first: entirely built from movement,
-        // which the rig does have.
-
-        /// <summary>Back off from the target and square up for the run.</summary>
-        private void BeginCharge()
+        /// <summary>Remember the current tree/log as one not to pick again for a while.</summary>
+        private void NoteFailure()
         {
-            m_chargeTarget = m_errand == Errand.Fell && m_tree != null
-                ? m_tree.transform.position
-                : m_log != null
-                    ? m_log.transform.position
-                    : m_target;
-
-            // Stand off along the line he arrived on, so the run-up comes from the village
-            // side and the trunk still goes down AWAY from him.
-            var back = m_ai.Position - m_chargeTarget;
-            back.y = 0f;
-            if (back.sqrMagnitude < 0.01f) back = Vector3.forward;
-            var standoff = m_chargeTarget + back.normalized * ChargeBackoff;
-
-            // Only back off to somewhere he can actually stand.
-            var filter = new NavMeshQueryFilter
-            {
-                agentTypeID = VillagerAgentType.UnityAgentTypeID,
-                areaMask = NavMesh.AllAreas,
-            };
-            if (NavMesh.SamplePosition(standoff, out var hit, 4f, filter))
-                standoff = hit.position;
-
-            m_target = standoff;
-            m_navIssued = false;
-            m_charge = ChargePhase.BackingOff;
-            m_chargeDeadline = Time.time + ChargeTimeout;
-        }
-
-        private void TickCharge()
-        {
-            var targetGone = m_errand == Errand.Fell
-                ? !TreeFelling.IsFellable(m_tree)
-                : !TreeFelling.IsBreakable(m_log);
-            // Deadline only — NOT the wind-up timer. Sharing one field between "the charge has
-            // taken too long" and "the wind-up is over" made the wind-up's own expiry read as
-            // a timeout, so every charge aborted ~1s after he squared up and never ran.
-            if (targetGone || Time.time > m_chargeDeadline)
-            {
-                if (!targetGone)
-                {
-                    Plugin.Log?.LogWarning($"[Forestry:{m_ai.NpcName}] charge timed out short of the trunk");
-                    NoteChargeFailure();
-                }
-
-                Reset();
-                return;
-            }
-
-            m_ai.RequestFastReselect(0.1f);
-
-            switch (m_charge)
-            {
-                case ChargePhase.BackingOff:
-                    if ((m_ai.Position - m_target).sqrMagnitude <= 1.5f * 1.5f)
-                    {
-                        m_charge = ChargePhase.WindUp;
-                        m_windupUntil = Time.time + WindupSeconds;
-                        SpawnDust();
-                        Plugin.Log?.LogInfo(
-                            $"[Forestry:{m_ai.NpcName}] squares up at {ChargeBackoff:F0}m and paws the ground");
-                        break;
-                    }
-
-                    if (!m_navIssued)
-                        m_navIssued = m_ai.NavTo(m_target, BehaviorState.Traveling,
-                            "forestry: back off for the charge", snapToApproach: false);
-                    break;
-
-                case ChargePhase.WindUp:
-                    // Stand and face it. MoveTowards with a zero-length run would slide him,
-                    // so just hold the facing until the wind-up expires.
-                    FaceTarget();
-                    if (Time.time >= m_windupUntil)
-                    {
-                        m_charge = ChargePhase.Running;
-                        // Fresh deadline for the run itself.
-                        m_chargeDeadline = Time.time + ChargeTimeout;
-                    }
-
-                    break;
-
-                case ChargePhase.Running:
-                    var toTarget = m_chargeTarget - m_ai.Position;
-                    toTarget.y = 0f;
-                    if (toTarget.magnitude <= ImpactRange)
-                    {
-                        Impact();
-                        return;
-                    }
-
-                    // A charge is the one place this behaviour drives the villager with no
-                    // path and no navmesh, so it is the one place a bad target means running
-                    // into the wild. Bound it by DISTANCE as well as by time: at a run, the 6s
-                    // deadline alone allows ~30m of unnavigated sprinting from a 5m start, and
-                    // a trunk he cannot close on — across a gully, or blocked — buys every
-                    // metre of that. Far enough to leave the navmesh, which is exactly where
-                    // the normal movement code can no longer bring him back.
-                    if (toTarget.magnitude > ChargeBackoff + ChargeOvershoot)
-                    {
-                        Plugin.Log?.LogWarning(
-                            $"[Forestry:{m_ai.NpcName}] charge ran {toTarget.magnitude:F0}m and is " +
-                            $"still short of the trunk — aborting before he leaves the woodlot.");
-                        NoteChargeFailure();
-                        Reset();
-                        return;
-                    }
-
-                    // And stop the moment he is off the mesh: from there a straight-line sprint
-                    // is unrecoverable, and every further metre makes it worse.
-                    if (!OnNavMesh(m_ai.Position))
-                    {
-                        Plugin.Log?.LogWarning(
-                            $"[Forestry:{m_ai.NpcName}] charge left the navmesh at " +
-                            $"({m_ai.Position.x:F0},{m_ai.Position.z:F0}) — aborting.");
-                        NoteChargeFailure();
-                        Reset();
-                        return;
-                    }
-
-                    // Straight-line sprint, not a nav path: it is a charge, and the last few
-                    // metres are open ground he has already walked.
-                    m_ai.DriveDirect(toTarget.normalized, true);
-                    break;
-            }
-        }
-
-        /// <summary>Remember the current charge target as one not to pick again for a while.</summary>
-        private void NoteChargeFailure()
-        {
-            Object target = m_errand == Errand.Fell ? (Object)m_tree : m_log;
+            Object target = m_errand == Errand.Fell ? m_tree : m_errand == Errand.BreakLog ? m_log : null;
             if (target == null) return;
-            m_chargeFailures[target.GetInstanceID()] = Time.time + ChargeRetrySeconds;
+            m_failedTargets[target.GetInstanceID()] = Time.time + FailedTargetRetrySeconds;
         }
 
-        /// <summary>True while a charge at this target has recently been called off.</summary>
-        private bool ChargeRecentlyFailed(Object target)
+        /// <summary>True while a leg to this tree/log recently timed out.</summary>
+        private bool RecentlyFailed(Object target)
         {
             if (target == null) return false;
             var id = target.GetInstanceID();
-            if (!m_chargeFailures.TryGetValue(id, out var until)) return false;
+            if (!m_failedTargets.TryGetValue(id, out var until)) return false;
             if (Time.time < until) return true;
-            m_chargeFailures.Remove(id);
+            m_failedTargets.Remove(id);
             return false;
-        }
-
-        /// <summary>Is there villager navmesh under this point? Used to call off a charge.</summary>
-        private static bool OnNavMesh(Vector3 pos)
-        {
-            var filter = new NavMeshQueryFilter
-            {
-                agentTypeID = VillagerAgentType.UnityAgentTypeID,
-                areaMask = NavMesh.AllAreas,
-            };
-            return NavMesh.SamplePosition(pos, out _, 2f, filter);
-        }
-
-        private void FaceTarget()
-        {
-            var dir = m_chargeTarget - m_ai.Position;
-            dir.y = 0f;
-            if (dir.sqrMagnitude > 0.01f) m_ai.DriveDirect(dir.normalized * 0.001f, false);
-        }
-
-        private void Impact()
-        {
-            if (m_errand == Errand.Fell) DoFell();
-            else DoBreakLog();
-            Reset();
-        }
-
-        /// <summary>Dust at his feet during the wind-up.</summary>
-        private void SpawnDust()
-        {
-            var prefab = ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(DustEffect) : null;
-            if (prefab == null) return;
-            Object.Instantiate(prefab, m_ai.Position, Quaternion.identity);
         }
 
         private void DoBreakLog()
@@ -875,14 +666,14 @@ namespace ValheimVillages.Behaviors.Forestry
         /// </summary>
         private const int AlternativesPerErrand = 4;
 
-        /// <summary>The nearest fellable trees, closest first, skipping recent charge failures.</summary>
+        /// <summary>The nearest fellable trees, closest first, skipping recent failures.</summary>
         private List<TreeBase> NearestTrees(Vector3 centre, float radius, int count)
         {
             var found = new List<TreeBase>();
             foreach (var tree in PhysicsHelper.GetAllInRadius<TreeBase>(centre, radius))
             {
                 if (!TreeFelling.IsFellable(tree)) continue;
-                if (ChargeRecentlyFailed(tree)) continue;
+                if (RecentlyFailed(tree)) continue;
                 found.Add(tree);
             }
 
@@ -892,7 +683,7 @@ namespace ValheimVillages.Behaviors.Forestry
             return found;
         }
 
-        /// <summary>The nearest breakable logs, closest first, skipping recent charge failures.</summary>
+        /// <summary>The nearest breakable logs, closest first, skipping recent failures.</summary>
         /// <param name="sortFrom">
         ///     Where "nearest" is measured from — the VILLAGER for logs, so the one in his way
         ///     is the one he clears. The search itself still covers the whole woodlot.
@@ -904,7 +695,7 @@ namespace ValheimVillages.Behaviors.Forestry
             {
                 if (!TreeFelling.IsBreakable(log)) continue;
                 if (!TreeFelling.IsSettled(log)) continue; // still rolling — leave it alone
-                if (ChargeRecentlyFailed(log)) continue;
+                if (RecentlyFailed(log)) continue;
                 found.Add(log);
             }
 
@@ -1035,7 +826,6 @@ namespace ValheimVillages.Behaviors.Forestry
             m_active = false;
             m_errand = Errand.None;
             m_navIssued = false;
-            m_charge = ChargePhase.None;
             m_tree = null;
             m_log = null;
             m_drop = null;
@@ -1045,15 +835,6 @@ namespace ValheimVillages.Behaviors.Forestry
             m_plantSeed = null;
             m_plantSpot = Vector3.zero;
             m_ai.SetState(BehaviorState.Idle);
-        }
-
-        /// <summary>Stages of one charge: back off, stamp, run it down.</summary>
-        private enum ChargePhase
-        {
-            None,
-            BackingOff,
-            WindUp,
-            Running,
         }
 
         private enum Errand

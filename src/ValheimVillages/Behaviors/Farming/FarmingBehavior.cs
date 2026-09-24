@@ -144,6 +144,8 @@ namespace ValheimVillages.Behaviors.Farming
             m_ai.SetState(BehaviorState.Idle);
         }
 
+        public void AbandonWorkPublic(string reason) => AbandonWork(reason);
+
         private void AbandonWork(string reason)
         {
             var taskName = m_context?.WorkOrder?.ItemPrefabName ?? "farming";

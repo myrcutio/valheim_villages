@@ -32,5 +32,13 @@ namespace ValheimVillages.Interfaces
 
         /// <summary>True while an assignment is in progress (travel + action).</summary>
         bool AssignmentActive { get; }
+
+        /// <summary>
+        ///     Drop the current assignment outright and return to Idle, so
+        ///     <see cref="AssignmentActive" /> reads false afterwards. Called by the dispatcher
+        ///     when an assignment outlives <see cref="SchedulerSettings.AssignmentCeiling" /> —
+        ///     the backstop for any path that leaves a behavior "busy" with nothing to finish it.
+        /// </summary>
+        void AbandonAssignment(string reason);
     }
 }

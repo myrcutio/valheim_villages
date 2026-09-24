@@ -61,6 +61,8 @@ namespace ValheimVillages.Behaviors.Feasts
 
         public bool AssignmentActive => m_active;
 
+        public void AbandonAssignment(string reason) => Reset();
+
         public AssignmentResult BeginAssignment(CandidateTask task)
         {
             var feast = FindEmptyFeast(task.Position, SearchRadius);

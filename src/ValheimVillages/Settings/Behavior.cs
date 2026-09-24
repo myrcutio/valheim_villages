@@ -451,6 +451,15 @@ namespace ValheimVillages.Settings
         public const float FleeDistance = 12f;
 
         /// <summary>
+        ///     Longest one flee episode (running + the all-clear watch) may hold control. On
+        ///     expiry the villager calms and returns to the scheduler; a hostile still inside
+        ///     <see cref="FleeDangerRadius" /> simply starts a fresh episode. Stops a threat that
+        ///     lingers in the wide all-clear ring from holding a villager out of work
+        ///     indefinitely.
+        /// </summary>
+        public const float FleeMaxSeconds = 30f;
+
+        /// <summary>
         ///     Max XZ distance a flee destination may be pulled to snap it onto the fleer's
         ///     OWN village graph. SafeSpot (myPos + away*FleeDistance) can land off-graph;
         ///     without this clamp the agent paths across the unioned multi-village navmesh and

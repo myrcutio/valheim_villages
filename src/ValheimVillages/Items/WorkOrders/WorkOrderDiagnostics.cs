@@ -110,6 +110,13 @@ namespace ValheimVillages.Items.WorkOrders
         {
             if (recipe.m_resources == null) return null;
 
+            // "Any one of these" recipe: nothing is missing while any single alternative is
+            // covered; otherwise one of them is.
+            if (recipe.m_requireOnlyOneIngredient)
+                return ContainerScanner.TryFindShortfall(containers, containers, recipe, out var anyOf)
+                    ? $"{anyOf.Needed} {anyOf.DisplayName}"
+                    : null;
+
             var parts = new List<string>();
             foreach (var req in recipe.m_resources)
             {

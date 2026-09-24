@@ -31,6 +31,15 @@ namespace ValheimVillages.Scheduling
         public static float ClaimTtl = 20f;
 
         /// <summary>
+        ///     Seconds an assignment may stay active before the dispatcher abandons it. The
+        ///     claim TTL above only stops OTHER villagers taking the task; nothing else bounds
+        ///     how long the holder reads as busy, so a behavior knocked out of its flow (e.g. a
+        ///     flee dropping a craft mid-walk to Idle) pinned its villager indefinitely.
+        ///     Generous on purpose: a legitimate smelt can sit at the station for 300s alone.
+        /// </summary>
+        public static float AssignmentCeiling = 600f;
+
+        /// <summary>
         ///     Whether the reranker's residual learns online from dispatch outcomes
         ///     (<see cref="SchedulerTrainer" />). Off leaves the model exactly as loaded, so the
         ///     scheduler runs on its closed-form utility alone.

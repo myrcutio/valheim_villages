@@ -44,8 +44,28 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// <summary>How far an endpoint may snap to find the mesh on its side.</summary>
         private const float SnapRadius = 1.5f;
 
-        /// <summary>Doorway width the link spans.</summary>
-        private const float LinkWidth = 1f;
+        /// <summary>
+        ///     Zero: a single line down the middle of the doorway. The bake drops the whole Door
+        ///     hierarchy, frame posts included, so the navmesh cannot see them; and a link is
+        ///     crossed in a straight line with no avoidance. A 1m-wide link let a villager enter
+        ///     0.5m off centre and drive straight into a wood_door post (inner face at 0.70m,
+        ///     body radius ~0.5m) — a Mountaineer sat wedged against one for a day, re-pathing
+        ///     into the same post every time the 8s crossing timeout fired.
+        /// </summary>
+        private const float LinkWidth = 0f;
+
+        /// <summary>
+        ///     How far off the door's centre line an endpoint may snap. A zero-width link is
+        ///     crossed exactly between its endpoints, so an endpoint pulled sideways moves the
+        ///     crossing toward a post. 0.2m keeps a 0.5m-radius body clear of a 1.4m opening.
+        /// </summary>
+        private const float MaxEndpointLateral = 0.2f;
+
+        /// <summary>
+        ///     How far a re-centred endpoint may snap. Small, so the point stays on the centre
+        ///     line instead of drifting back to wherever the wide snap put it.
+        /// </summary>
+        private const float RecentreSnapRadius = 0.3f;
 
         /// <summary>
         ///     Bounds on how far apart a door link's ends may be. Shorter than
@@ -190,6 +210,13 @@ namespace ValheimVillages.Villager.AI.Navigation
             };
 
             var skipped = 0;
+            void SkipDoor(Vector3 at, string reason)
+            {
+                skipped++;
+                DebugLog.Event("DoorLinks", "skip_door",
+                    ("pos", $"{at.x:F1},{at.z:F1},{at.y:F1}"), ("reason", reason));
+            }
+
             var doors = Object.FindObjectsByType<Door>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
 
@@ -205,39 +232,49 @@ namespace ValheimVillages.Villager.AI.Navigation
                 if (fwd.sqrMagnitude < 0.01f) continue;
                 fwd.Normalize();
 
-                if (!NavMesh.SamplePosition(pos - fwd * SideOffset, out var a, SnapRadius, filter) ||
-                    !NavMesh.SamplePosition(pos + fwd * SideOffset, out var b, SnapRadius, filter))
+                if (!NavMesh.SamplePosition(pos - fwd * SideOffset, out var hitA, SnapRadius, filter) ||
+                    !NavMesh.SamplePosition(pos + fwd * SideOffset, out var hitB, SnapRadius, filter))
                 {
-                    skipped++;
+                    SkipDoor(pos, "endpoint_missing");
+                    continue;
+                }
+
+                // A zero-width link is crossed exactly between its endpoints, so each must sit on
+                // the door's centre line. A 1.5m snap can land one sideways along the wall; slide
+                // it back onto the line and re-snap tightly rather than dropping the doorway.
+                var along = Vector3.Cross(Vector3.up, fwd);
+                if (!TryCentre(hitA.position, pos, along, filter, out var a) ||
+                    !TryCentre(hitB.position, pos, along, filter, out var b))
+                {
+                    SkipDoor(pos, "off_centre");
                     continue;
                 }
 
                 // Both ends snapped — but to WHERE? A snap radius of 1.5m around points 1.1m
-                // apart can pull both endpoints onto the same side of the door, or sideways
-                // along the wall. That link is not a doorway: it is a shortcut to nowhere, and
-                // the agent drives a link in a straight line with no route planning, so a bad
-                // one walks the villager into whatever is in the way. Require the two ends to
-                // sit on OPPOSITE sides of the door plane and the link to be roughly the length
-                // a doorway should be.
-                var acrossA = Vector3.Dot(a.position - pos, fwd);
-                var acrossB = Vector3.Dot(b.position - pos, fwd);
+                // apart can pull both endpoints onto the same side of the door. That link is not
+                // a doorway: it is a shortcut to nowhere, and the agent drives a link in a
+                // straight line with no route planning, so a bad one walks the villager into
+                // whatever is in the way. Require the two ends to sit on OPPOSITE sides of the
+                // door plane and the link to be roughly the length a doorway should be.
+                var acrossA = Vector3.Dot(a - pos, fwd);
+                var acrossB = Vector3.Dot(b - pos, fwd);
                 if (acrossA >= 0f || acrossB <= 0f)
                 {
-                    skipped++;
+                    SkipDoor(pos, "same_side");
                     continue;
                 }
 
-                var span = Vector3.Distance(a.position, b.position);
+                var span = Vector3.Distance(a, b);
                 if (span < MinLinkSpan || span > MaxLinkSpan)
                 {
-                    skipped++;
+                    SkipDoor(pos, $"span_{span:F1}m");
                     continue;
                 }
 
                 var instance = NavMesh.AddLink(new NavMeshLinkData
                 {
-                    startPosition = a.position,
-                    endPosition = b.position,
+                    startPosition = a,
+                    endPosition = b,
                     width = LinkWidth,
                     costModifier = -1f,
                     bidirectional = true,
@@ -246,13 +283,33 @@ namespace ValheimVillages.Villager.AI.Navigation
                 });
 
                 if (NavMesh.IsLinkValid(instance)) s_links.Add(instance);
-                else skipped++;
+                else SkipDoor(pos, "link_invalid");
             }
 
             Plugin.Log?.LogInfo(
                 $"[DoorLinks] {s_links.Count} doorway(s) bridged" +
-                (skipped > 0 ? $", {skipped} skipped (no navmesh on both sides)" : ""));
+                (skipped > 0 ? $", {skipped} skipped (see skip_door lines for which and why)" : ""));
             return s_links.Count;
+        }
+
+        /// <summary>
+        ///     An endpoint on the door's centre line: <paramref name="snapped" /> as-is when it is
+        ///     within <see cref="MaxEndpointLateral" /> of the line, otherwise slid back onto the
+        ///     line and re-snapped within <see cref="RecentreSnapRadius" />. False when no mesh
+        ///     lies close enough to the line on that side.
+        /// </summary>
+        private static bool TryCentre(
+            Vector3 snapped, Vector3 doorPos, Vector3 along, NavMeshQueryFilter filter, out Vector3 centred)
+        {
+            centred = snapped;
+            var lateral = Vector3.Dot(snapped - doorPos, along);
+            if (Mathf.Abs(lateral) <= MaxEndpointLateral) return true;
+
+            if (!NavMesh.SamplePosition(snapped - along * lateral, out var hit, RecentreSnapRadius, filter))
+                return false;
+
+            centred = hit.position;
+            return Mathf.Abs(Vector3.Dot(centred - doorPos, along)) <= MaxEndpointLateral;
         }
     }
 }

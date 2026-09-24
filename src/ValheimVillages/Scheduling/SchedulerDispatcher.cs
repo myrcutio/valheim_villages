@@ -26,7 +26,8 @@ namespace ValheimVillages.Scheduling
         // Keyed by record id, which OUTLIVES the VillagerAI instance (death+revive, zone
         // stream-out/in and hot reload all rebuild the instance under the same id), so the
         // owning instance is stored alongside and checked on every lookup — see AssignIfIdle.
-        private static readonly Dictionary<string, (string sourceId, IDirectedBehavior beh, VillagerAI owner)>
+        // assignedAt is Time.time at dispatch, for the AssignmentCeiling backstop.
+        private static readonly Dictionary<string, (string sourceId, IDirectedBehavior beh, VillagerAI owner, float assignedAt)>
             s_assigned = new();
 
         /// <summary>Seconds between repeats of an UNCHANGED dispatch-bail reason.</summary>
@@ -60,7 +61,21 @@ namespace ValheimVillages.Scheduling
                     // ReferenceEquals, not ==, so a destroyed instance compares by identity
                     // rather than through Unity's fake-null operator.
                     var sameInstance = ReferenceEquals(cur.owner, ai);
-                    if (sameInstance && cur.beh != null && cur.beh.AssignmentActive) return cur.beh;
+                    if (sameInstance && cur.beh != null && cur.beh.AssignmentActive)
+                    {
+                        // Nothing else bounds how long a held assignment reads as busy: the
+                        // claim TTL only guards against OTHER villagers. A behavior knocked out
+                        // of its own flow (a flee dropping a craft mid-walk to Idle, with the
+                        // waypoint left set but movement stopped) stays "active" forever, and
+                        // this early return then pins the villager with no diagnostic at all.
+                        var held = Time.time - cur.assignedAt;
+                        if (held <= SchedulerSettings.AssignmentCeiling) return cur.beh;
+
+                        Plugin.Log?.LogWarning(
+                            $"[Scheduler:{ai.NpcName}] assignment {cur.sourceId} still active after " +
+                            $"{held:F0}s (ceiling {SchedulerSettings.AssignmentCeiling:F0}s); abandoning.");
+                        cur.beh.AbandonAssignment($"assignment ceiling ({held:F0}s)");
+                    }
 
                     if (!sameInstance)
                         Plugin.Log?.LogInfo(
@@ -174,7 +189,7 @@ namespace ValheimVillages.Scheduling
                     return null;
                 }
 
-                s_assigned[villagerId] = (best.SourceId, beh, ai);
+                s_assigned[villagerId] = (best.SourceId, beh, ai, now);
                 Plugin.Log?.LogInfo(
                     $"[Scheduler:{ai.NpcName}] assigned {best.Kind}@({best.Position.x:F0},{best.Position.z:F0}) " +
                     $"cap={best.RequiredCapability}");

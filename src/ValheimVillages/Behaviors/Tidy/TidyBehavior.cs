@@ -50,6 +50,8 @@ namespace ValheimVillages.Behaviors.Tidy
 
         public bool AssignmentActive => m_active || m_targetStation != null;
 
+        public void AbandonAssignment(string reason) => Reset();
+
         public AssignmentResult BeginAssignment(CandidateTask task)
         {
             // No reachability verdict here: this behavior never resolves an approach, so it
