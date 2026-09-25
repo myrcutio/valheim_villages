@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-09-25
+
+### Changed
+- **Idle villagers wander the village.** With no work they can do, every villager now strolls around its village instead of parking at one relax spot. It still heads for the fire, a table or a seat when it actually feels cold, lonely or tired, and goes back to wandering afterwards.
+- **Idle villagers walk.** Wandering and relaxing now happen at a slow walk; villagers only hurry when they're on a job.
+- **Villagers sort out collisions.** When two villagers bump into each other, one steps aside and the other carries on, instead of both shoving until one gives up. A villager blocked by a player, a cart or an animal waits a moment, backs away and tries again, and gives up on a stroll that keeps running into the same thing.
+- **Villagers carry what they haul.** A villager now picks a stray item up, walks it to the chest and puts it in there. Before, the item stayed on the ground and jumped into the chest from wherever it lay, even from another floor. If the trip is interrupted, the item is dropped at the villager's feet; it's never lost, even if the villager dies or the area unloads.
+- **Piles are hauled in one trip.** Identical items lying together are picked up together, up to a full stack, as a single job, so a spilled pile no longer costs one round trip per item. Two villagers no longer chase the same item.
+- **Villagers only flee from real danger.** A hostile has to be able to reach the villager (in view, or already inside the village) and be aware of someone. A greyling wandering outside the wall no longer sends everyone running.
+- Idle villagers notice stray items straight away, even while wandering or relaxing.
+- Requires BepInExPack_Valheim 5.4.2351.
+
+### Fixed
+- **Items no longer duplicate or turn into underground ghosts.** When a Farmer collected harvested crops it only removed its own copy, so the player could still pick the same items up. On a dedicated server that left server-only copies stuck underground, where villagers kept trying and failing to reach them and ignored every other stray item. Villagers now remove collected items properly for everyone.
+- **Stray items are hauled even when some can't be reached.** One unreachable item used to be picked every time and block everything else; villagers now take the nearest item they can actually reach, and skip items that are still falling.
+- **Villagers go back to work after fleeing.** A Farmer or crafter interrupted mid-walk used to stand idle until a 10-minute timeout; they now pick up the walk where they left off.
+- **Long hauls, such as upstairs, no longer time out a few steps short.** Trip time now scales with the length of the route.
+- **The Farmer no longer offers orders for things that can't be farmed.** Loot and props such as the Fuling totem, Dvergr lanterns and tankards, charred skulls, pot shards and snowballs showed up as forage orders. Only plants that grow back are offered now, and the old entries disappear on their own. Characters from before the forage unlock fix may still see forage orders for plants they have never picked; the `vv_reset forage` console command clears those.
+
 ## [0.3.4] - 2026-09-23
 
 ### Changed

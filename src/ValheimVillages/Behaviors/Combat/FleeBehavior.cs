@@ -10,9 +10,10 @@ using ValheimVillages.Villager.AI.Navigation;
 namespace ValheimVillages.Behaviors.Combat
 {
     /// <summary>
-    ///     Non-combatant reaction to danger. When a hostile comes within
-    ///     <see cref="CombatSettings.FleeDangerRadius"/>, the villager panics and
-    ///     runs — toward the nearest guard (any villager with a
+    ///     Non-combatant reaction to danger. When a hostile that is aware of someone and can
+    ///     reach this villager (line of sight, or already inside on the village graph — see
+    ///     IsRealThreat) comes within <see cref="CombatSettings.FleeDangerRadius"/>, the
+    ///     villager panics and runs — toward the nearest guard (any villager with a
     ///     <see cref="CombatBehavior"/>) if one is on the roster, otherwise directly
     ///     away from the threat.
     ///
@@ -100,6 +101,7 @@ namespace ValheimVillages.Behaviors.Combat
                 m_threat = FindNearestThreat(CombatSettings.FleeDangerRadius);
                 if (m_threat != null)
                 {
+                    LogTrigger(m_threat);
                     if (m_episodeStartedAt <= 0f) m_episodeStartedAt = Time.time;
                     m_watchingForAllClear = false;
                     return true;
@@ -248,11 +250,80 @@ namespace ValheimVillages.Behaviors.Combat
 
         // --- helpers -------------------------------------------------------
 
+        private static int s_losMask;
+
+        /// <summary>
+        ///     Telemetry: what set off this flee and whether it could actually threaten the
+        ///     villager — line of sight through solid geometry (walls, terrain), whether it
+        ///     stands on the village graph (inside the walls), and whether it is even aware of
+        ///     anyone. Throttled per villager + threat.
+        /// </summary>
+        private void LogTrigger(Character threat)
+        {
+            if (!Settings.LogSettings.VerboseFlee) return;
+            var los = HasLineOfSight(threat, out var blockedBy);
+            var ai = threat.GetComponent<BaseAI>();
+            var monster = ai as MonsterAI;
+            var targetCreature = monster != null ? monster.GetTargetCreature() : null;
+
+            DebugLog.ThrottledWindow(
+                $"flee_trigger:{m_ai.NpcName}:{threat.GetZDOID()}", System.TimeSpan.FromSeconds(10f),
+                "Flee", "triggered",
+                ("villager", m_ai.NpcName), ("threat", threat.name.Replace("(Clone)", "")),
+                ("dist", Vector3.Distance(m_ai.Position, threat.transform.position)),
+                ("line_of_sight", los),
+                ("blocked_by", blockedBy ?? "none"),
+                ("threat_on_village_graph", IsOnVillageGraph(threat)),
+                ("threat_alerted", ai != null && ai.IsAlerted()),
+                ("threat_target", targetCreature != null ? targetCreature.name.Replace("(Clone)", "") : "none"),
+                ("villager_pos", m_ai.Position), ("threat_pos", threat.transform.position));
+        }
+
+        /// <summary>
+        ///     A hostile is only a threat if it could actually get at this villager AND knows
+        ///     anyone is there. Distance alone sent villagers running from a greyling on the
+        ///     far side of the palisade — 7 m away, behind a closed door, unaware of anyone.
+        ///     Reach = clear line of sight through solid geometry (walls, doors, terrain), or
+        ///     standing on the village's walkable graph (i.e. already inside). Aware = alerted,
+        ///     or has a target.
+        /// </summary>
+        private bool IsRealThreat(Character c)
+        {
+            var ai = c.GetComponent<BaseAI>();
+            if (ai == null) return false;
+            var monster = ai as MonsterAI;
+            var aware = ai.IsAlerted() || (monster != null && monster.GetTargetCreature() != null);
+            if (!aware) return false;
+
+            return HasLineOfSight(c, out _) || IsOnVillageGraph(c);
+        }
+
+        private bool HasLineOfSight(Character threat, out string blockedBy)
+        {
+            if (s_losMask == 0)
+                s_losMask = LayerMask.GetMask(
+                    "Default", "static_solid", "Default_small", "piece", "terrain", "vehicle");
+
+            var eye = m_ai.Position + Vector3.up * 1.5f;
+            var blocked = Physics.Linecast(eye, threat.GetCenterPoint(), out var hit, s_losMask,
+                QueryTriggerInteraction.Ignore);
+            blockedBy = blocked ? hit.collider.name : null;
+            return !blocked;
+        }
+
+        private bool IsOnVillageGraph(Character threat)
+        {
+            var graph = Villages.Entity.VillageRegistry.GraphAt(m_ai.HomeAnchor);
+            return graph != null && graph.PointToRegionId(threat.transform.position) != null;
+        }
+
         private bool IsStillDangerous(Character c)
         {
             if (c == null || c.IsDead()) return false;
             var clearSq = CombatSettings.FleeClearRadius * CombatSettings.FleeClearRadius;
-            return (c.transform.position - m_ai.Position).sqrMagnitude <= clearSq;
+            if ((c.transform.position - m_ai.Position).sqrMagnitude > clearSq) return false;
+            // Same test as the trigger: one that lost interest or went behind a wall is over.
+            return IsRealThreat(c);
         }
 
         private Character FindNearestThreat(float radius)
@@ -269,6 +340,7 @@ namespace ValheimVillages.Behaviors.Combat
                 if (!BaseAI.IsEnemy(me, c)) continue;
                 var dsq = (c.transform.position - myPos).sqrMagnitude;
                 if (dsq > radiusSq) continue;
+                if (!IsRealThreat(c)) continue;
                 if (dsq < bestSq)
                 {
                     bestSq = dsq;

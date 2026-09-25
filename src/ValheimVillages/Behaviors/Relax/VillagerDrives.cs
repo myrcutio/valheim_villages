@@ -89,6 +89,13 @@ namespace ValheimVillages.Behaviors.Relax
         /// <summary>Largest elapsed slice honoured in one tick, so a stall can't jump drives.</summary>
         private const float MaxElapsedSeconds = 2f;
 
+        /// <summary>
+        ///     Pressure at which a drive is worth acting on. Below it an idle villager just
+        ///     wanders; at or above it, relax takes over and sends it to a spot that serves the
+        ///     drive. From <see cref="Neutral" /> an unmet drive reaches this in ~20s.
+        /// </summary>
+        public const float ElevatedThreshold = 0.7f;
+
         private static readonly Dictionary<string, DriveState> s_byVillager = new();
 
         /// <summary>Wall-clock time of each villager's last tick.</summary>
@@ -192,6 +199,19 @@ namespace ValheimVillages.Behaviors.Relax
             }
 
             return best;
+        }
+
+        /// <summary>
+        ///     True when any of this villager's drives has reached
+        ///     <see cref="ElevatedThreshold" /> — i.e. it has a reason to go relax rather than wander.
+        /// </summary>
+        public static bool IsAnyElevated(string villagerId)
+        {
+            var d = For(villagerId);
+            foreach (Drive drive in System.Enum.GetValues(typeof(Drive)))
+                if (d.Get(drive) >= ElevatedThreshold)
+                    return true;
+            return false;
         }
 
         /// <summary>Drop one villager's drives (death / despawn).</summary>

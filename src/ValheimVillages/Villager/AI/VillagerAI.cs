@@ -176,6 +176,12 @@ namespace ValheimVillages.Villager.AI
 
         private DoorHandler DoorHandler => m_doorHandler ??= GetComponent<DoorHandler>();
 
+        /// <summary>
+        ///     Walking speed (m/s) for idle travel — relax and wander. Half the Dvergr jog
+        ///     (2.0) so an idle villager visibly strolls rather than hurrying.
+        /// </summary>
+        private const float CasualWalkSpeed = 1.0f;
+
         protected override void Awake()
         {
             try
@@ -199,6 +205,11 @@ namespace ValheimVillages.Villager.AI
                     "AI will not activate. Indicates a native-component cleanup or double-init regression.");
                 return;
             }
+
+            // The Dvergr prefab ships walk == jog (2.0 m/s), so the walk gait alone changes
+            // nothing. Give villagers a genuinely slower walk for idle travel (relax/wander);
+            // work travel keeps the prefab's jog/run.
+            m_character.m_walkSpeed = CasualWalkSpeed;
 
             if (VillagerAgentType.EnsureRegistered())
                 m_pathAgentType = VillagerAgentType.AgentType;
@@ -523,6 +534,9 @@ namespace ValheimVillages.Villager.AI
                 {
                     var ctx = new BehaviorContext();
                     var handled = false;
+                    var tier = "none";
+                    string offered = null;
+                    var offeredAccepted = false;
 
                     // Three tiers, in strict order. The scheduler is the sole selector of
                     // WORK; there is no self-discovery path and no log-only mode.
@@ -537,6 +551,7 @@ namespace ValheimVillages.Villager.AI
                             ActiveBehavior = b;
                             b.Update(dt);
                             handled = true;
+                            tier = "reactive";
                             break;
                         }
                     }
@@ -547,11 +562,14 @@ namespace ValheimVillages.Villager.AI
                     if (!handled)
                     {
                         var directed = Scheduling.SchedulerDispatcher.AssignIfIdle(this);
+                        offered = (directed as IBehavior)?.Tag;
                         if (directed is IBehavior db && db.WantsControl(ctx))
                         {
                             ActiveBehavior = db;
                             db.Update(dt);
                             handled = true;
+                            tier = "scheduler";
+                            offeredAccepted = true;
                         }
                     }
 
@@ -568,9 +586,21 @@ namespace ValheimVillages.Villager.AI
                                 ActiveBehavior = b;
                                 b.Update(dt);
                                 handled = true;
+                                tier = "routine";
                                 break;
                             }
                         }
+
+                    // Telemetry: which tier won this reselect, and what the scheduler offered.
+                    // Keyed per villager+tier+behaviour so each distinct outcome surfaces.
+                    if (Settings.LogSettings.VerboseSelect)
+                        DebugLog.ThrottledWindow(
+                            $"select:{m_villagerName}:{tier}:{ActiveBehavior?.Tag}:{offered}:{offeredAccepted}",
+                            TimeSpan.FromSeconds(15f), "Select", "reselect",
+                            ("villager", m_villagerName), ("tier", tier),
+                            ("behavior", handled ? ActiveBehavior?.Tag : "none"),
+                            ("scheduler_offered", offered ?? "none"), ("offer_accepted", offeredAccepted),
+                            ("state", CurrentState));
 
                     // Nothing wanted control — settle to Idle so the next reselect starts
                     // from a clean state (and so routine behaviors, which arm on Idle, can
@@ -707,20 +737,23 @@ namespace ValheimVillages.Villager.AI
                 m_behaviors.Sort((a, b) => b.Priority.CompareTo(a.Priority));
             }
 
-            // Lowest-priority idle filler: every villager relaxes at a comfort spot (fire/
-            // table/seat/hot tub) when it has nothing better to do. Auto-added like flee so
-            // definitions don't each opt in; guarded so a JSON that already lists "relax"
-            // (or a hot-reload re-run) doesn't double it. Its priority(10) sits under every
-            // other behavior, so it only ever runs when nothing else wanted control and is
-            // preempted by any real work on the next reselect tick.
+            // Idle for every villager with no workable task: wander by default, relax at a
+            // comfort spot (fire/table/seat/hot tub) when a drive is elevated. Both auto-added
+            // like flee so definitions don't each opt in; guarded so a JSON that already lists
+            // them (or a hot-reload re-run) doesn't double them. Relax(25) outranks wander(20)
+            // but both sit under patrol(30) and all work, so any real work preempts them on the
+            // next reselect tick.
             var hasRelax = false;
+            var hasWander = false;
             foreach (var b in m_behaviors)
-                if (b is Behaviors.Relax.RelaxBehavior) hasRelax = true;
-            if (!hasRelax)
             {
-                m_behaviors.Add(new Behaviors.Relax.RelaxBehavior(this));
-                m_behaviors.Sort((a, b) => b.Priority.CompareTo(a.Priority));
+                if (b is Behaviors.Relax.RelaxBehavior) hasRelax = true;
+                if (b is Behaviors.Wander.WanderBehavior) hasWander = true;
             }
+
+            if (!hasRelax) m_behaviors.Add(new Behaviors.Relax.RelaxBehavior(this));
+            if (!hasWander) m_behaviors.Add(new Behaviors.Wander.WanderBehavior(this));
+            m_behaviors.Sort((a, b) => b.Priority.CompareTo(a.Priority));
 
             // TODO: why is this necessary? what part of farming requires crafting?
             var craftAdapter = GetBehavior<CraftingBehaviorAdapter>();
@@ -1176,7 +1209,7 @@ namespace ValheimVillages.Villager.AI
             // stepping into a mutual deadlock. Lower value = higher priority.
             // Derive a stable 20..80 spread from the villager id so the same
             // villager always keeps the same priority across rebakes/reloads.
-            m_navAgent.avoidancePriority = 20 + (Mathf.Abs(UniqueId?.GetHashCode() ?? 0) % 61);
+            m_navAgent.avoidancePriority = AvoidancePriority;
 
             if (NavMesh.SamplePosition(transform.position, out var hit, 3f, AgentFilter()))
                 m_navAgent.Warp(hit.position);
@@ -1356,6 +1389,7 @@ namespace ValheimVillages.Villager.AI
             }
 
             // Walk home over the terrain (base-game pathing, NOT the village agent).
+            m_character?.SetWalk(false);
             MoveTo(dt, m_homeAnchor, 1f, true);
             return true;
         }
@@ -1637,6 +1671,13 @@ namespace ValheimVillages.Villager.AI
                 return;
             }
 
+            // Walked into something the bake doesn't know about — another villager, a player,
+            // a cart, a creature. RVO only STEERS around movers; once it fails and they are
+            // actually pushing each other, it never stops. One side yields until they are
+            // apart; the other keeps going. See HoldForDynamicBlocker (which drives the body
+            // itself while it holds — standing still, or backing away).
+            if (HoldForDynamicBlocker(dir)) return;
+
             // Doorways bake as plain walkable navmesh (door colliders are
             // excluded from the bake), so the agent routes straight through
             // them — but the PHYSICAL door is still a solid collider. Open any
@@ -1649,6 +1690,10 @@ namespace ValheimVillages.Villager.AI
                 if (blockingDoor != null) DoorHandler.OpenDoor(blockingDoor);
             }
 
+            // Idle travel (relax, wander) WALKS; without this, "not running" still meant
+            // Valheim's default jog. Set every tick — the engine never clears m_walk itself,
+            // so a stale flag would otherwise slow the next work trip.
+            m_character?.SetWalk(IsCasualTravel && !running);
             MoveTowards(dir.normalized, running);
         }
 
@@ -1673,6 +1718,7 @@ namespace ValheimVillages.Villager.AI
         public void DriveDirect(Vector3 dir, bool running)
         {
             m_directMoveAt = Time.time;
+            m_character?.SetWalk(false); // a charge never ambles, whatever idle travel left set
             MoveTowards(dir, running);
         }
 
@@ -1690,6 +1736,232 @@ namespace ValheimVillages.Villager.AI
         private const float OffMeshStopRadius = 5f;
 
         private float m_directMoveAt;
+
+        /// <summary>
+        ///     Skin added to the villager's own capsule when testing for contact. Two
+        ///     physics capsules pressed together rest a hair apart, so an exact-size test
+        ///     would miss the very collisions it's meant to catch.
+        /// </summary>
+        private const float ContactSkin = 0.05f;
+
+        /// <summary>
+        ///     How squarely the blocker must sit in the move direction (cosine) to count as
+        ///     being pushed into. Brushing past something at the side is not a collision.
+        /// </summary>
+        private const float PushingIntoCos = 0.5f;
+
+        /// <summary>
+        ///     Layers that hold things which move and are therefore never in the bake:
+        ///     characters (villagers, players, creatures) and vehicles (carts).
+        /// </summary>
+        private static int s_dynamicBlockerMask;
+
+        private static readonly Collider[] s_blockerHits = new Collider[16];
+
+        /// <summary>Time.time this villager started yielding to a blocker; 0 = not yielding.</summary>
+        private float m_yieldingSince;
+
+        /// <summary>
+        ///     How long a villager waits on the same blocker before backing away from it. A
+        ///     player standing still, or a body wedged against another, never "untangles" by
+        ///     itself — waiting alone left villagers pinned indefinitely.
+        /// </summary>
+        private const float YieldTimeoutSeconds = 1.5f;
+
+        /// <summary>How long the yielder steps directly away from the blocker before re-planning.</summary>
+        private const float BackoffSeconds = 0.75f;
+
+        /// <summary>
+        ///     Back-offs from the same blocker (within <see cref="EscapeMemorySeconds" />) before
+        ///     an IDLE trip (relax/wander) is dropped. Work trips never give up — they need that
+        ///     destination — they just keep backing off and retrying until the blocker moves.
+        /// </summary>
+        private const int MaxIdleEscapes = 2;
+
+        /// <summary>How long a back-off counts toward <see cref="MaxIdleEscapes" />.</summary>
+        private const float EscapeMemorySeconds = 10f;
+
+        private float m_backoffUntil;
+        private Vector3 m_backoffDir;
+        private GameObject m_escapeBlocker;
+        private int m_escapeCount;
+        private float m_lastEscapeAt;
+
+        /// <summary>
+        ///     True while this villager should stand still because it collided with a mover.
+        ///     Triggers only on an actual collision — the villager's body touching the mover
+        ///     while walking into it — never on mere proximity: RVO already steers around
+        ///     movers that are merely near.
+        ///
+        ///     <para>Between two villagers exactly ONE yields: the one without right of way
+        ///     (<see cref="HasRightOfWay" />) waits while the other keeps walking, until they
+        ///     are no longer touching. Both waiting, or both re-planning into each other, is the
+        ///     deadlock this exists to prevent. Against anything else — a player, a cart, a
+        ///     creature — the villager always yields, since those can't be asked to.</para>
+        ///
+        ///     <para>Once untangled, the path is dropped so the next tick re-plans from where
+        ///     the villager actually stands, not from before it was shoved.</para>
+        ///
+        ///     <para>If the blocker hasn't moved after <see cref="YieldTimeoutSeconds" />, the
+        ///     villager backs away from it for <see cref="BackoffSeconds" /> and re-plans. An idle
+        ///     trip that keeps hitting the same blocker is dropped (<see cref="MaxIdleEscapes" />).</para>
+        ///
+        ///     <para>Drives the body itself while holding (stop, or back away); the caller just
+        ///     returns.</para>
+        /// </summary>
+        private bool HoldForDynamicBlocker(Vector3 dir)
+        {
+            if (m_backoffUntil > 0f)
+            {
+                if (Time.time < m_backoffUntil)
+                {
+                    m_character?.SetWalk(false);
+                    MoveTowards(m_backoffDir, false);
+                    return true;
+                }
+
+                m_backoffUntil = 0f;
+                ClearCachedPath();
+                StopMoving();
+                return true; // backed off; the next tick re-plans from here
+            }
+
+            var blocker = FindDynamicBlocker(dir);
+            if (blocker != null && !HasRightOfWay(blocker))
+            {
+                if (m_yieldingSince <= 0f)
+                {
+                    m_yieldingSince = Time.time;
+                    DebugLog.ThrottledWindow(
+                        $"blocked:{m_villagerName}", System.TimeSpan.FromSeconds(5f),
+                        "Movement", "yielding_to_mover",
+                        ("villager", m_villagerName), ("blocker", blocker.name),
+                        ("pos", transform.position),
+                        ("note", "waiting until untangled, then re-planning"));
+                }
+                else if (Time.time - m_yieldingSince >= YieldTimeoutSeconds)
+                {
+                    BeginBackoff(blocker);
+                }
+
+                StopMoving();
+                return true;
+            }
+
+            if (m_yieldingSince <= 0f) return false;
+
+            m_yieldingSince = 0f;
+            ClearCachedPath();
+            StopMoving();
+            return true; // this tick's path is gone; the next tick re-plans
+        }
+
+        /// <summary>
+        ///     The blocker hasn't cleared: step directly away from it, or — for an idle trip
+        ///     that keeps running into the same thing — drop the trip so relax/wander pick
+        ///     somewhere else.
+        /// </summary>
+        private void BeginBackoff(GameObject blocker)
+        {
+            m_yieldingSince = 0f;
+
+            if (blocker == m_escapeBlocker && Time.time - m_lastEscapeAt <= EscapeMemorySeconds)
+                m_escapeCount++;
+            else
+            {
+                m_escapeBlocker = blocker;
+                m_escapeCount = 1;
+            }
+
+            m_lastEscapeAt = Time.time;
+
+            if (IsCasualTravel && m_escapeCount > MaxIdleEscapes)
+            {
+                DebugLog.Event("Movement", "idle_trip_dropped",
+                    ("villager", m_villagerName), ("blocker", blocker.name),
+                    ("pos", transform.position),
+                    ("note", $"blocked {m_escapeCount}x — picking somewhere else"));
+                m_escapeBlocker = null;
+                m_escapeCount = 0;
+                ClearCachedPath();
+                SetState(BehaviorState.Idle);
+                return;
+            }
+
+            var away = transform.position - blocker.transform.position;
+            away.y = 0f;
+            if (away.sqrMagnitude < 1e-4f) away = -transform.forward;
+            m_backoffDir = away.normalized;
+            m_backoffUntil = Time.time + BackoffSeconds;
+
+            DebugLog.Event("Movement", "backing_off_mover",
+                ("villager", m_villagerName), ("blocker", blocker.name),
+                ("pos", transform.position), ("attempt", m_escapeCount));
+        }
+
+        /// <summary>
+        ///     True when this villager keeps walking through a collision with
+        ///     <paramref name="blocker" /> and the blocker is the one that yields. Only another
+        ///     villager can yield, so against anything else this is false. Decided by the same
+        ///     per-villager <c>avoidancePriority</c> RVO uses (lower = right of way), ties broken
+        ///     by id, so both sides of a collision always reach opposite answers.
+        /// </summary>
+        private bool HasRightOfWay(GameObject blocker)
+        {
+            var other = blocker.GetComponent<VillagerAI>();
+            if (other == null || other == this) return false;
+
+            var mine = AvoidancePriority;
+            var theirs = other.AvoidancePriority;
+            if (mine != theirs) return mine < theirs;
+            return string.CompareOrdinal(UniqueId, other.UniqueId) < 0;
+        }
+
+        /// <summary>
+        ///     This villager's RVO priority (lower = right of way): a stable 20..80 spread from
+        ///     the villager id, so the same villager keeps it across rebakes and reloads.
+        /// </summary>
+        private int AvoidancePriority => 20 + (Mathf.Abs(UniqueId?.GetHashCode() ?? 0) % 61);
+
+        /// <summary>
+        ///     The first mover (not this villager) that this villager's body is touching AND
+        ///     walking into along <paramref name="dir" />, or null.
+        /// </summary>
+        private GameObject FindDynamicBlocker(Vector3 dir)
+        {
+            if (m_character == null) return null;
+            if (s_dynamicBlockerMask == 0)
+                s_dynamicBlockerMask = LayerMask.GetMask(
+                    "character", "character_net", "character_ghost", "character_noenv", "vehicle");
+
+            var radius = m_character.GetRadius() + ContactSkin;
+            var height = m_character.GetHeight();
+            var pos = transform.position;
+            var bottom = pos + Vector3.up * radius;
+            var top = pos + Vector3.up * Mathf.Max(radius, height - radius);
+            var centre = pos + Vector3.up * (height * 0.5f);
+            var forward = dir.normalized;
+
+            var count = Physics.OverlapCapsuleNonAlloc(
+                bottom, top, radius, s_blockerHits, s_dynamicBlockerMask, QueryTriggerInteraction.Ignore);
+            for (var i = 0; i < count; i++)
+            {
+                var col = s_blockerHits[i];
+                if (col == null) continue;
+                var character = col.GetComponentInParent<Character>();
+                if (character == m_character) continue;
+
+                // Touching, but is he walking INTO it? Side contact while passing isn't a push.
+                var toBlocker = col.bounds.center - centre;
+                toBlocker.y = 0f;
+                if (toBlocker.sqrMagnitude < 1e-4f ||
+                    Vector3.Dot(forward, toBlocker.normalized) < PushingIntoCos) continue;
+
+                return character != null ? character.gameObject : col.transform.root.gameObject;
+            }
+
+            return null;
+        }
 
         /// <summary>True while a behaviour is steering the body itself, bypassing the agent.</summary>
         private bool IsDrivingDirectly =>

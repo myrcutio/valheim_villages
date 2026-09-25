@@ -219,14 +219,10 @@ namespace ValheimVillages.Behaviors.Farming
                     continue;
                 }
 
-                var stack = drop.m_itemData.m_stack;
-                if (stack <= 0) continue;
-
-                var take = Mathf.Min(stack, maxTake - total);
-                drop.m_itemData.m_stack -= take;
-                if (drop.m_itemData.m_stack <= 0)
-                    Object.Destroy(drop.gameObject);
-                total += take;
+                // Through GroundDrops, not a bare Object.Destroy: the drop belongs to whoever
+                // picked the crop, and a local-only destroy left the item in their world AND
+                // resurrected it here as an underground ghost. See GroundDrops.
+                total += GroundDrops.Take(drop, maxTake - total);
             }
 
             DebugLog.Event("Farming", "collect_drops",

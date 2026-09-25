@@ -32,5 +32,30 @@ namespace ValheimVillages.Settings
         ///     both unanswerable without this. Off by default; chatter is not diagnostics.
         /// </summary>
         public static bool VerboseTalk = false;
+
+        /// <summary>
+        ///     When true, Haul logs every decision: why it declined to start, each scan's
+        ///     verdict on every drop it saw (owner, ZDO vs transform height, reachability,
+        ///     grouping), every leg change and arrival. One long line per villager per ~8 s
+        ///     scan — the telemetry that found the ghost-drop and remote-deposit bugs. The
+        ///     outcome ("Stored Nx … in a chest") and carry_dropped stay on regardless.
+        /// </summary>
+        public static bool VerboseHaul = false;
+
+        /// <summary>When true, every behaviour reselect logs which tier/behaviour won (throttled).</summary>
+        public static bool VerboseSelect = false;
+
+        /// <summary>
+        ///     When true, each flee trigger logs the threat, distance, line of sight, whether it
+        ///     is inside the village graph and whether it is alerted/targeting (throttled).
+        /// </summary>
+        public static bool VerboseFlee = false;
+
+        /// <summary>
+        ///     When true, every network destroy of an item-drop ZDO is traced (received, and
+        ///     whether it was really removed). Every pickup in the world fires it. A destroy
+        ///     that hits a dead registered instance is always logged, flag or not.
+        /// </summary>
+        public static bool VerboseItemDestroy = false;
     }
 }

@@ -45,6 +45,10 @@ namespace ValheimVillages.Patches
             var recordId = zdo.GetString(VillagerRecord.IdKey);
             if (string.IsNullOrEmpty(recordId)) return;
 
+            // A hauler killed mid-carry drops what it was carrying — the item lives only on
+            // this NPC ZDO while carried, and the ZDO is about to be destroyed.
+            Behaviors.Tidy.HaulCarry.DropIfCarrying(zdo, __instance.transform.position);
+
             var record = VillagerRecordTable.FindById(recordId);
             if (record == null)
             {

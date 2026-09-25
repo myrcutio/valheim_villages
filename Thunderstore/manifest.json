@@ -1,10 +1,10 @@
 {
   "name": "ValheimVillages",
-  "version_number": "0.3.4",
+  "version_number": "0.3.5",
   "website_url": "https://github.com/myrcutio/valheim_villages",
   "description": "Adds villagers who map your walled village, find your stations and chests, and keep work orders stocked from what you have. They farm, cook, smelt, haul, repair and patrol. Multiplayer and dedicated server ready, highly configurable.",
   "dependencies": [
-    "denikson-BepInExPack_Valheim-5.4.2350"
+    "denikson-BepInExPack_Valheim-5.4.2351"
   ],
   "tags": [
     "Mods",

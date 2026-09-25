@@ -18,9 +18,13 @@ namespace ValheimVillages.Items.VirtualRecipes
     ///     <para>Yields are read off each prefab's own <c>m_itemPrefab</c> rather than
     ///     hard-coded, so mod-added forageables appear automatically. Because the whole
     ///     Pickable population is far broader than any one villager's job — surtling cores, tar,
-    ///     dungeon loot and ore all use the same component — the villager definition supplies a
-    ///     <c>forageExclusions</c> substring list, exactly like the <c>cultivatorExclusions</c>
-    ///     that already keeps tree saplings out of the Farmer's planting list.</para>
+    ///     dungeon loot and ore all use the same component — only pickables that REGROW in place
+    ///     (<c>m_respawnTimeMinutes &gt; 0</c>) count. A bush, a mushroom or a thistle comes back
+    ///     on its own; a Fuling totem, a charred skull, a pot shard or a Dvergr tankard is a
+    ///     one-shot prop that is gone once taken, so it is never something a villager can be
+    ///     ordered to keep supplying. A denylist alone let every unlisted prop through. The
+    ///     definition's <c>forageExclusions</c> still applies on top, for regrowing things the
+    ///     Farmer shouldn't touch.</para>
     ///
     ///     <para>Outputs already registered for the station are skipped, which is what keeps a
     ///     PLANTABLE crop (Carrot, Turnip, Barley...) on the farm route: cultivator discovery
@@ -43,6 +47,7 @@ namespace ValheimVillages.Items.VirtualRecipes
             // all drop Raspberries must not become six identical work orders.
             var seenOutputs = new HashSet<string>();
             var excluded = new List<string>();
+            var oneShot = new List<string>();
 
             for (var i = 0; i < zns.m_prefabs.Count; i++)
             {
@@ -54,6 +59,15 @@ namespace ValheimVillages.Items.VirtualRecipes
                 var output = pickable.m_itemPrefab.name;
                 if (string.IsNullOrEmpty(output)) continue;
                 if (existingOutputs != null && existingOutputs.Contains(output)) continue;
+
+                // Checked per prefab, BEFORE the per-output dedup: if any prefab yielding this
+                // output regrows, that is the one that makes it forageable.
+                if (pickable.m_respawnTimeMinutes <= 0f)
+                {
+                    oneShot.Add(go.name + "->" + output);
+                    continue;
+                }
+
                 if (!seenOutputs.Add(output)) continue;
 
                 // Match exclusions on BOTH names: the prefab says what is being harvested
@@ -89,6 +103,10 @@ namespace ValheimVillages.Items.VirtualRecipes
                 Plugin.Log?.LogInfo(
                     "[PickableRecipeDiscovery] excluded " + excluded.Count + " yield(s) by definition filter: " +
                     string.Join(", ", excluded.ToArray()));
+            if (oneShot.Count > 0)
+                Plugin.Log?.LogInfo(
+                    "[PickableRecipeDiscovery] skipped " + oneShot.Count + " one-shot pickable(s) that never regrow: " +
+                    string.Join(", ", oneShot.ToArray()));
 
             return list;
         }

@@ -10,15 +10,16 @@ using ValheimVillages.Villager.AI.Pathfinding;
 namespace ValheimVillages.Behaviors.Wander
 {
     /// <summary>
-    ///     Low-priority idle ambling for villagers with no work role (e.g. the
-    ///     Mountaineer, whose JSON has no work behaviors). When idle, pick a random
+    ///     The default idle activity for EVERY villager with no workable task (auto-added in
+    ///     <c>VillagerAI.RegisterBehaviors</c>). When idle, pick a random
     ///     walkable point within a short radius of the home anchor on the villager
     ///     (slot-31) navmesh and stroll to it, then idle and re-arm after a cooldown —
     ///     which reads as the villager mooching around the village instead of standing
     ///     frozen on its anchor.
     ///
-    ///     <para>Purely cosmetic idle filler: priority sits below patrol and far below the
-    ///     reactive floor, so flee/combat still preempt. Not an <see cref="IDirectedBehavior" />
+    ///     <para>Idle filler: priority sits below relax (25, which takes over when a drive is
+    ///     elevated), below patrol, and far below the reactive floor, so flee/combat still
+    ///     preempt. Not an <see cref="IDirectedBehavior" />
     ///     — there is no scheduler task for it; it runs in the routine (step-3) slot, only
     ///     reached when the scheduler had nothing to dispatch. Tag: "wander".</para>
     /// </summary>
@@ -41,7 +42,7 @@ namespace ValheimVillages.Behaviors.Wander
 
         public string Tag => "wander";
 
-        // Below patrol(30); pure idle filler. Reactive behaviors (flee/combat=100) preempt.
+        // Below relax(25) and patrol(30); idle filler. Reactive behaviors (flee/combat=100) preempt.
         public int Priority => 20;
 
         public bool WantsControl(BehaviorContext ctx)
@@ -102,7 +103,10 @@ namespace ValheimVillages.Behaviors.Wander
                 m_nextWanderTime = Time.time + WanderInterval;
                 if (m_ai.NavTo(hit.position, BehaviorState.Wandering, "wander: stroll",
                         snapToApproach: false))
+                {
+                    m_ai.IsCasualTravel = true; // SetState cleared it — re-set after NavTo; walk, don't jog
                     return true;
+                }
 
                 m_active = false;
                 return false;

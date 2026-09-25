@@ -40,7 +40,23 @@ namespace ValheimVillages.Settings
                 ["training"] = new(
                     "every scheduler reranker training step",
                     () => SchedulerSettings.LogTraining,
-                    v => SchedulerSettings.LogTraining = v)
+                    v => SchedulerSettings.LogTraining = v),
+                ["haul"] = new(
+                    "every haul decision: gate, per-drop scan verdicts, legs, arrivals",
+                    () => LogSettings.VerboseHaul,
+                    v => LogSettings.VerboseHaul = v),
+                ["select"] = new(
+                    "which tier/behaviour won each villager reselect",
+                    () => LogSettings.VerboseSelect,
+                    v => LogSettings.VerboseSelect = v),
+                ["flee"] = new(
+                    "each flee trigger: threat, distance, line of sight, awareness",
+                    () => LogSettings.VerboseFlee,
+                    v => LogSettings.VerboseFlee = v),
+                ["itemdestroy"] = new(
+                    "every network destroy of an item drop (received / really removed)",
+                    () => LogSettings.VerboseItemDestroy,
+                    v => LogSettings.VerboseItemDestroy = v)
             };
 
         private static IEnumerable<string> ChannelNames()

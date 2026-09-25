@@ -675,11 +675,9 @@ namespace ValheimVillages.Behaviors.Crafting
             for (var i = 0; i < matches.Count && collected < room; i++)
             {
                 var drop = matches[i].drop;
-                var dropNview = drop.GetComponent<ZNetView>();
-                if (dropNview != null && dropNview.GetZDO() != null)
-                    ZNetScene.instance.Destroy(drop.gameObject);
-                else
-                    Object.Destroy(drop.gameObject);
+                // Claims ownership first — ZNetScene.Destroy alone only drops a non-owner's
+                // local instance, which is re-created on the next pass. See GroundDrops.
+                GroundDrops.Destroy(drop);
                 collected++;
             }
 

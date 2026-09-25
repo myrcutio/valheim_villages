@@ -75,7 +75,58 @@ namespace ValheimVillages.Behaviors.Farming
                 return;
             }
 
+            ResumeInterruptedTravel();
             UpdatePlantingCooldown(dt);
+        }
+
+        /// <summary>
+        ///     A travel sub-state only advances on ARRIVAL. If something preempted the walk — a
+        ///     flee takes the movement target and its Calm() drops the villager to Idle — no
+        ///     arrival ever comes, and the farmer stood "WalkingToPlantSpot" doing nothing until
+        ///     the stale-job timeout. Every walk here sets Working, so "travel sub-state while
+        ///     Idle" means the walk was taken away: issue it again from where we now stand.
+        /// </summary>
+        private void ResumeInterruptedTravel()
+        {
+            if (m_ai.CurrentState != BehaviorState.Idle) return;
+
+            switch (SubState)
+            {
+                case FarmSubState.GatheringSeeds:
+                case FarmSubState.TravelingToFarm:
+                case FarmSubState.WalkingToPlantSpot:
+                case FarmSubState.TravelingToHarvest:
+                case FarmSubState.ReturningToChest:
+                    break;
+                default:
+                    return;
+            }
+
+            DebugLog.Event("Farming", "resume_travel",
+                ("villager", m_ai.NpcName), ("subState", SubState), ("pos", m_ai.Position));
+
+            switch (SubState)
+            {
+                case FarmSubState.GatheringSeeds:
+                    WalkToNextSeedChest();
+                    break;
+                case FarmSubState.TravelingToFarm:
+                    BeginTravelingToFarm();
+                    break;
+                case FarmSubState.WalkingToPlantSpot:
+                    if (m_context.NextPlantPosition.HasValue &&
+                        m_ai.NavTo(m_context.NextPlantPosition.Value, BehaviorState.Working, "plant spot"))
+                        break;
+                    m_context.NextPlantPosition = null;
+                    TryFindAndWalkToNextPlantSpot();
+                    break;
+                case FarmSubState.TravelingToHarvest:
+                    BeginHarvestPass();
+                    break;
+                case FarmSubState.ReturningToChest:
+                    WalkToOutputChest();
+                    break;
+            }
         }
 
         /// <summary>

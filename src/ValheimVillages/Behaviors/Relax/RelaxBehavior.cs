@@ -12,18 +12,20 @@ using ValheimVillages.Villages;
 namespace ValheimVillages.Behaviors.Relax
 {
     /// <summary>
-    ///     Lowest-priority idle filler: when a villager has nothing better to do it ambles
-    ///     over to a comfort spot — a fire, a table, a seat ("sit"), or the hot tub — and
-    ///     relaxes there until real work calls.
+    ///     Needs-driven idle: when a villager has nothing better to do AND one of its drives
+    ///     is elevated (<see cref="VillagerDrives.IsAnyElevated" />) it ambles over to a comfort
+    ///     spot that serves the need — a fire, a table, a seat ("sit"), the hot tub — and
+    ///     relaxes there until the dwell ends or real work calls. With no pressing need, the
+    ///     idle villager wanders instead (<see cref="Wander.WanderBehavior" />).
     ///
     ///     <para>Modeled on <see cref="Wander.WanderBehavior" />: a routine
     ///     <see cref="IBehavior" /> (NOT an <see cref="Interfaces.IDirectedBehavior" />), so
     ///     it is never dispatched by the reranker and always sits in the step-3 routine slot,
-    ///     reached only when the scheduler had nothing. Its priority (10) is below wander (20)
-    ///     and patrol (30) and far below the reactive floor (100), so ANY real work — reactive
-    ///     (combat/flee) or scheduler work (craft/repair/cook/farm) — preempts it on the next
-    ///     reselect tick. That is the "always interruptible for any real work" contract: relax
-    ///     is only ever selected when nothing else wanted control.</para>
+    ///     reached only when the scheduler had nothing. Its priority (25) is ABOVE wander (20),
+    ///     so a pressing need beats aimless strolling, but below patrol (30) and far below the
+    ///     reactive floor (100), so ANY real work — reactive (combat/flee) or scheduler work
+    ///     (craft/repair/cook/farm) — still preempts it on the next reselect tick. That is the
+    ///     "always interruptible for any real work" contract.</para>
     ///
     ///     <para>Relax spots come from the village-level <see cref="VillagePoiRegistry" />,
     ///     which already classifies Fire/Table/Chair and (now) the hot tub. The chosen spot is
@@ -81,9 +83,9 @@ namespace ValheimVillages.Behaviors.Relax
 
         public string Tag => "relax";
 
-        // The absolute floor of the routine tier: below wander(20)/patrol(30) and far below
-        // the reactive floor(100). Everything else a villager could do outranks relaxing.
-        public int Priority => 10;
+        // Above wander(20) so an elevated need wins over strolling; below patrol(30) and far
+        // below the reactive floor(100), so everything productive still outranks relaxing.
+        public int Priority => 25;
 
         public bool WantsControl(BehaviorContext ctx)
         {
@@ -91,6 +93,8 @@ namespace ValheimVillages.Behaviors.Relax
             if (m_ai.CurrentState != BehaviorState.Idle) return false;
             if (m_ai.IsInBackoff) return false;
             if (Time.time < m_nextRelaxTime) return false;
+            // Nothing pressing → leave idle time to wander.
+            if (!VillagerDrives.IsAnyElevated(m_ai.UniqueId)) return false;
             return TryPickSpot();
         }
 

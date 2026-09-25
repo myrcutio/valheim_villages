@@ -215,6 +215,9 @@ namespace ValheimVillages.Villager.AI
                     $"    char: moveDir=({mv.x:F2},{mv.z:F2}) |{new Vector3(mv.x, 0f, mv.z).magnitude:F2}| " +
                     $"vel={new Vector3(vel.x, 0f, vel.z).magnitude:F2} " +
                     $"needsMove={NeedsMovement(CurrentState)} hasWaypoint={m_currentWaypoint != null}");
+                sb.AppendLine(
+                    $"    gait: speeds walk={m_character.m_walkSpeed:F2} " +
+                    $"jog={m_character.m_speed:F2} run={m_character.m_runSpeed:F2}");
             }
 
             // Report the path state of the mover the villager ACTUALLY uses.
@@ -332,4 +335,3 @@ namespace ValheimVillages.Villager.AI
         }
     }
 }
-

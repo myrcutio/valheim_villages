@@ -269,6 +269,8 @@ namespace ValheimVillages.Behaviors.Crafting
                 return;
             }
 
+            if (ResumeInterruptedTravel()) return;
+
             if (SubState != WorkSubState.Crafting) return;
 
             // Ceiling FIRST, because every poller below reports "still waiting" unconditionally
@@ -343,6 +345,62 @@ namespace ValheimVillages.Behaviors.Crafting
                     AbandonWork("unexpected arrival");
                     break;
             }
+        }
+
+        /// <summary>
+        ///     Travel sub-states only advance on ARRIVAL. A reactive behaviour (flee) that
+        ///     preempts the walk takes the movement target and its Calm() drops the villager to
+        ///     Idle, so no arrival ever comes and the job sat frozen until the stale timeout.
+        ///     Every walk here goes through TryWalkTo, which sets Working — so "travel sub-state
+        ///     while Idle" means the walk was taken away: issue it again from where we stand.
+        ///     Returns true when it re-issued a walk.
+        /// </summary>
+        private bool ResumeInterruptedTravel()
+        {
+            if (m_ai == null || m_ai.CurrentState != BehaviorState.Idle) return false;
+
+            switch (SubState)
+            {
+                case WorkSubState.GatheringFuel:
+                case WorkSubState.FuelingStation:
+                case WorkSubState.GatheringIngredients:
+                case WorkSubState.TravelingToStation:
+                case WorkSubState.ReturningToChest:
+                    break;
+                default:
+                    return false;
+            }
+
+            DebugLog.Event("Work", "resume_travel",
+                ("villager", LogName), ("subState", SubState), ("pos", m_ai.Position));
+
+            switch (SubState)
+            {
+                case WorkSubState.GatheringFuel:
+                    BeginFueling();
+                    break;
+                case WorkSubState.FuelingStation:
+                    if (m_context.FuelRequirement == null)
+                    {
+                        AbandonWork("lost fuel target while resuming");
+                        break;
+                    }
+
+                    TryWalkTo(m_context.FuelRequirement.Value.FuelTargetPosition,
+                        WorkSubState.FuelingStation, "fuel target");
+                    break;
+                case WorkSubState.GatheringIngredients:
+                    WalkToNextIngredientChest();
+                    break;
+                case WorkSubState.TravelingToStation:
+                    BeginTravelingToStation();
+                    break;
+                case WorkSubState.ReturningToChest:
+                    BeginReturningToChest();
+                    break;
+            }
+
+            return true;
         }
     }
 }
