@@ -354,14 +354,17 @@ namespace ValheimVillages.TaskQueue.Handlers
                 {
                     // Select on "would the engine let us put food in?", not "is it warm enough to
                     // keep cooking" — those differ for a fire-requiring station holding fuel.
+                    // Only stations that can make THIS output — menus differ per station type.
+                    var cookOutput = match.ItemPrefabName;
                     if (VillageStationRegistry.TryFindStation<CookingStation>(
-                            anchorPos, s => StationFinder.CanAcceptItem(s), out var pos, out var station))
+                            anchorPos, s => StationFinder.CanCook(s, cookOutput) && StationFinder.CanAcceptItem(s),
+                            out var pos, out var station))
                     {
                         stationPos = pos;
                         cookingStationRef = station;
                     }
                     else if (VillageStationRegistry.TryFindStation<CookingStation>(
-                                 anchorPos, null, out pos, out station))
+                                 anchorPos, s => StationFinder.CanCook(s, cookOutput), out pos, out station))
                     {
                         if (StationFuelHelper.DiagnoseFuelNeed(station, out var need)
                             && StationFuelHelper.FindFuelInContainers(containers, need.FuelItemPrefab, out var fc))

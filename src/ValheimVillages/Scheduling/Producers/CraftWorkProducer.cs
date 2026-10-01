@@ -168,7 +168,7 @@ namespace ValheimVillages.Scheduling.Producers
 
             if (physical == "cookingstation"
                 && VillageStationRegistry.TryFindStation<CookingStation>(
-                    ai.HomeAnchor, null, out var cookPos, out _))
+                    ai.HomeAnchor, s => StationFinder.CanCook(s, itemPrefab), out var cookPos, out _))
                 return cookPos;
 
             if (physical == BeehiveHelper.PhysicalStation

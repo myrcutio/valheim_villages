@@ -5,6 +5,12 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-10-01
+
+### Fixed
+- **Villagers cook on every kind of cooking station.** Only the basic cooking station's menu was offered as work orders, so dishes that need the iron cooking station or the oven, such as cooked serpent meat, cooked lox meat, bread and pies, could never be ordered. Every cooking station's dishes are offered now, and each order is taken to a station that can actually make it, and fuelled from the right station's fuel.
+- **Works alongside SpreadTheLoad.** Valheim Villages took over the game's object-ownership handout in a way that hid it from other mods, so SpreadTheLoad's player-yielding never ran and it reported "Yield Players IS NOT WORKING". Other mods that adjust ownership now see it again. Villagers and village data stay owned by the server as before.
+
 ## [0.3.5] - 2026-09-25
 
 ### Changed

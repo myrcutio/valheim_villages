@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
@@ -141,8 +142,14 @@ namespace ValheimVillages.Patches
             ///     steal reclaims a carrier sitting in a present player's active area instead
             ///     of letting that player take it. Kept byte-faithful to the decompiled engine
             ///     method for every other ZDO.
+            ///     <para>The peer-active-area test calls the ENGINE's
+            ///     <c>ZDOMan.IsInPeerActiveArea</c> (not a private copy) so other mods'
+            ///     patches on it still apply — SpreadTheLoad's whole ownership handout is a
+            ///     postfix there. Low priority lets their <c>ReleaseNearbyZDOS</c> prefixes run
+            ///     before this one skips the original. Village ZDOs never reach that test.</para>
             /// </summary>
             [HarmonyPrefix]
+            [HarmonyPriority(Priority.Low)]
             private static bool Prefix(ZDOMan __instance, Vector3 refPosition, long uid)
             {
                 if (ZoneSystem.instance == null || ZNet.instance == null)
@@ -183,7 +190,7 @@ namespace ValheimVillages.Patches
                         if (!ZNetScene.InActiveArea(position, zone))
                             zdo.SetOwner(0L);
                     }
-                    else if ((!zdo.HasOwner() || !IsInPeerActiveArea(position, zdo.GetOwner()))
+                    else if ((!zdo.HasOwner() || !s_isInPeerActiveArea(__instance, position, zdo.GetOwner()))
                              && ZNetScene.InActiveArea(position, zone))
                     {
                         zdo.SetOwner(uid);
@@ -193,15 +200,10 @@ namespace ValheimVillages.Patches
                 return false; // fully replaced the engine method
             }
 
-            /// <summary>Faithful copy of the private <c>ZDOMan.IsInPeerActiveArea</c>.</summary>
-            private static bool IsInPeerActiveArea(Vector3 point, long owner)
-            {
-                if (owner == ZDOMan.GetSessionID())
-                    return ZNetScene.InActiveArea(point, ZNet.instance.GetReferencePosition());
-
-                var peer = ZNet.instance.GetPeer(owner);
-                return peer != null && ZNetScene.InActiveArea(point, peer.GetRefPos());
-            }
+            /// <summary>The private engine <c>ZDOMan.IsInPeerActiveArea</c>, patches included.</summary>
+            private static readonly Func<ZDOMan, Vector3, long, bool> s_isInPeerActiveArea =
+                AccessTools.MethodDelegate<Func<ZDOMan, Vector3, long, bool>>(
+                    AccessTools.Method(typeof(ZDOMan), "IsInPeerActiveArea"));
         }
 
         /// <summary>

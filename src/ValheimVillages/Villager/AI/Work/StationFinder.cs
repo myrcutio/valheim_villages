@@ -130,6 +130,21 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
+        ///     True when <paramref name="station" /> has a conversion producing
+        ///     <paramref name="outputPrefab" />. Cooking stations have different menus — serpent
+        ///     meat only goes on the iron station, bread only in the oven — so "any cooking
+        ///     station with a free slot" would send the villager to one the engine refuses.
+        /// </summary>
+        public static bool CanCook(CookingStation station, string outputPrefab)
+        {
+            if (station?.m_conversion == null || string.IsNullOrEmpty(outputPrefab)) return false;
+            foreach (var conv in station.m_conversion)
+                if (conv?.m_to != null && conv.m_to.gameObject.name == outputPrefab)
+                    return true;
+            return false;
+        }
+
+        /// <summary>
         ///     Whether cooking would PROGRESS right now — mirroring the engine's
         ///     <c>CookingStation.UpdateCooking</c> gate:
         ///     <code>

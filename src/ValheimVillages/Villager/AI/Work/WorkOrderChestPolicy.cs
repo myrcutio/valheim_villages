@@ -283,7 +283,9 @@ namespace ValheimVillages.Villager.AI.Work
 
             if (physical == "cookingstation")
             {
-                var station = NearestInVillage<CookingStation>(chestPos);
+                // The station that makes THIS dish — its fuel, not the nearest station's.
+                var output = recipe.m_item != null ? recipe.m_item.gameObject.name : null;
+                var station = NearestInVillage<CookingStation>(chestPos, s => StationFinder.CanCook(s, output));
                 if (station == null) return;
 
                 if (station.m_requireFire
@@ -312,7 +314,7 @@ namespace ValheimVillages.Villager.AI.Work
         ///     <see cref="ContainerScanner.FindNearbyContainers" /> does: collider state diverges
         ///     on a headless server, and villagers run on the host.
         /// </summary>
-        private static T NearestInVillage<T>(Vector3 pos) where T : Component
+        private static T NearestInVillage<T>(Vector3 pos, System.Func<T, bool> accept = null) where T : Component
         {
             T best = null;
             var bestSq = WorkSettings.ChestScanRadius * WorkSettings.ChestScanRadius;
@@ -320,6 +322,7 @@ namespace ValheimVillages.Villager.AI.Work
             foreach (var candidate in Object.FindObjectsByType<T>(FindObjectsSortMode.None))
             {
                 if (candidate == null) continue;
+                if (accept != null && !accept(candidate)) continue;
                 var d = (candidate.transform.position - pos).sqrMagnitude;
                 if (d > bestSq) continue;
                 bestSq = d;
