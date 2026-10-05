@@ -157,6 +157,38 @@ namespace ValheimVillages.Villager.AI.Navigation
             LayerMask.GetMask("Default", "static_solid", "piece");
 
         /// <summary>
+        ///     The EXACT clearance volume <see cref="ProbeTriangle" /> tests for a TERRAIN
+        ///     triangle, exposed so diagnostics report the real filter instead of their own
+        ///     copy of it. vv_probe used to redeclare these constants and drifted to a 0.3m
+        ///     radius against this 0.2m one — a 50% wider probe, so it reported rej_blocked
+        ///     for triangles the partition actually accepts, worst exactly where geometry is
+        ///     tight (stairwells, doorways). Diagnostics must never re-derive this.
+        /// </summary>
+        internal static void TerrainClearanceCapsule(
+            Vector3 centroid, out Vector3 p0, out Vector3 p1, out float radius)
+        {
+            radius = CapsuleRadius;
+            p0 = centroid + Vector3.up * (CapsuleLift + CapsuleRadius);
+            p1 = centroid + Vector3.up * (CapsuleLift + CapsuleHeight - CapsuleRadius);
+        }
+
+        /// <summary>
+        ///     The EXACT clearance volume <see cref="ProbeTriangle" /> tests for a PIECE
+        ///     triangle — a tiny waist-height sphere, NOT the terrain capsule. Stair treads and
+        ///     floors are pieces, so a diagnostic that shows them the capsule verdict is
+        ///     answering a question the partition never asks.
+        /// </summary>
+        internal static void PieceClearanceSphere(
+            Vector3 centroid, out Vector3 origin, out float radius)
+        {
+            origin = centroid + Vector3.up * PieceWaistProbeLift;
+            radius = PieceWaistProbeRadius;
+        }
+
+        /// <summary>Layers the clearance probes treat as blocking. Excludes terrain by design.</summary>
+        internal static int ClearanceBlockMask => s_blockMask;
+
+        /// <summary>
         ///     Filtered triangles from the most recent build of EACH village, keyed by
         ///     village id and tagged with their region assignment. Consumed by
         ///     <see cref="PathDebugRenderer" /> for the wireframe overlay and by the

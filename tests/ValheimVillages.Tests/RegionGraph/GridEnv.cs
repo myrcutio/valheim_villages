@@ -13,6 +13,7 @@ internal sealed class GridEnv
 {
     private readonly HashSet<(int, int, int, int)> _walls = new();
     private readonly Dictionary<long, float> _heights = new();
+    private readonly Dictionary<long, List<float>> _surfaces = new();
     private readonly HashSet<long> _populated = new();
 
     /// <summary>Sever the (undirected) step between two adjacent cells.</summary>
@@ -68,13 +69,57 @@ internal sealed class GridEnv
     public Func<long, int, int, float> SurfaceY =>
         (k, _, _) => _heights.TryGetValue(k, out var y) ? y : 0f;
 
+    /// <summary>
+    ///     An ADDITIONAL walkable surface stacked in a cell's column — a floor piece resting
+    ///     over the ground, or a stair tread between two storeys. The column model exists
+    ///     because these are distinct standing places, not one cell with one height.
+    /// </summary>
+    public GridEnv Surface(int gx, int gz, float y)
+    {
+        var k = Key(gx, gz);
+        if (!_surfaces.TryGetValue(k, out var list))
+        {
+            list = new List<float>();
+            _surfaces[k] = list;
+        }
+
+        list.Add(y);
+        return this;
+    }
+
+    /// <summary>Every walkable surface in a column, ascending.</summary>
+    public Func<long, int, int, IReadOnlyList<float>> SurfacesAt =>
+        (k, _, _) =>
+        {
+            var baseY = _heights.TryGetValue(k, out var y) ? y : 0f;
+            if (!_surfaces.TryGetValue(k, out var extra)) return new[] { baseY };
+            var all = new List<float>(extra.Count + 1) { baseY };
+            all.AddRange(extra);
+            all.Sort();
+            return all;
+        };
+
     public Func<long, bool> IsPopulated => k => _populated.Contains(k);
 
     // Wall gate: blocks a step iff the (unordered) cell pair was walled. The Y
     // args are ignored here so flood-topology tests stay deterministic; the
     // Y-dependent gate is exercised separately with a custom delegate.
+    //
+    // DIAGONAL steps (Pass 2 is 8-connected) are blocked when EITHER flanking orthogonal pair is
+    // walled — you cannot cut a corner through a wall. Modelling walls purely as registered cell
+    // pairs could not express this: a diagonal pair is never itself registered, so a wall line
+    // would have been stepped straight around. Production gets the same answer geometrically,
+    // because ComputeWaistProbeBox centres a diagonal probe on the shared CORNER and therefore
+    // samples wall geometry in both flanking cells.
     public Func<int, int, int, int, float, float, bool> WallBlocks =>
-        (ax, az, bx, bz, _, _) => _walls.Contains(Canon(ax, az, bx, bz));
+        (ax, az, bx, bz, _, _) =>
+        {
+            if (_walls.Contains(Canon(ax, az, bx, bz))) return true;
+            var diagonal = ax != bx && az != bz;
+            if (!diagonal) return false;
+            return _walls.Contains(Canon(ax, az, bx, az))
+                   || _walls.Contains(Canon(ax, az, ax, bz));
+        };
 
     public static long Key(int gx, int gz) => RubberBandPrune.PackXzKey(gx, gz);
 

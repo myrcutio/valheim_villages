@@ -67,7 +67,10 @@ namespace ValheimVillages.Dev
                     true, (_, village) => VillagePoiRegistry.DumpPois(village)),
                 ["orders"] = new(
                     "work orders per villager + how many outputs exist in chests (all villagers)",
-                    false, (_, _) => VillagerAI.DumpWorkOrders())
+                    false, (_, _) => VillagerAI.DumpWorkOrders()),
+                ["delete"] = new(
+                    "delete an empty village (no villagers, no registry): vv_village delete <villageId> --yes",
+                    true, Delete)
             };
 
         private static IEnumerable<string> SectionNames()
@@ -75,7 +78,7 @@ namespace ValheimVillages.Dev
             return Sections.Keys;
         }
 
-        [DevCommand("Inspect a village: vv_village <list|at|anchors|stations|pois|orders> [villageId]",
+        [DevCommand("Inspect a village: vv_village <list|at|anchors|stations|pois|orders|delete> [villageId]",
             Name = "vv_village", OptionsProvider = nameof(SectionNames))]
         public static void Village(Terminal.ConsoleEventArgs args)
         {
@@ -125,6 +128,54 @@ namespace ValheimVillages.Dev
                 : $"[vv_village] '{token}' is ambiguous ({matches.Count} matches): " +
                   string.Join(", ", matches.Select(v => v.VillageId)));
             return false;
+        }
+
+        /// <summary>
+        ///     Manual cleanup for leftover villages — e.g. the orphans a moved registry left
+        ///     behind before registry removal reaped them. Goes through
+        ///     <see cref="VillageRegistry.Delete" />, so the delete rule still holds: a village
+        ///     with living villagers or a registry piece is refused, never force-deleted.
+        ///     Needs an explicit id (never the player's village by default) and <c>--yes</c>.
+        /// </summary>
+        private static void Delete(Terminal.ConsoleEventArgs args, Villages.Entity.Village village)
+        {
+            if (village == null)
+            {
+                Print("[vv_village delete] needs a village id — vv_village delete <villageId> --yes " +
+                      "(ids from vv_village list)");
+                return;
+            }
+
+            if (!DevConfirm.IsConfirmed(args))
+            {
+                DevConfirm.PrintRefusal($"vv_village delete {village.VillageId}");
+                return;
+            }
+
+            var id = village.VillageId;
+            if (!VillageRegistry.CanDelete(id, out var blockedBy))
+            {
+                Print($"[vv_village delete] refusing {id}: {blockedBy}");
+                return;
+            }
+
+            if (args.Args.Any(a => string.Equals(a, "--dry-run", StringComparison.OrdinalIgnoreCase)))
+            {
+                Print($"[vv_village delete] dry run: {id} is empty and would be deleted");
+                return;
+            }
+
+            // Village ZDOs are host-owned; a client's DestroyZDO would be refused.
+            if (ZNet.instance == null || !ZNet.instance.IsServer())
+            {
+                Print("[vv_village delete] run this on the server console — villages are host-owned");
+                return;
+            }
+
+            // CanDelete already passed above, so Delete goes through. (Re-reading it back would
+            // still find it: DestroyZDO only queues the removal until the next network update.)
+            VillageRegistry.Delete(id);
+            Print($"[vv_village delete] deleted {id}");
         }
 
         private static void PrintSections()

@@ -76,12 +76,16 @@ namespace ValheimVillages.Behaviors.Patrol
         ///     HNA graph (if available). Does NOT clear the HNA graph itself — it's expensive
         ///     to rebuild and the boundary mapper can re-derive waypoints instantly.
         /// </summary>
-        public void ResetDiscovery()
+        /// <param name="reason">
+        ///     Why the reset happened, for the log. Required: this used to hardcode "manual",
+        ///     so a repartition-triggered reset reported itself as an operator command.
+        /// </param>
+        public void ResetDiscovery(string reason)
         {
-            // A manual reset (vv_reset patrols) re-arms the one-shot auto-heal: the operator
-            // is explicitly asking for a fresh attempt.
+            // An external reset re-arms the one-shot auto-heal: something outside the patrol is
+            // explicitly asking for a fresh attempt.
             m_autoResetAttempted = false;
-            ResetDiscoveryInternal("manual");
+            ResetDiscoveryInternal(reason);
         }
 
         private void ResetDiscoveryInternal(string reason)

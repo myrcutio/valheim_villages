@@ -213,7 +213,6 @@ namespace ValheimVillages.Patches
         private static void OnPieceRemoved(WearNTear __instance)
         {
             MarkDirtyObject("hammer-remove", __instance != null ? __instance.gameObject : null);
-            Villages.VillageCleanupRpc.OnRegistryRemoved(__instance);
         }
 
         // Pieces destroyed by damage/decay go through the private WearNTear.Destroy
@@ -223,7 +222,6 @@ namespace ValheimVillages.Patches
         private static void OnPieceDestroyed(WearNTear __instance)
         {
             MarkDirtyObject("destroyed", __instance != null ? __instance.gameObject : null);
-            Villages.VillageCleanupRpc.OnRegistryRemoved(__instance);
         }
 
         // Terrain edits (hoe/pickaxe/cultivator/raise/level) — the combined bake includes

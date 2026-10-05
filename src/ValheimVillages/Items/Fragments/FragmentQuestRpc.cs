@@ -20,6 +20,8 @@ namespace ValheimVillages.Items.Fragments
     {
         private const string RequestRpcName = "VV_FindQuestLocation";
         private const string ResultRpcName = "VV_QuestLocationResult";
+        private const string ClaimRpcName = "VV_ClaimRescueQuest";
+        private const string ClaimResultRpcName = "VV_RescueQuestClaimResult";
 
         // The ZRoutedRpc we registered our handlers on. ZRoutedRpc is recreated per ZNet
         // session (world join/host), so we (re)register whenever the instance changes.
@@ -38,10 +40,14 @@ namespace ValheimVillages.Items.Fragments
             {
                 RoutedRpcRegistrar.ClearStale(rpc, RequestRpcName);
                 RoutedRpcRegistrar.ClearStale(rpc, ResultRpcName);
+                RoutedRpcRegistrar.ClearStale(rpc, ClaimRpcName);
+                RoutedRpcRegistrar.ClearStale(rpc, ClaimResultRpcName);
                 rpc.Register<string, Vector3>(RequestRpcName, OnRequest);
                 rpc.Register<bool, string, Vector3, string, string>(ResultRpcName, OnResult);
+                rpc.Register<ZDOID>(ClaimRpcName, OnClaim);
+                rpc.Register<bool, ZDOID, Vector3, bool>(ClaimResultRpcName, OnClaimResult);
                 Plugin.Log?.LogInfo(
-                    "[FragmentQuestRpc] registered VV_FindQuestLocation + VV_QuestLocationResult handlers");
+                    "[FragmentQuestRpc] registered quest location + rescue quest claim handlers");
             }
             catch (Exception ex)
             {
@@ -117,6 +123,43 @@ namespace ValheimVillages.Items.Fragments
                 FragmentCombiner.CompleteQuest(player, biome, questPos, locationName);
             else
                 FragmentCombiner.OnQuestLocationUnavailable(player, biome, reason);
+        }
+
+        /// <summary>
+        ///     Ask the host for the reward of the rescue quest <paramref name="questId" />. The
+        ///     host grants each quest to exactly one claimant, so two players reaching the site
+        ///     together can't both collect it; the answer arrives in <see cref="OnClaimResult" />.
+        /// </summary>
+        public static void RequestClaim(ZDOID questId)
+        {
+            EnsureRegistered();
+            var rpc = ZRoutedRpc.instance;
+            if (rpc == null)
+            {
+                Plugin.Log?.LogError("[FragmentQuestRpc] no ZRoutedRpc available; cannot claim rescue quest");
+                return;
+            }
+
+            rpc.InvokeRoutedRPC(ClaimRpcName, questId);
+        }
+
+        /// <summary>Host handler — grants the quest to the first claimant and removes it.</summary>
+        private static void OnClaim(long sender, ZDOID questId)
+        {
+            if (ZNet.instance == null || !ZNet.instance.IsServer()) return;
+
+            var granted = RescueQuestStore.TryClaim(questId, out var quest);
+            Plugin.Log?.LogInfo(granted
+                ? $"[RescueQuest] granted {quest.VillagerType} rescue quest {questId} to peer {sender}"
+                : $"[RescueQuest] refused claim of {questId} by peer {sender}: already claimed or gone");
+            ZRoutedRpc.instance?.InvokeRoutedRPC(sender, ClaimResultRpcName, granted, questId, quest.Position,
+                quest.IsInterior);
+        }
+
+        /// <summary>Client handler — places the reward when the host granted the claim.</summary>
+        private static void OnClaimResult(long sender, bool granted, ZDOID questId, Vector3 questPos, bool isInterior)
+        {
+            RescueQuestTracker.OnClaimResult(granted, questId, questPos, isInterior);
         }
     }
 }

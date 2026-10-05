@@ -3,6 +3,7 @@ using ValheimVillages.Interfaces;
 using ValheimVillages.TaskQueue.ActivityLog;
 using ValheimVillages.Villager;
 using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.AI.Work;
 
 namespace ValheimVillages.Behaviors.Farming
 {
@@ -178,6 +179,38 @@ namespace ValheimVillages.Behaviors.Farming
             AbandonWork(reason);
         }
 
+        /// <summary>
+        ///     Put unplanted seeds back in the chest they came from. A session that ends still
+        ///     holding seeds — finished, abandoned or stuck — used to drop the context and the
+        ///     seeds with it. A farmer that withdrew a seed and then failed to reach any plant
+        ///     spot leaked one per cycle; TurnipSeeds fell 56 -> 26 over a single session.
+        /// </summary>
+        private void ReturnUnplantedSeeds()
+        {
+            if (m_context == null || m_context.SeedsGathered <= 0) return;
+            var sources = m_context.IngredientSources;
+            if (sources == null) return;
+
+            foreach (var source in sources)
+            {
+                if (m_context.SeedsGathered <= 0) break;
+                if (source?.Container == null || string.IsNullOrEmpty(source.PrefabName)) continue;
+                // All-or-nothing per container; a full chest just means trying the next source.
+                if (!ContainerScanner.TryDepositItem(
+                        source.Container, source.PrefabName, m_context.SeedsGathered)) continue;
+
+                Plugin.Log?.LogInfo(
+                    $"[Farming:{m_villager.VillagerName}] Returned {m_context.SeedsGathered}x " +
+                    $"{source.PrefabName} to a chest");
+                m_context.SeedsGathered = 0;
+            }
+
+            if (m_context.SeedsGathered > 0)
+                Plugin.Log?.LogWarning(
+                    $"[Farming:{m_villager.VillagerName}] Could not return " +
+                    $"{m_context.SeedsGathered} seed(s): no source chest had room");
+        }
+
         private void FinishWork()
         {
             var itemName = m_context?.WorkOrder?.ItemPrefabName ?? "farming";
@@ -186,6 +219,7 @@ namespace ValheimVillages.Behaviors.Farming
                 $"({m_context?.HarvestedCount ?? 0} harvested, " +
                 $"{m_context?.PlantedThisSession ?? 0} planted)");
             VillagerActivityLog.Instance.Record(m_villager.UniqueID, itemName, "complete", "farming");
+            ReturnUnplantedSeeds();
             m_context = null;
             SubState = FarmSubState.Idle;
             // Deliberately does NOT re-scan for more work. The assignment ends here and
@@ -203,6 +237,7 @@ namespace ValheimVillages.Behaviors.Farming
             Plugin.Log?.LogWarning(
                 $"[Farming:{m_villager.VillagerName}] Abandoning farming: {reason}");
             VillagerActivityLog.Instance.Record(m_villager.UniqueID, taskName, "abandon", reason);
+            ReturnUnplantedSeeds();
             m_context = null;
             SubState = FarmSubState.Idle;
 

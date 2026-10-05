@@ -5,8 +5,9 @@ using ValheimVillages.Attributes;
 namespace ValheimVillages.Items.Fragments
 {
     /// <summary>
-    ///     Tracks pending rescue quests and places a Lode Core reward when the player reaches
-    ///     the quest location. Delivery depends on the location kind:
+    ///     Watches for the local player reaching a pending rescue quest and places the Lode
+    ///     Core reward. The quests themselves are world state in <see cref="RescueQuestStore" />,
+    ///     so any player can complete any quest. Delivery depends on the location kind:
     ///     <list type="bullet">
     ///         <item>
     ///             <b>Interior dungeons</b> (crypts, caves, excavations) place the core inside,
@@ -19,6 +20,8 @@ namespace ValheimVillages.Items.Fragments
     ///             <see cref="TickArrival" />.
     ///         </item>
     ///     </list>
+    ///     Either way the host must grant the claim first (<see cref="FragmentQuestRpc.RequestClaim" />);
+    ///     the core is placed in <see cref="OnClaimResult" />.
     /// </summary>
     public static class RescueQuestTracker
     {
@@ -40,83 +43,71 @@ namespace ValheimVillages.Items.Fragments
 
         private static float _lastArrivalCheck;
 
-        private static readonly List<PendingQuest> _pendingQuests = new();
+        // Claims sent to the host and not yet answered, so the once-a-second arrival sweep
+        // doesn't re-request the same quest while the reply is in flight.
+        private static readonly HashSet<ZDOID> _claimsInFlight = new();
 
         /// <summary>
-        ///     Whether there are any pending quests.
+        ///     Records a new pending rescue quest in the world save. Its reward is placed when
+        ///     any player enters the dungeon (interior) or reaches the site (surface).
         /// </summary>
-        public static int PendingCount => _pendingQuests.Count;
-
-        /// <summary>
-        ///     Registers a new pending rescue quest. The pawn will be spawned when
-        ///     the player enters the dungeon at this position.
-        /// </summary>
-        public static void AddQuest(Vector3 position, string villagerType, string biome, bool isInterior)
+        public static void AddQuest(Vector3 position, string villagerType, string biome, bool isInterior,
+            string locationName)
         {
-            _pendingQuests.Add(new PendingQuest
-            {
-                Position = position,
-                VillagerType = villagerType,
-                Biome = biome,
-                IsInterior = isInterior,
-            });
+            var quest = RescueQuestStore.Create(position, villagerType, biome, isInterior, locationName);
 
             Plugin.Log?.LogInfo(
                 isInterior
-                    ? $"Registered pending rescue quest: {villagerType} at {position} ({biome}, interior). " +
-                      $"Reward spawns when player enters the dungeon within {QuestDungeonRadius}m."
-                    : $"Registered pending rescue quest: {villagerType} at {position} ({biome}, surface). " +
-                      $"Reward spawns when player arrives within {SurfaceArrivalRadius}m.");
+                    ? $"Registered pending rescue quest {quest.Id}: {villagerType} at {position} ({biome}, interior). " +
+                      $"Reward spawns when a player enters the dungeon within {QuestDungeonRadius}m."
+                    : $"Registered pending rescue quest {quest.Id}: {villagerType} at {position} ({biome}, surface). " +
+                      $"Reward spawns when a player arrives within {SurfaceArrivalRadius}m.");
         }
 
         /// <summary>
         ///     Called when the player enters a dungeon (EnvMan.SetForceEnvironment
-        ///     called with a non-empty environment name). Checks if any pending quest
-        ///     is near the player and spawns the pawn in a dungeon room.
+        ///     called with a non-empty environment name). Claims the nearest interior quest
+        ///     within <see cref="QuestDungeonRadius" />, if any.
         /// </summary>
         public static void OnDungeonEntered(Player player, string environmentName)
         {
-            if (player == null || _pendingQuests.Count == 0)
+            if (player == null)
                 return;
 
             var playerPos = player.transform.position;
+            var quests = RescueQuestStore.Near(playerPos);
+            if (quests.Count == 0)
+                return;
 
             Plugin.Log?.LogInfo(
                 $"Dungeon entry detected (env: {environmentName}), " +
-                $"player at {playerPos}, checking {_pendingQuests.Count} pending quest(s).");
+                $"player at {playerPos}, checking {quests.Count} nearby pending quest(s).");
 
-            for (var i = _pendingQuests.Count - 1; i >= 0; i--)
+            foreach (var quest in quests)
             {
-                var quest = _pendingQuests[i];
-
                 // Surface sites deliver on arrival (TickArrival), not on dungeon entry. Skipping
                 // them here also stops an interior dungeon's surface entrance from poaching a
                 // nearby surface quest's reward.
                 if (!quest.IsInterior)
                     continue;
 
-                // Use horizontal (X,Z) distance only — dungeon interiors are placed
-                // deep underground, so 3D distance would be huge
-                var dx = playerPos.x - quest.Position.x;
-                var dz = playerPos.z - quest.Position.z;
-                var horizontalDistance = Mathf.Sqrt(dx * dx + dz * dz);
+                // Horizontal (X,Z) distance only — dungeon interiors are placed thousands of
+                // metres above the surface, so 3D distance would be huge
+                var horizontalDistance = HorizontalDistance(playerPos, quest.Position);
 
                 Plugin.Log?.LogInfo(
-                    $"  Quest {i}: {quest.VillagerType} at {quest.Position}, " +
+                    $"  Quest {quest.Id}: {quest.VillagerType} at {quest.Position}, " +
                     $"horizontal distance: {horizontalDistance:F0}m");
 
-                if (horizontalDistance <= QuestDungeonRadius)
-                {
-                    Plugin.Log?.LogInfo(
-                        $"Player entered dungeon (env: {environmentName}) within " +
-                        $"{horizontalDistance:F0}m (horizontal) of rescue quest for " +
-                        $"{quest.VillagerType} — placing a Lode Core in a dungeon room.");
+                if (horizontalDistance > QuestDungeonRadius)
+                    continue;
 
-                    var spawnPos = FindDungeonRoomPosition(playerPos);
-                    SpawnLodeCore(spawnPos);
-                    _pendingQuests.RemoveAt(i);
-                    return; // Only handle one quest per dungeon entry
-                }
+                Plugin.Log?.LogInfo(
+                    $"Player entered dungeon (env: {environmentName}) within " +
+                    $"{horizontalDistance:F0}m (horizontal) of rescue quest for " +
+                    $"{quest.VillagerType} — claiming it from the host.");
+                RequestClaim(quest);
+                return; // Only handle one quest per dungeon entry
             }
         }
 
@@ -129,7 +120,7 @@ namespace ValheimVillages.Items.Fragments
         /// </summary>
         public static void TickArrival(Player player)
         {
-            if (player == null || _pendingQuests.Count == 0)
+            if (player == null)
                 return;
 
             if (Time.time - _lastArrivalCheck < ArrivalCheckInterval)
@@ -137,28 +128,62 @@ namespace ValheimVillages.Items.Fragments
             _lastArrivalCheck = Time.time;
 
             var playerPos = player.transform.position;
-
-            for (var i = _pendingQuests.Count - 1; i >= 0; i--)
+            foreach (var quest in RescueQuestStore.Near(playerPos))
             {
-                var quest = _pendingQuests[i];
                 if (quest.IsInterior)
                     continue; // delivered on dungeon entry, not on arrival
 
                 // Horizontal distance only — surface Y can differ from the stored marker Y.
-                var dx = playerPos.x - quest.Position.x;
-                var dz = playerPos.z - quest.Position.z;
-                var horizontalDistance = Mathf.Sqrt(dx * dx + dz * dz);
+                var horizontalDistance = HorizontalDistance(playerPos, quest.Position);
                 if (horizontalDistance > SurfaceArrivalRadius)
                     continue;
 
                 Plugin.Log?.LogInfo(
                     $"Player reached surface rescue site for {quest.VillagerType} " +
-                    $"({horizontalDistance:F0}m from marker) — placing a Lode Core.");
-
-                SpawnLodeCore(GroundSnap(quest.Position));
-                _pendingQuests.RemoveAt(i);
+                    $"({horizontalDistance:F0}m from marker) — claiming it from the host.");
+                RequestClaim(quest);
                 return; // one per tick
             }
+        }
+
+        private static void RequestClaim(RescueQuest quest)
+        {
+            if (!_claimsInFlight.Add(quest.Id))
+                return;
+            FragmentQuestRpc.RequestClaim(quest.Id);
+        }
+
+        /// <summary>
+        ///     The host's answer to <see cref="RequestClaim" />. On a grant the quest is already
+        ///     gone from the world, so the core is placed now: in a dungeon room for an interior
+        ///     quest (the player is inside it), on the ground at the marker for a surface one.
+        /// </summary>
+        public static void OnClaimResult(bool granted, ZDOID questId, Vector3 questPos, bool isInterior)
+        {
+            _claimsInFlight.Remove(questId);
+            if (!granted)
+            {
+                Plugin.Log?.LogInfo($"[RescueQuest] claim of {questId} refused: another player completed it first");
+                return;
+            }
+
+            var player = Player.m_localPlayer;
+            if (player == null)
+            {
+                Plugin.Log?.LogError(
+                    $"[RescueQuest] host granted quest {questId} but there is no local player to place the reward for");
+                return;
+            }
+
+            var spawnPos = isInterior ? FindDungeonRoomPosition(player.transform.position) : GroundSnap(questPos);
+            SpawnLodeCore(spawnPos);
+        }
+
+        private static float HorizontalDistance(Vector3 a, Vector3 b)
+        {
+            var dx = a.x - b.x;
+            var dz = a.z - b.z;
+            return Mathf.Sqrt(dx * dx + dz * dz);
         }
 
         /// <summary>
@@ -173,13 +198,11 @@ namespace ValheimVillages.Items.Fragments
             return pos;
         }
 
-        /// <summary>
-        ///     Clear all pending quests (e.g. on hot reload or world unload).
-        /// </summary>
+        /// <summary>Forget unanswered claims (e.g. on hot reload or world unload).</summary>
         [RegisterCleanup]
         public static void Clear()
         {
-            _pendingQuests.Clear();
+            _claimsInFlight.Clear();
         }
 
         /// <summary>
@@ -272,17 +295,6 @@ namespace ValheimVillages.Items.Fragments
             Plugin.Log?.LogError("[RescueQuest] Lode Core pedestal unavailable; dropping the bare core instead.");
             var spawnPos = new Vector3(position.x, position.y + 0.5f, position.z);
             LodeCore.DropAt(spawnPos);
-        }
-
-        /// <summary>
-        ///     Represents a pending rescue quest that hasn't spawned its pawn yet.
-        /// </summary>
-        public class PendingQuest
-        {
-            public string Biome;
-            public bool IsInterior;
-            public Vector3 Position;
-            public string VillagerType;
         }
     }
 }

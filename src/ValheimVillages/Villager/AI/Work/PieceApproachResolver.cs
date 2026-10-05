@@ -45,7 +45,7 @@ namespace ValheimVillages.Villager.AI.Work
         ///     <para>One height bucket of slack on top of the reach, because a cell's Y is its
         ///     bucket centre rather than the true surface height.</para>
         /// </summary>
-        private const float MaxVerticalSlack = Navigation.RegionGraph.HeightBucketSize;
+        private const float MaxVerticalSlack = Navigation.RegionGraph.VerticalMatchTolerance;
 
         /// <summary>
         ///     A standing spot within <paramref name="reach" /> of <paramref name="piecePos" />

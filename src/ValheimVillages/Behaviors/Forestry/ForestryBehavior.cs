@@ -74,6 +74,13 @@ namespace ValheimVillages.Behaviors.Forestry
         private Errand m_errand;
         private float m_legDeadline;
         private bool m_navIssued;
+
+        /// <summary>Last "nothing actionable" skip set logged, and when — see the throttle below.</summary>
+        private string m_lastNotActionable;
+
+        private float m_lastNotActionableAt = -999f;
+
+        private const float NotActionableLogInterval = 60f;
         private Vector3 m_target;
         private Vector3 m_grove;
 
@@ -173,11 +180,25 @@ namespace ValheimVillages.Behaviors.Forestry
                 return AssignmentResult.Accepted;
             }
 
-            // Woodlot reachable, but nothing in it is actionable right now.
+            // Woodlot reachable, but nothing in it is actionable right now. Info, not Warning,
+            // and throttled: this is the steady state for a lumberjack with nothing to do, so it
+            // fired on every dispatch (40+ in 20 minutes) and buried everything else. Repeats are
+            // suppressed until the skipped set CHANGES or the interval lapses, so a genuine
+            // change in what is unreachable still surfaces immediately.
             if (skipped.Count > 0)
-                Plugin.Log?.LogWarning(
-                    $"[Forestry:{m_ai.NpcName}] nothing actionable: could not approach " +
-                    $"{skipped.Count} candidate(s) [{string.Join(",", skipped.ToArray())}]");
+            {
+                var signature = string.Join(",", skipped.ToArray());
+                if (signature != m_lastNotActionable ||
+                    Time.time - m_lastNotActionableAt >= NotActionableLogInterval)
+                {
+                    m_lastNotActionable = signature;
+                    m_lastNotActionableAt = Time.time;
+                    Plugin.Log?.LogInfo(
+                        $"[Forestry:{m_ai.NpcName}] nothing actionable: could not approach " +
+                        $"{skipped.Count} candidate(s) [{signature}]");
+                }
+            }
+
             return AssignmentResult.NotActionable;
         }
 

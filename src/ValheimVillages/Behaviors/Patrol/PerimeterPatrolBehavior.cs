@@ -70,9 +70,9 @@ namespace ValheimVillages.Behaviors.Patrol
                 PatrolPersistence.Load(m_patrol, zdo);
         }
 
-        public void ResetDiscovery()
+        public void ResetDiscovery(string reason)
         {
-            m_patrol?.ResetDiscovery();
+            m_patrol?.ResetDiscovery(reason);
         }
 
         #region Pass-through patrol state

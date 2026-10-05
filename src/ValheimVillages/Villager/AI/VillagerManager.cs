@@ -168,7 +168,7 @@ namespace ValheimVillages.Villager.AI
             {
                 var patrol = ai?.GetBehavior<Behaviors.Patrol.PerimeterPatrolBehavior>();
                 if (patrol == null) continue;
-                patrol.ResetDiscovery();
+                patrol.ResetDiscovery("repartition");
                 count++;
             }
 

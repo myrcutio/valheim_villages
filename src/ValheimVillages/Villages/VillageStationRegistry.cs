@@ -532,7 +532,7 @@ namespace ValheimVillages.Villages
             var rejections = new System.Text.StringBuilder();
             var rejected = 0;
             var ok = VillagerMovement.TryResolveApproach(
-                target, from, null, out var approach, 0f,
+                target, from, null, out var approach,
                 line =>
                 {
                     rejected++;

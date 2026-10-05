@@ -218,12 +218,12 @@ namespace ValheimVillages.Villager.AI.Navigation
         /// </summary>
         private static void ReportCapsuleHits(StringBuilder sb, Vector3 pos)
         {
-            const float capsuleRadius = 0.3f;
-            const float capsuleHeight = 1.4f;
-            const float capsuleLift = 0.25f;
-            var blockMask = LayerMask.GetMask("Default", "static_solid", "piece");
-            var p0 = pos + Vector3.up * (capsuleLift + capsuleRadius);
-            var p1 = pos + Vector3.up * (capsuleLift + capsuleHeight - capsuleRadius);
+            // Geometry comes from RegionBuilder so this can never drift from the filter it
+            // claims to predict. It did drift once: a local 0.3m radius against the real
+            // 0.2m, i.e. a 50% wider probe reporting rej_blocked for triangles the partition
+            // accepts — worst exactly in the tight geometry people probe (stairwells, doors).
+            RegionBuilder.TerrainClearanceCapsule(pos, out var p0, out var p1, out var capsuleRadius);
+            var blockMask = RegionBuilder.ClearanceBlockMask;
             var hits = Physics.OverlapCapsule(p0, p1, capsuleRadius, blockMask, QueryTriggerInteraction.Ignore);
             if (hits == null || hits.Length == 0)
             {
@@ -446,7 +446,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             const float traceRadius = 3f;
 
             int total = 0, passBounds = 0, passDist = 0, pass05 = 0, pass10 = 0, pass20 = 0;
-            int passSteep = 0, passBlocked = 0;
+            int passSteep = 0, passBlocked = 0, passSphere = 0;
             var shown = 0;
             // Exemplars, not a listing — the `totals` line below is what gets read. Three
             // is enough to see the shape of a rejection; eight was just more scrolling.
@@ -455,9 +455,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             // Match the RegionBuilder terrain-pass constants so the trace
             // reflects what kind=Terrain would actually accept.
             const float minTerrainNormalY = 0.891007f; // cos(27°)
-            const float capsuleRadius = 0.3f;
-            const float capsuleHeight = 1.4f;
-            const float capsuleLift = 0.25f;
+
             var blockMask = LayerMask.GetMask("Default", "static_solid", "piece");
 
             for (var t = 0; t < triCount; t++)
@@ -503,11 +501,17 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var steepOk = n.y >= minTerrainNormalY;
                 if (steepOk) passSteep++;
 
-                var capP0 = c + Vector3.up * (capsuleLift + capsuleRadius);
-                var capP1 = c + Vector3.up * (capsuleLift + capsuleHeight - capsuleRadius);
-                var blocked = Physics.CheckCapsule(capP0, capP1, capsuleRadius, blockMask);
-                var capsuleOk = !blocked;
+                RegionBuilder.TerrainClearanceCapsule(c, out var capP0, out var capP1, out var capR);
+                var capsuleOk = !Physics.CheckCapsule(capP0, capP1, capR, blockMask);
                 if (capsuleOk) passBlocked++;
+
+                // The PIECE branch of the same filter. Stair treads and floors are pieces, so
+                // the capsule column above is a "what if this were terrain" readout for them —
+                // this is the verdict the partition actually uses.
+                RegionBuilder.PieceClearanceSphere(c, out var sphOrigin, out var sphR);
+                var sphereOk = !Physics.CheckSphere(
+                    sphOrigin, sphR, blockMask, QueryTriggerInteraction.Ignore);
+                if (sphereOk) passSphere++;
 
                 if (shown < maxShown)
                 {
@@ -518,7 +522,8 @@ namespace ValheimVillages.Villager.AI.Navigation
                         $"  tri@({c.x:F2},{c.y:F2},{c.z:F2}) " +
                         $"bounds={(bnds ? "Y" : "n")} dist={(near ? "Y" : "n")} " +
                         $"agent[0.5]={h05str} [1.0]={h10str} [2.0]={h20str} " +
-                        $"steep={(steepOk ? "Y" : "n")} capsule={(capsuleOk ? "Y" : "BLOCKED")}");
+                        $"steep={(steepOk ? "Y" : "n")} capsule={(capsuleOk ? "Y" : "BLOCKED")} " +
+                        $"sphere={(sphereOk ? "Y" : "BLOCKED")}");
                     shown++;
                 }
             }
@@ -532,7 +537,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             sb.AppendLine(
                 $"  totals (of {total}): " +
                 $"bounds={passBounds} dist={passDist} agent[0.5]={pass05} agent[1.0]={pass10} agent[2.0]={pass20} " +
-                $"steep_ok={passSteep} capsule_ok={passBlocked}");
+                $"steep_ok={passSteep} capsule_ok={passBlocked} sphere_ok={passSphere}");
             sb.AppendLine($"  anchors in scene: {anchors.Count}");
         }
 

@@ -493,12 +493,15 @@ namespace ValheimVillages.Villager.AI.Navigation
             // carries a region — the floor the villager stands on. This is the
             // main position marker, not a fallback.
             //
-            // anchorReachableCellY records each reached cell's surface Y so Pass 3
-            // seeds the piece flood at the same height (not the terrain a metre
-            // below, which would exceed MaxClimb and orphan the floor pieces).
+            // anchorReachableCellYs records EVERY surface the flood stood on in a cell, so
+            // Pass 3 seeds the piece flood at the same heights (not the terrain a metre
+            // below, which would exceed MaxClimb and orphan the floor pieces). It is a list
+            // per cell, not a single Y, because a column can hold a floor over open ground
+            // and both are walkable — see the column note in AnchorReachableFlood.
             var anchorReachableCells = new HashSet<long>();
-            var anchorReachableCellY = new Dictionary<long, float>();
+            var anchorReachableCellYs = new Dictionary<long, List<float>>();
             var pass2Seeds = 0;
+            int pass2RejWall = 0, pass2RejClimb = 0, pass2RejOutside = 0;
 
             // Region surface Y at a cell: the highest region-centroid Y present
             // there across both kinds (floor pieces win over the terrain they
@@ -517,22 +520,153 @@ namespace ValheimVillages.Villager.AI.Navigation
                     : 0f;
             }
 
+            // MaxClimb 1.0m: tight enough to drop the rampart-to-roof-base bridge
+            // (typically 2m+), still allows 1m-per-cell stair pieces. Bump to 1.25-1.5m if
+            // stair connectivity breaks empirically. See PieceReachableFlood for why it is
+            // deliberately looser than the bake's own step, and what 0.2m cost when tried.
+            const float MaxClimb = 1.0f;
+
+            // Real walk-surface height of every lookup cell, taken from the TRIANGLES
+            // themselves — the centroid of each triangle, bucketed by its own lookup key, with
+            // the highest tri in a cell winning (a villager stands ON the surface, and where a
+            // cell holds a lip or a step the upper face is the one they end up on).
+            //
+            // Must NOT be derived from region centroids: a region centroid is the AVERAGE of the
+            // whole region, and for a merged stair flight or a long ramp that average sits over
+            // a metre from the tread actually underfoot. Covers BOTH kinds (the piece-only
+            // version used to be built after Pass 2, which left Pass 2 with nothing but region
+            // averages to work from). Built here, before any triangle pruning below.
+            var keySurfaceY = new Dictionary<long, float>(lookupGrid.Count);
+            if (triangles != null)
+                foreach (var tri in triangles)
+                {
+                    if (string.IsNullOrEmpty(tri.RegionId)) continue;
+                    var tcx = (tri.V0.x + tri.V1.x + tri.V2.x) / 3f;
+                    var tcy = (tri.V0.y + tri.V1.y + tri.V2.y) / 3f;
+                    var tcz = (tri.V0.z + tri.V1.z + tri.V2.z) / 3f;
+                    var tKey = RegionGraph.PackLookup(
+                        Mathf.FloorToInt(tcx / cell), Mathf.FloorToInt(tcz / cell),
+                        RegionGraph.HeightBucket(tcy));
+                    if (!keySurfaceY.TryGetValue(tKey, out var known) || tcy > known)
+                        keySurfaceY[tKey] = tcy;
+                }
+
+            // Every distinct walkable surface in a column, ascending. Built from the per-kind
+            // lookup-key index rather than xzMaxY*, which has already collapsed the column to its
+            // highest surface. Heights come from the TRIANGLES, not region centroids: a centroid
+            // averages a whole region and on a merged flight sits well off the tread underfoot.
+            // The returned list is a reused buffer — do not hold it across calls.
+            var surfacesScratch = new List<float>(4);
+
+            IReadOnlyList<float> SurfacesAt(long xzKey, int gx, int gz)
+            {
+                surfacesScratch.Clear();
+
+                void Collect(Dictionary<long, List<long>> index)
+                {
+                    if (index == null || !index.TryGetValue(xzKey, out var keys)) return;
+                    foreach (var lookupKey in keys)
+                    {
+                        if (!lookupGrid.TryGetValue(lookupKey, out var rid)) continue;
+                        float y;
+                        if (keySurfaceY.TryGetValue(lookupKey, out var triY))
+                        {
+                            // Triangle-derived: the surface actually at this cell.
+                            y = triY;
+                        }
+                        else
+                        {
+                            // No triangle recorded for this cell. Clamp the region centroid into
+                            // the key's own height bucket rather than trusting a region average
+                            // that may be metres away — never worse than the raw centroid, and
+                            // exact when the region lies in one bucket.
+                            if (!centroids.TryGetValue(rid, out var c)) continue;
+                            UnpackLookup(lookupKey, out _, out _, out var hb);
+                            var bucketMin = hb * RegionGraph.HeightBucketSize;
+                            y = Mathf.Clamp(c.y, bucketMin, bucketMin + RegionGraph.HeightBucketSize);
+                        }
+                        // Distinct at the same 0.25m quantisation the flood dedups visits by,
+                        // so a terrain surface and the floor resting on it do not collapse.
+                        var q = Mathf.RoundToInt(y * 4f);
+                        var already = false;
+                        for (var i = 0; i < surfacesScratch.Count && !already; i++)
+                            already = Mathf.RoundToInt(surfacesScratch[i] * 4f) == q;
+                        if (!already) surfacesScratch.Add(y);
+                    }
+                }
+
+                Collect(xzToLookupKeysTerrain);
+                Collect(xzToLookupKeysPiece);
+
+                if (surfacesScratch.Count == 0)
+                    // No region in this column: fall back to the terrain heightmap so the flood
+                    // can still cross gaps in region coverage. Never returns empty.
+                    surfacesScratch.Add(SurfaceY(xzKey, gx, gz, out _));
+
+                surfacesScratch.Sort();
+                return surfacesScratch;
+            }
+
+            if (WatchXz.HasValue)
+            {
+                UnpackXz(WatchXz.Value, out var wgx, out var wgz);
+                var wSurf = SurfacesAt(WatchXz.Value, wgx, wgz);
+                var wsb = new System.Text.StringBuilder();
+                if (wSurf != null)
+                    for (var si = 0; si < wSurf.Count; si++)
+                    {
+                        if (si > 0) wsb.Append(", ");
+                        wsb.Append(wSurf[si].ToString("F2"));
+                    }
+
+                Trace("index",
+                    $"cell ({wgx},{wgz}) surfaces=[{wsb}] " +
+                    $"terrainKeys={(xzToLookupKeysTerrain.TryGetValue(WatchXz.Value, out var wtk) ? wtk.Count : 0)} " +
+                    $"pieceKeys={(xzToLookupKeysPiece.TryGetValue(WatchXz.Value, out var wpk) ? wpk.Count : 0)} " +
+                    $"pass1_outside={outsideCells.Contains(WatchXz.Value)}");
+            }
+
             if (anchors != null && anchors.Count > 0 && ZoneSystem.instance != null)
             {
                 // Pass 2 flood now lives in the pure AnchorReachableFlood helper.
                 // isPopulated keeps the anchor-snap on the ContainsKey fast path (no
-                // ground cast); surfaceY supplies the walk-surface height.
+                // ground cast); surfacesAt supplies every walk surface in a column.
                 AnchorReachableFlood(
                     gxMin, gzMin, gxMax, gzMax, anchors, outsideCells, cell, anchorSnapRingMax: 6,
                     isPopulated: ck => xzMaxYTerrain.ContainsKey(ck) || xzMaxYPiece.ContainsKey(ck),
-                    surfaceY: (xzKey, gx, gz) => SurfaceY(xzKey, gx, gz, out _),
+                    surfacesAt: SurfacesAt,
                     wallBlocks: (ax, az, bx, bz, ya, yb) => WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask),
-                    out anchorReachableCells, out anchorReachableCellY, out pass2Seeds,
+                    maxClimb: MaxClimb,
+                    out anchorReachableCells, out anchorReachableCellYs, out pass2Seeds,
+                    out pass2RejWall, out pass2RejClimb, out pass2RejOutside,
                     warn: msg => Plugin.Log?.LogWarning(msg));
             }
 
             stats.Pass2Seeds = pass2Seeds;
             stats.AnchorReachableTerrainCells = anchorReachableCells.Count;
+            stats.Pass2RejWallBlocks = pass2RejWall;
+            stats.Pass2RejClimb = pass2RejClimb;
+            stats.Pass2RejOutside = pass2RejOutside;
+
+            if (WatchXz.HasValue)
+            {
+                var reached = anchorReachableCells.Contains(WatchXz.Value);
+                var ys = "";
+                if (anchorReachableCellYs.TryGetValue(WatchXz.Value, out var wys))
+                {
+                    var b = new System.Text.StringBuilder();
+                    for (var i = 0; i < wys.Count; i++)
+                    {
+                        if (i > 0) b.Append(", ");
+                        b.Append(wys[i].ToString("F2"));
+                    }
+
+                    ys = b.ToString();
+                }
+
+                Trace("pass2.result",
+                    $"anchor-reachable={reached} surfacesStoodOn=[{ys}] (total cells {anchorReachableCells.Count})");
+            }
 
             if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
 
@@ -557,10 +691,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             // MaxClimb 1.0m: tight enough to drop the rampart → roof-base
             // bridge (typically ≥2m), still allows 1m-per-cell stair pieces.
             // Bump to 1.25–1.5m if stair connectivity breaks empirically.
-            // Deliberately LOOSER than the bake's own step (NavMeshBakeMaxClimb, 0.2m), and
+            // Deliberately LOOSER than the bake's own step (NavMeshBakeMaxClimb, 0.25m), and
             // it has to be: this chains between piece REGION CENTROIDS, not between adjacent
             // surfaces. A flight of stairs is one region whose centroid sits a metre above the
-            // floor it leaves, so a 0.2m limit severs the building from its own ground.
+            // floor it leaves, so a bake-sized limit severs the building from its own ground.
             //
             // Tried and measured: at 0.2m, anchor-reachable piece keys fell 825 → 625, regions
             // kept 169 → 147, and a whole building went with them — the station registry lost
@@ -568,43 +702,10 @@ namespace ValheimVillages.Villager.AI.Navigation
             // were pruned. Rooftops are not this pass's problem: roof geometry is excluded
             // from the bake up front (NavMeshBakeManager.IsRoofGeometry), so there is no roof
             // navmesh for the chain to climb onto in the first place.
-            // MaxClimb 1.0m: tight enough to drop the rampart-to-roof-base bridge
-            // (typically 2m+), still allows 1m-per-cell stair pieces. Bump to 1.25-1.5m if
-            // stair connectivity breaks empirically. See PieceReachableFlood for why it is
-            // deliberately looser than the bake's own step, and what 0.2m cost when tried.
-            const float MaxClimb = 1.0f;
-            // The real walk-surface height of every piece lookup cell, taken from the
-            // triangles themselves. A region centroid is the AVERAGE of a region, and for a
-            // merged stair flight that average sits over a metre from the tread you would
-            // actually step onto — which is what pruned a building's whole upper storey. The
-            // height bucket alone is not tight enough to recover it either: buckets are 2m and
-            // MaxClimb is 1m, so a centroid can still sit 1.35m from the surface inside its
-            // own bucket. Runs before the triangle sweep, while the triangles are still all
-            // here; ~3.8k piece tris, one pass.
-            var pieceKeySurfaceY = new Dictionary<long, float>(xzToLookupKeysPiece.Count);
-            if (triangles != null)
-                foreach (var tri in triangles)
-                {
-                    if (string.IsNullOrEmpty(tri.RegionId)) continue;
-                    if (kindMap == null || !kindMap.TryGetValue(tri.RegionId, out var tk)) continue;
-                    if (tk != SurfaceKind.Piece) continue;
-
-                    var tcx = (tri.V0.x + tri.V1.x + tri.V2.x) / 3f;
-                    var tcy = (tri.V0.y + tri.V1.y + tri.V2.y) / 3f;
-                    var tcz = (tri.V0.z + tri.V1.z + tri.V2.z) / 3f;
-                    var tKey = RegionGraph.PackLookup(
-                        Mathf.FloorToInt(tcx / cell), Mathf.FloorToInt(tcz / cell),
-                        RegionGraph.HeightBucket(tcy));
-                    // Highest tri in the cell: a villager stands ON the surface, and where a
-                    // cell holds a lip or a step the upper face is the one they end up on.
-                    if (!pieceKeySurfaceY.TryGetValue(tKey, out var known) || tcy > known)
-                        pieceKeySurfaceY[tKey] = tcy;
-                }
-
             PieceReachableFlood(
                 xzToLookupKeysPiece, xzToLookupKeysTerrain, lookupGrid, centroids,
-                pieceKeySurfaceY,
-                anchorReachableCells, anchorReachableCellY, outsideCells, cell, MaxClimb,
+                keySurfaceY,
+                anchorReachableCells, anchorReachableCellYs, outsideCells, cell, MaxClimb,
                 // The pass's one engine dependency, injected. A null oracle skips the pass,
                 // which is exactly what a null ZoneSystem used to do.
                 ZoneSystem.instance == null
@@ -677,6 +778,32 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             stats.LookupCellsDropped = terrainLookupDropped + pieceLookupDropped;
             stats.Pass3PieceKeysDropped = pass3PieceKeysDropped;
+
+            // Per-key fate of the traced cell, AFTER the cell-level apply. This is the stage the
+            // earlier trace stopped short of: Pass 2 accepting a cell only protects its TERRAIN
+            // entries, while its PIECE entries live or die by Pass 3's pieceReachableKeys.
+            if (WatchXz.HasValue)
+            {
+                UnpackXz(WatchXz.Value, out var wgx, out var wgz);
+                var xzReach = anchorReachableCells.Contains(WatchXz.Value);
+                if (xzToLookupKeysPiece.TryGetValue(WatchXz.Value, out var wpk))
+                    foreach (var k in wpk)
+                    {
+                        RegionGraph.UnpackLookup(k, out _, out _, out var hb);
+                        Trace("cellapply",
+                            $"({wgx},{wgz}) PIECE hb={hb} reachedByPass3={pieceReachableKeys.Contains(k)} " +
+                            $"stillInGrid={lookupGrid.ContainsKey(k)}");
+                    }
+
+                if (xzToLookupKeysTerrain.TryGetValue(WatchXz.Value, out var wtk))
+                    foreach (var k in wtk)
+                    {
+                        RegionGraph.UnpackLookup(k, out _, out _, out var hb);
+                        Trace("cellapply",
+                            $"({wgx},{wgz}) TERRAIN hb={hb} xzAnchorReachable={xzReach} " +
+                            $"stillInGrid={lookupGrid.ContainsKey(k)}");
+                    }
+            }
 
             // Triangle sweep: terrain tris drop iff centroid XZ NOT in
             // anchorReachable; piece tris drop iff their lookup key (gx, gz,
@@ -1119,19 +1246,57 @@ namespace ValheimVillages.Villager.AI.Navigation
             float cell,
             int anchorSnapRingMax,
             Func<long, bool> isPopulated,
-            Func<long, int, int, float> surfaceY,
+            Func<long, int, int, IReadOnlyList<float>> surfacesAt,
             Func<int, int, int, int, float, float, bool> wallBlocks,
+            float maxClimb,
             out HashSet<long> anchorReachableCells,
-            out Dictionary<long, float> anchorReachableCellY,
+            out Dictionary<long, List<float>> anchorReachableCellYs,
             out int seedCount,
+            out int rejWallBlocks,
+            out int rejClimb,
+            out int rejOutside,
             Action<string> warn = null)
         {
-            anchorReachableCells = new HashSet<long>();
-            anchorReachableCellY = new Dictionary<long, float>();
+            // Locals because the Visit local function below cannot capture out parameters;
+            // both are reference types already handed to the caller, so Visit's mutations
+            // are what the caller sees.
+            var cells = new HashSet<long>();
+            var cellYs = new Dictionary<long, List<float>>();
+            anchorReachableCells = cells;
+            anchorReachableCellYs = cellYs;
             seedCount = 0;
+            // Aggregate boundary shape. Tracing cells one at a time cannot tell you whether the
+            // flood's frontier is dominated by walls, by climb, or by columns with no regions —
+            // this can, in one partition.
+            // Shape of the flood's frontier, for diagnosing a village that maps short.
+            rejWallBlocks = 0;
+            rejClimb = 0;
+            rejOutside = 0;
             if (anchors == null || anchors.Count == 0) return;
 
+            // Visited per (cell, surface), not per cell: a column holding a floor over open
+            // ground is two walkable places, and collapsing them to the highest one confines an
+            // upstairs-seeded flood to that storey. Quantised at 0.25m rather than by height
+            // bucket so a tread and the landing beside it stay distinct.
+            var visited = new HashSet<(long key, int q)>();
+
             var anchorQueue = new Queue<(long key, float y)>();
+
+            bool Visit(long key, float y)
+            {
+                if (!visited.Add((key, Mathf.RoundToInt(y * 4f)))) return false;
+                if (Watching(key)) Trace("pass2.visit", $"surface y={y:F2} ACCEPTED");
+                cells.Add(key);
+                if (!cellYs.TryGetValue(key, out var ys))
+                {
+                    ys = new List<float>(2);
+                    cellYs[key] = ys;
+                }
+
+                ys.Add(y);
+                anchorQueue.Enqueue((key, y));
+                return true;
+            }
             foreach (var anchor in anchors)
             {
                 var bgx0 = Mathf.FloorToInt(anchor.x / cell);
@@ -1166,34 +1331,117 @@ namespace ValheimVillages.Villager.AI.Navigation
                     continue;
                 }
 
+                // Seed the surface the anchor is actually STANDING on — the one nearest its
+                // own Y — not the column's highest. An anchor on a ground floor used to seed
+                // the storey above it simply because a floor piece shadowed its cell.
                 var anchorKey = XzKey(bgx, bgz);
-                if (anchorReachableCells.Add(anchorKey))
+                var seedSurfaces = surfacesAt(anchorKey, bgx, bgz);
+                if (seedSurfaces == null || seedSurfaces.Count == 0) continue;
+
+                var seedY = seedSurfaces[0];
+                var bestSeedDelta = Mathf.Abs(seedY - anchor.y);
+                for (var i = 1; i < seedSurfaces.Count; i++)
                 {
-                    var seedY = surfaceY(anchorKey, bgx, bgz);
-                    anchorReachableCellY[anchorKey] = seedY;
-                    anchorQueue.Enqueue((anchorKey, seedY));
-                    seedCount++;
+                    var delta = Mathf.Abs(seedSurfaces[i] - anchor.y);
+                    if (delta >= bestSeedDelta) continue;
+                    bestSeedDelta = delta;
+                    seedY = seedSurfaces[i];
                 }
+
+                if (Visit(anchorKey, seedY)) seedCount++;
             }
 
-            int[] dx = { 1, -1, 0, 0 };
-            int[] dz = { 0, 0, 1, -1 };
+            // 8-connected, unlike Pass 1. A staircase that turns a corner descends DIAGONALLY,
+            // and a 4-connected flood cannot follow it: the step is short and well inside the
+            // climb gate but is never considered, so the village maps as only the storey its
+            // anchors sit on. Corner-cutting is handled by the probe geometry rather than a
+            // separate rule — ComputeWaistProbeBox centres a diagonal probe on the shared corner,
+            // so a wall in either flanking cell blocks the step.
+            //
+            // Pass 1 stays 4-connected: it floods INWARD to find the perimeter, where a diagonal
+            // gap must not let "outside" leak into a sealed village, and its edge cache is keyed
+            // per-axis so it cannot express diagonals anyway.
+            int[] dx = { 1, -1, 0, 0, 1, 1, -1, -1 };
+            int[] dz = { 0, 0, 1, -1, 1, -1, 1, -1 };
             while (anchorQueue.Count > 0)
             {
                 var (curKey, curY) = anchorQueue.Dequeue();
                 UnpackXz(curKey, out var gx, out var gz);
-                for (var d = 0; d < 4; d++)
+                for (var d = 0; d < dx.Length; d++)
                 {
                     int ngx = gx + dx[d], ngz = gz + dz[d];
                     if (ngx < gxMin || ngx > gxMax || ngz < gzMin || ngz > gzMax) continue;
                     var nKey = XzKey(ngx, ngz);
-                    if (anchorReachableCells.Contains(nKey)) continue;
-                    if (outsideCells.Contains(nKey)) continue;
-                    var nY = surfaceY(nKey, ngx, ngz);
-                    if (wallBlocks(gx, gz, ngx, ngz, curY, nY)) continue;
-                    anchorReachableCells.Add(nKey);
-                    anchorReachableCellY[nKey] = nY;
-                    anchorQueue.Enqueue((nKey, nY));
+                    if (outsideCells.Contains(nKey))
+                    {
+                        rejOutside++;
+                        continue;
+                    }
+
+                    // Every surface in the neighbouring column is a candidate, each judged on
+                    // its own. wallBlocks probes the waist band at BOTH ends, so a step from an
+                    // upper storey out over open ground is still refused by the wall at either
+                    // elevation — what changes is that the ground floor under that storey, and
+                    // each stair tread between them, are now places the flood can stand.
+                    var nSurfaces = surfacesAt(nKey, ngx, ngz);
+                    var watched = Watching(nKey);
+                    if (nSurfaces == null || nSurfaces.Count == 0)
+                    {
+                        if (watched)
+                            Trace("pass2.reject",
+                                $"from ({gx},{gz}) y={curY:F2} -> NO SURFACES in column");
+                        continue;
+                    }
+
+                    if (watched)
+                    {
+                        var sb = new System.Text.StringBuilder();
+                        for (var si = 0; si < nSurfaces.Count; si++)
+                        {
+                            if (si > 0) sb.Append(", ");
+                            sb.Append(nSurfaces[si].ToString("F2"));
+                        }
+
+                        Trace("pass2.candidate", $"from ({gx},{gz}) y={curY:F2}; surfaces=[{sb}]");
+                    }
+
+                    // A SINGLE-surface column behaves exactly as before: no climb gate at all,
+                    // wallBlocks alone decides, so flat and steeply sloped terrain keep the
+                    // reachability they already had. Only a STACKED column needs a gate —
+                    // without one the flood could hop from open ground straight onto the roof
+                    // above it, purely because both surfaces share a cell.
+                    var gateStacked = nSurfaces.Count > 1;
+                    for (var i = 0; i < nSurfaces.Count; i++)
+                    {
+                        var nY = nSurfaces[i];
+                        if (gateStacked && Mathf.Abs(nY - curY) > maxClimb)
+                        {
+                            rejClimb++;
+                            if (watched)
+                                Trace("pass2.reject",
+                                    $"y={nY:F2} from y={curY:F2} -> CLIMB |{Mathf.Abs(nY - curY):F2}| " +
+                                    $"> maxClimb {maxClimb:F2} (stacked column, {nSurfaces.Count} surfaces)");
+                            continue;
+                        }
+
+                        if (visited.Contains((nKey, Mathf.RoundToInt(nY * 4f))))
+                        {
+                            if (watched) Trace("pass2.skip", $"y={nY:F2} already visited");
+                            continue;
+                        }
+
+                        if (wallBlocks(gx, gz, ngx, ngz, curY, nY))
+                        {
+                            rejWallBlocks++;
+                            if (watched)
+                                Trace("pass2.reject",
+                                    $"y={nY:F2} from ({gx},{gz}) y={curY:F2} -> WALLBLOCKS " +
+                                    "(waist probe at BOTH ends)");
+                            continue;
+                        }
+
+                        Visit(nKey, nY);
+                    }
                 }
             }
         }
@@ -1240,7 +1488,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             Dictionary<string, Vector3> centroids,
             Dictionary<long, float> keySurfaceY,
             HashSet<long> anchorReachableCells,
-            Dictionary<long, float> anchorReachableCellY,
+            Dictionary<long, List<float>> anchorReachableCellYs,
             HashSet<long> outsideCells,
             float cell,
             float maxClimb,
@@ -1272,16 +1520,30 @@ namespace ValheimVillages.Villager.AI.Navigation
                     pairs.Add((fromRid, toRid, startPos, endPos));
             }
 
-            // Terrain region at a given cell XZ (any height bucket). The first
-            // lookup-key-resolved rid is sufficient for recording adjacency, since multiple
-            // terrain regions at one cell are coplanar-merged upstream.
-            string TerrainRegionAtCell(long xz)
+            // Terrain region at a cell XZ whose surface is within maxClimb of targetY, nearest
+            // first. Symmetric with PieceAtCellInReachable, and that symmetry is the point: the
+            // climb gate validates the VISIT (curY -> stepY) while the edge recorded is
+            // (fromRid -> rid), so an unguarded source emits links between surfaces metres apart.
+            // This once took no Y at all, on the reasoning that terrain regions at one cell are
+            // coplanar-merged upstream — they are not; two stacked terrain surfaces never merge.
+            string TerrainRegionAtCell(long xz, float targetY)
             {
                 if (xzToLookupKeysTerrain == null) return null;
                 if (!xzToLookupKeysTerrain.TryGetValue(xz, out var keys)) return null;
+                string bestRid = null;
+                var bestDeltaY = float.MaxValue;
                 foreach (var lookupKey in keys)
-                    if (lookupGrid.TryGetValue(lookupKey, out var trid)) return trid;
-                return null;
+                {
+                    if (!lookupGrid.TryGetValue(lookupKey, out var trid)) continue;
+                    if (!centroids.TryGetValue(trid, out var tc)) continue;
+                    var delta = Mathf.Abs(CellSurfaceY(lookupKey, tc.y) - targetY);
+                    if (delta > maxClimb) continue;
+                    if (delta >= bestDeltaY) continue;
+                    bestDeltaY = delta;
+                    bestRid = trid;
+                }
+
+                return bestRid;
             }
 
             // The height a step is judged against is the surface AT THE CANDIDATE CELL, not
@@ -1340,7 +1602,11 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             var half = cell * 0.5f;
-            var visitedTerrainXz = new HashSet<long>();
+            // Terrain visits dedup per (cell, surface), not per cell: a column holding a
+            // floor over open ground is two distinct standing places, and collapsing them
+            // means whichever one the flood reaches first silently cancels the other.
+            var visitedTerrainXz = new HashSet<(long xz, int q)>();
+            static int TerrainVisitQ(float y) => Mathf.RoundToInt(y * 4f);
             // Queue entries are tagged isTerrain so dedup is kind-aware:
             //   - Terrain visits (seed + bridge) dedup by XZ on dequeue, so each
             //     anchor-reachable XZ is processed once at ground altitude.
@@ -1355,13 +1621,16 @@ namespace ValheimVillages.Villager.AI.Navigation
             foreach (var xz in anchorReachableCells)
             {
                 UnpackXz(xz, out var gx, out var gz);
-                // Seed at the surface Pass 2 actually walked (floor pieces in a floored
-                // village), not the terrain a metre below — otherwise the floor pieces sit
-                // more than maxClimb above the seed and the flood never reaches them.
-                var ty = anchorReachableCellY != null && anchorReachableCellY.TryGetValue(xz, out var sy)
-                    ? sy
-                    : groundY(gx * cell + half, gz * cell + half);
-                pieceQueue.Enqueue((xz, ty, true, null));
+                // Seed at EVERY surface Pass 2 actually walked in this column (floor pieces in
+                // a floored village), not the terrain a metre below — otherwise the floor
+                // pieces sit more than maxClimb above the seed and the flood never reaches
+                // them. A column can hold several: the ground floor and the storey above it
+                // are both places Pass 2 stood, and each has its own pieces to step onto.
+                if (anchorReachableCellYs != null && anchorReachableCellYs.TryGetValue(xz, out var sys))
+                    foreach (var sy in sys)
+                        pieceQueue.Enqueue((xz, sy, true, null));
+                else
+                    pieceQueue.Enqueue((xz, groundY(gx * cell + half, gz * cell + half), true, null));
             }
 
             int[] dx = { 1, -1, 0, 0 };
@@ -1369,7 +1638,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             while (pieceQueue.Count > 0)
             {
                 var (curXz, curY, isTerrain, sourceRid) = pieceQueue.Dequeue();
-                if (isTerrain && !visitedTerrainXz.Add(curXz)) continue;
+                if (isTerrain && !visitedTerrainXz.Add((curXz, TerrainVisitQ(curY)))) continue;
                 UnpackXz(curXz, out var gx, out var gz);
                 for (var d = 0; d < 4; d++)
                 {
@@ -1380,14 +1649,28 @@ namespace ValheimVillages.Villager.AI.Navigation
                     //     surface height if it is anchor-reachable and the climb fits.
                     //     Bridges propagate sourceRid=null — they create no piece adjacency,
                     //     they are pure connectivity.
-                    if (anchorReachableCells.Contains(nXz) && !visitedTerrainXz.Contains(nXz))
+                    if (anchorReachableCells.Contains(nXz))
                     {
-                        var tnY = anchorReachableCellY != null &&
-                                  anchorReachableCellY.TryGetValue(nXz, out var nsy)
-                            ? nsy
-                            : groundY(ngx * cell + half, ngz * cell + half);
-                        if (Mathf.Abs(tnY - curY) <= maxClimb)
-                            pieceQueue.Enqueue((nXz, tnY, true, null));
+                        // Bridge to whichever surface of the neighbouring column is within
+                        // climb — a column can carry several, and the one directly below an
+                        // upper storey is a different place from the storey itself.
+                        if (anchorReachableCellYs != null &&
+                            anchorReachableCellYs.TryGetValue(nXz, out var nsys))
+                        {
+                            foreach (var tnY in nsys)
+                            {
+                                if (Mathf.Abs(tnY - curY) > maxClimb) continue;
+                                if (visitedTerrainXz.Contains((nXz, TerrainVisitQ(tnY)))) continue;
+                                pieceQueue.Enqueue((nXz, tnY, true, null));
+                            }
+                        }
+                        else
+                        {
+                            var tnY = groundY(ngx * cell + half, ngz * cell + half);
+                            if (Mathf.Abs(tnY - curY) <= maxClimb &&
+                                !visitedTerrainXz.Contains((nXz, TerrainVisitQ(tnY))))
+                                pieceQueue.Enqueue((nXz, tnY, true, null));
+                        }
                     }
 
                     // (b) Piece step: walk every piece at the neighbour XZ within climb of
@@ -1427,7 +1710,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                         //   4. the previous piece added in THIS iteration, so sibling pieces
                         //      at one cell chain even with no terrain and nothing prior.
                         var fromRid = sourceRid
-                                      ?? TerrainRegionAtCell(curXz)
+                                      ?? TerrainRegionAtCell(curXz, curY)
                                       ?? PieceAtCellInReachable(curXz, curY)
                                       ?? lastAddedAtNeighbour;
                         PieceStepLinkPositions(
@@ -1909,6 +2192,26 @@ namespace ValheimVillages.Villager.AI.Navigation
                    || (yA != yB && ProbeAtWaist(gxA, gzA, gxB, gzB, yB, cell, mask));
         }
 
+        /// <summary>
+        ///     XZ key of a single cell to trace through the partition, or null. Set by
+        ///     `vv_watchcell`. Exists because the probe can only report the FINISHED graph plus
+        ///     Pass 1's terrain-level view — it cannot show what Pass 2 decided per surface, so
+        ///     six consecutive interventions were evaluated against the wrong gate. This reports
+        ///     the decision at the moment it is made, with the reason.
+        /// </summary>
+        internal static long? WatchXz;
+
+        /// <summary>True when <paramref name="xz" /> is the traced cell.</summary>
+        private static bool Watching(long xz)
+        {
+            return WatchXz.HasValue && WatchXz.Value == xz;
+        }
+
+        private static void Trace(string stage, string detail)
+        {
+            Plugin.Log?.LogInfo($"[CellTrace] {stage}: {detail}");
+        }
+
         // Reused buffer for the anchor-aware waist probe. Sized generously —
         // dense village cells can stack many piece colliders in one waist box.
         private static readonly Collider[] s_waistProbeBuf = new Collider[64];
@@ -1941,6 +2244,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             return col.GetComponentInParent<Bed>() != null;
         }
+
 
         // --- Gate / door sealing for the Pass 1 outside flood --------------
         // A wall's collider sits in the waist band, so WallBlocks catches it.
@@ -2652,13 +2956,25 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             var dgx = gxB - gxA;
             var dgz = gzB - gzA;
-            if ((dgx == 0) == (dgz == 0))
+            var cardinal = (dgx == 0) != (dgz == 0);
+            var diagonal = dgx != 0 && dgz != 0 && Mathf.Abs(dgx) == 1 && Mathf.Abs(dgz) == 1;
+            if (!cardinal && !diagonal)
                 throw new System.ArgumentException(
-                    "ComputeWaistProbeBox called with non-cardinal step " +
-                    $"({gxA},{gzA})->({gxB},{gzB}); the flood is 4-connected. The box built " +
-                    "for a diagonal step spans the wrong volume, so answering anyway would " +
-                    "report a gate the flood never evaluates.");
+                    "ComputeWaistProbeBox called with a step that is neither cardinal nor a " +
+                    $"single diagonal: ({gxA},{gzA})->({gxB},{gzB}). The box would span the " +
+                    "wrong volume, so answering anyway would report a gate the flood never " +
+                    "evaluates.");
 
+            // Cardinal: the midpoint IS the shared edge, so a half-cell box straddles it and
+            // covers the half of each cell the walker crosses.
+            //
+            // Diagonal (Pass 2 only — Pass 1 and its edge cache remain 4-connected): the two
+            // cells share only a CORNER, and the midpoint lands exactly on it. The same
+            // half-cell box therefore covers a quarter of each of the four cells meeting at
+            // that corner, which is the right question for a diagonal move: "can a walker
+            // squeeze past this corner". It also means geometry in either flanking cell is
+            // counted, so the flood cannot cut diagonally through the join of two walls — the
+            // corner-cutting guard falls out of the geometry instead of needing a separate rule.
             halfExtents = new Vector3(half, halfY, half);
         }
 
@@ -2706,6 +3022,18 @@ namespace ValheimVillages.Villager.AI.Navigation
 
             /// <summary>Terrain XZ cells reached by Pass 2's anchor flood (or the fallback set).</summary>
             public int AnchorReachableTerrainCells;
+
+            /// <summary>
+            ///     Shape of Pass 2's frontier: why steps were refused, aggregated over the whole
+            ///     flood. Tracing one cell tells you about that cell; these tell you whether the
+            ///     boundary is made of walls, of climb limits, or of columns holding no regions.
+            /// </summary>
+            public int Pass2RejWallBlocks;
+
+
+            public int Pass2RejClimb;
+
+            public int Pass2RejOutside;
 
             /// <summary>Piece lookup keys seeded for Pass 3 (piece cells within step-height of a anchor-reachable terrain cell).</summary>
             public int Pass3Seeds;

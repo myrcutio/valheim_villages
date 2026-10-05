@@ -26,8 +26,8 @@ using ValheimVillages.Villages.Entity;
 [assembly: AssemblyCompany("Myrcutio")]
 [assembly: AssemblyProduct("ValheimVillages")]
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
-[assembly: AssemblyVersion("0.3.6")]
-[assembly: AssemblyFileVersion("0.3.6")]
+[assembly: AssemblyVersion("0.3.7")]
+[assembly: AssemblyFileVersion("0.3.7")]
 [assembly: InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
@@ -37,7 +37,7 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.3.6";
+        public const string PluginVersion = "0.3.7";
 
         private static bool _recipeRefreshEnqueued;
         private static bool _recordIndexEnqueued;
@@ -150,6 +150,7 @@ namespace ValheimVillages
                 AttributeScanner.EnqueueAgentDependentTasks();
                 Villager.Records.RecordPrefabFactory.RegisterInZNetScene(ZNetScene.instance);
                 Villages.Entity.VillagePrefabFactory.RegisterInZNetScene(ZNetScene.instance);
+                Items.Fragments.RescueQuestStore.RegisterInZNetScene(ZNetScene.instance);
 
                 Log.LogInfo("Hot reload — fixing up existing NPC components");
                 HotReloadHelper.FixupExistingNPCs();
@@ -214,7 +215,6 @@ namespace ValheimVillages
             Villager.VillagerRecallRpc.EnsureRegistered();
             Villager.WorkOrderConfigRpc.EnsureRegistered();
             Villager.VillagerPauseRpc.EnsureRegistered();
-            Villages.VillageCleanupRpc.EnsureRegistered();
             Items.Fragments.FragmentQuestRpc.EnsureRegistered();
 
             // Deliver surface rescue-quest rewards on arrival (interior dungeons spawn via the

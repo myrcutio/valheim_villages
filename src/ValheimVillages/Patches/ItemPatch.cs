@@ -51,6 +51,7 @@ namespace ValheimVillages.Patches
             AttributeScanner.EnqueueAgentDependentTasks();
             ValheimVillages.Villager.Records.RecordPrefabFactory.RegisterInZNetScene(__instance);
             ValheimVillages.Villages.Entity.VillagePrefabFactory.RegisterInZNetScene(__instance);
+            ValheimVillages.Items.Fragments.RescueQuestStore.RegisterInZNetScene(__instance);
             // VirtualRecipeLoader.RegisterCookingRecipesIfNeeded now runs as a deferred
             // [RequireObjectDB] task (enqueued above), so it no longer silently no-ops when
             // ObjectDB lost the Awake race against ZNetScene.

@@ -100,10 +100,6 @@ namespace ValheimVillages.Villager.AI.Navigation
         }
 
 
-        /// <summary>Block layers for the anchor clearance capsule (terrain excluded — only
-        /// structures/pieces count, so a point on open terrain passes).</summary>
-        private static readonly int s_clearanceMask = LayerMask.GetMask("Default", "static_solid", "piece");
-
         /// <summary>
         ///     Find the nearest reachable point on the villager NavMesh within
         ///     <paramref name="maxRadius"/> of <paramref name="target"/>. Use this for stations
@@ -114,7 +110,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     <paramref name="approachPoint"/> = target) when nothing walkable is found within radius.
         /// </summary>
         public static bool TryFindReachableApproach(
-            Vector3 target, float maxRadius, out Vector3 approachPoint, float minClearance = 0f)
+            Vector3 target, float maxRadius, out Vector3 approachPoint)
         {
             approachPoint = target;
             if (!VillagerAgentType.IsRegistered) return false;
@@ -126,19 +122,6 @@ namespace ValheimVillages.Villager.AI.Navigation
             };
 
             if (!NavMesh.SamplePosition(target, out var hit, maxRadius, filter)) return false;
-
-            // Clearance gate (anchor sampling): require room for a body of radius minClearance
-            // (2-3x a humanoid) so anchors land on open ground, never on a cramped sliver like a
-            // station top. A vertical capsule of that radius at the sampled point must be clear of
-            // structure/piece colliders (terrain excluded). A station top is rejected because the
-            // station's own piece colliders fall inside the capsule; open terrain passes.
-            if (minClearance > 0f)
-            {
-                var p0 = hit.position + Vector3.up * 0.3f;
-                var p1 = hit.position + Vector3.up * 1.8f;
-                if (Physics.CheckCapsule(p0, p1, minClearance, s_clearanceMask, QueryTriggerInteraction.Ignore))
-                    return false;
-            }
 
             approachPoint = hit.position;
             return true;
@@ -168,7 +151,6 @@ namespace ValheimVillages.Villager.AI.Navigation
             Vector3 pathSource,
             System.Func<Vector3, bool> hullPredicate,
             out Vector3 approach,
-            float minClearance = 0f,
             System.Action<string> trace = null)
         {
             approach = target;
@@ -182,9 +164,8 @@ namespace ValheimVillages.Villager.AI.Navigation
             // radius 0.4, so it cannot centre itself 4cm from an edge — NavMeshAgent clamps and
             // the villager stalls a metre short with desiredVel high and velocity zero, looking
             // frozen mid-task. (Observed: a cooking station whose approach landed on a 1.62m²
-            // piece-region, 0.04m from its edge.) This is distinct from `minClearance`, which is
-            // a physics capsule test against structure colliders — that point passed physics
-            // fine; it was the mesh geometry that made it unstandable.
+            // piece-region, 0.04m from its edge.) The point sampled fine; it was the mesh
+            // geometry that made it unstandable.
             //
             // The fallback pass matters: rejecting outright would make a station with no roomy
             // approach simply unreachable, which is worse than a tight approach that usually
@@ -197,7 +178,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 for (var i = 0; i < probes.Length; i++)
                 {
                     var probe = target + probes[i];
-                    if (!TryFindReachableApproach(probe, ApproachProbeRadius, out var hit, minClearance))
+                    if (!TryFindReachableApproach(probe, ApproachProbeRadius, out var hit))
                     {
                         trace?.Invoke($"p{pass}#{i} {Where(probe)}: no navmesh within {ApproachProbeRadius:F1}m");
                         continue;
@@ -238,8 +219,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                 }
             }
 
-            return TryReachApproach(target, pathSource, hullPredicate, pathBuffer, minClearance,
-                out approach, trace);
+            return TryReachApproach(target, pathSource, hullPredicate, pathBuffer, out approach, trace);
         }
 
         /// <summary>
@@ -276,7 +256,6 @@ namespace ValheimVillages.Villager.AI.Navigation
             Vector3 pathSource,
             System.Func<Vector3, bool> hullPredicate,
             List<Vector3> pathBuffer,
-            float minClearance,
             out Vector3 approach,
             System.Action<string> trace = null)
         {
@@ -291,7 +270,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     continue;
                 }
 
-                if (!TryFindReachableApproach(ground, ReachSnapRadius, out var hit, minClearance))
+                if (!TryFindReachableApproach(ground, ReachSnapRadius, out var hit))
                 {
                     trace?.Invoke($"reach#{i} {Where(ground)}: floor here, but no navmesh within " +
                                   $"{ReachSnapRadius:F1}m of it");

@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEngine;
 using ValheimVillages.Villager.AI.Navigation;
 using Xunit;
@@ -15,12 +16,12 @@ public class Pass2AnchorReachableTests
 {
     private static void Flood(
         GridEnv env, Vector3[] anchors, HashSet<long> outside,
-        out HashSet<long> reach, out Dictionary<long, float> reachY, out int seeds,
+        out HashSet<long> reach, out Dictionary<long, List<float>> reachY, out int seeds,
         System.Action<string>? warn = null) =>
         RubberBandPrune.AnchorReachableFlood(
             0, 0, 6, 6, anchors, outside, cell: 1f, anchorSnapRingMax: 6,
-            env.IsPopulated, env.SurfaceY, env.WallBlocks,
-            out reach, out reachY, out seeds, warn);
+            env.IsPopulated, env.SurfacesAt, env.WallBlocks, maxClimb: 1f,
+            out reach, out reachY, out seeds, out _, out _, out _, warn);
 
     private static Vector3[] AnchorAtCell(int gx, int gz) =>
         new[] { new Vector3(gx + 0.5f, 0f, gz + 0.5f) };
@@ -131,7 +132,49 @@ public class Pass2AnchorReachableTests
 
         Flood(env, AnchorAtCell(3, 3), outside, out _, out var reachY, out _);
 
-        Assert.Equal(12.5f, reachY[GridEnv.Key(3, 3)]);
-        Assert.Equal(13.0f, reachY[GridEnv.Key(3, 4)]);
+        Assert.Equal(12.5f, Assert.Single(reachY[GridEnv.Key(3, 3)]));
+        Assert.Equal(13.0f, Assert.Single(reachY[GridEnv.Key(3, 4)]));
+    }
+
+    /// <summary>
+    ///     A column can hold more than one walkable surface — a floor piece resting over open
+    ///     ground — and both are places a villager stands. Collapsing a column to its HIGHEST
+    ///     surface is what confined an upstairs-seeded flood to the building's own footprint:
+    ///     the ground floor under the upper storey was never walkable, so the ground-level
+    ///     doorway (the only way out) was never even evaluated. Measured in game: 131 reachable
+    ///     cells and 14 committed regions, against 1300+ cells and 70+ regions once the flood
+    ///     can walk down.
+    /// </summary>
+    [Fact]
+    public void Flood_CarriesEverySurfaceInAStackedColumn()
+    {
+        var env = new GridEnv()
+            .Height(3, 3, 0f).Surface(3, 3, 0.8f)
+            .Height(3, 4, 0f).Surface(3, 4, 0.8f);
+        var outside = GridEnv.Border(0, 0, 6, 6);
+
+        Flood(env, AnchorAtCell(3, 3), outside, out var reach, out var reachY, out _);
+
+        Assert.Contains(GridEnv.Key(3, 4), reach);
+        Assert.Equal(new[] { 0f, 0.8f }, reachY[GridEnv.Key(3, 3)].OrderBy(y => y).ToArray());
+        Assert.Equal(new[] { 0f, 0.8f }, reachY[GridEnv.Key(3, 4)].OrderBy(y => y).ToArray());
+    }
+
+    /// <summary>
+    ///     The guard on the above. A stacked column is climb-gated, so the flood must not hop
+    ///     from open ground onto a roof 4m up merely because they share a cell. A column with a
+    ///     SINGLE surface keeps its old ungated behaviour, so steep terrain is unaffected.
+    /// </summary>
+    [Fact]
+    public void Flood_DoesNotHopOntoAStackedSurfaceBeyondClimb()
+    {
+        var env = new GridEnv()
+            .Height(3, 3, 0f)
+            .Height(3, 4, 0f).Surface(3, 4, 4f);
+        var outside = GridEnv.Border(0, 0, 6, 6);
+
+        Flood(env, AnchorAtCell(3, 3), outside, out _, out var reachY, out _);
+
+        Assert.Equal(0f, Assert.Single(reachY[GridEnv.Key(3, 4)]));
     }
 }

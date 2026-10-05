@@ -100,7 +100,7 @@ namespace ValheimVillages.Villager.AI
             {
                 var patrol = kv.Value?.GetBehavior<Behaviors.Patrol.PerimeterPatrolBehavior>();
                 if (patrol == null) continue;
-                patrol.ResetDiscovery();
+                patrol.ResetDiscovery("manual command");
                 count++;
             }
 

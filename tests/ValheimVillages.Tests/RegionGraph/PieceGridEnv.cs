@@ -24,7 +24,7 @@ internal sealed class PieceGridEnv
     private readonly Dictionary<long, string> _lookup = new();
     private readonly Dictionary<string, Vector3> _centroids = new();
     private readonly HashSet<long> _anchorReachable = new();
-    private readonly Dictionary<long, float> _anchorReachableY = new();
+    private readonly Dictionary<long, List<float>> _anchorReachableY = new();
     private readonly HashSet<long> _outside = new();
     private readonly Dictionary<long, float> _keySurfaceY = new();
 
@@ -46,7 +46,16 @@ internal sealed class PieceGridEnv
     {
         var xz = RubberBandPrune.PackXzKey(gx, gz);
         _anchorReachable.Add(xz);
-        _anchorReachableY[xz] = y;
+        // Append rather than overwrite: Pass 2 can stand at several heights in one column,
+        // so two Ground() calls on one cell mean "it walked both", which is exactly the
+        // ground-floor-under-an-upper-storey case.
+        if (!_anchorReachableY.TryGetValue(xz, out var ys))
+        {
+            ys = new List<float>(2);
+            _anchorReachableY[xz] = ys;
+        }
+
+        if (!ys.Contains(y)) ys.Add(y);
 
         if (regionId == null) return this;
 

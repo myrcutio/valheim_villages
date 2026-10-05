@@ -52,7 +52,25 @@ namespace ValheimVillages.Villager.AI.Navigation
         public const float CellSize = 3f;
 
         /// <summary>Size of height buckets for multi-floor lookups (m).</summary>
-        internal const float HeightBucketSize = 2f;
+        /// <summary>
+        ///     Quantisation step for the lookup grid's height axis. Must stay below the smallest
+        ///     buildable step: `PackLookup(gx, gz, hb)` maps one key to ONE region, so two
+        ///     walkable surfaces sharing an XZ cell AND a bucket collide — one wins the key and
+        ///     the other gets no lookup cell, which makes it unreachable by construction. At the
+        ///     old 2m, two stair treads 0.37m apart collided.
+        ///
+        ///     <para>A quantisation step, NOT a tolerance. Anything wanting "within about N
+        ///     metres vertically" uses <see cref="VerticalMatchTolerance" />.</para>
+        /// </summary>
+        internal const float HeightBucketSize = 0.25f;
+
+        /// <summary>
+        ///     How far apart in Y two things may be and still count as the same surface, for
+        ///     lookups and approach resolution. Separate from <see cref="HeightBucketSize" /> on
+        ///     purpose — callers once reused the bucket size for this, so shrinking the bucket
+        ///     would have silently shrunk their tolerance too.
+        /// </summary>
+        internal const float VerticalMatchTolerance = 2f;
 
         /// <summary>Fine-grid cell size for the rasterized point-to-region lookup (m).</summary>
         internal const float LookupCellSize = 1f;
@@ -405,7 +423,13 @@ namespace ValheimVillages.Villager.AI.Navigation
             var gx = Mathf.FloorToInt(worldPosition.x / LookupCellSize);
             var gz = Mathf.FloorToInt(worldPosition.z / LookupCellSize);
             var hb = HeightBucket(worldPosition.y);
-            for (var d = 0; d <= 1; d++)
+            // Scan outward from the exact bucket so the NEAREST surface still wins. The range is
+            // derived from the tolerance, not hardcoded: it used to be +/-1 bucket, which was
+            // +/-2m only because buckets were 2m. With a finer bucket the same +/-1 would have
+            // collapsed the tolerance to 25cm and stopped resolving villagers standing slightly
+            // off the recorded surface height.
+            var maxBucketSpan = Mathf.CeilToInt(VerticalMatchTolerance / HeightBucketSize);
+            for (var d = 0; d <= maxBucketSpan; d++)
             {
                 if (m_lookupGrid.TryGetValue(PackLookup(gx, gz, hb + d), out var id))
                     return id;

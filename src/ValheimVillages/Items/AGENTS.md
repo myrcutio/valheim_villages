@@ -41,7 +41,8 @@ Items/
     WorkOrderTutorial.cs               -- Tutorial popup for first work order use
   Fragments/
     FragmentCombiner.cs                -- Combines 3 same-biome fragments into a rescue quest
-    RescueQuestTracker.cs              -- Tracks rescue quests; places a generic Lode Core at the quest dungeon
+    RescueQuestStore.cs                -- Pending rescue quests as world-save vv_rescue_quest carrier ZDOs; host-arbitrated claim
+    RescueQuestTracker.cs              -- Detects a player reaching a quest site; claims it and places a generic Lode Core
     FragmentUsePatch.cs                -- Harmony patch for fragment item use
     FragmentLootPatch.cs               -- Adds fragment drops to dungeon loot tables
     RescueQuestProximityPatch.cs       -- Triggers quest events on player proximity

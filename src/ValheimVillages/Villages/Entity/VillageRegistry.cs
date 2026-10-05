@@ -142,7 +142,7 @@ namespace ValheimVillages.Villages.Entity
         ///     Tear down a village: unregister its derived area (and stations/PoIs/rooms keyed off
         ///     it) and destroy its durable ZDO. Host-only in practice — DestroyZDO requires
         ///     ownership and villages are host-authoritative, so callers route here via
-        ///     VillageCleanupRpc. Idempotent.
+        ///     VillageCleanupPatch. Idempotent.
         /// </summary>
         /// <summary>
         ///     Is this village safe to reap? A village may only be deleted once it has NO
@@ -158,14 +158,13 @@ namespace ValheimVillages.Villages.Entity
         ///     dangling their records, which the record layer explicitly must never do.
         ///     </para>
         /// </summary>
-        /// <param name="registryPiecesBeingRemoved">
-        ///     How many of this village's registry pieces the caller is in the middle of
-        ///     removing. A <c>WearNTear.Remove</c> PREFIX runs while the piece's ZDO still
-        ///     exists, so the caller discounts it here rather than the check trying to guess
-        ///     which pieces are about to vanish.
+        /// <param name="registryBeingRemoved">
+        ///     The registry piece whose destruction the caller is handling. The host sees the
+        ///     destroy while that piece's ZDO still exists, so it is named here and skipped
+        ///     rather than the check guessing which pieces are about to vanish.
         /// </param>
         public static bool CanDelete(
-            string villageId, out string reason, int registryPiecesBeingRemoved = 0)
+            string villageId, out string reason, ZDOID registryBeingRemoved = default)
         {
             reason = null;
             if (string.IsNullOrEmpty(villageId))
@@ -185,7 +184,7 @@ namespace ValheimVillages.Villages.Entity
                 return false;
             }
 
-            var registries = CountRegistryPieces(villageId) - registryPiecesBeingRemoved;
+            var registries = CountRegistryPieces(villageId, registryBeingRemoved);
             if (registries > 0)
             {
                 reason = $"{registries} registry piece(s) still point at it";
@@ -195,8 +194,11 @@ namespace ValheimVillages.Villages.Entity
             return true;
         }
 
-        /// <summary>Registry pieces in the world whose ZDO names this village.</summary>
-        private static int CountRegistryPieces(string villageId)
+        /// <summary>
+        ///     Registry pieces in the world whose ZDO names this village, not counting
+        ///     <paramref name="ignore" /> (a piece whose destruction is being handled right now).
+        /// </summary>
+        private static int CountRegistryPieces(string villageId, ZDOID ignore)
         {
             var zdoMan = ZDOMan.instance;
             if (zdoMan == null) return 0;
@@ -209,19 +211,19 @@ namespace ValheimVillages.Villages.Entity
             var count = 0;
             foreach (var zdo in objectsByID.Values)
             {
-                if (zdo == null || zdo.GetPrefab() != registryHash) continue;
+                if (zdo == null || zdo.GetPrefab() != registryHash || zdo.m_uid == ignore) continue;
                 if (zdo.GetString(Village.IdKey) == villageId) count++;
             }
 
             return count;
         }
 
-        public static void Delete(string villageId)
+        public static void Delete(string villageId, ZDOID registryBeingRemoved = default)
         {
             if (string.IsNullOrEmpty(villageId)) return;
 
             // Enforced HERE, at the one destruction point, so no caller can route around it.
-            if (!CanDelete(villageId, out var blockedBy))
+            if (!CanDelete(villageId, out var blockedBy, registryBeingRemoved))
             {
                 Plugin.Log?.LogWarning(
                     $"[VillageRegistry] Refusing to delete village {villageId}: {blockedBy}.");
@@ -368,12 +370,10 @@ namespace ValheimVillages.Villages.Entity
         private const float TriadDedupDist = 1f;
 
         /// <summary>
-        ///     Minimum free navmesh radius (metres) an anchor / villager-seed sample must clear.
-        ///     ~2.5× a humanoid (slot-31 agent radius 0.4) so anchors land on open ground with room
-        ///     for a larger body — never on a sliver like a station top or right against a carved
-        ///     fire/wall edge. Used as the clearance gate for all anchor sampling.
+        ///     How far (XZ, metres) an anchor / villager-seed probe may snap to reach the village's
+        ///     mapped surface — about one probe-ring step, so a probe never jumps to unrelated ground.
         /// </summary>
-        public const float AnchorSampleClearance = 1.0f;
+        private const float AnchorSnapRadius = 1.5f;
 
         /// <summary>The slot-31 villager-agent query filter (same shape used everywhere).</summary>
         private static NavMeshQueryFilter AgentFilter()
@@ -445,7 +445,7 @@ namespace ValheimVillages.Villages.Entity
             // path FROM F. Dedup ~1m.
             if (!village.TryGetAnchor(VillageAnchor.Registry, out var registry))
                 registry = village.Anchor;
-            var pool = BuildCandidatePool(registry, f);
+            var pool = BuildCandidatePool(village, registry, f);
 
             // Survivors: existing triad anchors still connected to F.
             var survivors = new List<Vector3>();
@@ -517,7 +517,34 @@ namespace ValheimVillages.Villages.Entity
             else if (village.TryGetAnchor(VillageAnchor.Registry, out var registry)) source = registry;
             else return false;
 
-            return VillagerMovement.TryResolveApproach(near, source, null, out seed, AnchorSampleClearance);
+            return TrySnapAnchor(village, near, source, out seed);
+        }
+
+        /// <summary>
+        ///     Snap <paramref name="probe" /> onto the village's MAPPED surface — the region graph's
+        ///     lookup grid — and resolve a standing point there with a complete path from
+        ///     <paramref name="pathSource" />. Anchors and villager seeds come from here.
+        ///     <para>A built floor is ordinary walkable ground: the partition maps it as a piece
+        ///     region like any other. This replaced a physics clearance capsule (1m radius, reaching
+        ///     0.7m below the standing point) that hit the floor piece under every point on a built
+        ///     floor, so a registry placed on one could never find a single anchor and its village
+        ///     was always invalid. What the capsule was there to keep out — a station top, a sliver
+        ///     against a wall — is not in the graph, so snapping to the graph excludes it.</para>
+        /// </summary>
+        private static bool TrySnapAnchor(Village village, Vector3 probe, Vector3 pathSource, out Vector3 anchor)
+        {
+            anchor = probe;
+            var graph = village.Graph;
+            if (graph == null || !graph.IsAvailable) return false;
+
+            // Same storey only: the nearest cell in XZ may sit on the floor above or below.
+            if (!graph.TryFindNearestLookupCell(probe,
+                    cell => Mathf.Abs(cell.y - probe.y) <= RegionGraph.VerticalMatchTolerance,
+                    out var cellPos, out _, AnchorSnapRadius))
+                return false;
+
+            if (!VillagerMovement.TryResolveApproach(cellPos, pathSource, null, out anchor)) return false;
+            return graph.PointToRegionId(anchor) != null;
         }
 
         // ---- triad helpers ----
@@ -549,15 +576,16 @@ namespace ValheimVillages.Villages.Entity
         }
 
         /// <summary>
-        ///     Probe a ring/grid around the registry and keep on-mesh points with a complete
-        ///     path FROM F. Deduped to ~<see cref="TriadDedupDist" />.
+        ///     Probe a ring/grid around the registry and keep the points that snap onto the
+        ///     village's mapped surface with a complete path FROM F. Deduped to
+        ///     ~<see cref="TriadDedupDist" />.
         /// </summary>
-        private static List<Vector3> BuildCandidatePool(Vector3 registry, Vector3 f)
+        private static List<Vector3> BuildCandidatePool(Village village, Vector3 registry, Vector3 f)
         {
             var pool = new List<Vector3>();
             void Consider(Vector3 probe)
             {
-                if (!VillagerMovement.TryResolveApproach(probe, f, null, out var approach, AnchorSampleClearance)) return;
+                if (!TrySnapAnchor(village, probe, f, out var approach)) return;
                 foreach (var existing in pool)
                     if ((existing - approach).sqrMagnitude < TriadDedupDist * TriadDedupDist)
                         return;

@@ -287,16 +287,16 @@ namespace ValheimVillages.Villager.AI.Navigation
             // planner routes around (or reports unreachable) instead of stalling.
             settings.agentSlope = NavMeshBakeMaxSlopeDegrees;
 
-            // Lower the step-climb the voxelizer will bridge. Stairs become
-            // walkable navmesh when each riser is <= agentClimb, regardless of
-            // overall slope — so the permissive Humanoid-cloned climb let the
-            // bake stitch a continuous walkable surface over tall stone-stair
-            // risers (~0.5m) the character can't actually step up, and the agent
-            // mover then committed to them and wedged. Capping climb at a
-            // realistic humanoid step (0.2m) means risers taller than that are
-            // NOT bridged: the navmesh ends at the base of an un-stepable stair,
-            // so the planner routes around or reports unreachable instead of
-            // wedging. Local copy — bake topology only, not query settings.
+            // Lower the step-climb the voxelizer will bridge. Stairs become walkable navmesh
+            // when each riser is <= agentClimb regardless of overall slope, so the permissive
+            // Humanoid-cloned value let the bake stitch a surface over risers the character
+            // cannot actually step up, and the mover then committed to them and wedged. Capping
+            // at a realistic humanoid step means taller risers are NOT bridged: the navmesh ends
+            // at the base of an un-stepable stair and the planner routes around or reports
+            // unreachable. Local copy — bake topology only, not query settings.
+            //
+            // Tried and reverted: 0.25 and 0.30 both moved the baked frontier not at all. If a
+            // village maps short, this is not the knob.
             settings.agentClimb = NavMeshBakeMaxClimb;
 
             // --- Terrain geometry collection (combined into the single bake

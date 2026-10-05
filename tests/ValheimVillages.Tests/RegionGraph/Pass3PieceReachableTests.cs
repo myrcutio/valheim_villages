@@ -303,4 +303,70 @@ public class Pass3PieceReachableTests
             .PieceRun(0, 3, 0, 36.4f, "corridor")
             .PieceRun(1, 3, 0, 39.0f, "stairs");
     }
+
+    // -------------------------------------------------------------------------
+    // The recorded edge must obey the same climb gate as the step that produced it.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     A cell whose terrain region sits at y=0 but which Pass 2 walked at y=4, because the
+    ///     villager was standing on a floor piece there. <c>anchorReachableCellY</c> holds the
+    ///     surface Pass 2 actually walked, not the terrain beneath it, so the flood visits this
+    ///     cell with <c>curY=4</c>.
+    ///
+    ///     <para>Stepping to the upper storey at y=4 is a legal 0m step and must still happen.
+    ///     What must NOT happen is recording that step as an edge from the GROUND terrain
+    ///     region 4m below — the step was validated between surfaces at y=4, so the edge has to
+    ///     join regions at y=4.</para>
+    ///
+    ///     <para>Measured in game before the fix: an upper-floor piece region was linked to a
+    ///     ground terrain region by an edge typed <c>Slope</c> across a ~3.9m drop, whose region
+    ///     centroids were nearly 4x the 1m gate apart. Adding or removing one unrelated floor
+    ///     piece then swung the committed village between 73 and 14 regions.</para>
+    /// </summary>
+    [Fact]
+    public void UpperStoreyStep_IsNotRecordedAgainstGroundTerrainFarBelow()
+    {
+        var result = UpperFloorOverGroundTerrain().Run(ShippedClimb);
+
+        Assert.True(result.Reached("upper"),
+            "the step itself is legal (y=4 -> y=4) and must still be taken");
+        Assert.False(result.HasEdge("ground", "upper"),
+            "a step validated between surfaces at y=4 must not be recorded as an edge to the " +
+            "terrain region at y=0 — that is a 4m fall typed as a walkable Slope");
+    }
+
+    /// <summary>
+    ///     The control. Identical shape, but the cell is walked at its OWN terrain height, so
+    ///     the terrain region genuinely is the surface the villager steps off. The edge must
+    ///     still be recorded — otherwise the fix above has simply disabled terrain-to-piece
+    ///     adjacency, which is the thing Pass 3 exists to discover.
+    /// </summary>
+    [Fact]
+    public void GroundLevelStep_StillRecordsItsTerrainSource()
+    {
+        var env = new PieceGridEnv()
+            .Ground(0, 0, 0f, "ground")
+            .Piece(1, 0, 0.5f, "upper");
+
+        var result = env.Run(ShippedClimb);
+
+        Assert.True(result.Reached("upper"));
+        Assert.True(result.HasEdge("ground", "upper"),
+            "a real 0.5m step off open ground must still produce a terrain->piece edge");
+    }
+
+    /// <summary>
+    ///     Ground terrain at y=0, but Pass 2 walked the cell at y=4 standing on a floor piece.
+    ///     The second <c>Ground</c> call sets only the walked height (no region id), which is
+    ///     exactly the production split between <c>anchorReachableCellY</c> and the terrain
+    ///     region indexed at that XZ.
+    /// </summary>
+    private static PieceGridEnv UpperFloorOverGroundTerrain()
+    {
+        return new PieceGridEnv()
+            .Ground(0, 0, 0f, "ground")
+            .Ground(0, 0, 4f)
+            .Piece(1, 0, 4f, "upper");
+    }
 }

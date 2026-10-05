@@ -163,6 +163,7 @@ namespace ValheimVillages.Dev
             if (prefab == recordHash) return "record-carrier";
             if (prefab == registryHash) return "registry-station";
             if (prefab == VillagePrefabFactory.VillagePrefabHash) return "village-carrier";
+            if (prefab == Items.Fragments.RescueQuestStore.PrefabHash) return "rescue-quest";
             if (!string.IsNullOrEmpty(zdo.GetString("vv_record_id"))
                 || !string.IsNullOrEmpty(zdo.GetString("vv_villager_type"))) return "villager-npc";
             if (vvHashes.Contains(prefab)) return "vv-prefab";

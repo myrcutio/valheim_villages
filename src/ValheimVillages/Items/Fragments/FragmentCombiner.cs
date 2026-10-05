@@ -244,7 +244,7 @@ namespace ValheimVillages.Items.Fragments
             var isInterior = IsInteriorLocation(locationName);
 
             AddQuestMarker(questPos, villagerType, biome);
-            RescueQuestTracker.AddQuest(questPos, villagerType, biome, isInterior);
+            RescueQuestTracker.AddQuest(questPos, villagerType, biome, isInterior, locationName);
 
             // Completing the map still teaches this player to recruit the biome's villager type
             // (per-player unlock) — but quietly. Keep the on-screen text terse and cryptic; the

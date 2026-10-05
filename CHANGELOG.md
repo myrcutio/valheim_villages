@@ -5,6 +5,17 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-10-05
+
+### Fixed
+- **A village registry on an upper floor now maps the whole village.** Put the registry on a building's upper storey and only that storey became the village: villagers could not follow a staircase that turns a corner, so the ground floor and everything outside the building were left out, and the village stopped at the walls of one room. Villagers follow stairs around corners now, and a village maps the same wherever its registry sits.
+- **Rescue quests survive logging out and server restarts.** A quest from combining map fragments only existed for as long as the session that created it, so a relog, a server restart or a mod update lost it while the map marker stayed — you would travel to the site and find nothing there. Quests are kept in the world save now, and any player who reaches the site can finish it.
+- **Moving a village registry no longer leaves an empty village behind.** Removing or relocating the registry raced with the check that decides whether the village still has anything in it, so the old village stayed registered and empty; one base collected five of them.
+- **The Farmer no longer loses seeds.** A planting round that could not reach any free ground kept the seed it had taken out of the chest, losing one per round until the stock ran down. Unplanted seeds are put back when the round ends, however it ends.
+
+### Changed
+- **Villages map further than they used to.** Anywhere a villager can actually walk — around a corner, up or down stairs, across a yard — now counts as part of the village, so an existing village may cover noticeably more ground than before.
+
 ## [0.3.6] - 2026-10-01
 
 ### Fixed

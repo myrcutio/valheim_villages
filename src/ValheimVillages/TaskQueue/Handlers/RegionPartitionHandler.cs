@@ -570,6 +570,12 @@ namespace ValheimVillages.TaskQueue.Handlers
                 ("outside_terrain_cells", rbStats.OutsideTerrainCells),
                 ("pass2_seeds", rbStats.Pass2Seeds),
                 ("anchor_reachable_terrain_cells", rbStats.AnchorReachableTerrainCells),
+                // Why Pass 2's frontier stopped, aggregated. Without this the only way to ask
+                // "what is holding the boundary" was to trace cells one at a time and guess
+                // which ones were on it.
+                ("pass2_rej_wall", rbStats.Pass2RejWallBlocks),
+                ("pass2_rej_climb", rbStats.Pass2RejClimb),
+                ("pass2_rej_outside", rbStats.Pass2RejOutside),
                 // Emitted so a change to the climb threshold is measurable rather than a
                 // matter of opinion: compare kept-vs-dropped across a repartition.
                 ("max_climb", Villager.AI.Navigation.NavMeshBakeManager.NavMeshBakeMaxClimb),
@@ -1022,10 +1028,17 @@ namespace ValheimVillages.TaskQueue.Handlers
             // is FootprintScanRadius (100m) per side, so with two settlements closer than
             // 200m this village's footprint would otherwise grow to enclose the neighbour's
             // build — the same class of cross-village bleed that TryGetCombinedBounds caused.
+            //
+            // A village with no registry and no villagers is a leftover, not a neighbour — the
+            // same test that makes it deletable. Counting it handed its pieces away: four
+            // orphans from moved registries sat east of a new registry in the same base, took
+            // the east side of the build out of its footprint, and the wall check's outside
+            // flood then started inside the compound and reported the walled village unsealed.
             var rivalAnchors = new List<Vector3>();
             foreach (var other in VillageRegistry.EnumerateAll())
             {
                 if (other == null || other.VillageId == villageKey) continue;
+                if (VillageRegistry.CanDelete(other.VillageId, out _)) continue;
                 var a = other.Anchor;
                 if (a != Vector3.zero) rivalAnchors.Add(a);
             }

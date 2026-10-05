@@ -133,7 +133,7 @@ namespace ValheimVillages.Dev
             var ids = new HashSet<string>(villages.Select(v => v.VillageId));
 
             // A village nothing points at cannot be re-linked to and cannot be reaped by
-            // VillageCleanupRpc (which triggers off registry-piece removal).
+            // VillageCleanupPatch (which triggers off registry-piece removal).
             foreach (var village in villages)
                 if (!registries.TryGetValue(village.VillageId, out var pieces) || pieces.Count == 0)
                     problems.Add($"village {Short(village.VillageId)} has NO registry piece — " +
