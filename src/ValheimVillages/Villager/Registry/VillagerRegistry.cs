@@ -97,6 +97,12 @@ namespace ValheimVillages.Villager.Registry
             }
 
             Plugin.Log?.LogInfo($"VillagerRegistry initialized with {_definitions.Count} types");
+
+            // Authored-data invariants (level graph symmetry, comfort tier floors). Throws on a
+            // violation: these are JSON bugs, and the failure they otherwise produce is a
+            // villager that silently never levels.
+            Levels.VillagerLevelValidator.Validate(_definitions);
+            VillagerTheme.Validate(_definitions);
         }
     }
 }

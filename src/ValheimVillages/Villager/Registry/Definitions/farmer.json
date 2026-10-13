@@ -19,26 +19,20 @@
   "materialRequirements": "Wood for farm structures, cultivatable land nearby",
   "scalingType": "VillagerVariety",
   "skinColor": "1.15,1.85,1.55",
+  "themeColor": "0.70,0.58,0.30",
   "equipment": [
     "cultivator"
   ],
+  "heldTool": "Cultivator",
+  "heldToolRotation": "250,90,0",
+  "heldToolPosition": "0.7,0.35,-0.04",
   "stationName": "$vv_farmer",
   "stationIcon": "Cultivator",
   "workStations": [
     "$piece_workbench",
-    "$piece_cauldron",
-    "$piece_preptable",
     "$vv_farmer"
   ],
-  "stationRecipes": [
-    {
-      "output": "BarleyFlour",
-      "outputAmount": 1,
-      "input": "Barley",
-      "inputAmount": 1,
-      "minStationLevel": 2
-    }
-  ],
+  "stationRecipes": [],
   "cultivatorExclusions": [
     "cultivate",
     "grass",
@@ -98,7 +92,6 @@
   ],
   "behaviors": [
     "craft",
-    "feast",
     "tidy",
     "haul"
   ],
@@ -108,7 +101,6 @@
     "tab:debug",
     "tab:workorder",
     "recipe:cultivator",
-    "recipe:cooking",
     "recipe:beekeeping",
     "recipe:foraging"
   ],

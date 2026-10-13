@@ -162,7 +162,10 @@ namespace ValheimVillages.Behaviors.Tidy
                 Plugin.Log?.LogInfo(
                     $"[Tidy:{m_ai.NpcName}] Removing slot {i} ({item}, status={status})");
 
-                nview.InvokeRPC("RPC_RemoveDoneItem", station.transform.position, i);
+                // AMOUNT, not a slot index: vanilla clears the first done slot and spawns
+                // `amount` copies of it. Passing i destroyed slot 0's food (amount 0) and
+                // duplicated from slot 2 up. One call per done slot, one item each.
+                nview.InvokeRPC("RPC_RemoveDoneItem", station.transform.position, 1);
                 PickupDroppedItem(station, item);
                 removedItems.Add(item);
             }

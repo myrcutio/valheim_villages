@@ -52,6 +52,28 @@ namespace ValheimVillages.UI.Core
         /// <summary>Injected RawImage for displaying a map texture in the description panel.</summary>
         private GameObject m_mapImageObject;
 
+        /// <summary>
+        ///     The shield badge showing a villager's level in the description panel. Our own,
+        ///     not Valheim's <c>m_minStationLevelIcon</c>: that one is only re-published for
+        ///     details carrying recipe requirements, so a Status detail — which has a level but
+        ///     no ingredients — never showed a level at all.
+        /// </summary>
+        private GameObject m_levelCrestObject;
+
+        /// <summary>Container for the level-ladder rows drawn under the description title.</summary>
+        private GameObject m_rungRoot;
+
+        /// <summary>
+        ///     Value signature of the pins currently laid over the map, so the hit targets are
+        ///     rebuilt only when they actually change.
+        ///
+        ///     <para>PopulateDescription runs on the refresh timer, not on a change, so without
+        ///     this the overlay destroyed and recreated every pin several times a second: a
+        ///     tooltip can't survive its own GameObject being destroyed mid-hover, and a click
+        ///     landing on a rebuild frame goes nowhere.</para>
+        /// </summary>
+        private string m_renderedPinSignature;
+
         private int m_selectedListIndex = -1;
 
         protected TabHandler m_tabHandler;
@@ -92,6 +114,13 @@ namespace ValheimVillages.UI.Core
         private int m_pendingListSelection = -1;
 
         /// <summary>
+        ///     Whether a tab has already claimed the opening row for this session. Without it
+        ///     an <see cref="IInitialRowTab{TSubject}" /> would drag the selection back every
+        ///     time the player tabbed away and returned, overriding a row they chose by hand.
+        /// </summary>
+        private bool m_initialRowApplied;
+
+        /// <summary>
         ///     Open the tab that owns the row the subject's alert is about, and select that row.
         ///     No-op when no tab claims the alert, which leaves the default tab and first row —
         ///     the behaviour before there was an alert to follow.
@@ -116,11 +145,85 @@ namespace ValheimVillages.UI.Core
             }
         }
 
+        /// <summary>
+        ///     Close the work-order editor when the player turns their attention elsewhere in
+        ///     this panel — a different tab, a different row.
+        ///
+        ///     <para>It is docked INSIDE the inventory window and takes over input while open,
+        ///     so leaving it hanging over a panel the player has already moved on from is both
+        ///     confusing and a trap: the editor would still be bound to an order they are no
+        ///     longer looking at. Hide() commits, so dismissing it this way saves rather than
+        ///     discards — the same thing closing it with Back does.</para>
+        ///
+        ///     <para>Switching between two ORDERS is handled by WorkOrderMenu.Show instead,
+        ///     which commits the outgoing one and rebinds, so the editor never flickers shut
+        ///     and open again.</para>
+        /// </summary>
+        private static void DismissWorkOrderEditor()
+        {
+            if (ContextMenus.WorkOrderMenu.IsVisible) ContextMenus.WorkOrderMenu.Hide();
+        }
+
+        /// <summary>
+        ///     Open a named tab and select one of its rows. Driven by map pins: clicking a
+        ///     villager's cot on the Tasks map jumps to the quarters row on Status that explains
+        ///     what that room still needs.
+        ///
+        ///     <para>Goes through the same pending-selection mechanism as
+        ///     <see cref="FocusAlertRow" />, because the destination tab's rows do not exist
+        ///     until the switch rebuilds them. Matching on TabName rather than an index keeps
+        ///     the caller out of the tab ORDER, which changes when a villager has no work
+        ///     orders.</para>
+        /// </summary>
+        public void FocusTabRow(string tabName, int row)
+        {
+            if (!m_active || m_tabHandler == null || row < 0 || string.IsNullOrEmpty(tabName))
+                return;
+
+            for (var i = 0; i < m_tabs.Count; i++)
+            {
+                if (!string.Equals(m_tabs[i].TabName, tabName,
+                        System.StringComparison.OrdinalIgnoreCase)) continue;
+
+                m_pendingListSelection = row;
+                // forceSelect, for the same reason FocusAlertRow needs it: the target tab may
+                // already be active, and SetActiveTab returns early without firing
+                // ActiveTabChanged, so the row would never be applied.
+                m_tabHandler.SetActiveTab(m_firstCustomTabIndex + i, true);
+                return;
+            }
+        }
+
+        /// <summary>
+        ///     Let a freshly shown tab choose the row the player lands on, once per open.
+        ///
+        ///     <para>Routed through <see cref="m_pendingListSelection" /> rather than setting
+        ///     the index directly, because the list elements the row refers to are not built
+        ///     until <c>RefreshCustomContent</c> runs immediately after this.</para>
+        /// </summary>
+        private void ApplyInitialRow(ITabContent<TSubject> tab)
+        {
+            if (m_initialRowApplied || !HasSubject) return;
+            // An alert focus already claimed a row on the way in; "look at this now" outranks
+            // a resting default, so leave it alone.
+            if (m_pendingListSelection >= 0) return;
+            if (tab is not IInitialRowTab<TSubject> initial) return;
+
+            var row = initial.FindInitialRow(CurrentSubject);
+            m_initialRowApplied = true;
+            if (row >= 0) m_pendingListSelection = row;
+        }
+
         /// <summary>Shared activation: subclasses bind their subject, then call this.</summary>
         protected void ActivateCore(bool hasCraftingRecipes, string headerName)
         {
             m_active = true;
+            // Every panel open starts from the fitted village. Keying the view off
+            // subject/tab/row is not enough on its own: closing and reopening on the same row
+            // would otherwise inherit the zoom it was left at, which reads as a broken map.
+            Panels.MapViewState.Reset();
             m_pendingListSelection = -1;
+            m_initialRowApplied = false;
             m_hasCraftingRecipes = hasCraftingRecipes;
             m_lastUpdateTime = Time.time;
             m_headerName = headerName;
@@ -153,6 +256,16 @@ namespace ValheimVillages.UI.Core
 
             var ci = GetCustomIndex();
             if (ci >= 0) HandleCustomListGamepadNav();
+
+            // A map zoom or pan has to show this frame rather than on the next one-second
+            // tick. Consuming the flag here is also what coalesces a burst of wheel notches
+            // into a single re-render.
+            if (ci >= 0 && Panels.MapViewState.ConsumeDirty())
+            {
+                m_lastUpdateTime = Time.time;
+                RefreshCustomContent(ci);
+                return;
+            }
 
             if (Time.time - m_lastUpdateTime <= UpdateInterval) return;
             m_lastUpdateTime = Time.time;
@@ -286,7 +399,10 @@ namespace ValheimVillages.UI.Core
             {
                 SetNativeTabHidden(gui.m_tabCraft, true);
                 SetNativeTabHidden(gui.m_tabUpgrade, true);
-                AddNativeTabClone(gui, gui.m_tabCraft, true);
+                // Neither native clone is the default any more: the first custom tab (Status)
+                // is what the player should land on, because it answers "how is this villager
+                // doing" — the question they walked up to ask. Orders is a thing you go TO.
+                AddNativeTabClone(gui, gui.m_tabCraft, false);
                 AddNativeTabClone(gui, gui.m_tabUpgrade, false);
                 m_firstCustomTabIndex = 2;
             }
@@ -521,7 +637,7 @@ namespace ValheimVillages.UI.Core
                 m_tabHandler.m_tabs.Add(new TabHandler.Tab
                 {
                     m_button = btnGO.GetComponent<Button>(),
-                    m_default = !m_hasCraftingRecipes && i == 0,
+                    m_default = i == 0,
                 });
             }
         }
@@ -582,6 +698,12 @@ namespace ValheimVillages.UI.Core
 
         private void OnTabChanged(int index)
         {
+            // Here rather than in TrySelectCustomTab: that returns false for the native Orders
+            // and Upgrade clones, so putting the dismiss there closed the editor for Status and
+            // Tasks but left it hanging when the player switched to Orders or Upgrade. This is
+            // the one place every tab change passes through.
+            DismissWorkOrderEditor();
+
             foreach (var t in m_tabs) t.OnDeselected();
 
             if (TrySelectCustomTab(index)) return;
@@ -608,7 +730,9 @@ namespace ValheimVillages.UI.Core
             // Force a list rebuild for the new tab — the previous tab's elements are
             // still in m_listElements, so the change-detection must not short-circuit.
             m_renderedListSignature = null;
+            Panels.MapViewState.Reset();
             m_tabs[ci].OnSelected(CurrentSubject);
+            ApplyInitialRow(m_tabs[ci]);
             RefreshCustomContent(ci);
             return true;
         }

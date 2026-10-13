@@ -553,12 +553,36 @@ namespace ValheimVillages.Items.WorkOrders
 
             // Add UITooltip if missing (type from assembly_guiutils, same as Localization)
             var ttType = typeof(Localization).Assembly.GetType("UITooltip");
-            if (ttType != null)
+            if (ttType == null) return;
+
+            // A tooltip added from scratch must be given m_tooltipPrefab: UITooltip.OnHoverStart
+            // instantiates it, so a null one throws ArgumentException on EVERY hover. This
+            // branch normally does not run — the cloned button already carries a UITooltip and
+            // the loop above returns early — but when it does, it would otherwise plant exactly
+            // the per-frame exception the map pins hit. Borrowed from any existing tooltip.
+            var prefabField = ttType.GetField(
+                "m_tooltipPrefab", BindingFlags.Public | BindingFlags.Instance);
+            UnityEngine.GameObject donor = null;
+            if (prefabField != null)
+                foreach (var existing in UnityEngine.Resources.FindObjectsOfTypeAll(ttType))
+                    if (prefabField.GetValue(existing) is UnityEngine.GameObject p && p != null)
+                    {
+                        donor = p;
+                        break;
+                    }
+
+            if (donor == null)
             {
-                var tt = buttonGO.AddComponent(ttType);
-                ttType.GetField("m_text", BindingFlags.Public | BindingFlags.Instance)?.SetValue(tt, text);
-                ttType.GetField("m_topic", BindingFlags.Public | BindingFlags.Instance)?.SetValue(tt, "");
+                Plugin.Log?.LogWarning(
+                    "[CraftingStationPatch] no UITooltip to borrow m_tooltipPrefab from; " +
+                    "leaving the Order button without a tooltip rather than throwing on hover.");
+                return;
             }
+
+            var tt = buttonGO.AddComponent(ttType);
+            prefabField.SetValue(tt, donor);
+            ttType.GetField("m_text", BindingFlags.Public | BindingFlags.Instance)?.SetValue(tt, text);
+            ttType.GetField("m_topic", BindingFlags.Public | BindingFlags.Instance)?.SetValue(tt, "");
         }
 
         /// <summary>

@@ -85,7 +85,7 @@ namespace ValheimVillages.Items
                 ConfigurePiece(existing);
                 ConfigureInteraction(existing);
                 GraftProps(existing, zNetScene);
-                ApplyIcon(existing);
+                ApplyRenderedIcon(existing, "PieceFactory");
                 _registryPrefab = existing;
                 Plugin.Log?.LogInfo("[PieceFactory] Re-grafted registry prefab after hot reload");
                 return;
@@ -103,28 +103,36 @@ namespace ValheimVillages.Items
             ConfigurePiece(prefab);
             ConfigureInteraction(prefab);
             GraftProps(prefab, zNetScene);
-            ApplyIcon(prefab);
+            ApplyRenderedIcon(prefab, "PieceFactory");
 
             _registryPrefab = prefab;
             Plugin.Log?.LogInfo($"[PieceFactory] Built registry prefab from '{BaseTable}'");
         }
 
         /// <summary>
-        ///     Replace the inherited <c>piece_table</c> icon with a render of THIS prefab, so the
-        ///     build menu shows the scribe's desk rather than a bare dining table. Runs after
-        ///     <see cref="GraftProps" /> — the papers and candles are the whole point, so the
-        ///     shot has to be taken once they exist.
+        ///     Replace a cloned piece's INHERITED build-menu icon with a render of the prefab as
+        ///     it actually looks once grafted.
+        ///
+        ///     <para>Every piece here is kitbashed from a donor — the registry from a dining
+        ///     table, the Forester's Post from a woodpile, the cot from a bed — and cloning
+        ///     carries the donor's <c>m_icon</c> across unchanged. Nothing about grafting props
+        ///     onto a prefab updates that sprite, so without this the build menu advertises the
+        ///     thing we started from rather than the thing the player will place.</para>
+        ///
+        ///     <para>Call it LAST, after every graft: the shot can only include parts that
+        ///     already exist.</para>
         /// </summary>
-        private static void ApplyIcon(GameObject prefab)
+        public static bool ApplyRenderedIcon(GameObject prefab, string logTag, float modelYaw = 0f)
         {
-            var piece = prefab.GetComponent<Piece>();
-            if (piece == null) return;
+            var piece = prefab != null ? prefab.GetComponent<Piece>() : null;
+            if (piece == null) return false;
 
-            var sprite = Icons.RegistryIconRenderer.Render(prefab);
-            if (sprite == null) return; // renderer already logged why; keep the inherited icon
+            var sprite = Icons.RegistryIconRenderer.Render(prefab, modelYaw: modelYaw);
+            if (sprite == null) return false; // renderer already logged why; keep the inherited icon
 
             piece.m_icon = sprite;
-            Plugin.Log?.LogInfo("[PieceFactory] Rendered the registry build-menu icon from the prefab");
+            Plugin.Log?.LogInfo($"[{logTag}] Rendered the build-menu icon from the prefab");
+            return true;
         }
 
         private static void ConfigurePiece(GameObject prefab)

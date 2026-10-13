@@ -379,7 +379,43 @@ namespace ValheimVillages.Behaviors.Crafting
         {
             var station = m_context?.CookingStationRef;
             if (station == null) return false;
-            if (m_context.CookingRemovalRequested) return true;
+            if (m_context.CookingRemovalRequested)
+            {
+                // RPC_RemoveDoneItem spits the food onto the GROUND by the station rather than
+                // handing it over, exactly as the smelter does with its bars. Pick it up and
+                // carry it, or the meal lies in the grass while a copy of it appears in the
+                // chest from the fallback deposit in OnArrivedAtOutputChest — which is what
+                // made cooked food look like it teleported home.
+                var collected = CollectGroundOutput(
+                    station.transform.position, OutputBatchPerTrip);
+                if (collected > 0)
+                {
+                    m_context.CraftedCount += collected;
+                    BeginReturningToChest();
+                    return true;
+                }
+
+                // Nothing on the ground. The spawn lands a frame or two after the RPC, so a
+                // short grace is right — but it has to END. Without one this branch returns
+                // true forever and the craft poll pins the villager: measured on the dedicated
+                // server, a Tavern Keeper held in "crafting @ station" with every slot on all
+                // three nearby stations empty, no scheduler line for him at all, and a LoxPie
+                // order still short. He finished one bake and then never asked for more work.
+                if (Time.time - m_context.CookingRemovalAt <= CookingRemovalGraceSec) return true;
+
+                if (m_context.CraftedCount > 0)
+                {
+                    // Something was made and banked earlier in this craft — carry that home
+                    // rather than throwing the trip away.
+                    BeginReturningToChest();
+                    return true;
+                }
+
+                AbandonWork(
+                    $"asked {station.name} for its cooked output but nothing appeared within " +
+                    $"{CookingRemovalGraceSec:F0}s — releasing the craft instead of holding here");
+                return true;
+            }
 
             if (!StationFinder.IsCookingStationReady(station))
             {
@@ -397,6 +433,7 @@ namespace ValheimVillages.Behaviors.Crafting
             var slotCount = station.m_slots != null ? station.m_slots.Length : 0;
             var zdo = nview.GetZDO();
             var anythingOnTheStation = false;
+            var doneSlots = 0;
             for (var i = 0; i < slotCount; i++)
             {
                 var slotItem = zdo.GetString("slot" + i);
@@ -405,17 +442,30 @@ namespace ValheimVillages.Behaviors.Crafting
                 anythingOnTheStation = true;
                 var status = zdo.GetInt("slotstatus" + i);
                 // Status: 0=NotDone, 1=Done, 2=Burnt
-                if (status >= 1)
-                {
-                    m_context.CookingRemovalRequested = true;
-                    nview.InvokeRPC("RPC_RemoveDoneItem", station.transform.position, i);
+                if (status >= 1) doneSlots++;
+            }
 
-                    TryPickupDroppedItem(station, slotItem);
+            if (doneSlots > 0)
+            {
+                // RPC_RemoveDoneItem(userPoint, AMOUNT): the second argument is a QUANTITY,
+                // not a slot index. Vanilla scans for the FIRST done slot, spawns `amount`
+                // copies of it and clears it regardless, then breaks. Passing the loop index
+                // therefore destroyed the food in slot 0 outright (amount 0 spawns nothing,
+                // the slot is emptied anyway) and spawned duplicates from slot 2 up — and the
+                // index never selected a slot in the first place.
+                //
+                // One call per done slot, each asking for exactly one item. Draining the
+                // whole batch in a single visit is also what stops the rest burning: the
+                // villager fills every free slot at once so they finish together, and taking
+                // one per round trip to the chest left the others on the fire to become coal.
+                m_context.CookingRemovalRequested = true;
+                m_context.CookingRemovalAt = Time.time;
+                for (var n = 0; n < doneSlots; n++)
+                    nview.InvokeRPC("RPC_RemoveDoneItem", station.transform.position, 1);
 
-                    m_context.CraftedCount++;
-                    BeginReturningToChest();
-                    return true;
-                }
+                // Vanilla spawns the food beside the station rather than handing it over, so
+                // the next poll sweeps the whole batch off the ground in one go.
+                return true;
             }
 
             // Nothing on the station at all. Either it never went on, or someone else took it
@@ -441,6 +491,10 @@ namespace ValheimVillages.Behaviors.Crafting
         ///     the owner, short enough that the villager is not stuck for a whole minute.
         /// </summary>
         private const float EmptyStationGraceSec = 15f;
+
+        /// <summary>How long to keep looking for food the station was told to spit out
+        /// before giving the villager back to the scheduler.</summary>
+        private const float CookingRemovalGraceSec = 10f;
 
         /// <summary>Seconds to wait for a hive's extracted honey to hit the ground.</summary>
         private const float BeehiveHarvestTimeoutSec = 10f;
@@ -691,43 +745,6 @@ namespace ValheimVillages.Behaviors.Crafting
                 Amount = collected,
             });
             return collected;
-        }
-
-        private void TryPickupDroppedItem(CookingStation station, string slotItemName)
-        {
-            var spawnPos = station.m_spawnPoint != null
-                ? station.m_spawnPoint.position
-                : station.transform.position;
-            const float searchRadius = 3f;
-
-            var allDrops = PhysicsHelper.GetAllInRadius<ItemDrop>(spawnPos, searchRadius);
-
-            ItemDrop closest = null;
-            var closestDist = float.MaxValue;
-            foreach (var drop in allDrops)
-            {
-                if (drop == null || drop.m_itemData == null) continue;
-                if (drop.IsPiece()) continue; // placed by a player, not spat out by the station
-                var dropPrefab = drop.m_itemData.m_dropPrefab?.name
-                                 ?? drop.gameObject.name.Replace("(Clone)", "").Trim();
-                if (dropPrefab != slotItemName) continue;
-
-                var dist = Vector3.Distance(drop.transform.position, spawnPos);
-                if (dist < closestDist)
-                {
-                    closest = drop;
-                    closestDist = dist;
-                }
-            }
-
-            if (closest != null)
-            {
-                var dropNview = closest.GetComponent<ZNetView>();
-                if (dropNview != null && dropNview.GetZDO() != null)
-                    ZNetScene.instance.Destroy(closest.gameObject);
-                else
-                    Object.Destroy(closest.gameObject);
-            }
         }
 
         /// <summary>
@@ -997,11 +1014,27 @@ namespace ValheimVillages.Behaviors.Crafting
                 var nview = station.GetComponent<ZNetView>();
                 if (nview != null && nview.GetZDO() != null)
                 {
-                    // Trailing "cheated" bool, as for RPC_AddOre above:
-                    // RPC_AddItem(long sender, string itemName, bool cheated).
-                    nview.InvokeRPC("RPC_AddItem", m_context.CookingInputItemName, false);
-                    // Cooking input committed — clear the matching in-transit entry.
-                    ClearHeldItem(m_context.CookingInputItemName, 1);
+                    // Load the whole carried batch, one piece per free slot. Bounded by a
+                    // slot count read ONCE: RPC_AddItem is applied by the station's owner, so
+                    // re-reading the slots inside the loop would still see them empty and
+                    // over-add past the station's capacity, losing the surplus.
+                    var carrying = 0;
+                    foreach (var h in m_context.HeldItems)
+                        if (h != null && h.PrefabName == m_context.CookingInputItemName)
+                            carrying += h.Amount;
+                    if (carrying <= 0) carrying = 1;
+
+                    var room = StationFinder.CountFreeSlots(station);
+                    var toLoad = Mathf.Max(1, Mathf.Min(carrying, room));
+
+                    for (var slot = 0; slot < toLoad; slot++)
+                    {
+                        // Trailing "cheated" bool, as for RPC_AddOre above:
+                        // RPC_AddItem(long sender, string itemName, bool cheated).
+                        nview.InvokeRPC("RPC_AddItem", m_context.CookingInputItemName, false);
+                        // Cooking input committed — clear the matching in-transit entry.
+                        ClearHeldItem(m_context.CookingInputItemName, 1);
+                    }
 
                     var conversion = station.m_conversion?.Find(c =>
                         c.m_from != null && c.m_from.gameObject.name == m_context.CookingInputItemName);
@@ -1041,6 +1074,25 @@ namespace ValheimVillages.Behaviors.Crafting
                     if (carried <= 0) carried = 1;
                     if (ContainerScanner.TryDepositItem(m_context.SourceContainer, outputPrefab, carried))
                         m_context.HeldItems.RemoveAll(h => h != null && h.PrefabName == outputPrefab);
+                }
+            }
+
+            // Whatever is still held at this point was carried and never used — a batch the
+            // station had no room for, say. It goes back in the chest; left in HeldItems it
+            // would only be returned if the job were abandoned, so a successful craft would
+            // quietly pocket it.
+            foreach (var h in new List<HeldItem>(m_context.HeldItems))
+            {
+                if (h == null || string.IsNullOrEmpty(h.PrefabName) || h.Amount <= 0) continue;
+                var into = h.SourceContainer ?? m_context.SourceContainer;
+                if (into == null) continue;
+
+                if (ContainerScanner.TryDepositItem(into, h.PrefabName, h.Amount))
+                {
+                    Plugin.Log?.LogInfo(
+                        $"[Work:{LogName}] Returned {h.Amount}x {h.PrefabName} " +
+                        "that was carried but not used.");
+                    m_context.HeldItems.Remove(h);
                 }
             }
 

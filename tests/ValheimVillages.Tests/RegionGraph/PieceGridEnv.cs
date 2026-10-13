@@ -130,12 +130,16 @@ internal sealed class PieceGridEnv
         return this;
     }
 
-    /// <summary>Run Pass 3 over this fixture.</summary>
-    public Pass3Result Run(float maxClimb = 1.0f)
+    /// <summary>
+    ///     Run Pass 3 over this fixture. <paramref name="outsideY" /> is the elevation each
+    ///     outside column was found outside AT; null keeps the column-wide behaviour these
+    ///     fixtures were written against.
+    /// </summary>
+    public Pass3Result Run(float maxClimb = 1.0f, Dictionary<long, float>? outsideY = null)
     {
         RubberBandPrune.PieceReachableFlood(
             _piece, _terrain, _lookup, _centroids, _keySurfaceY,
-            _anchorReachable, _anchorReachableY, _outside,
+            _anchorReachable, _anchorReachableY, _outside, outsideY,
             Cell, maxClimb, GroundY,
             out var reachableKeys, out var edges, out var added);
         return new Pass3Result(reachableKeys, edges, added, _lookup);

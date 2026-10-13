@@ -74,9 +74,15 @@ namespace ValheimVillages.Items.Icons
         ///     Photograph <paramref name="prefab" /> and return the sprite, or null when no free
         ///     layer is available to render on (logged — the piece then keeps its inherited icon).
         /// </summary>
+        /// <param name="modelYaw">
+        ///     Spin the model about its up axis before the shot, in degrees. A kitbashed piece
+        ///     has no say in which way the fixed camera sees it, and the flattering side is not
+        ///     always the one it happens to face — the cot, for instance, presented the BACK of
+        ///     its headboard until it was turned around.
+        /// </param>
         public static Sprite Render(
             GameObject prefab, int size = IconSize, string onlyNode = null,
-            bool substituteMaterial = false)
+            bool substituteMaterial = false, float modelYaw = 0f)
         {
             if (prefab == null) return null;
 
@@ -98,12 +104,22 @@ namespace ValheimVillages.Items.Icons
             var rig = new GameObject("vv_icon_rig");
             rig.transform.position = StagePos();
             model.transform.SetParent(rig.transform, false);
+            // Before BuildCamera, which frames the model's bounds — rotating afterwards would
+            // leave the shot composed for the old orientation.
+            model.transform.localRotation = Quaternion.Euler(0f, modelYaw, 0f);
 
             try
             {
                 var camera = BuildCamera(rig, layer, model);
                 AddLights(rig, layer);
-                return Capture(camera, size);
+                var sprite = Capture(camera, size);
+
+                // Name the sprite after the prefab it was rendered FROM. This used to be
+                // hardcoded to "vv_registry_icon" for every prefab, so the cot's own icon
+                // reported itself as the registry's — which reads like a wrong-sprite bug in
+                // any icon diagnostic, and cost time chasing exactly that.
+                if (sprite != null) sprite.name = prefab.name + "_icon";
+                return sprite;
             }
             finally
             {
@@ -175,8 +191,19 @@ namespace ValheimVillages.Items.Icons
             Material[] result = null;
             for (var i = 0; i < source.Length; i++)
             {
+                // Custom/Vegetation is Valheim's WIND shader and is what hanging cloth wears —
+                // the Forester's Post banner, for one. It needs the same swap as Custom/Piece or
+                // the cloth is simply absent from the shot.
+                //
+                // It is re-shaded OPAQUE, like everything else. Alpha cutout was tried first, on
+                // the assumption that banner art is a silhouette on a transparent sheet, and it
+                // rendered NOTHING: that texture's alpha is not a coverage mask, so every texel
+                // failed the cutoff. Rendering the node with a flat material showed the mesh
+                // already carries the banner's shape — notched top, angled hem — so there is no
+                // silhouette left for alpha to supply.
                 var mat = source[i];
-                if (mat == null || mat.shader == null || mat.shader.name != "Custom/Piece") continue;
+                var shaderName = mat != null && mat.shader != null ? mat.shader.name : null;
+                if (shaderName != "Custom/Piece" && shaderName != "Custom/Vegetation") continue;
 
                 result ??= (Material[])source.Clone();
 
@@ -203,6 +230,42 @@ namespace ValheimVillages.Items.Icons
         /// </summary>
         private static Shader FindLitShader(GameObject prefab)
         {
+            var own = StandardShaderOn(prefab);
+            if (own != null) return own;
+
+            // A piece built ENTIRELY from Custom/Piece grafts has no Standard material of its
+            // own to harvest, and then every one of its meshes drops out and the icon comes back
+            // blank. The Villager Cot is exactly that: frame, headboard, locker and legs are all
+            // kitbashed from wood and stone pieces. Borrow the shader from a prefab that is
+            // known to carry it instead.
+            foreach (var donorName in LitShaderDonors)
+            {
+                var donor = ZNetScene.instance?.GetPrefab(donorName);
+                var shader = donor != null ? StandardShaderOn(donor) : null;
+                if (shader != null) return shader;
+            }
+
+            Plugin.Log?.LogWarning(
+                "[RegistryIcon] No Standard-shader material on the prefab or any donor to " +
+                "re-shade with; Custom/Piece meshes will be missing from the icon.");
+            return null;
+        }
+
+        /// <summary>
+        ///     Prefabs known to carry a <c>Standard</c> material, in preference order. Needed
+        ///     because <c>Shader.Find("Standard")</c> returns null in Valheim — unused shaders
+        ///     are stripped from the build, so the shader is only reachable through a material
+        ///     that already references it. These are all small, always-loaded props.
+        /// </summary>
+        private static readonly string[] LitShaderDonors =
+        {
+            "AncientCoin",
+            "treasure_stack",
+            "TrinketBronzeStamina",
+        };
+
+        private static Shader StandardShaderOn(GameObject prefab)
+        {
             foreach (var mr in prefab.GetComponentsInChildren<MeshRenderer>(true))
             {
                 if (mr == null || mr.sharedMaterials == null) continue;
@@ -211,9 +274,14 @@ namespace ValheimVillages.Items.Icons
                         return mat.shader;
             }
 
-            Plugin.Log?.LogWarning(
-                "[RegistryIcon] No Standard-shader material on the prefab to re-shade with; " +
-                "Custom/Piece meshes will be missing from the icon.");
+            foreach (var smr in prefab.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            {
+                if (smr == null || smr.sharedMaterials == null) continue;
+                foreach (var mat in smr.sharedMaterials)
+                    if (mat?.shader != null && mat.shader.name == "Standard")
+                        return mat.shader;
+            }
+
             return null;
         }
 
@@ -388,7 +456,7 @@ namespace ValheimVillages.Items.Icons
 
             var sprite = Sprite.Create(
                 tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), size);
-            sprite.name = "vv_registry_icon";
+            sprite.name = "vv_piece_icon";
             return sprite;
         }
 

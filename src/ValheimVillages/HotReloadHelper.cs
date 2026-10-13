@@ -52,10 +52,57 @@ namespace ValheimVillages
             var staleComponents = DestroyStaleComponents();
             var orphanedObjects = DestroyOrphanedModObjects();
 
+            // MUST come before anything that can reach Player.UpdateKnownRecipesList — which
+            // VirtualRecipeLoader.RegisterAll does, later in the same Awake. See the method.
+            var deadPieces = PurgeDestroyedPieceTableEntries();
+
             Plugin.Log?.LogInfo(
                 "[HotReload] Cleanup complete: " +
                 $"{staleComponents} stale component(s), " +
-                $"{orphanedObjects} orphaned GameObject(s) destroyed.");
+                $"{orphanedObjects} orphaned GameObject(s), " +
+                $"{deadPieces} dead piece-table entr(ies) destroyed.");
+        }
+
+        /// <summary>
+        ///     Drop destroyed GameObjects from every build PieceTable in ObjectDB.
+        ///
+        ///     <para><b>This has to happen during cleanup, not when a piece is re-added.</b>
+        ///     Our piece templates carry the vv_ prefix the cleanup sweep reclaims, so the
+        ///     previous incarnation's GameObject is destroyed while its slot in the Hammer table
+        ///     survives. <c>Player.UpdateKnownRecipesList</c> walks every owned PieceTable and
+        ///     calls <c>GetComponent&lt;Piece&gt;()</c> on each entry, and Unity throws
+        ///     NullReferenceException — not null — once the native side is gone.</para>
+        ///
+        ///     <para><c>PieceFactory.AddToHammerTable</c> already purges, but it runs from the
+        ///     DEFERRED [RequireObjectDB] pass, and <c>VirtualRecipeLoader.RegisterAll</c>
+        ///     reaches <c>UpdateKnownRecipesList</c> earlier in the same <c>Plugin.Awake</c>.
+        ///     The NRE therefore escaped Awake and every later step was skipped — prefab
+        ///     registration included, which left placed pieces in the world with no template in
+        ///     ZNetScene. Observed as Villager Cots that looked orphaned: present and grafted,
+        ///     but unbuildable and unable to survive a zone reload.</para>
+        /// </summary>
+        private static int PurgeDestroyedPieceTableEntries()
+        {
+            var db = ObjectDB.instance;
+            if (db?.m_items == null) return 0;
+
+            var removed = 0;
+            var seen = new HashSet<PieceTable>();
+
+            foreach (var itemPrefab in db.m_items)
+            {
+                // Explicit == null, NOT ?. — the null-conditional operator uses a reference
+                // check and so sails straight past Unity's "fake null" destroyed objects, which
+                // then throw on the very GetComponent this is meant to avoid.
+                if (itemPrefab == null) continue;
+
+                var table = itemPrefab.GetComponent<ItemDrop>()?.m_itemData?.m_shared?.m_buildPieces;
+                if (table?.m_pieces == null || !seen.Add(table)) continue;
+
+                removed += table.m_pieces.RemoveAll(go => go == null);
+            }
+
+            return removed;
         }
 
         /// <summary>
@@ -349,6 +396,36 @@ namespace ValheimVillages
             if (fixedCount > 0)
                 Plugin.Log?.LogInfo(
                     $"[HotReload] Re-applied interaction to {fixedCount} placed registry station(s)");
+        }
+
+        /// <summary>
+        ///     Same repair for placed Villager Cots: without it a reloaded cot's surviving
+        ///     CraftingStation hijacks E and opens the native menu instead of the Assign tab.
+        ///     Their blankets are repainted at the same time, since the occupant mark is applied
+        ///     per instance and is lost with the rest of the grafted state.
+        /// </summary>
+        public static void FixupExistingCots()
+        {
+            var cotHash = Items.VillagerBedPiece.PrefabName.GetStableHashCode();
+            var fixedCount = 0;
+
+#pragma warning disable CS0618
+            var znetViews = Object.FindObjectsOfType<ZNetView>();
+#pragma warning restore CS0618
+
+            foreach (var nview in znetViews)
+            {
+                if (nview == null) continue;
+                var zdo = nview.GetZDO();
+                if (zdo == null || zdo.GetPrefab() != cotHash) continue;
+
+                Items.VillagerBedPiece.ReapplyInteractionToInstance(nview.gameObject);
+                Items.VillagerCotOccupant.RefreshBlanket(nview.gameObject);
+                fixedCount++;
+            }
+
+            if (fixedCount > 0)
+                Plugin.Log?.LogInfo($"[HotReload] Re-applied interaction to {fixedCount} placed cot(s)");
         }
 
         /// <summary>

@@ -15,6 +15,9 @@ namespace ValheimVillages.UI.Panels
         private const float Padding = 10f;
         private const int WaypointDotRadius = 4;
         private const int AnchorDotRadius = 5;
+
+        /// <summary>Radius for a pin clamped to the border — smaller, so it reads as off-map.</summary>
+        private const int EdgePinRadius = 3;
         private const int PathLineWidth = 2;
 
         private static readonly Color WildColor = new(0.6f, 0.15f, 0.15f, 0.7f);
@@ -28,6 +31,19 @@ namespace ValheimVillages.UI.Panels
         private static readonly Color FloodFillColor = new(0.45f, 0.45f, 0.45f, 0.95f);
         private static readonly Color GroundTruthColor = new(1f, 0.4f, 0.9f, 1f);
         private static readonly Color GroundTruthDotColor = new(1f, 0.5f, 0.95f, 0.8f);
+
+        // Player-facing palette, to sit beside Valheim's own parchment map rather than the
+        // diagnostic red/grey. "Wild" becomes paper and the operable area becomes the darker
+        // inked land on it; the debug palette above is unchanged, because there the red IS the
+        // information (it marks what the village does NOT cover).
+        private static readonly Color MapParchment = new(0.80f, 0.72f, 0.56f, 1f);
+        private static readonly Color MapLand = new(0.64f, 0.55f, 0.40f, 1f);
+
+        /// <summary>
+        ///     Smallest half-width the map will frame, in metres. A village with only a couple
+        ///     of cells would otherwise be scaled up until a 2m hut filled the panel.
+        /// </summary>
+        private const float MinHalfExtent = 20f;
 
         // Minimal (player-facing Tasks tab) palette. Transparent background so the
         // map sits directly on the wood panel.
@@ -44,7 +60,12 @@ namespace ValheimVillages.UI.Panels
             List<Vector3> floodFillCells = null,
             List<Vector3> groundTruthPath = null,
             float cellSize = 3f,
-            IReadOnlyList<(Vector3 position, Color color)> extraPins = null)
+            IReadOnlyList<(Vector3 position, Color color)> extraPins = null,
+            bool playerFacing = false,
+            MapFrame frameOut = null,
+            bool drawOwnDots = true,
+            List<Color> cellColors = null,
+            List<(Vector3 center, Vector3 outward)> boundary = null)
         {
             var activeCount = 0;
             if (waypoints != null)
@@ -58,12 +79,19 @@ namespace ValheimVillages.UI.Panels
                     (extraPins == null || extraPins.Count == 0))
                     return RenderEmpty();
 
-            ComputeBounds(waypoints, anchorPosition, floodFillCells, groundTruthPath, extraPins, out var min, out var max);
+            ComputeBounds(waypoints, anchorPosition, floodFillCells, groundTruthPath, out var min, out var max);
 
             var worldW = max.x - min.x;
             var worldH = max.y - min.y;
             if (worldW < 1f) worldW = 1f;
             if (worldH < 1f) worldH = 1f;
+
+            if (frameOut != null)
+            {
+                frameOut.Min = min;
+                frameOut.WorldW = worldW;
+                frameOut.WorldH = worldH;
+            }
 
             var tex = new Texture2D(MapSize, MapSize, TextureFormat.RGBA32, false);
             tex.filterMode = FilterMode.Point;
@@ -77,22 +105,34 @@ namespace ValheimVillages.UI.Panels
                 ? BuildActivePolygon2D(waypoints)
                 : new List<Vector2>();
 
-            FillPixels(tex, activePolygon, min, worldW, worldH);
+            var wildColor = playerFacing ? MapParchment : WildColor;
+            var landColor = playerFacing ? MapLand : VillageColor;
+            var cellColor = playerFacing ? MapLand : FloodFillColor;
+
+            FillPixels(tex, activePolygon, min, worldW, worldH, landColor, wildColor);
 
             if (floodFillCells != null && floodFillCells.Count > 0)
-                DrawFloodFillCells(tex, floodFillCells, cellSize, min, worldW, worldH);
+                DrawFloodFillCells(tex, floodFillCells, cellSize, min, worldW, worldH, cellColor,
+                    cellColors);
+
+            // The wall goes on after the floor and before the route, so the barricade reads as
+            // standing ON the ground the village covers rather than being tiled over by it.
+            if (boundary != null && boundary.Count > 0)
+                DrawBarricade(tex, boundary, min, worldW, worldH);
 
             if (waypoints != null)
             {
-                DrawPatrolPath(tex, waypoints, min, worldW, worldH);
-                DrawDots(tex, waypoints, anchorPosition, patrollerPosition, min, worldW, worldH);
+                DrawPatrolPath(tex, waypoints, min, worldW, worldH, playerFacing);
+                DrawDots(tex, waypoints, anchorPosition,
+                    drawOwnDots ? patrollerPosition : null, min, worldW, worldH, drawOwnDots,
+                    playerFacing);
             }
 
             if (groundTruthPath != null && groundTruthPath.Count >= 2)
             {
                 DrawGroundTruthPath(tex, groundTruthPath, min, worldW, worldH);
             }
-            else
+            else if (drawOwnDots)
             {
                 var anchorPx = WorldToPixel(anchorPosition, min, worldW, worldH);
                 DrawCircle(tex, anchorPx, AnchorDotRadius, AnchorColor);
@@ -100,10 +140,7 @@ namespace ValheimVillages.UI.Panels
 
             if (extraPins != null)
                 foreach (var pin in extraPins)
-                {
-                    var pinPx = WorldToPixel(pin.position, min, worldW, worldH);
-                    DrawCircle(tex, pinPx, AnchorDotRadius, pin.color);
-                }
+                    DrawPin(tex, pin.position, pin.color, min, max, worldW, worldH);
 
             tex.Apply();
             return tex;
@@ -197,10 +234,21 @@ namespace ValheimVillages.UI.Panels
             return tex;
         }
 
+        /// <summary>
+        ///     Frame the map on the village's own geometry — the anchor, its operable cells and
+        ///     any patrol route.
+        ///
+        ///     <para>Pins are deliberately NOT included. They used to be, and a single far-off
+        ///     pin (a task target across the valley, or a gate the partition picked up out in
+        ///     the world) dragged the frame out to encompass it: the village collapsed into a
+        ///     speck in one corner with the stray pin in the other, reading as two unrelated
+        ///     islands on a map zoomed uselessly far out. A pin is a thing to point AT, never a
+        ///     thing that decides how much world fits on the map — off-frame ones are clamped to
+        ///     the border by <see cref="DrawPin" /> so their direction still shows.</para>
+        /// </summary>
         private static void ComputeBounds(
             IReadOnlyList<VillagerWaypoint> waypoints, Vector3 anchor,
             List<Vector3> floodFillCells, List<Vector3> groundTruthPath,
-            IReadOnlyList<(Vector3 position, Color color)> extraPins,
             out Vector2 min, out Vector2 max)
         {
             float minX = anchor.x, maxX = anchor.x;
@@ -236,18 +284,24 @@ namespace ValheimVillages.UI.Panels
                     if (p.z > maxZ) maxZ = p.z;
                 }
 
-            if (extraPins != null)
-                for (var i = 0; i < extraPins.Count; i++)
-                {
-                    var p = extraPins[i].position;
-                    if (p.x < minX) minX = p.x;
-                    if (p.x > maxX) maxX = p.x;
-                    if (p.z < minZ) minZ = p.z;
-                    if (p.z > maxZ) maxZ = p.z;
-                }
-
             min = new Vector2(minX - Padding, minZ - Padding);
             max = new Vector2(maxX + Padding, maxZ + Padding);
+
+            // Never frame tighter than MinHalfExtent, or a one-room village fills the panel at
+            // a scale where the pins overlap each other.
+            var cx = (min.x + max.x) * 0.5f;
+            var cz = (min.y + max.y) * 0.5f;
+            if (max.x - min.x < MinHalfExtent * 2f)
+            {
+                min.x = cx - MinHalfExtent;
+                max.x = cx + MinHalfExtent;
+            }
+
+            if (max.y - min.y < MinHalfExtent * 2f)
+            {
+                min.y = cz - MinHalfExtent;
+                max.y = cz + MinHalfExtent;
+            }
 
             // Preserve aspect ratio: the map texture is square, so expand the
             // shorter world axis (centered) instead of stretching the village.
@@ -265,6 +319,11 @@ namespace ValheimVillages.UI.Panels
                 min.x -= pad;
                 max.x += pad;
             }
+
+            // Last word on framing goes to the player's zoom/pan, applied to the square frame
+            // the map would otherwise have auto-fitted. Every pin is normalised through the
+            // frame this produces, so they follow it without any further work.
+            MapViewState.Apply(ref min, ref max);
         }
 
         private static List<Vector2> BuildActivePolygon2D(
@@ -281,7 +340,8 @@ namespace ValheimVillages.UI.Panels
 
         private static void FillPixels(
             Texture2D tex, List<Vector2> polygon,
-            Vector2 min, float worldW, float worldH)
+            Vector2 min, float worldW, float worldH,
+            Color insideColor, Color outsideColor)
         {
             var pixels = new Color[MapSize * MapSize];
 
@@ -291,7 +351,7 @@ namespace ValheimVillages.UI.Panels
                 var wx = min.x + px / (float)MapSize * worldW;
                 var wz = min.y + py / (float)MapSize * worldH;
                 var inside = polygon.Count >= 3 && PointInPolygon(new Vector2(wx, wz), polygon);
-                pixels[py * MapSize + px] = inside ? VillageColor : WildColor;
+                pixels[py * MapSize + px] = inside ? insideColor : outsideColor;
             }
 
             tex.SetPixels(pixels);
@@ -303,13 +363,22 @@ namespace ValheimVillages.UI.Panels
 
         private static void DrawFloodFillCells(
             Texture2D tex, List<Vector3> cells, float cellSize,
-            Vector2 min, float worldW, float worldH)
+            Vector2 min, float worldW, float worldH, Color cellColor,
+            List<Color> cellColors = null)
         {
             // Enlarge each region cell so neighbours overlap and the walkable
             // area reads as one solid village floor instead of scattered blocks.
             var halfCell = cellSize * 0.85f;
-            foreach (var cell in cells)
+            for (var i = 0; i < cells.Count; i++)
             {
+                var cell = cells[i];
+
+                // Per-cell colour when the caller classified the ground (grass/dirt/planks/…),
+                // otherwise the single colour it asked for. This used to be hardcoded to
+                // FloodFillColor, which silently ignored the caller's choice — the player-facing
+                // map was drawing the DEBUG grey while believing it had a parchment palette.
+                var fill = cellColors != null && i < cellColors.Count ? cellColors[i] : cellColor;
+
                 var cornerA = WorldToPixel(new Vector3(cell.x - halfCell, 0, cell.z - halfCell), min, worldW, worldH);
                 var cornerB = WorldToPixel(new Vector3(cell.x + halfCell, 0, cell.z + halfCell), min, worldW, worldH);
 
@@ -323,7 +392,7 @@ namespace ValheimVillages.UI.Panels
                 {
                     if (px < 0 || px >= MapSize || py < 0 || py >= MapSize) continue;
                     var existing = tex.GetPixel(px, py);
-                    tex.SetPixel(px, py, BlendOver(existing, FloodFillColor));
+                    tex.SetPixel(px, py, BlendOver(existing, fill));
                 }
             }
         }
@@ -355,10 +424,52 @@ namespace ValheimVillages.UI.Panels
 
         #region Layer: Patrol Path
 
+        /// <summary>Treasure-map red for the player-facing patrol route.</summary>
+        private static readonly Color RouteColor = new(0.70f, 0.16f, 0.13f, 1f);
+
+        /// <summary>A muted red for route waypoints the patrol has dropped.</summary>
+        private static readonly Color RouteInactiveColor = new(0.52f, 0.30f, 0.27f, 0.75f);
+
+        /// <summary>Dash and gap length in pixels for the dashed route.</summary>
+        private const int DashOn = 4;
+
+        private const int DashOff = 4;
+
+        /// <summary>
+        ///     Draw one leg of the route. Solid in the debug palette, dashed red for the
+        ///     player — the dotted line is the treasure-map idiom for "a path someone walks",
+        ///     and it reads as a route rather than as a wall or a border.
+        /// </summary>
+        private static void DrawRouteLeg(
+            Texture2D tex, Vector2Int a, Vector2Int b, bool dashed, Color color)
+        {
+            if (!dashed)
+            {
+                DrawLine(tex, a, b, color, PathLineWidth);
+                return;
+            }
+
+            var span = Mathf.Max(1, Mathf.RoundToInt(Vector2Int.Distance(a, b)));
+            var period = DashOn + DashOff;
+            for (var i = 0; i < span; i += period)
+            {
+                var t0 = i / (float)span;
+                var t1 = Mathf.Min(1f, (i + DashOn) / (float)span);
+                var p0 = new Vector2Int(
+                    Mathf.RoundToInt(Mathf.Lerp(a.x, b.x, t0)),
+                    Mathf.RoundToInt(Mathf.Lerp(a.y, b.y, t0)));
+                var p1 = new Vector2Int(
+                    Mathf.RoundToInt(Mathf.Lerp(a.x, b.x, t1)),
+                    Mathf.RoundToInt(Mathf.Lerp(a.y, b.y, t1)));
+                DrawLine(tex, p0, p1, color, PathLineWidth);
+            }
+        }
+
         private static void DrawPatrolPath(
             Texture2D tex, IReadOnlyList<VillagerWaypoint> waypoints,
-            Vector2 min, float worldW, float worldH)
+            Vector2 min, float worldW, float worldH, bool dashedRed = false)
         {
+            var legColor = dashedRed ? RouteColor : PathColor;
             VillagerWaypoint prevActive = null;
             var firstActiveIdx = -1;
             for (var i = 0; i < waypoints.Count; i++)
@@ -369,7 +480,7 @@ namespace ValheimVillages.UI.Panels
                 {
                     var a = WorldToPixel(prevActive.Position, min, worldW, worldH);
                     var b = WorldToPixel(waypoints[i].Position, min, worldW, worldH);
-                    DrawLine(tex, a, b, PathColor, PathLineWidth);
+                    DrawRouteLeg(tex, a, b, dashedRed, legColor);
                 }
 
                 prevActive = waypoints[i];
@@ -379,7 +490,7 @@ namespace ValheimVillages.UI.Panels
             {
                 var a = WorldToPixel(prevActive.Position, min, worldW, worldH);
                 var b = WorldToPixel(waypoints[firstActiveIdx].Position, min, worldW, worldH);
-                DrawLine(tex, a, b, PathColor, PathLineWidth);
+                DrawRouteLeg(tex, a, b, dashedRed, legColor);
             }
 
             for (var i = 0; i < waypoints.Count; i++)
@@ -413,24 +524,34 @@ namespace ValheimVillages.UI.Panels
             Texture2D tex,
             IReadOnlyList<VillagerWaypoint> waypoints,
             Vector3 anchor, Vector3? patroller,
-            Vector2 min, float worldW, float worldH)
+            Vector2 min, float worldW, float worldH, bool drawAnchor = true,
+            bool playerFacing = false)
         {
+            // Waypoints belong to the route, so on the player map they wear the route's colour
+            // — a red dotted line studded with green dots reads as two different things.
+            var activeColor = playerFacing ? RouteColor : WaypointColor;
+            var inactiveColor = playerFacing ? RouteInactiveColor : InactiveWaypointColor;
             for (var i = 0; i < waypoints.Count; i++)
             {
                 if (waypoints[i].Active) continue;
                 var px = WorldToPixel(waypoints[i].Position, min, worldW, worldH);
-                DrawCircle(tex, px, WaypointDotRadius - 1, InactiveWaypointColor);
+                DrawCircle(tex, px, WaypointDotRadius - 1, inactiveColor);
             }
 
             for (var i = 0; i < waypoints.Count; i++)
             {
                 if (!waypoints[i].Active) continue;
                 var px = WorldToPixel(waypoints[i].Position, min, worldW, worldH);
-                DrawCircle(tex, px, WaypointDotRadius, WaypointColor);
+                DrawCircle(tex, px, WaypointDotRadius, activeColor);
             }
 
-            var anchorPx = WorldToPixel(anchor, min, worldW, worldH);
-            DrawCircle(tex, anchorPx, AnchorDotRadius, AnchorColor);
+            // The player-facing map draws the anchor and the villager as real icons in the
+            // overlay, so baking a dot underneath would show as a coloured halo around them.
+            if (drawAnchor)
+            {
+                var anchorPx = WorldToPixel(anchor, min, worldW, worldH);
+                DrawCircle(tex, anchorPx, AnchorDotRadius, AnchorColor);
+            }
 
             if (patroller.HasValue)
             {
@@ -442,6 +563,87 @@ namespace ValheimVillages.UI.Panels
         #endregion
 
         #region Drawing Primitives
+
+        /// <summary>
+        ///     Draw one pin, clamped to the border when it falls outside the framed area.
+        ///
+        ///     <para>An off-frame pin is drawn smaller and hard against the edge it left
+        ///     through, so "that way, off the map" stays legible without letting the pin
+        ///     rescale the whole village — see <see cref="ComputeBounds" /> for why that
+        ///     matters.</para>
+        /// </summary>
+        private static void DrawPin(
+            Texture2D tex, Vector3 world, Color color,
+            Vector2 min, Vector2 max, float worldW, float worldH)
+        {
+            var offFrame = world.x < min.x || world.x > max.x ||
+                           world.z < min.y || world.z > max.y;
+
+            // Zoomed or panned, the border would otherwise fill with edge-clamped dots for
+            // everything the player deliberately framed out. At the default fit the clamp still
+            // earns its keep as a "that way" hint.
+            if (offFrame && MapViewState.Active) return;
+
+            var clamped = new Vector3(
+                Mathf.Clamp(world.x, min.x, max.x),
+                world.y,
+                Mathf.Clamp(world.z, min.y, max.y));
+
+            var px = WorldToPixel(clamped, min, worldW, worldH);
+
+            if (!offFrame)
+            {
+                DrawCircle(tex, px, AnchorDotRadius, color);
+                return;
+            }
+
+            // WorldToPixel already clamps to the texture, but a pin sitting exactly on the
+            // edge would be drawn half outside it; inset by its own radius so it stays whole.
+            px.x = Mathf.Clamp(px.x, EdgePinRadius, MapSize - 1 - EdgePinRadius);
+            px.y = Mathf.Clamp(px.y, EdgePinRadius, MapSize - 1 - EdgePinRadius);
+            DrawCircle(tex, px, EdgePinRadius, color);
+        }
+
+        /// <summary>Palisade stakes — dark enough to read as a wall against any floor colour.</summary>
+        private static readonly Color BarricadeColor = new(0.28f, 0.20f, 0.13f, 1f);
+
+        /// <summary>
+        ///     Draw the village's detected wall as a barricade: a post on every boundary cell,
+        ///     each with a short stake leaning outward.
+        ///
+        ///     <para>Boundary cells are where the outside flood was stopped, i.e. where the wall
+        ///     actually is — so this traces the real perimeter rather than a convex hull around
+        ///     it. They arrive unordered, which is why each cell is drawn as its own stake
+        ///     instead of a polyline: at roughly a cell per metre the posts merge into a
+        ///     continuous palisade anyway, and nothing has to guess the winding order.</para>
+        /// </summary>
+        private static void DrawBarricade(
+            Texture2D tex, List<(Vector3 center, Vector3 outward)> boundary,
+            Vector2 min, float worldW, float worldH)
+        {
+            // One metre of stake, in pixels, so the wall keeps its thickness as the frame grows.
+            var pxPerMetre = MapSize / Mathf.Max(worldW, 1f);
+            var stake = Mathf.Clamp(Mathf.RoundToInt(pxPerMetre * 0.9f), 2, 6);
+
+            foreach (var (center, outward) in boundary)
+            {
+                var basePx = WorldToPixel(center, min, worldW, worldH);
+
+                var dir = new Vector2(outward.x, outward.z);
+                if (dir.sqrMagnitude < 1e-4f)
+                {
+                    DrawCircle(tex, basePx, 1, BarricadeColor);
+                    continue;
+                }
+
+                dir.Normalize();
+                var tip = new Vector2Int(
+                    basePx.x + Mathf.RoundToInt(dir.x * stake),
+                    basePx.y + Mathf.RoundToInt(dir.y * stake));
+
+                DrawLine(tex, basePx, tip, BarricadeColor, 2);
+            }
+        }
 
         private static Vector2Int WorldToPixel(
             Vector3 world, Vector2 min, float worldW, float worldH)

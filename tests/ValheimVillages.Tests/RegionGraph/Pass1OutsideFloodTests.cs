@@ -119,14 +119,17 @@ public class Pass1OutsideFloodTests
     [Fact]
     public void ImpassableCells_AreStillMarkedOutside_SoTheBakeCarvesThem()
     {
-        // Nothing walks on deep water, so those cells must remain in the outside set
-        // (the bake carves outside cells NotWalkable). Making the whole grid impassable
-        // yields exactly the seeds: each is marked, none expands.
+        // Nothing walks on deep water, so those cells must be in the outside set — the bake
+        // carves outside cells NotWalkable. Marking used to depend on the flood ARRIVING at a
+        // cell, which it cannot do THROUGH water: only the perimeter seeds and a one-cell
+        // fringe were ever marked, so open water defaulted to INSIDE the village and was baked
+        // walkable. See SubmergedTerrainTests for the sea-floor case that came out of it.
         var outside = Flood(new GridEnv(), 0, 0, 4, 4, (_, _, _) => true, out var seeds);
 
-        Assert.Equal(seeds, outside.Count);
-        Assert.Contains(GridEnv.Key(0, 0), outside);
-        Assert.DoesNotContain(GridEnv.Key(2, 2), outside);
+        Assert.Equal(25, outside.Count);               // every cell, not merely the seeds
+        Assert.Equal(16, seeds);                       // the perimeter ring itself is unchanged
+        Assert.Contains(GridEnv.Key(0, 0), outside);   // a seed
+        Assert.Contains(GridEnv.Key(2, 2), outside);   // interior: unreachable, still outside
     }
 
     [Fact]

@@ -14,12 +14,23 @@ namespace ValheimVillages.Tests.RegionGraph;
 /// </summary>
 public class Pass2AnchorReachableTests
 {
+    /// <summary>
+    ///     No elevation map — every surface in an outside column is outside, which is the
+    ///     column-wide behaviour these cases were written against.
+    /// </summary>
     private static void Flood(
         GridEnv env, Vector3[] anchors, HashSet<long> outside,
         out HashSet<long> reach, out Dictionary<long, List<float>> reachY, out int seeds,
         System.Action<string>? warn = null) =>
+        Flood(env, anchors, outside, null, out reach, out reachY, out seeds, warn);
+
+    private static void Flood(
+        GridEnv env, Vector3[] anchors, HashSet<long> outside,
+        Dictionary<long, float>? outsideY,
+        out HashSet<long> reach, out Dictionary<long, List<float>> reachY, out int seeds,
+        System.Action<string>? warn = null) =>
         RubberBandPrune.AnchorReachableFlood(
-            0, 0, 6, 6, anchors, outside, cell: 1f, anchorSnapRingMax: 6,
+            0, 0, 6, 6, anchors, outside, outsideY, cell: 1f, anchorSnapRingMax: 6,
             env.IsPopulated, env.SurfacesAt, env.WallBlocks, maxClimb: 1f,
             out reach, out reachY, out seeds, out _, out _, out _, warn);
 
@@ -176,5 +187,68 @@ public class Pass2AnchorReachableTests
         Flood(env, AnchorAtCell(3, 3), outside, out _, out var reachY, out _);
 
         Assert.Equal(0f, Assert.Single(reachY[GridEnv.Key(3, 4)]));
+    }
+
+    // --- Y-aware outside set -------------------------------------------------------
+    //
+    // Pass 1 floods TERRAIN only, so "this column is outside" describes its ground. A
+    // raised floor over exterior terrain used to inherit that verdict and became
+    // permanently unreachable — the bug that left cots on a platform extension with no
+    // region at all.
+
+    [Fact]
+    public void PlatformOverAnOutsideColumn_IsReachableAtItsOwnElevation()
+    {
+        // (3,3) is interior ground. (3,4) is an OUTSIDE column whose ground is at 0, but a
+        // deck runs over it at 6 — continuous with the interior floor, also at 6.
+        var env = new GridEnv()
+            .Populate(3, 3).Surface(3, 3, 6f)
+            .Populate(3, 4).Surface(3, 4, 0f).Surface(3, 4, 6f);
+
+        var outside = new HashSet<long> { GridEnv.Key(3, 4) };
+        var outsideY = new Dictionary<long, float> { [GridEnv.Key(3, 4)] = 0f };
+
+        // Anchor AT the deck's height: the flood seeds from the anchor's own Y, and an
+        // anchor left at y=0 would be six metres under the floor it is standing on.
+        var anchors = new[] { new Vector3(3.5f, 6f, 3.5f) };
+        Flood(env, anchors, outside, outsideY, out var reach, out var reachY, out _);
+
+        Assert.Contains(GridEnv.Key(3, 4), reach);
+
+        // The deck, not the ground beneath it.
+        Assert.Contains(6f, reachY[GridEnv.Key(3, 4)]);
+        Assert.DoesNotContain(0f, reachY[GridEnv.Key(3, 4)]);
+    }
+
+    [Fact]
+    public void GroundOfAnOutsideColumn_StaysUnreachable()
+    {
+        // Same column, but the only surface is the exterior ground itself. Nothing changed
+        // for the case the outside set exists to handle.
+        var env = new GridEnv()
+            .Populate(3, 3).Surface(3, 3, 0f)
+            .Populate(3, 4).Surface(3, 4, 0f);
+
+        var outside = new HashSet<long> { GridEnv.Key(3, 4) };
+        var outsideY = new Dictionary<long, float> { [GridEnv.Key(3, 4)] = 0f };
+
+        Flood(env, AnchorAtCell(3, 3), outside, outsideY, out var reach, out _, out _);
+
+        Assert.DoesNotContain(GridEnv.Key(3, 4), reach);
+    }
+
+    [Fact]
+    public void WithoutAnElevationMap_TheWholeOutsideColumnIsStillRefused()
+    {
+        // Callers that pass no elevation map keep the old column-wide semantics, so an
+        // un-migrated one cannot silently start admitting exterior ground.
+        var env = new GridEnv()
+            .Populate(3, 3).Surface(3, 3, 6f)
+            .Populate(3, 4).Surface(3, 4, 0f).Surface(3, 4, 6f);
+
+        Flood(env, new[] { new Vector3(3.5f, 6f, 3.5f) },
+            new HashSet<long> { GridEnv.Key(3, 4) }, out var reach, out _, out _);
+
+        Assert.DoesNotContain(GridEnv.Key(3, 4), reach);
     }
 }

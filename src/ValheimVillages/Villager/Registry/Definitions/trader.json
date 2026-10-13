@@ -1,5 +1,6 @@
 {
   "type": "Trader",
+  "themeColor": "0.44,0.20,0.66",
   "disabled": true,
   "category": "Specialist",
   "displayName": "Trader",
@@ -19,22 +20,32 @@
   "dependentOnNpcType": "",
   "tieredBenefits": [
     {
-      "minLevel": 4,
-      "maxLevel": 6,
+      "minLevel": 2,
+      "maxLevel": 2,
       "description": "Establishes trade routes, basic requirement offsets",
-      "effectMultiplier": 1.0
+      "effectMultiplier": 1.0,
+      "requires": [
+        "Fire"
+      ]
     },
     {
-      "minLevel": 7,
-      "maxLevel": 9,
+      "minLevel": 3,
+      "maxLevel": 3,
       "description": "Enhanced trade routes, moderate requirement offsets",
-      "effectMultiplier": 1.5
+      "effectMultiplier": 1.5,
+      "requires": [
+        "Storage"
+      ]
     },
     {
-      "minLevel": 10,
+      "minLevel": 4,
       "maxLevel": 99,
       "description": "Maximum trade range, significant requirement offsets",
-      "effectMultiplier": 2.0
+      "effectMultiplier": 2.0,
+      "requires": [
+        "Table",
+        "Seat"
+      ]
     }
   ],
   "productions": [],
@@ -42,7 +53,7 @@
   "receivesLevelFrom": [],
   "interdependenceDescription": "",
   "stationName": "",
-  "stationIcon": "Coins",
+  "stationIcon": "TrinketBronzeStamina",
   "workStations": [],
   "behaviors": [
     "craft"
@@ -86,4 +97,3 @@
     "Safe travels! Your purchases are non-refundable once you leave. That's not a rule, that's just physics."
   ]
 }
-

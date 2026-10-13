@@ -35,6 +35,17 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         public string StationName;
         public string Reason;
 
+        /// <summary>
+        ///     The villager is only waiting for TIME to pass — crops growing, a hive filling,
+        ///     mead fermenting — not for the player to do anything.
+        ///
+        ///     <para>Classified at the source rather than by reading <see cref="Reason" />,
+        ///     because the reason is prose written for a player and matching on it would break
+        ///     the moment someone reworded it. An alert is a request for help; waiting is not,
+        ///     and conflating them trains the player to ignore the badge.</para>
+        /// </summary>
+        public bool WaitingOnTime;
+
         // Populated only for Action == "blocked" entries where a chest location is known
         // (e.g. missing ingredients, output chest full). All three set together or all null.
         public float? WorkOrderPosX;

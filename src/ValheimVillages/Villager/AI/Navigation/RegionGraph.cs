@@ -259,6 +259,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             m_outsideCellsXz.Clear();
             m_anchorReachableCellsXz.Clear();
             m_prunedPieceKeys.Clear();
+            m_cellSurfaces.Clear();
             m_hasClassification = false;
             m_initialized = false;
         }
@@ -351,6 +352,15 @@ namespace ValheimVillages.Villager.AI.Navigation
         private readonly Dictionary<string, Vector3> m_regionCentroids = new();
 
         private readonly Dictionary<long, string> m_lookupGrid = new();
+
+        /// <summary>
+        ///     Surface class per lookup cell, keyed the same way as <see cref="m_lookupGrid" />.
+        ///     Filled once when the graph is committed — see <c>VillageSurfaceMap.Build</c> —
+        ///     never on demand: classifying costs a raycast per piece cell and a heightmap read
+        ///     per terrain cell, which is fine once per partition and far too slow on the map's
+        ///     refresh timer. Empty until built, which the map reads as "no colouring yet".
+        /// </summary>
+        private readonly Dictionary<long, byte> m_cellSurfaces = new();
 
         private readonly List<(string id, Vector3 center, Vector3 outDir)> m_boundaryCells = new();
 
@@ -785,6 +795,66 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             m_gates.Clear();
             if (gates != null) m_gates.AddRange(gates);
+        }
+
+        /// <summary>True once the surface classes have been computed for this generation.</summary>
+        public bool HasCellSurfaces => m_cellSurfaces.Count > 0;
+
+        /// <summary>
+        ///     Store the surface class of every lookup cell. Called by the partition and by the
+        ///     ZDO load — the two places a graph is committed — so the map never has to compute
+        ///     it. Keys come from <see cref="GetLookupCells" />.
+        /// </summary>
+        public void SetCellSurfaces(IEnumerable<KeyValuePair<long, byte>> surfaces)
+        {
+            m_cellSurfaces.Clear();
+            if (surfaces == null) return;
+            foreach (var kv in surfaces) m_cellSurfaces[kv.Key] = kv.Value;
+        }
+
+        /// <summary>Every lookup cell as (key, world centre), for classifying and reading back.</summary>
+        public List<(long key, Vector3 center)> GetLookupCells()
+        {
+            var list = new List<(long, Vector3)>();
+            if (!m_initialized) return list;
+
+            var halfCell = LookupCellSize * 0.5f;
+            var halfBucket = HeightBucketSize * 0.5f;
+            foreach (var key in m_lookupGrid.Keys)
+            {
+                UnpackLookup(key, out var gx, out var gz, out var hb);
+                list.Add((key, new Vector3(
+                    gx * LookupCellSize + halfCell,
+                    hb * HeightBucketSize + halfBucket,
+                    gz * LookupCellSize + halfCell)));
+            }
+
+            return list;
+        }
+
+        /// <summary>
+        ///     Surface class at a world position, or false when unclassified. Quantises exactly
+        ///     as <see cref="PointToRegionId" /> does, so a cell centre handed back by
+        ///     <see cref="GetLookupCells" /> always finds its own entry.
+        /// </summary>
+        public bool TryGetCellSurface(Vector3 worldPosition, out byte surface)
+        {
+            surface = 0;
+            if (!m_initialized || m_cellSurfaces.Count == 0) return false;
+
+            var gx = Mathf.FloorToInt(worldPosition.x / LookupCellSize);
+            var gz = Mathf.FloorToInt(worldPosition.z / LookupCellSize);
+            var hb = HeightBucket(worldPosition.y);
+
+            var maxBucketSpan = Mathf.CeilToInt(VerticalMatchTolerance / HeightBucketSize);
+            for (var d = 0; d <= maxBucketSpan; d++)
+            {
+                if (m_cellSurfaces.TryGetValue(PackLookup(gx, gz, hb + d), out surface)) return true;
+                if (d > 0 && m_cellSurfaces.TryGetValue(PackLookup(gx, gz, hb - d), out surface))
+                    return true;
+            }
+
+            return false;
         }
 
         public List<Vector3> GetGates()

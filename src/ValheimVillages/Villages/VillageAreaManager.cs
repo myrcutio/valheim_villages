@@ -36,6 +36,9 @@ namespace ValheimVillages.Villages
                 $"[VillageArea] Registered area for {area.VillageId} with {area.Waypoints.Count} waypoints");
             VillageStationRegistry.RefreshFor(area);
             VillagePoiRegistry.RefreshFor(area);
+            // Last: it buckets pieces by region, so it needs the village's graph, which is
+            // committed before the area is registered.
+            VillageRoomCatalog.RefreshFor(area);
         }
 
         /// <summary>
@@ -48,6 +51,7 @@ namespace ValheimVillages.Villages
                 Plugin.Log?.LogInfo($"[VillageArea] Unregistered area for {villageId}");
                 VillageStationRegistry.RemoveFor(villageId);
                 VillagePoiRegistry.RemoveFor(villageId);
+                VillageRoomCatalog.RemoveFor(villageId);
             }
         }
 
@@ -143,6 +147,25 @@ namespace ValheimVillages.Villages
             foreach (var area in s_areas.Values)
                 if (area.IsInsideArea(position) || area.IsNearBoundary(position, radius))
                     return true;
+            return false;
+        }
+
+        /// <summary>
+        ///     Which village a position belongs to, by the same test
+        ///     <see cref="IsNearAnyVillage" /> uses. Needed wherever the answer depends on the
+        ///     village rather than just on being in one — spawn protection has to ask whether
+        ///     THIS village has a guard, not whether any village anywhere does.
+        /// </summary>
+        public static bool TryGetVillageNear(Vector3 position, float radius, out string villageId)
+        {
+            foreach (var area in s_areas.Values)
+            {
+                if (!area.IsInsideArea(position) && !area.IsNearBoundary(position, radius)) continue;
+                villageId = area.VillageId;
+                return true;
+            }
+
+            villageId = null;
             return false;
         }
 

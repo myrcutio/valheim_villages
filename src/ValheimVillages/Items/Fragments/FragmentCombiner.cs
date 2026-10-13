@@ -30,7 +30,11 @@ namespace ValheimVillages.Items.Fragments
         /// </summary>
         private static readonly Dictionary<string, string[]> BiomeNpcMap = new()
         {
-            { "Meadows", new[] { "Farmer" } },
+            // TavernKeeper rides along with the Farmer rather than taking a later slot: it is
+            // VillagerDependent on a Farmer for every level above its first, so the map that
+            // teaches the dependency is the only one that can teach it usefully. Cooking is
+            // also a first-hour need, and this role now owns it.
+            { "Meadows", new[] { "Farmer", "TavernKeeper" } },
             { "BlackForest", new[] { "Carpenter", "Lumberjack" } },
             { "Swamp", new[] { "Blacksmith" } },
             { "Mountain", new[] { "Mountaineer" } },

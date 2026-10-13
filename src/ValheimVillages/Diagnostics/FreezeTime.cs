@@ -105,6 +105,18 @@ namespace ValheimVillages.Diagnostics
             Report($"frozen at time={t:F2}");
         }
 
+        /// <summary>
+        ///     Pin the world to midday. Visual work has to be judged under the same light every
+        ///     time — comparing a change made at dusk against one made at night says nothing
+        ///     about the change.
+        /// </summary>
+        public static bool Noon()
+        {
+            if (EnvMan.instance == null) return false;
+            SetFrozen(true, DefaultFrozenTime);
+            return true;
+        }
+
         private static void SetFrozen(bool frozen, float timeOfDay)
         {
             EnvMan.instance.m_debugTimeOfDay = frozen;

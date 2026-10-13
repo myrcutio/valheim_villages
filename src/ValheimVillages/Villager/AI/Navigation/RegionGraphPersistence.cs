@@ -203,10 +203,20 @@ namespace ValheimVillages.Villager.AI.Navigation
                 }
             }
 
+            // NOTE: surfaces are classified right after this call — see below. A peer that
+            // loads a graph from the ZDO never runs a partition, so the load IS its region
+            // build, and the map data has to be derived here too.
             graph.SetGraph(regionIds, links, centroids, lookupGrid,
                 null, kinds);
             if (!string.IsNullOrEmpty(classSection))
                 RestoreClassification(graph, classSection);
+
+            // Derived, not persisted: the surface classes come from the live Heightmap and the
+            // pieces standing there, both of which this peer already has loaded. Storing ~1
+            // byte per cell in the ZDO would bloat a blob that is already large, to cache
+            // something cheap to recompute once per load.
+            UI.Panels.VillageSurfaceMap.Build(graph);
+
             LogInfo(
                 $"[Region] Restored v4 graph from ZDO: {regionIds.Count} regions, {links.Count} links, " +
                 $"{kinds.Count} kinded, classification={(graph.HasClassification ? "yes" : "no")}");

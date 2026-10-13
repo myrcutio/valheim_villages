@@ -36,6 +36,11 @@ namespace ValheimVillages.Schemas
         /// </summary>
         public bool CookingRemovalRequested;
 
+        /// <summary>When <see cref="CookingRemovalRequested" /> was set. The collect-from-
+        /// ground step needs a deadline of its own: the craft may have started minutes
+        /// earlier, so CraftStartTime cannot bound it.</summary>
+        public float CookingRemovalAt;
+
         /// <summary>
         ///     When using a physical CookingStation (roast meat/fish), the station instance so the NPC can add items and poll
         ///     for done.
@@ -47,6 +52,12 @@ namespace ValheimVillages.Schemas
 
         /// <summary>Time when crafting animation started.</summary>
         public float CraftStartTime;
+
+        /// <summary>When the villager ACCEPTED this work order, as opposed to when it
+        /// reached the station. A work order is a transaction: this is what bounds the
+        /// whole of it, including the gathering, travelling and depositing legs that
+        /// <see cref="CraftStartTime" /> never covers.</summary>
+        public float WorkStartTime;
 
         /// <summary>Position of the crafting station to use.</summary>
         public Vector3 CraftStationPosition;

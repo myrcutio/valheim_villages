@@ -1,5 +1,6 @@
 {
   "type": "Blacksmith",
+  "themeColor": "0.58,0.33,0.26",
   "category": "Villager",
   "displayName": "Blacksmith",
   "description": "Skilled in metalworking, forging, and weapon/armor repair",
@@ -25,7 +26,8 @@
     }
   ],
   "providesLevelTo": [
-    "Miner"
+    "Miner",
+    "Lumberjack"
   ],
   "receivesLevelFrom": [
     "Miner",

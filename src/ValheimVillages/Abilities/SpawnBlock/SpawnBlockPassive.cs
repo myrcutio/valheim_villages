@@ -44,7 +44,13 @@ namespace ValheimVillages.Abilities.SpawnBlock
             // Raids come through with eventSpawner=true and are none of our business.
             if (eventSpawner) return true;
             if (VillageAreaManager.AreaCount == 0) return true;
-            if (!VillageAreaManager.IsNearAnyVillage(spawnPoint, SpawnBlockMargin)) return true;
+
+            // The protection has to be EARNED. This used to pass on "is near any village",
+            // which meant planting a registry bought the whole benefit and recruiting the
+            // Guard who is supposed to provide it bought nothing. Gated on a living villager
+            // in THIS village declaring passive:spawnblock.
+            if (!VillagePassives.AtPositionHas(spawnPoint, SpawnBlockMargin, VillagePassives.SpawnBlock))
+                return true;
 
             // Counted and reported periodically rather than logged per spawn: this runs on
             // every spawn attempt in the world, and a line each would bury the log — the

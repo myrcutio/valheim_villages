@@ -314,7 +314,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                 if (physicalStation == "farm")
                 {
                     var farmContext = FarmWorkOrderHelper.BuildFarmingContext(
-                        ai, match, recipe, ingredients, existingCount, out var farmBlocked);
+                        ai, match, recipe, ingredients, existingCount, out var farmBlocked,
+                        out var farmWaiting);
                     if (farmContext == null)
                     {
                         rejections.Add(new RejectionRecord
@@ -324,6 +325,9 @@ namespace ValheimVillages.TaskQueue.Handlers
                             PhysicalStation = physicalStation,
                             Reason = farmBlocked ?? "The farm has nothing to do right now.",
                             IsUnimplemented = false,
+                            // No reason at all means the farm is simply idle — everything is
+                            // planted and growing, which is waiting, not a problem.
+                            IsWaiting = farmWaiting || farmBlocked == null,
                             WorkOrderPosition = match.SourceContainer.transform.position,
                         });
                         continue;
@@ -488,6 +492,14 @@ namespace ValheimVillages.TaskQueue.Handlers
 
                 if (!stationPos.HasValue)
                 {
+                    // A hive that exists but has not filled is NOT a missing station. Without
+                    // this the scan told the player to build a beehive next to the beehive they
+                    // already had, and flagged it as a fault needing their attention.
+                    var hiveStillFilling =
+                        physicalStation == BeehiveHelper.PhysicalStation &&
+                        BeehiveHelper.AnyHiveFor(anchorPos, WorkSettings.ChestScanRadius,
+                            match.ItemPrefabName);
+
                     var unimplemented = physicalStation != null
                                         && physicalStation != "farm"
                                         && physicalStation != "cookingstation"
@@ -502,9 +514,16 @@ namespace ValheimVillages.TaskQueue.Handlers
                         Reason = forageOrder
                             ? $"No ripe {ItemDisplay.Name(match.ItemPrefabName)} to pick in the village. " +
                               "Wait for it to grow, or plant more."
-                            : $"There is no {stationDesc} in the village. " +
-                              "Build one inside the walls for this villager to work at.",
+                            : hiveStillFilling
+                                ? $"The {stationDesc} has not produced any " +
+                                  $"{ItemDisplay.Name(match.ItemPrefabName)} yet. Give it time."
+                                : $"There is no {stationDesc} in the village. " +
+                                  "Build one inside the walls for this villager to work at.",
                         IsUnimplemented = unimplemented,
+                        // "Wait for it to grow" and "the hive has not filled yet" are waiting;
+                        // a genuinely missing station is the player's to build. All three share
+                        // this branch but are different kinds of blocker.
+                        IsWaiting = forageOrder || hiveStillFilling,
                         WorkOrderPosition = match.SourceContainer.transform.position,
                     });
                     continue;
@@ -530,6 +549,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                                      $"against a maximum of {match.MaxQuantity}. " +
                                      "Raise the order's maximum if you want more.",
                             IsUnimplemented = false,
+                            // In flight, not stuck: the only thing missing is time.
+                            IsWaiting = true,
                             IsSatisfied = true,
                             WorkOrderPosition = match.SourceContainer.transform.position,
                         });
@@ -542,6 +563,45 @@ namespace ValheimVillages.TaskQueue.Handlers
                 if (cookingStationRef != null && recipe.m_resources != null && recipe.m_resources.Length > 0 &&
                     recipe.m_resources[0].m_resItem != null)
                     cookingInputName = recipe.m_resources[0].m_resItem.gameObject.name;
+
+                // Cook a full station-load per trip instead of one piece per round trip. The
+                // withdrawal already honours IngredientSource.Amount, so scaling it here flows
+                // through the existing in-transit tracking and rollback untouched.
+                //
+                // Bounded by three things at once, because getting any of them wrong is an
+                // overshoot or a loss: the free slots, the quota headroom the in-flight check
+                // just established, and what the chest actually holds.
+                if (cookingStationRef != null && ingredients != null && ingredients.Count > 0)
+                {
+                    var headroom = match.MaxQuantity -
+                                   (existingCount +
+                                    VillageStationRegistry.CountCookingOutputInFlight(anchorPos));
+                    var batch = Mathf.Min(
+                        StationFinder.CountFreeSlots(cookingStationRef), headroom);
+
+                    foreach (var ing in ingredients)
+                    {
+                        var inv = ing?.Container != null ? ing.Container.GetInventory() : null;
+                        if (inv == null || ing.Amount <= 0)
+                        {
+                            batch = 1;
+                            break;
+                        }
+
+                        batch = Mathf.Min(
+                            batch,
+                            ContainerScanner.CountByPrefab(inv, ing.PrefabName) / ing.Amount);
+                    }
+
+                    if (batch > 1)
+                    {
+                        foreach (var ing in ingredients) ing.Amount *= batch;
+                        Plugin.Log?.LogInfo(
+                            $"[WorkOrderScan] {ai.NpcName}: batching {batch}x " +
+                            $"{match.ItemPrefabName} into one trip " +
+                            $"(free slots, quota headroom {headroom}).");
+                    }
+                }
 
                 // Build the full context for the callback
                 var context = new WorkOrderContext
@@ -581,6 +641,11 @@ namespace ValheimVillages.TaskQueue.Handlers
                     "work_order_matched",
                     $"matched work order for {match.ItemPrefabName} " +
                     $"(need: {ingredientDesc}, station: {match.StationName})");
+
+                // Whatever stopped this order before plainly does not stop it now, so the old
+                // complaint goes. Otherwise a fixed problem keeps alerting forever: nothing else
+                // removes a blocker.
+                activityLog.ClearBlocked(villagerId, match.ItemPrefabName);
 
                 // Staleness signal for the reranker: mark on START, not on offer — a row that is
                 // offered and fizzles must still read as stale, or it stops gaining ground.
@@ -639,7 +704,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             {
                 var stationDisplay = r.PhysicalStation ?? r.Station;
                 activityLog.RecordBlocked(villagerId, TaskName, r.ItemPrefab, stationDisplay,
-                    r.Reason, r.WorkOrderPosition, r.IsSatisfied);
+                    r.Reason, r.WorkOrderPosition, r.IsSatisfied, r.IsWaiting);
             }
         }
 
@@ -653,6 +718,13 @@ namespace ValheimVillages.TaskQueue.Handlers
 
             /// <summary>The order was skipped because it is DONE — not a problem to report.</summary>
             public bool IsSatisfied;
+
+            /// <summary>
+            ///     Skipped because the work is simply in progress — something is cooking,
+            ///     growing or fermenting. Shows as an hourglass rather than an alert: there is
+            ///     nothing for the player to do but wait.
+            /// </summary>
+            public bool IsWaiting;
             public Vector3 WorkOrderPosition;
         }
 

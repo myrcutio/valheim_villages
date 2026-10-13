@@ -19,23 +19,80 @@ namespace ValheimVillages.IntegrationTests
     {
         private const float MaxDistance = RegionGraph.CellSize;
 
+        /// <summary>
+        ///     How far outside a village's own recorded footprint a fixture point may still
+        ///     count as belonging to it. The region graph reaches past the pieces that
+        ///     define the footprint (the bake runs on anchors +/- 30m), so an exact
+        ///     containment test would reject legitimate perimeter points.
+        /// </summary>
+        private const float FixtureFootprintMargin = 50f;
+
+        /// <summary>
+        ///     True when at least one recorded fixture point falls within a loaded
+        ///     village's footprint, i.e. we are in the place the fixture was captured.
+        ///
+        ///     <para><see cref="WalkablePositions" /> is a recording of ONE village (see the
+        ///     Source line on the data file). Replayed anywhere else all 389 points sit
+        ///     kilometres away, so both fixture tests failed permanently — 2 of 6 red on
+        ///     every run, which made the suite verdict worthless as a gate. Being in the
+        ///     wrong world is a SKIP, not a failure.</para>
+        ///
+        ///     <para>Measured against each village's own <c>TryGetFootprint</c> rather than
+        ///     <c>VillageRegistry.GraphAt</c>: GraphAt is built on GetVillageAt, which
+        ///     returns the NEAREST village with no distance limit, so it answers non-null
+        ///     for a point on the far side of the map and this guard never tripped. It is
+        ///     also not tested via PointToRegionId, because that is the very thing these
+        ///     tests measure — gating on it would make them incapable of ever failing.</para>
+        ///
+        ///     <para>Probing the points rather than hardcoding a world or village name is
+        ///     what makes this self-maintaining: load the fixture's world and the tests
+        ///     start asserting again on their own, with no flag to remember.</para>
+        /// </summary>
+        private static bool FixtureWorldIsLoaded()
+        {
+            foreach (var village in Villages.Entity.VillageRegistry.EnumerateAll())
+            {
+                var graph = village.Graph;
+                if (graph == null || !graph.IsAvailable) continue;
+                if (!village.TryGetFootprint(out var minX, out var minZ, out var maxX, out var maxZ))
+                    continue;
+
+                foreach (var pt in WalkablePositions)
+                    if (pt.x >= minX - FixtureFootprintMargin &&
+                        pt.x <= maxX + FixtureFootprintMargin &&
+                        pt.z >= minZ - FixtureFootprintMargin &&
+                        pt.z <= maxZ + FixtureFootprintMargin)
+                        return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Skip unless we are in the world <see cref="WalkablePositions" /> came from.</summary>
+        private static void RequireFixtureWorld()
+        {
+            if (FixtureWorldIsLoaded()) return;
+
+            ModAssert.Skip(
+                "the recorded walkable fixture belongs to a different place — not one of its "
+                + WalkablePositions.Length
+                + " points falls within any loaded village's footprint. Re-capture it from "
+                + "vv_dumps/hna_walkable_path.json to measure coverage here.");
+        }
+
         [ModTest(Name = "HNA_WalkableCoverage_AllPointsWithinCellSize", Order = 200)]
         public static void AllPointsWithinCellSize()
         {
             if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
-            {
-                Plugin.Log?.LogInfo(
-                    "[ModTest] skip name=walkable_coverage reason=hna_not_built");
-                return;
-            }
+                ModAssert.Skip(
+                    "no HNA graph is built in this world, so there is nothing to check "
+                    + "(walkable coverage)");
+
+            RequireFixtureWorld();
 
             var centers = CollectAllRegionCenters();
             if (centers.Count == 0)
-            {
-                Plugin.Log?.LogWarning(
-                    "[ModTest] HNA graph has no region centers — skipping walkable coverage test");
-                return;
-            }
+                ModAssert.Skip("the HNA graph reports no region centers at all");
 
             var covered = 0;
             var uncovered = 0;
@@ -94,11 +151,11 @@ namespace ValheimVillages.IntegrationTests
         public static void PointToRegionResolution()
         {
             if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
-            {
-                Plugin.Log?.LogInfo(
-                    "[ModTest] skip name=point_to_region reason=hna_not_built");
-                return;
-            }
+                ModAssert.Skip(
+                    "no HNA graph is built in this world, so there is nothing to check "
+                    + "(point-to-region resolution)");
+
+            RequireFixtureWorld();
 
             var resolved = 0;
             var unresolved = 0;
@@ -151,11 +208,9 @@ namespace ValheimVillages.IntegrationTests
         public static void GraphHasMinimumRegions()
         {
             if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
-            {
-                Plugin.Log?.LogInfo(
-                    "[ModTest] skip name=minimum_regions reason=hna_not_built");
-                return;
-            }
+                ModAssert.Skip(
+                    "no HNA graph is built in this world, so there is nothing to check "
+                    + "(minimum region count)");
 
             var centers = CollectAllRegionCenters();
             Plugin.Log?.LogInfo($"[HNA MinRegions] Total region centers across all graphs: {centers.Count}");
@@ -169,11 +224,9 @@ namespace ValheimVillages.IntegrationTests
         public static void AllRegionsHaveGroundBelow()
         {
             if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
-            {
-                Plugin.Log?.LogInfo(
-                    "[ModTest] skip name=ground_below reason=hna_not_built");
-                return;
-            }
+                ModAssert.Skip(
+                    "no HNA graph is built in this world, so there is nothing to check "
+                    + "(ground-below pruning)");
 
             var centers = CollectAllRegionCenters();
             int passed = 0, failed = 0;
@@ -211,11 +264,9 @@ namespace ValheimVillages.IntegrationTests
         public static void AllRegionsHaveSufficientWidth()
         {
             if (!Villages.Entity.VillageRegistry.IsAnyAvailable)
-            {
-                Plugin.Log?.LogInfo(
-                    "[ModTest] skip name=surface_width reason=hna_not_built");
-                return;
-            }
+                ModAssert.Skip(
+                    "no HNA graph is built in this world, so there is nothing to check "
+                    + "(surface-width pruning)");
 
             var filter = new NavMeshQueryFilter
             {

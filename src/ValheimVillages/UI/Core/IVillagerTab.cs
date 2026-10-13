@@ -40,6 +40,19 @@ namespace ValheimVillages.UI.Core
         public Texture2D MapTexture { get; set; }
 
         /// <summary>
+        ///     The level ladder, rendered as rows with a shield badge on each reached rung.
+        ///     Null = no ladder (every tab except Status).
+        /// </summary>
+        public System.Collections.Generic.List<LevelRung> Rungs { get; set; }
+
+        /// <summary>
+        ///     Interactive points of interest laid over <see cref="MapTexture" />: what each dot
+        ///     is called, and which row to open when the player clicks it. Null = a map with no
+        ///     interaction, which is how the debug tab uses it.
+        /// </summary>
+        public System.Collections.Generic.List<Panels.MapPin> MapPins { get; set; }
+
+        /// <summary>
         ///     Optional recipe-style ingredient rows (item + amount), rendered with the native
         ///     <c>InventoryGui.SetupRequirement</c> so icons + have/need colouring match the
         ///     craft menu. Null = no ingredient row (the default text-only detail).

@@ -326,6 +326,12 @@ namespace ValheimVillages.Settings
         /// </summary>
         public const float CraftStallTimeout = 300f;
 
+        /// <summary>Ceiling on a whole work-order transaction, across every leg. Longer
+        /// than <see cref="CraftStallTimeout" /> because a transaction also contains the
+        /// walking: it is the last resort for a villager that would otherwise hold its
+        /// assignment forever and silently stop taking work.</summary>
+        public const float WorkTransactionTimeout = 600f;
+
         /// <summary>How often to re-scan for work when idle (seconds).</summary>
         public const float WorkScanInterval = 6f;
 

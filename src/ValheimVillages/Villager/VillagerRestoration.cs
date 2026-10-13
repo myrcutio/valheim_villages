@@ -77,6 +77,7 @@ namespace ValheimVillages.Villager
             RestoreIdentity(go, def);
             RestoreComponents(go, recordId, typeStr);
             Dialog.ConfigureDialog(go, def);
+            VillagerAppearance.Apply(go, def);
 
             Plugin.Log?.LogInfo(
                 $"[VillagerRestoration] Restored {def.displayName} ({typeStr}) at {go.transform.position}");

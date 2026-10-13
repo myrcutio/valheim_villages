@@ -35,6 +35,7 @@ namespace ValheimVillages.Testing
             int passed = 0, failed = 0, errored = 0, skipped = 0;
             var failures = new List<TestResultEntry>();
             var errors = new List<TestResultEntry>();
+            var skips = new List<TestResultEntry>();
 
             foreach (var method in methods)
             {
@@ -46,6 +47,15 @@ namespace ValheimVillages.Testing
                     method.Invoke(null, null);
                     passed++;
                     Plugin.Log?.LogDebug($"[ModTestRunner] PASS: {testName}");
+                }
+                catch (TargetInvocationException tie) when (tie.InnerException is ModTestSkipException mse)
+                {
+                    skipped++;
+                    skips.Add(new TestResultEntry
+                    {
+                        Test = testName, State = "SKIP", Message = mse.Message,
+                    });
+                    Plugin.Log?.LogInfo($"[ModTestRunner] SKIP: {testName} — {mse.Message}");
                 }
                 catch (TargetInvocationException tie) when (tie.InnerException is ModAssertException mae)
                 {
@@ -71,7 +81,7 @@ namespace ValheimVillages.Testing
                 $"{errored} errors, {skipped} skipped — {result}");
 
             WriteJsonResults(result, passed, failed, errored, skipped,
-                failures, errors, methods.Count);
+                failures, errors, skips, methods.Count);
         }
 
         /// <summary>
@@ -153,7 +163,7 @@ namespace ValheimVillages.Testing
         private static void WriteJsonResults(
             string result, int passed, int failed, int errored, int skipped,
             List<TestResultEntry> failures, List<TestResultEntry> errors,
-            int totalTests)
+            List<TestResultEntry> skips, int totalTests)
         {
             var sb = new StringBuilder();
             sb.AppendLine("{");
@@ -178,8 +188,10 @@ namespace ValheimVillages.Testing
             WriteEntries(sb, errors);
             sb.AppendLine("  ],");
 
-            // Skipped (always empty for now)
-            sb.AppendLine("  \"skipped\": []");
+            // Skipped — a test that could not run here, with the reason why.
+            sb.AppendLine("  \"skipped\": [");
+            WriteEntries(sb, skips);
+            sb.AppendLine("  ]");
             sb.AppendLine("}");
 
             try

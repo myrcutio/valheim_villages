@@ -346,6 +346,9 @@ namespace ValheimVillages.Villager.AI
 
         private bool m_warnedNoHome;
 
+        /// <summary>Countdown to the next drive mirror publish. See VillagerDriveMirror.</summary>
+        private float m_nextDrivePublish;
+
         // Spawn-settle gate: false until the deferred `villager_settle` task confirms this
         // villager is on its village graph with a ready agent. While false, UpdateAI holds
         // the villager in place so a first-tick behavior (e.g. flee) can't eject it.
@@ -385,6 +388,11 @@ namespace ValheimVillages.Villager.AI
                 UniqueId, dt,
                 (ActiveBehavior as Behaviors.Relax.RelaxBehavior)?.ServedSpotType,
                 CurrentState == BehaviorState.Traveling);
+
+            // UpdateAI runs only on the owner, so the drives above exist on one peer. Mirror
+            // them onto the NPC ZDO or the villager UI shows every remote villager a neutral
+            // mood it invented.
+            Behaviors.Relax.VillagerDriveMirror.Publish(NView, UniqueId, ref m_nextDrivePublish, dt);
 
             if (m_lastBehaviorUpdateTime > 0.0)
             {
@@ -1242,10 +1250,36 @@ namespace ValheimVillages.Villager.AI
         ///     them.</para>
         ///     Returns true when the agent is live and on-mesh (sync applied).
         /// </summary>
+        /// <summary>
+        ///     Separation (m) between the agent's mesh-constrained position and the physics
+        ///     character beyond which the character is treated as having left the mesh.
+        ///
+        ///     <para>Generous enough not to fire while walking a slope or briefly falling —
+        ///     normally the two coincide, because this method pins the agent to the character
+        ///     every tick and the clamp has nothing to do.</para>
+        /// </summary>
+        private const float MaxAgentSeparation = 1.0f;
+
         private bool SyncAgentAvoidance()
         {
             if (m_navAgent == null || !m_navAgent.isOnNavMesh) return false;
+
+            // Read where the agent ACTUALLY ended up last tick before overwriting it. Assigning
+            // nextPosition asks Unity to move the agent to the character and it CLAMPS the
+            // result onto the navmesh, so a character that has left the mesh leaves the agent
+            // behind on it — and `isOnNavMesh` stays true, because the clamping is exactly what
+            // hides the separation.
+            //
+            // Observed: a Guard walked under a wood_floor deck and stood on terrain 1.46m below
+            // the baked surface. The agent was clamped up onto the floor, reported a complete
+            // 2.9m path from there, and fed a steering direction to the character below, which
+            // pressed into a wall-blocked collider at vel=0 for 157s. Nothing detected it:
+            // isOnNavMesh was true here, and IsStranded() had already returned "fine" because
+            // PointToRegionId resolved — that region spans 1.48m of height and contains both
+            // levels. A vertical offset is invisible to every test that is not this one.
+            var separation = m_navAgent.nextPosition - transform.position;
             m_navAgent.nextPosition = transform.position;
+            if (separation.sqrMagnitude > MaxAgentSeparation * MaxAgentSeparation) return false;
             if (m_character != null)
             {
                 var charVel = m_character.GetVelocity();
@@ -1687,7 +1721,21 @@ namespace ValheimVillages.Villager.AI
             if (DoorHandler != null)
             {
                 var blockingDoor = DoorHandler.GetBlockingDoor(dir);
-                if (blockingDoor != null) DoorHandler.OpenDoor(blockingDoor);
+                if (blockingDoor != null)
+                {
+                    DoorHandler.OpenDoor(blockingDoor);
+                }
+                else
+                {
+                    // Nothing CLOSED in the way, yet the villager is pushing and not moving.
+                    // The remaining door case is one already open towards it — its leaf sitting
+                    // in the doorway — which opening cannot fix and the navmesh never knew about.
+                    var speed = m_character != null
+                        ? new Vector3(m_character.GetVelocity().x, 0f, m_character.GetVelocity().z)
+                            .magnitude
+                        : 0f;
+                    DoorHandler.TryRecoverFromWedge(dir, speed);
+                }
             }
 
             // Idle travel (relax, wander) WALKS; without this, "not running" still meant

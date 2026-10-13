@@ -270,6 +270,27 @@ namespace ValheimVillages.UI.Core
                     Enum.ToObject(alignProp.PropertyType, alignment));
         }
 
+        /// <summary>
+        ///     How tall the text in <paramref name="go" /> actually renders, or 0 if unknown.
+        ///
+        ///     <para>Needed to place anything BELOW a block of text whose length varies — a
+        ///     fixed anchor cannot work when the content changes with the villager's state,
+        ///     which is how the level ladder ended up drawn over the description.</para>
+        ///
+        ///     <para>Reflected, like everything else here, so this file stays free of a hard
+        ///     TextMeshPro reference.</para>
+        /// </summary>
+        public static float GetTMPPreferredHeight(GameObject go)
+        {
+            if (go == null) return 0f;
+
+            var comp = FindTMP(go);
+            if (comp == null) return 0f;
+
+            var prop = comp.GetType().GetProperty("preferredHeight");
+            return prop?.GetValue(comp) is float h ? h : 0f;
+        }
+
         private static Component FindTMP(GameObject go)
         {
             foreach (var comp in go.GetComponentsInChildren<Component>(true))

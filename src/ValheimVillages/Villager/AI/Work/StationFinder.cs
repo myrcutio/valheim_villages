@@ -251,6 +251,27 @@ namespace ValheimVillages.Villager.AI.Work
         }
 
         /// <summary>
+        ///     Number of EMPTY slots on a cooking station — how many pieces of food it could
+        ///     take right now. Mirrors <see cref="HasFreeSlot" />, which answers the same
+        ///     question but only yes/no, so a villager carrying one item at a time could never
+        ///     tell that it was walking back for a slot that had been free all along.
+        /// </summary>
+        public static int CountFreeSlots(CookingStation station)
+        {
+            if (station == null) return 0;
+            var nview = station.GetComponent<ZNetView>();
+            if (nview == null || nview.GetZDO() == null) return 0;
+
+            var slotCount = station.m_slots != null ? station.m_slots.Length : 0;
+            var zdo = nview.GetZDO();
+            var free = 0;
+            for (var i = 0; i < slotCount; i++)
+                if (string.IsNullOrEmpty(zdo.GetString("slot" + i)))
+                    free++;
+            return free;
+        }
+
+        /// <summary>
         ///     Number of occupied (non-empty) slots on a cooking station — items currently
         ///     cooking, each of which becomes one finished output. Reads ZDO slot data,
         ///     mirroring <see cref="HasFreeSlot" />. Counted as pending output toward a

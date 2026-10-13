@@ -11,6 +11,16 @@ namespace ValheimVillages.Testing
     {
         [ThreadStatic] private static List<AssertionEntry> s_collected;
 
+        /// <summary>
+        ///     Abandon this test as not-applicable here, recording a SKIP rather than a
+        ///     pass. For unmet preconditions (no HNA graph yet) and fixtures belonging to
+        ///     another world — never to dodge an assertion that is genuinely failing.
+        /// </summary>
+        public static void Skip(string reason)
+        {
+            throw new ModTestSkipException(reason);
+        }
+
         /// <summary>Assert that a condition is true.</summary>
         public static void True(bool condition, string message)
         {

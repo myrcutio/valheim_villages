@@ -64,6 +64,7 @@ namespace ValheimVillages.Attributes
             RegisterPassives(assembly);
             RegisterTabs(assembly);
             RegisterRegistryTabs(assembly);
+            RegisterCotTabs(assembly);
             RegisterListPanels(assembly);
             RegisterContextMenus(assembly);
             RegisterBehaviors(assembly);
@@ -560,6 +561,41 @@ namespace ValheimVillages.Attributes
         public static IReadOnlyList<IVillagerTab> GetRegisteredTabs()
         {
             return s_tabs;
+        }
+
+        /// <summary>
+        ///     Discover [RegisterCotTab] classes and register them with CotTabManager. Parallel
+        ///     to RegisterRegistryTabs, keyed on ICotTabUI so the tab populations never cross —
+        ///     a cot must not sprout the registry's Revive tab.
+        /// </summary>
+        private static void RegisterCotTabs(Assembly assembly)
+        {
+            var tabTypes = new List<(Type type, RegisterCotTabAttribute attr)>();
+            foreach (var type in assembly.GetTypes())
+            {
+                var attr = type.GetCustomAttribute<RegisterCotTabAttribute>();
+                if (attr == null) continue;
+
+                if (!typeof(ICotTabUI).IsAssignableFrom(type))
+                {
+                    Plugin.Log?.LogWarning(
+                        $"[AttributeScanner] {type.Name} has [RegisterCotTab] " +
+                        "but does not implement ICotTabUI");
+                    continue;
+                }
+
+                tabTypes.Add((type, attr));
+            }
+
+            var count = 0;
+            foreach (var (type, _) in tabTypes.OrderBy(t => t.attr.Order))
+            {
+                var tab = (ICotTabUI)Activator.CreateInstance(type);
+                CotTabManager.RegisterTab(tab);
+                count++;
+            }
+
+            Plugin.Log?.LogDebug($"[AttributeScanner] Registered {count} cot tabs");
         }
 
         /// <summary>

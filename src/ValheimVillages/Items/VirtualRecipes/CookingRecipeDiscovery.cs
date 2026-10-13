@@ -41,6 +41,20 @@ namespace ValheimVillages.Items.VirtualRecipes
                     var toName = conv.m_to.gameObject.name;
                     if (string.IsNullOrEmpty(fromName) || string.IsNullOrEmpty(toName)) continue;
                     if (existingOutputs != null && existingOutputs.Contains(toName)) continue;
+
+                    // A cooking station may only produce FOOD. Valheim ships cooking stations
+                    // whose conversion lists carry unreleased content — Deep North armour, the
+                    // gold weapon set, a quest key — and taking the list verbatim put weapons and
+                    // shields on the Tavern Keeper's menu.
+                    var shared = conv.m_to.m_itemData?.m_shared;
+                    if (shared == null || shared.m_food <= 0f)
+                    {
+                        Plugin.Log?.LogDebug(
+                            $"[CookingDiscovery] skipped non-food conversion on " +
+                            $"'{go.name}': {fromName} -> {toName}");
+                        continue;
+                    }
+
                     if (!seenOutputs.Add(toName)) continue;
 
                     list.Add(new VirtualRecipeEntry

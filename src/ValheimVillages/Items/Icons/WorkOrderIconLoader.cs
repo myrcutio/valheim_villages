@@ -40,6 +40,11 @@ namespace ValheimVillages.Items.Icons
                 new Rect(0, 0, tex.width, tex.height),
                 new Vector2(0.5f, 0.5f));
 
+            // Sprite.Create leaves the name empty, which makes these invisible to any
+            // by-name sprite search — they could not be found or dumped while diagnosing
+            // why a map pin was showing the wrong icon.
+            sprite.name = $"vv_workorder_{key.ToLowerInvariant()}_icon";
+
             _cache[key] = sprite;
             return sprite;
         }

@@ -38,6 +38,7 @@ namespace ValheimVillages.Villager.AI.Navigation
         {
             // Process pending door closures
             ProcessPendingDoorClosures();
+            ProcessPendingReswings();
 
             // Periodically scan for nearby doors
             if (Time.time - m_lastDoorScanTime > 0.5f)
@@ -60,6 +61,153 @@ namespace ValheimVillages.Villager.AI.Navigation
         // villager is about to walk THROUGH. >= DoorDetectionRadius so the
         // door opens a step before the character reaches the panel.
         private const float DoorCrossLookahead = 3f;
+
+        #region Wedge recovery
+
+        /// <summary>Below this speed the villager counts as not moving at all.</summary>
+        private const float WedgeSpeed = 0.2f;
+
+        /// <summary>
+        ///     How long to be pushing against something before blaming a door. Long enough not
+        ///     to fire while squeezing past another villager, short enough that a wedge does not
+        ///     cost the villager its afternoon.
+        /// </summary>
+        private const float WedgeSeconds = 1.5f;
+
+        /// <summary>Time for the leaf to swing clear of the doorway before re-opening it.</summary>
+        private const float ReswingDelay = 0.75f;
+
+        private float m_wedgeSince = -1f;
+        private readonly Dictionary<Door, float> m_pendingReswings = new();
+        private readonly Dictionary<Door, int> m_reswingState = new();
+
+        /// <summary>
+        ///     Unstick a villager that is walking into a door which is already OPEN — towards it.
+        ///
+        ///     <para>A door opens away from whoever used it, so one opened from the far side
+        ///     leaves its leaf occupying the doorway for anyone coming the other way. Opening it
+        ///     again does nothing (<see cref="OpenDoor" /> returns early on an open door) and no
+        ///     navmesh change can help, because the obstruction is a physical collider that
+        ///     wasn't there at bake time. The only way through is to actuate it: close the door,
+        ///     then open it again — which, being driven from this side now, swings it the other
+        ///     way and clears the path.</para>
+        /// </summary>
+        public void TryRecoverFromWedge(Vector3 moveDirection, float speed)
+        {
+            if (speed > WedgeSpeed)
+            {
+                m_wedgeSince = -1f;
+                return;
+            }
+
+            if (m_wedgeSince < 0f)
+            {
+                m_wedgeSince = Time.time;
+                return;
+            }
+
+            if (Time.time - m_wedgeSince < WedgeSeconds) return;
+
+            var door = GetWrongWayDoor(moveDirection);
+            if (door == null) return;
+
+            m_wedgeSince = -1f;
+            Reswing(door);
+        }
+
+        /// <summary>
+        ///     An OPEN, player-built door across the villager's path whose leaf is swung towards
+        ///     this side. Mirrors <see cref="GetBlockingDoor" />, which deliberately only
+        ///     considers CLOSED doors and so cannot see this case at all.
+        /// </summary>
+        private Door GetWrongWayDoor(Vector3 moveDirection)
+        {
+            if (m_nearbyDoors.Count == 0) return null;
+
+            var from = transform.position;
+            var dir = moveDirection;
+            dir.y = 0f;
+            if (dir.sqrMagnitude < 1e-4f) return null;
+            var to = from + dir.normalized * DoorCrossLookahead;
+
+            foreach (var door in m_nearbyDoors)
+            {
+                if (door == null) continue;
+                if (IsDoorClosed(door)) continue;
+                if (!IsPlayerBuiltDoor(door)) continue;
+
+                var nview = GetDoorZNetView(door);
+                if (nview?.GetZDO() == null) continue;
+
+                // Open the way this villager would open it = already clear of its path.
+                if (nview.GetZDO().GetInt(ZDOVars.s_state) == DesiredOpenState(door)) continue;
+
+                var doorPos = door.transform.position;
+                if ((doorPos - from).sqrMagnitude >
+                    DoorSettings.DoorDetectionRadius * DoorSettings.DoorDetectionRadius)
+                    continue;
+
+                if (SegmentCrossesDoor(from, to, doorPos, door.transform.forward,
+                        DoorwayHalfWidth(door)))
+                    return door;
+            }
+
+            return null;
+        }
+
+        /// <summary>Which way this door swings when opened from where the villager stands.</summary>
+        private int DesiredOpenState(Door door)
+        {
+            var userDir = (transform.position - door.transform.position).normalized;
+            return Vector3.Dot(door.transform.forward, userDir) < 0f ? 1 : -1;
+        }
+
+        private void Reswing(Door door)
+        {
+            var nview = GetDoorZNetView(door);
+            if (nview?.GetZDO() == null) return;
+
+            var desired = DesiredOpenState(door);
+
+            // Shut it first. Going straight to the opposite state would sweep the leaf THROUGH
+            // the villager, which is the thing being escaped.
+            nview.GetZDO().Set(ZDOVars.s_state, 0);
+            m_reswingState[door] = desired;
+            m_pendingReswings[door] = Time.time + ReswingDelay;
+
+            Plugin.Log?.LogInfo(
+                $"[Door] wedged against an open door at {door.transform.position}; " +
+                $"closing and re-opening it to state {desired}.");
+        }
+
+        private void ProcessPendingReswings()
+        {
+            if (m_pendingReswings.Count == 0) return;
+
+            foreach (var door in new List<Door>(m_pendingReswings.Keys))
+            {
+                if (door == null)
+                {
+                    m_pendingReswings.Remove(door);
+                    m_reswingState.Remove(door);
+                    continue;
+                }
+
+                if (Time.time < m_pendingReswings[door]) continue;
+
+                m_pendingReswings.Remove(door);
+                if (!m_reswingState.TryGetValue(door, out var desired)) continue;
+                m_reswingState.Remove(door);
+
+                var nview = GetDoorZNetView(door);
+                if (nview?.GetZDO() == null) continue;
+
+                nview.GetZDO().Set(ZDOVars.s_state, desired);
+                ScheduleClose(door);
+            }
+        }
+
+        #endregion
 
         /// <summary>
         ///     Returns a closed, player-built door the villager is about to walk

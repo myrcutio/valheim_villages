@@ -235,6 +235,7 @@ namespace ValheimVillages.Behaviors.Crafting
                 $"{context.WorkOrder.ItemPrefabName} at {context.CraftStationPosition}");
 
             m_context = context;
+            m_context.WorkStartTime = Time.time;
             SetWorkNote($"start {context.WorkOrder.ItemPrefabName} @ t={Time.time:F0}");
             VillagerActivityLog.Instance.Record(
                 UniqueIdForLog, context.WorkOrder.ItemPrefabName, "start", "crafting");
@@ -266,6 +267,27 @@ namespace ValheimVillages.Behaviors.Crafting
                 if (ScanPending) return;
 
                 AbandonWork("lost context");
+                return;
+            }
+
+            // TRANSACTION CEILING — every sub-state, not just Crafting.
+            //
+            // Accepting a work order is a transaction, and something must always end it. The
+            // craft ceiling below runs only once SubState == Crafting, so a villager that
+            // stopped making progress while gathering, travelling, returning or depositing had
+            // NO deadline at all: the sub-state keeps AssignmentActive true, the dispatcher
+            // hands back the held assignment without re-selecting, and the villager quietly
+            // takes no further work. Measured on the dedicated server: a Tavern Keeper finished
+            // one bake and then never polled for another.
+            //
+            // This is the backstop, not the mechanism. Each leg should end itself promptly and
+            // say why; reaching this line means one of them did not, so it is logged as the
+            // fault it is.
+            var held = Time.time - m_context.WorkStartTime;
+            if (held > WorkSettings.WorkTransactionTimeout)
+            {
+                AbandonWork(
+                    $"work transaction ran {held:F0}s without completing (stuck in {SubState})");
                 return;
             }
 

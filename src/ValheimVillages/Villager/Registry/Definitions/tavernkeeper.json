@@ -1,6 +1,9 @@
 {
   "type": "TavernKeeper",
-  "disabled": true,
+  "themeColor": "0.40,0.12,0.26",
+  "heldTool": "Tankard",
+  "heldToolRotation": "90,280,195",
+  "heldToolPosition": "-0.15,0.25,-0.06",
   "category": "Specialist",
   "displayName": "Tavern Keeper",
   "description": "Manages tavern operations, cooking, brewing, and hospitality services",
@@ -48,6 +51,8 @@
   "stationName": "$vv_tavernkeeper",
   "stationIcon": "Tankard",
   "workStations": [
+    "$piece_cauldron",
+    "$piece_preptable",
     "$vv_tavernkeeper"
   ],
   "stationRecipes": [
@@ -56,43 +61,50 @@
       "outputAmount": 1,
       "input": "RawMeat",
       "inputAmount": 1,
-      "minStationLevel": 1
+      "minStationLevel": 1,
+      "physicalStation": "cookingstation"
     },
     {
       "output": "NeckTailGrilled",
       "outputAmount": 1,
       "input": "NeckTail",
       "inputAmount": 1,
-      "minStationLevel": 1
+      "minStationLevel": 1,
+      "physicalStation": "cookingstation"
     },
     {
       "output": "CookedDeerMeat",
       "outputAmount": 1,
       "input": "DeerMeat",
       "inputAmount": 1,
-      "minStationLevel": 1
+      "minStationLevel": 1,
+      "physicalStation": "cookingstation"
     },
     {
       "output": "CookedLoxMeat",
       "outputAmount": 1,
       "input": "LoxMeat",
       "inputAmount": 1,
-      "minStationLevel": 2
+      "minStationLevel": 2,
+      "physicalStation": "cookingstation"
     },
     {
       "output": "BarleyFlour",
       "outputAmount": 1,
       "input": "Barley",
       "inputAmount": 1,
-      "minStationLevel": 2
+      "minStationLevel": 2,
+      "physicalStation": "windmill"
     }
   ],
   "behaviors": [
     "craft",
+    "feast",
     "tidy",
     "haul"
   ],
   "tags": [
+    "recipe:cooking",
     "tab:info",
     "tab:debug",
     "tab:workorder"
@@ -130,4 +142,3 @@
     "May your hangover be gentle and your memory selective!"
   ]
 }
-

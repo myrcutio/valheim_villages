@@ -18,12 +18,14 @@ namespace ValheimVillages.Abilities.SpawnBlock
         public string DisplayName => "Spawn Protection";
 
         /// <summary>
-        ///     Returns true if the given world position is inside a protected village area
-        ///     where enemy spawns are suppressed.
+        ///     Returns true if the given world position is inside a village that has EARNED
+        ///     spawn protection — i.e. one with a living villager providing it. Must apply the
+        ///     same gate as <see cref="SpawnProtectionPatch" /> or the UI would report
+        ///     protection the spawn path is not actually giving.
         /// </summary>
         public bool IsActive(Vector3 position)
         {
-            return VillageAreaManager.IsInsideAnyVillage(position);
+            return VillagePassives.AtPositionHas(position, 0f, VillagePassives.SpawnBlock);
         }
     }
 }

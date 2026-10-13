@@ -36,7 +36,37 @@ namespace ValheimVillages.Villager.Station
         public static bool HasCraftingRecipes(string villagerType)
         {
             var def = VillagerRegistry.Get(villagerType);
-            return def?.tags != null && TagParser.HasTag(def.tags, "tab", "workorder");
+            if (def?.tags == null || !TagParser.HasTag(def.tags, "tab", "workorder")) return false;
+
+            // The tag only says the type is ALLOWED work orders — it does not say any exist.
+            // The Carpenter carries tab:workorder with no authored stationRecipes and no
+            // recipe:* tag to discover any, so it was given an Orders tab and an Upgrade tab
+            // that can never hold a single row. Ask what the tab would actually list.
+            return CountStationRecipes(GetStationName(villagerType)) > 0;
+        }
+
+        /// <summary>
+        ///     How many recipes the crafting UI would list for this station.
+        ///
+        ///     <para>Counted off ObjectDB rather than <c>def.stationRecipes</c>, because a
+        ///     type's recipes arrive by two different routes — authored on the def, or
+        ///     discovered from its <c>recipe:*</c> tags — and only the registered result
+        ///     reflects both. Counting the def alone would wrongly hide the Blacksmith's and
+        ///     Farmer's tabs, whose recipes are all tag-discovered.</para>
+        /// </summary>
+        private static int CountStationRecipes(string stationName)
+        {
+            var odb = ObjectDB.instance;
+            if (odb?.m_recipes == null || string.IsNullOrEmpty(stationName)) return 0;
+
+            var count = 0;
+            foreach (var recipe in odb.m_recipes)
+            {
+                if (recipe == null || recipe.m_craftingStation == null) continue;
+                if (recipe.m_craftingStation.m_name == stationName) count++;
+            }
+
+            return count;
         }
 
         /// <summary>

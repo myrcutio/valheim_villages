@@ -1,5 +1,6 @@
 {
   "type": "Carpenter",
+  "themeColor": "0.48,0.33,0.19",
   "category": "Villager",
   "displayName": "Carpenter",
   "description": "Skilled in woodworking, construction, and toolmaking",
@@ -29,7 +30,9 @@
     "Miner",
     "Blacksmith"
   ],
-  "receivesLevelFrom": [],
+  "receivesLevelFrom": [
+    "Lumberjack"
+  ],
   "interdependenceDescription": "Adds levels to all production villagers through better tools",
   "stationName": "",
   "stationIcon": "Hammer",
@@ -76,6 +79,8 @@
     "Right, back to work.",
     "Take care! And if you find any good timber out there, you know where I am.",
     "May your roof never leak. Unless you want it to!"
-  ]
+  ],
+  "heldTool": "AxeIron",
+  "heldToolRotation": "10,270,120",
+  "heldToolPosition": "0,0.19,-0.1"
 }
-

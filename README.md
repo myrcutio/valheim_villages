@@ -21,6 +21,7 @@ Requires [BepInExPack Valheim](https://thunderstore.io/c/valheim/p/denikson/BepI
       - coal refined in a kiln, ore smelted in a smelter, meat roasted on a cooking station
       - lumberjacks work a woodlot outside the walls: planting saplings from your tree seeds, felling the grown trees, and hauling the wood home
       - an eaten-out feast is replaced from your stores, if you have one spare
+    - they carry the tool of their trade and a lit lantern, and wear their village's colours
     - they find their way through doors, up stairs you built, across walls and ramparts, and over terrain you've reshaped
     - they can fight, badly — guards shoot crossbows, everyone else runs and cowers
   - multiple villages
@@ -36,8 +37,11 @@ Requires [BepInExPack Valheim](https://thunderstore.io/c/valheim/p/denikson/BepI
       another village and the order goes with it
   - village map
     - your walls decide where the village ends, and the area is drawn on a map in the Tasks menu
+    - orders, cots, stations and gates are marked on it — hover for a tooltip, click to jump to that task
+    - scroll to zoom and drag to pan
   - interface
     - extra tabs on the registry station, with controller and Steam Deck navigation
+    - a Status tab per villager, covering station levels, quarters and comfort, and mood
 
 ### Screenshots
 
@@ -70,14 +74,36 @@ wood home.
 
 ![A Forester's Post, a woodpile under a green banner, standing in a birch wood](https://raw.githubusercontent.com/myrcutio/valheim_villages/main/public/imgs/forestry-post.png)
 
+**Each villager looks the part.** They carry the tool of their trade — a cultivator for the
+Farmer, an iron axe for the Carpenter — with a lit lantern in the off hand, dressed in their
+village's colours.
+
+![A Farmer and a Carpenter in straw-coloured robes, carrying a cultivator and an axe, each with a lit lantern](https://raw.githubusercontent.com/myrcutio/valheim_villages/main/public/imgs/villager-equipment.png)
+
+**Follow the work on the map.** The Tasks tab marks every order, cot, station and gate on the
+village map; an hourglass means a crop is still growing, a warning means something needs you.
+
+![The Farmer's Tasks tab, with order rows and a parchment village map marked with labelled pins](https://raw.githubusercontent.com/myrcutio/valheim_villages/main/public/imgs/villager-ui-activity-map.png)
+
+**Check how they're living.** The Status tab reports the station's level, the comfort of their
+quarters and their current mood.
+
+![The Farmer's Status tab showing shelter, a comfort bar and the quarters description](https://raw.githubusercontent.com/myrcutio/valheim_villages/main/public/imgs/villager-status-levels.png)
+
+**Give them somewhere to sleep.** Each villager's cot is dyed in their colours and marked with
+the sign of their trade.
+
+![Two villager cots in a lamplit room, blankets dyed straw and red, each stamped with a trade icon](https://raw.githubusercontent.com/myrcutio/valheim_villages/main/public/imgs/villager-beds.png)
+
 ### Known Issues
 If you are looking here you probably noticed something dreadfully wrong and broken, and for that I am sorry.
   - multiple villages not tested with two villages closer than about 200m
   - the villagers use dverger prefabs for animations, and sometimes a race condition on load fails to clean up the old prefab while still creating a new one, leading to very confused dwarves wandering your village
   - navmeshes are really hard
     - there are many, many edge cases that the villagers may not be able to properly navigate.  in particular this is a problem with shallow stairs and low gaps between floors.  to best avoid these, use wide stairs and ramps, and lots of clearance between floors and terrain.  if it's not handicap accessible, it will probably prove a problem for a villager.
-    - gaps in village walls may break navmesh baking, particularly around doors on top of terrain (doors on pieces and floors work well)
-  - villager rescue quests and map fragments may appear in the world, but they are very experimental and untested
   - villagers sometimes get distracted and let the meat burn on the cooking station.  mea culpa.
   - melee combat is absolutely not a thing and even a lowly greyling can end up wiping out a village if there isn't a capable guard or player to protect them
-  - The village _should_ keep humming along while the player is away, but things may stall if the player loads in far away and hasn't loaded in that tile yet.  YMMV.
+
+### AI Disclosure
+AI was used for code assistance and documentation throughout this project. All art was made
+(poorly) by a human.

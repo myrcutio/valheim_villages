@@ -163,6 +163,16 @@ namespace ValheimVillages.UI.Core
                 btn.onClick.RemoveAllListeners();
                 btn.onClick.AddListener(() => OnListItemClicked(idx));
 
+                // Same exemption the map needed: the work-order editor installs a
+                // UIGroupHandler at priority 10000, which makes Valheim deactivate every other
+                // group and leaves this row's CanvasGroup non-interactable, so the click never
+                // arrives. Applied per row because the rows are recycled native elements and
+                // nothing else owns them.
+                var rowGroup = elem.GetComponent<CanvasGroup>() ?? elem.AddComponent<CanvasGroup>();
+                rowGroup.ignoreParentGroups = true;
+                rowGroup.interactable = true;
+                rowGroup.blocksRaycasts = true;
+
                 elem.SetActive(true);
                 m_listElements.Add(elem);
             }
@@ -179,6 +189,10 @@ namespace ValheimVillages.UI.Core
 
         private void PopulateDescription(InventoryGui gui, ITabContent<TSubject> tab)
         {
+            // Selecting a different row re-frames the map on a different subject, so the
+            // previous row's zoom does not carry over.
+            Panels.MapViewState.EnsureKey(m_selectedListIndex.ToString());
+
             var detail = m_selectedListIndex >= 0
                 ? tab.GetDetail(m_selectedListIndex, CurrentSubject)
                 : null;
@@ -202,8 +216,14 @@ namespace ValheimVillages.UI.Core
                 // but the text un-rendered.
                 var nameChild = descPanel.Find("Name");
                 if (nameChild != null)
-                    VillagerUIFactory.SetTMPText(
-                        nameChild.gameObject, detail?.Title ?? "");
+                {
+                    // An empty title still occupies its line, leaving a blank band at the top
+                    // of the panel. Hide the element rather than blanking its text.
+                    var title = detail?.Title ?? "";
+                    nameChild.gameObject.SetActive(!string.IsNullOrEmpty(title));
+                    if (!string.IsNullOrEmpty(title))
+                        VillagerUIFactory.SetTMPText(nameChild.gameObject, title);
+                }
 
                 var descChild = descPanel.Find("Description");
                 if (descChild != null)
@@ -211,7 +231,9 @@ namespace ValheimVillages.UI.Core
                         descChild.gameObject, detail?.Description ?? "");
             }
 
-            UpdateMapImage(descPanel, detail?.MapTexture);
+            UpdateLevelCrest(descPanel, detail?.StationLevel ?? 0);
+            UpdateLevelRungs(descPanel, detail?.Rungs);
+            UpdateMapImage(descPanel, detail?.MapTexture, detail?.MapPins);
 
             ApplyTabAction(gui, detail);
 
@@ -347,14 +369,308 @@ namespace ValheimVillages.UI.Core
         }
 
         /// <summary>
+        ///     Height of one ladder row. Sized to the badge it carries, which has to be big
+        ///     enough to read the level off at a glance — the whole point of using the shield
+        ///     rather than a tick.
+        /// </summary>
+        private const float RungHeight = 68f;
+
+        /// <summary>Font size for the level digit on a rung badge, scaled to the badge.</summary>
+        private const float RungBadgeFontSize = 30f;
+
+        /// <summary>
+        ///     Highest the map may start, as a fraction of the description panel. Leaves room
+        ///     for at least a title plus a line or two even when the text is short.
+        /// </summary>
+        private const float MapTopMax = 0.70f;
+
+        /// <summary>
+        ///     Lowest the map may be pushed. Past this the map is too small to read, and
+        ///     clipping a long reason is the better trade than a map nobody can use.
+        /// </summary>
+        private const float MapTopMin = 0.34f;
+
+        /// <summary>
+        ///     Where the map's top edge belongs: just below the description text, measured
+        ///     rather than assumed.
+        /// </summary>
+        private static float MapTopAnchor(Transform descPanel)
+        {
+            var descText = descPanel != null ? descPanel.Find("Description") : null;
+            var panelRect = descPanel as RectTransform;
+            if (descText == null || panelRect == null) return MapTopMax;
+
+            var panelHeight = panelRect.rect.height;
+            if (panelHeight <= 1f) return MapTopMax;
+
+            var textHeight = VillagerUIFactory.GetTMPPreferredHeight(descText.gameObject);
+            if (textHeight <= 0f) return MapTopMax;
+
+            // The description starts at the panel top, so the fraction it consumes is its
+            // height over the panel's; the map begins below that, plus a small gap.
+            var consumed = (textHeight + MapGap) / panelHeight;
+            return Mathf.Clamp(1f - consumed, MapTopMin, MapTopMax);
+        }
+
+        /// <summary>Breathing room between the description text and the map below it.</summary>
+        private const float MapGap = 10f;
+
+        /// <summary>Breathing room between the end of the description text and the ladder.</summary>
+        private const float RungGap = 8f;
+
+        /// <summary>Signature of the rendered ladder, so rows are rebuilt only when they change.</summary>
+        private string m_renderedRungSignature;
+
+        /// <summary>
+        ///     Draw the level ladder as rows, a shield badge on each rung already earned.
+        ///
+        ///     <para>Rows rather than text because the badge carries the level NUMBER, and a
+        ///     digit cannot be drawn inside an inline TMP sprite. Rebuilt only when the ladder
+        ///     actually changes — this runs on the description refresh timer, and recreating a
+        ///     handful of objects several times a second is how the map pins first broke.</para>
+        /// </summary>
+        private void UpdateLevelRungs(Transform descPanel, List<LevelRung> rungs)
+        {
+            // Height is part of the signature: the ladder's position depends on how tall the
+            // description rendered, so a description that changed length must reflow the rows
+            // even when the rungs themselves are identical.
+            var descForHeight = descPanel != null ? descPanel.Find("Description") : null;
+            var heightKey = descForHeight != null
+                ? Mathf.RoundToInt(VillagerUIFactory.GetTMPPreferredHeight(descForHeight.gameObject))
+                : 0;
+            var signature = ComputeRungSignature(rungs) + "@" + heightKey;
+            if (signature == m_renderedRungSignature && m_rungRoot != null)
+            {
+                m_rungRoot.SetActive(rungs != null && rungs.Count > 0);
+                return;
+            }
+
+            m_renderedRungSignature = signature;
+
+            if (m_rungRoot != null)
+            {
+                Destroy(m_rungRoot);
+                m_rungRoot = null;
+            }
+
+            if (rungs == null || rungs.Count == 0 || descPanel == null) return;
+
+            m_rungRoot = new GameObject("VV_LevelRungs", typeof(RectTransform));
+
+            // Parented to the DESCRIPTION text and offset by its own rendered height, so the
+            // ladder always starts just below whatever the text happens to be. A fixed anchor
+            // cannot work here: the description grows and shrinks with the villager's state
+            // (blocker lines, "Now:", mood), which is why the rows kept landing on top of it.
+            var descText = descPanel.Find("Description");
+            var host = descText != null ? descText : descPanel;
+            m_rungRoot.transform.SetParent(host, false);
+
+            var textHeight = descText != null
+                ? VillagerUIFactory.GetTMPPreferredHeight(descText.gameObject)
+                : 0f;
+
+            var root = m_rungRoot.GetComponent<RectTransform>();
+            root.anchorMin = new Vector2(0f, 1f);
+            root.anchorMax = new Vector2(1f, 1f);
+            root.pivot = new Vector2(0.5f, 1f);
+            root.anchoredPosition = new Vector2(0f, -(textHeight + RungGap));
+            root.sizeDelta = new Vector2(0f, RungHeight * rungs.Count);
+
+            for (var i = 0; i < rungs.Count; i++) BuildRung(root, rungs[i], i, rungs.Count);
+        }
+
+        private static string ComputeRungSignature(List<LevelRung> rungs)
+        {
+            if (rungs == null || rungs.Count == 0) return "";
+
+            var sb = new StringBuilder();
+            foreach (var r in rungs)
+                sb.Append(r.Level).Append(r.Reached ? '+' : r.IsNext ? '>' : '-')
+                  .Append(r.Text).Append(';');
+
+            return sb.ToString();
+        }
+
+        /// <summary>One ladder row: badge-or-marker on the left, what it asks for on the right.</summary>
+        private static void BuildRung(RectTransform parent, LevelRung rung, int index, int count)
+        {
+            var row = new GameObject($"VV_Rung{rung.Level}", typeof(RectTransform));
+            var rt = row.GetComponent<RectTransform>();
+            rt.SetParent(parent, false);
+            rt.anchorMin = new Vector2(0f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(0.5f, 1f);
+            rt.anchoredPosition = new Vector2(0f, -RungHeight * index);
+            rt.sizeDelta = new Vector2(0f, RungHeight);
+
+            if (rung.Reached)
+            {
+                // The badge IS the tick now: same shield as the map pin and the panel header.
+                var badge = new GameObject("Badge", typeof(RectTransform), typeof(Image));
+                var brt = badge.GetComponent<RectTransform>();
+                brt.SetParent(rt, false);
+                brt.anchorMin = new Vector2(0f, 0.5f);
+                brt.anchorMax = new Vector2(0f, 0.5f);
+                brt.pivot = new Vector2(0f, 0.5f);
+                brt.anchoredPosition = Vector2.zero;
+                // The star is square, unlike the shield the map pins wear.
+                brt.sizeDelta = new Vector2(RungHeight, RungHeight);
+
+                var img = badge.GetComponent<Image>();
+                img.sprite = UiSprites.LevelStar();
+                // Greyscale sprite tinted gold, exactly as the native level readout does it.
+                img.color = UiSprites.LevelStarTint;
+                img.preserveAspect = true;
+                img.raycastTarget = false;
+
+                var num = VillagerUIFactory.CreateLabel(
+                    brt, rung.Level.ToString(), RungBadgeFontSize);
+                if (num != null)
+                {
+                    var nrt = num.GetComponent<RectTransform>();
+                    if (nrt != null)
+                    {
+                        nrt.anchorMin = Vector2.zero;
+                        nrt.anchorMax = Vector2.one;
+                        // Raise the bottom edge, not lower the top: the shield's visual centre
+                        // sits above its geometric one because it tapers to a point.
+                        // Centred: a star is near enough symmetric that the digit needs no
+                        // lift, unlike the shield, which tapers to a point and pulled its
+                        // visual centre upward.
+                        nrt.offsetMin = Vector2.zero;
+                        nrt.offsetMax = Vector2.zero;
+                    }
+
+                    VillagerUIFactory.SetTMPProperties(
+                        num, RungBadgeFontSize, LevelCrestTextColor, TmpCenter);
+                }
+            }
+
+            var label = VillagerUIFactory.CreateLabel(
+                rt, $"{(rung.Reached ? "" : rung.IsNext ? "▸ " : "· ")}Level {rung.Level} — {rung.Text}",
+                14f);
+            if (label == null) return;
+
+            var lrt = label.GetComponent<RectTransform>();
+            if (lrt != null)
+            {
+                lrt.anchorMin = new Vector2(0f, 0f);
+                lrt.anchorMax = new Vector2(1f, 1f);
+                // Indent past the badge column so reached and unreached rows line up.
+                lrt.offsetMin = new Vector2(RungHeight + 8f, 0f);
+                lrt.offsetMax = Vector2.zero;
+            }
+
+            VillagerUIFactory.SetTMPProperties(
+                label, 14f,
+                rung.Reached ? RungMetColor : rung.IsNext ? RungNextColor : RungLockedColor,
+                TmpMidlineLeft);
+        }
+
+        /// <summary>TMP TextAlignmentOptions: Center, and MidlineLeft for row text.</summary>
+        private const int TmpCenter = 514;
+
+        private const int TmpMidlineLeft = 513;
+
+        private static readonly Color RungMetColor = new(0.56f, 0.82f, 0.56f, 1f);
+        private static readonly Color RungNextColor = new(1f, 0.76f, 0.29f, 1f);
+        private static readonly Color RungLockedColor = new(0.43f, 0.48f, 0.53f, 1f);
+
+        /// <summary>Size of the level shield in the description panel, in pixels.</summary>
+        private const float LevelCrestHeight = 46f;
+
+        /// <summary>
+        ///     Show the villager's level as a number on the same shield their map pin wears, in
+        ///     the top-right of the description panel.
+        ///
+        ///     <para>Built here rather than reusing Valheim's station-level star because that
+        ///     star is only re-published for details that carry recipe requirements — a Status
+        ///     detail has a level and no ingredients, so it fell through that branch and showed
+        ///     nothing. Reusing the crest ties the number to the same badge the villager is
+        ///     marked with on the map.</para>
+        /// </summary>
+        private void UpdateLevelCrest(Transform descPanel, int level)
+        {
+            if (level <= 0)
+            {
+                if (m_levelCrestObject != null) m_levelCrestObject.SetActive(false);
+                return;
+            }
+
+            if (m_levelCrestObject == null && descPanel != null)
+            {
+                m_levelCrestObject = new GameObject(
+                    "VV_LevelCrest", typeof(RectTransform), typeof(Image));
+                m_levelCrestObject.transform.SetParent(descPanel, false);
+
+                var img = m_levelCrestObject.GetComponent<Image>();
+                img.sprite = UiSprites.Crest();
+                img.preserveAspect = true;
+                img.raycastTarget = false;
+                if (img.sprite == null) img.color = new Color(0.35f, 0.30f, 0.22f, 0.9f);
+
+                VillagerUIFactory.CreateLabel(m_levelCrestObject.transform, "", 22f);
+            }
+
+            if (m_levelCrestObject == null) return;
+
+            var rt = m_levelCrestObject.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(1f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(1f, 1f);
+            rt.anchoredPosition = new Vector2(-6f, -4f);
+            rt.sizeDelta = new Vector2(LevelCrestHeight * UiSprites.CrestAspect, LevelCrestHeight);
+
+            m_levelCrestObject.SetActive(true);
+
+            // The number sits on the shield, filling it, so it stays centred whatever the digit.
+            if (m_levelCrestObject.transform.childCount == 0) return;
+            var label = m_levelCrestObject.transform.GetChild(0).gameObject;
+            var lrt = label.GetComponent<RectTransform>();
+            if (lrt != null)
+            {
+                lrt.anchorMin = Vector2.zero;
+                lrt.anchorMax = Vector2.one;
+                // Nudge the digit UP by raising the BOTTOM edge. The previous attempt lowered
+                // the top edge instead, which shrinks the rect from the other side and moves
+                // centred text DOWN — the opposite of the intent, and why the number sat low.
+                lrt.offsetMin = new Vector2(0f, 7f);
+                lrt.offsetMax = Vector2.zero;
+            }
+
+            VillagerUIFactory.SetTMPText(label, level.ToString());
+            VillagerUIFactory.SetTMPProperties(label, 22f, LevelCrestTextColor, 514);
+        }
+
+        /// <summary>Warm gold for the level digit, to read as a stamped badge.</summary>
+        private static readonly Color LevelCrestTextColor = new(0.96f, 0.84f, 0.52f, 1f);
+
+        /// <summary>
         ///     Show or hide a map texture in the description panel.
         /// </summary>
-        private void UpdateMapImage(Transform descPanel, Texture2D texture)
+        private void UpdateMapImage(
+            Transform descPanel, Texture2D texture, List<Panels.MapPin> pins)
         {
             if (texture == null)
             {
                 if (m_mapImageObject != null)
+                {
+                    // Clear the hit targets too, or an invisible button from the previous row
+                    // keeps swallowing clicks over a hidden map.
+                    Panels.MapPinOverlay.Clear(m_mapImageObject);
+                    m_renderedPinSignature = null;
                     m_mapImageObject.SetActive(false);
+
+                    // Hiding the map is also where its texture stops being referenced.
+                    var raw = m_mapImageObject.GetComponent<RawImage>();
+                    var stale = raw != null ? raw.texture as Texture2D : null;
+                    if (stale != null)
+                    {
+                        raw.texture = null;
+                        Object.Destroy(stale);
+                    }
+                }
+
                 return;
             }
 
@@ -363,6 +679,22 @@ namespace ValheimVillages.UI.Core
                 m_mapImageObject = new GameObject("VV_MapImage",
                     typeof(RectTransform), typeof(RawImage));
                 m_mapImageObject.transform.SetParent(descPanel, false);
+
+                // Stay clickable even when another UI group takes over. The work-order editor
+                // installs a UIGroupHandler at priority 10000, which makes Valheim deactivate
+                // every other group — the crafting panel included — so its CanvasGroup goes
+                // non-interactable and map pin clicks are silently swallowed. That is why
+                // clicking a second order while editing the first appeared to do nothing.
+                // The editor exempts itself the same way; the map has to as well, or the map
+                // is dead whenever anything it opens is on screen.
+                var cg = m_mapImageObject.AddComponent<CanvasGroup>();
+                cg.ignoreParentGroups = true;
+                cg.interactable = true;
+                cg.blocksRaycasts = true;
+
+                // Wheel zoom and drag pan. On the map itself, which is the parent of every pin
+                // hit target, so the events reach it from anywhere over the map.
+                m_mapImageObject.AddComponent<Panels.MapViewInput>();
             }
 
             if (m_mapImageObject != null)
@@ -370,21 +702,59 @@ namespace ValheimVillages.UI.Core
                 // Anchored to the lower portion of the description panel, below
                 // the title/station/legend text. Re-applied each time so a tweak
                 // takes effect without recreating the object.
+                // Top edge follows the description's MEASURED height rather than a fixed
+                // fraction. The text grows with the villager's state, so a constant anchor
+                // either wastes space or lets the text run under the map — which it did.
                 var rt = m_mapImageObject.GetComponent<RectTransform>();
                 rt.anchorMin = new Vector2(0.05f, 0.04f);
-                rt.anchorMax = new Vector2(0.95f, 0.70f);
+                rt.anchorMax = new Vector2(0.95f, MapTopAnchor(descPanel));
                 rt.offsetMin = Vector2.zero;
                 rt.offsetMax = Vector2.zero;
 
                 m_mapImageObject.SetActive(true);
                 var rawImage = m_mapImageObject.GetComponent<RawImage>();
-                if (rawImage != null)
+                if (rawImage != null && rawImage.texture != texture)
+                {
+                    // Every render allocates a fresh 256x256 RGBA32 and nothing used to free the
+                    // one it replaced, so an open panel bled a quarter of a megabyte a second.
+                    // Native texture memory is not reclaimed by the GC, and zoom re-renders far
+                    // more often than the old one-second tick did.
+                    var previous = rawImage.texture as Texture2D;
                     rawImage.texture = texture;
+                    if (previous != null) Object.Destroy(previous);
+                }
+
+                var pinSignature = ComputePinSignature(pins);
+                if (pinSignature != m_renderedPinSignature)
+                {
+                    Panels.MapPinOverlay.Apply(m_mapImageObject, pins, FocusTabRow);
+                    m_renderedPinSignature = pinSignature;
+                }
             }
+        }
+
+        /// <summary>
+        ///     Value signature of a pin set: what it is called and where it sits, rounded to the
+        ///     pixel the hit target would land on. Compared by value because the pins are rebuilt
+        ///     fresh on every detail refresh, so references always differ.
+        /// </summary>
+        private static string ComputePinSignature(List<Panels.MapPin> pins)
+        {
+            if (pins == null || pins.Count == 0) return "";
+
+            var sb = new StringBuilder();
+            foreach (var pin in pins)
+                sb.Append(pin.Label).Append('@')
+                  .Append(Mathf.RoundToInt(pin.Normalized.x * 256f)).Append(',')
+                  .Append(Mathf.RoundToInt(pin.Normalized.y * 256f)).Append('|')
+                  .Append(pin.TargetTab).Append(pin.TargetRow).Append(';');
+
+            return sb.ToString();
         }
 
         private void OnListItemClicked(int index)
         {
+            DismissWorkOrderEditor();
             m_selectedListIndex = index;
             UpdateSelectionVisuals();
             var ci = GetCustomIndex();
@@ -499,6 +869,20 @@ namespace ValheimVillages.UI.Core
             {
                 Destroy(m_mapImageObject);
                 m_mapImageObject = null;
+                m_renderedPinSignature = null;
+            }
+
+            if (m_rungRoot != null)
+            {
+                Destroy(m_rungRoot);
+                m_rungRoot = null;
+                m_renderedRungSignature = null;
+            }
+
+            if (m_levelCrestObject != null)
+            {
+                Destroy(m_levelCrestObject);
+                m_levelCrestObject = null;
             }
 
             var gui = InventoryGui.instance;

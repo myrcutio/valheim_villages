@@ -43,6 +43,7 @@ namespace ValheimVillages.UI.Patches
                 // disjoint static state, so sharing the close hook is order-independent.
                 VillagerInteract.OnCraftingUIClosed();
                 RegistryInteract.OnCraftingUIClosed();
+                CotInteract.OnCraftingUIClosed();
             }
         }
     }

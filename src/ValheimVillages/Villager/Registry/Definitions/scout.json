@@ -1,5 +1,6 @@
 {
   "type": "Scout",
+  "themeColor": "0.22,0.54,0.48",
   "disabled": true,
   "category": "Specialist",
   "displayName": "Scout",
@@ -20,27 +21,39 @@
   "tieredBenefits": [
     {
       "minLevel": 2,
-      "maxLevel": 3,
+      "maxLevel": 2,
       "description": "Basic exploration bonuses, reveals nearby points of interest",
-      "effectMultiplier": 1.0
+      "effectMultiplier": 1.0,
+      "requires": [
+        "Fire"
+      ]
+    },
+    {
+      "minLevel": 3,
+      "maxLevel": 3,
+      "description": "Wider discovery radius, marks resource locations and enemy camps",
+      "effectMultiplier": 1.5,
+      "requires": [
+        "Table"
+      ]
     },
     {
       "minLevel": 4,
-      "maxLevel": 6,
-      "description": "Wider discovery radius, marks resource locations and enemy camps",
-      "effectMultiplier": 1.5
-    },
-    {
-      "minLevel": 7,
-      "maxLevel": 9,
+      "maxLevel": 4,
       "description": "Marks dungeons/spawners, 1.5x wisplight radius in Mistlands",
-      "effectMultiplier": 2.0
+      "effectMultiplier": 2.0,
+      "requires": [
+        "Bed"
+      ]
     },
     {
-      "minLevel": 10,
+      "minLevel": 5,
       "maxLevel": 99,
       "description": "Maximum discovery, all dungeons marked, 2x wisplight radius",
-      "effectMultiplier": 3.0
+      "effectMultiplier": 3.0,
+      "requires": [
+        "Storage"
+      ]
     }
   ],
   "productions": [],
@@ -90,4 +103,3 @@
     "Off to scout! Remember: if you hear screaming in the distance, it's probably not me. Probably."
   ]
 }
-

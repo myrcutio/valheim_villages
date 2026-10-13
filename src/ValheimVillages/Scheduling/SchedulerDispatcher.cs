@@ -4,6 +4,7 @@ using ValheimVillages.Attributes;
 using ValheimVillages.Interfaces;
 using ValheimVillages.Scheduling.Producers;
 using ValheimVillages.Villager.AI;
+using ValheimVillages.Villager.Records;
 using ValheimVillages.Villages.Entity;
 
 namespace ValheimVillages.Scheduling
@@ -83,6 +84,17 @@ namespace ValheimVillages.Scheduling
                             $"instance (source={cur.sourceId}); reassigning.");
                     TaskBoard.Release(cur.sourceId);
                     s_assigned.Remove(villagerId);
+                }
+
+                // QUARTERS GATE. A villager with nowhere to live does not take work — they only
+                // idle-wander until the player gives them a cot in a habitable room. Placed
+                // after the in-progress block above on purpose: someone who loses their cot
+                // mid-task still finishes and releases it cleanly rather than stranding a claim.
+                var quarters = Villager.Levels.VillagerQuarters.For(VillagerRecordTable.FindById(villagerId));
+                if (!quarters.CanWork)
+                {
+                    Diag(ai, quarters.Blocker);
+                    return null;
                 }
 
                 var village = VillageRegistry.GetVillageAt(ai.HomeAnchor);

@@ -348,7 +348,19 @@ namespace ValheimVillages.Villager.AI.Navigation
             var doorGeometryDropped = pieceSources.RemoveAll(s =>
                 s.component != null && s.component.GetComponentInParent<Door>() != null);
             result.DoorPiecesDropped = doorGeometryDropped;
-            result.DoorsBlocked = 0;
+
+            // Dropping the panel geometry (above) keeps the bake independent of open/closed
+            // state. It does NOT make the doorway safe to walk: leaving it as plain walkable
+            // navmesh means the agent paths through the space a solid panel occupies, and a
+            // villager that meets the panel there is wedged with no detector able to help —
+            // measured on the dedicated server, a Tavern Keeper stuck at vel=0 against an open
+            // door for over 800s. So the doorway is carved instead, and DoorLinkPlacer bridges
+            // it with an off-mesh link the villager crosses after opening the door.
+            //
+            // The carve must cover EVERY position the panel can occupy — closed, swung in and
+            // swung out — which is why the phantom is sized from the door's own colliders
+            // rather than one constant: a wider door sweeps a wider arc.
+            result.DoorsBlocked = AddDoorBlockers(pieceSources, bounds);
 
             // Drop roof geometry for the same reason, one step earlier than every filter
             // that was supposed to catch it. A Valheim roof piece is a pitched MESH wrapped
@@ -422,7 +434,8 @@ namespace ValheimVillages.Villager.AI.Navigation
                 outsideCells, villageId, null, floodHolder.GateMarkers);
             // A gate is only a way out if there is ground to step onto beyond it.
             DoorLinkPlacer.UnblockDoorAprons(outsideCells, bounds);
-            var phantomOutside = AddOutsideCellBlockers(pieceSources, outsideCells, bounds);
+            var phantomOutside = AddOutsideCellBlockers(
+                pieceSources, outsideCells, bounds, floodHolder.OutsideCellY);
             if (TaskQueue.PartitionRunner.ShouldYield()) yield return null;
             result.OutsideCellsBlocked = phantomOutside;
             result.OutsideCellsCount = outsideCells.Count;
@@ -773,43 +786,105 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     bounds. These block the bake from producing NavMesh through
         ///     doorways regardless of the door's current open/closed orientation.
         /// </summary>
+        /// <summary>
+        ///     Half-extent of the square blocker stamped over every door.
+        ///
+        ///     <para>Deliberately a plain square big enough to cover the door however it is
+        ///     turned or swung — no attempt to model the panel's arc. That is what makes the
+        ///     carve independent of whether the door happened to be open when the mesh baked,
+        ///     which is the fault this replaces: the old 1.2 x 0.3 slab was oriented by the
+        ///     door's live rotation and under-covered it even SHUT (a villager wedged 0.62m
+        ///     along the panel and 0.20m off its plane, outside the slab, inside the wood).</para>
+        ///
+        ///     <para><see cref="DoorLinkPlacer" />'s <c>SideOffset</c> must clear this square's
+        ///     DIAGONAL, not merely this value — see the note there.</para>
+        /// </summary>
+        /// <para>MEASURED CEILING: 1.2m does not work. A 2.4m square strips the floor 1.2m
+        /// either side of the door, so the link has to span ~3.9m of carved ground and most
+        /// rooms simply do not have that much clear floor — every doorway came back
+        /// <c>endpoint_missing</c> (0 bridged, 5 skipped, against 3 bridged before). 0.75m still
+        /// covers the observed wedge (0.62m along the panel, 0.20m off its plane) with margin
+        /// and leaves the link its anchors.</para>
+        internal const float DoorBlockerHalfExtent = 0.75f;
+
+
+        /// <summary>
+        ///     Carve only where the panel COMES TO REST when open — its two swung-aside poses —
+        ///     and leave the doorway corridor itself walkable.
+        ///
+        ///     <para>Blocking the whole swept volume works, but it severs the doorway: the
+        ///     navmesh then has no route through at all and every crossing depends on an
+        ///     off-mesh link, which measured 13 bridged / 5 skipped — and a skipped doorway is
+        ///     impassable, which is worse than the wedge being fixed. The panel only ever sits
+        ///     in three places, and the closed one is transient: a villager opens a closed door
+        ///     on approach (DoorHandler.GetBlockingDoor). So the corridor stays open and only
+        ///     the two resting poses are cut, which is what the agent can actually collide
+        ///     with.</para>
+        ///
+        ///     <para>The panel is the child named "door" — the same one the audit command reads
+        ///     for panelYaw — and it swings about its own origin, so `panelYaw = rootYaw + 90 *
+        ///     state`. Taking the colliders UNDER that child, rather than every descendant of
+        ///     the Door, also keeps the static frame out of the carve.</para>
+        /// </summary>
         private static int AddDoorBlockers(List<NavMeshBuildSource> sources, Bounds bounds)
         {
+            const float pad = 0.1f;
+
             var added = 0;
             var allDoors = Object.FindObjectsByType<Door>(
                 FindObjectsInactive.Include, FindObjectsSortMode.None);
+
             foreach (var door in allDoors)
             {
                 if (door == null || door.transform == null) continue;
                 if (!bounds.Contains(door.transform.position)) continue;
 
-                // Phantom centered at the door's transform position with no
-                // vertical offset. Valheim's Door prefab pivots at the door
-                // PANEL CENTER (chest height, ~1m above the floor for a
-                // standard 2m-tall door), so a 2m-tall phantom centered
-                // here spans floor to top-of-door — covering the doorway
-                // opening at the agent's footstep elevation. The earlier
-                // "+1m up" offset assumed door.transform was at the floor
-                // and pushed the phantom to 1m-3m above the floor, leaving
-                // the doorway unblocked at NavMesh height and causing
-                // PlaceDoorLinks to think the doorway was already
-                // traversable on the NavMesh (no link needed).
-                var transform = Matrix4x4.TRS(
-                    door.transform.position,
-                    door.transform.rotation,
-                    Vector3.one);
-                sources.Add(new NavMeshBuildSource
+                var panel = door.transform.Find("door");
+                if (panel == null)
                 {
-                    shape = NavMeshBuildSourceShape.Box,
-                    size = new Vector3(1.2f, 2.0f, 0.3f),
-                    transform = transform,
-                    area = 1, // NotWalkable — block but don't make walkable surface on top
-                });
-                added++;
+                    // Not a shape this knows how to carve. Say so rather than leaving a door
+                    // silently unblocked — a villager will path into it and wedge.
+                    Plugin.Log?.LogWarning(
+                        $"[NavMeshBake] door at {door.transform.position} has no 'door' panel " +
+                        "child; its open positions are NOT carved.");
+                    continue;
+                }
+
+                var hinge = panel.position;
+
+                foreach (var state in OpenStates)
+                {
+                    // Where the panel rests in this open state, relative to where it is now.
+                    var resting = Quaternion.AngleAxis(90f * state, Vector3.up)
+                                  * door.transform.rotation;
+                    var delta = resting * Quaternion.Inverse(panel.rotation);
+
+                    foreach (var collider in panel.GetComponentsInChildren<Collider>(true))
+                    {
+                        if (collider == null) continue;
+
+                        var b = collider.bounds;
+                        var centre = hinge + delta * (b.center - hinge);
+                        var size = b.size + new Vector3(pad, pad, pad);
+
+                        sources.Add(new NavMeshBuildSource
+                        {
+                            shape = NavMeshBuildSourceShape.ModifierBox,
+                            size = size,
+                            transform = Matrix4x4.TRS(centre, delta, Vector3.one),
+                            area = 1, // NotWalkable
+                        });
+                        added++;
+                    }
+                }
             }
 
             return added;
         }
+
+        /// <summary>The two poses an open door rests in; the closed pose is deliberately left
+        /// walkable so the doorway keeps a corridor through it.</summary>
+        private static readonly int[] OpenStates = { 1, -1 };
 
         /// <summary>
         ///     Append a phantom <c>NotWalkable</c> box over every column/pillar
@@ -1077,57 +1152,157 @@ namespace ValheimVillages.Villager.AI.Navigation
             return false;
         }
 
+        /// <summary>
+        ///     How far above the outside GROUND the carve reaches. Everything higher is left
+        ///     alone, so a floor built out over exterior terrain survives the bake.
+        ///
+        ///     <para>Enough to swallow a doorstep, a kerb or a bit of terrain noise sitting on
+        ///     the outside ground, and far short of a storey — so the rampart-top case the
+        ///     full-height carve existed for is still carved (its walkable top is the outside
+        ///     ground's own surface), while a deck metres above is not.</para>
+        /// </summary>
+        private const float OutsideCarveHeadroom = 1.0f;
+
+        /// <summary>
+        ///     Ground-elevation band width used to group outside cells before decomposing them
+        ///     into rectangles. Rectangles are what keep this to tens of bake sources instead of
+        ///     thousands, and a rectangle can only carry ONE height — so cells are banded by
+        ///     elevation first and each band decomposed on its own.
+        /// </summary>
+        private const float OutsideCarveBand = 1.0f;
+
         private static int AddOutsideCellBlockers(
             List<NavMeshBuildSource> sources,
             HashSet<long> outsideCells,
-            Bounds bounds)
+            Bounds bounds,
+            IReadOnlyDictionary<long, float> outsideCellY)
         {
             if (outsideCells == null || outsideCells.Count == 0) return 0;
 
             var cell = ValheimVillages.Villager.AI.Navigation.RegionGraph.LookupCellSize;
-            var ySize = bounds.size.y + 4f;
-            var yCenter = bounds.center.y;
 
-            // Grow each blocker rectangle by this much per XZ side so the carve
-            // overlaps the cell boundary instead of ending exactly on it — keeps a
-            // thin sliver of walkable navmesh from surviving along the seam between
-            // an outside blocker and an adjacent kept cell. Small relative to the
-            // 1m cell and the agent-radius erosion, so it only tightens the navmesh
-            // against the wall.
-            const float padXZ = 0.2f;
+            // No elevation map: keep the original full-height carve rather than guessing. A
+            // caller that cannot say how high the outside ground is must not get a carve that
+            // silently stops short of a rampart.
+            if (outsideCellY == null)
+                return AddFullHeightBlockers(sources, outsideCells, bounds, cell);
 
-            // Greedy-decompose contiguous outside-cell blocks into rectangles.
-            // For a village with ~3000 outside cells this typically drops to
-            // tens of ModifierBox sources — ~50x fewer voxelizer inputs. We
-            // use ModifierBox (not Box) so the bake treats this as a pure
-            // area-override volume: it stamps area=1 (NotWalkable) across the
-            // covered XZ column without ALSO producing walkable surface on
-            // top of the box (which a regular Box source would do, defeating
-            // the carve at rampart-top altitude).
-            var rects = ValheimVillages.Villager.AI.Navigation
-                .RubberBandPrune.DecomposeToRectangles(outsideCells);
-            foreach (var r in rects)
+            // --- Elevation-banded carve ---------------------------------------------------
+            // Group cells by the ground elevation Pass 1 found them outside AT, decompose each
+            // band separately, and cap each band's box just above its own ground. A platform
+            // overhanging exterior terrain is then left intact: the box under it stops a metre
+            // above the open ground, metres below the deck.
+            var bands = new Dictionary<int, HashSet<long>>();
+            var bandTop = new Dictionary<int, float>();
+            var unmapped = 0;
+
+            foreach (var key in outsideCells)
             {
-                var w = (r.Gx1 - r.Gx0 + 1) * cell;
-                var d = (r.Gz1 - r.Gz0 + 1) * cell;
-                var cx = (r.Gx0 + r.Gx1 + 1) * 0.5f * cell;
-                var cz = (r.Gz0 + r.Gz1 + 1) * 0.5f * cell;
-
-                sources.Add(new NavMeshBuildSource
+                if (!outsideCellY.TryGetValue(key, out var groundY))
                 {
-                    shape = NavMeshBuildSourceShape.ModifierBox,
-                    size = new Vector3(w + 2f * padXZ, ySize, d + 2f * padXZ),
-                    transform = Matrix4x4.TRS(
-                        new Vector3(cx, yCenter, cz),
-                        Quaternion.identity, Vector3.one),
-                    area = 1, // NotWalkable
-                });
+                    // Reached by a path that recorded no height. Carve it full-height: an
+                    // unknown height must not become an un-carved hole in the perimeter.
+                    unmapped++;
+                    continue;
+                }
+
+                var band = Mathf.FloorToInt(groundY / OutsideCarveBand);
+                if (!bands.TryGetValue(band, out var set))
+                    bands[band] = set = new HashSet<long>();
+                set.Add(key);
+
+                // The band's HIGHEST ground wins, so no cell in the rectangle is under-carved.
+                if (!bandTop.TryGetValue(band, out var top) || groundY > top)
+                    bandTop[band] = groundY;
+            }
+
+            var floor = bounds.min.y - 2f;
+            var emitted = 0;
+
+            foreach (var kv in bands)
+            {
+                var rectsForBand = ValheimVillages.Villager.AI.Navigation
+                    .RubberBandPrune.DecomposeToRectangles(kv.Value);
+                var top = bandTop[kv.Key] + OutsideCarveHeadroom;
+                var bandSize = Mathf.Max(0.1f, top - floor);
+                var bandCentre = (floor + top) * 0.5f;
+
+                foreach (var r in rectsForBand)
+                {
+                    AddBlockerBox(sources, r, cell, bandCentre, bandSize);
+                    emitted++;
+                }
+            }
+
+            if (unmapped > 0)
+            {
+                var leftovers = new HashSet<long>();
+                foreach (var key in outsideCells)
+                    if (!outsideCellY.ContainsKey(key))
+                        leftovers.Add(key);
+                emitted += AddFullHeightBlockers(sources, leftovers, bounds, cell);
             }
 
             Plugin.Log?.LogInfo(
+                $"[NavMeshBake] OutsideCellBlockers: {outsideCells.Count} cells -> {emitted} " +
+                $"ModifierBox rectangles across {bands.Count} elevation band(s), " +
+                $"headroom {OutsideCarveHeadroom:F1}m ({unmapped} cells had no height, carved full)");
+            return emitted;
+        }
+
+        /// <summary>The original carve: one full-height box per rectangle, spanning the whole village.</summary>
+        private static int AddFullHeightBlockers(
+            List<NavMeshBuildSource> sources, HashSet<long> outsideCells, Bounds bounds, float cell)
+        {
+            if (outsideCells.Count == 0) return 0;
+
+            var ySize = bounds.size.y + 4f;
+            var yCenter = bounds.center.y;
+
+            // Greedy-decompose contiguous outside-cell blocks into rectangles. For a village
+            // with ~3000 outside cells this typically drops to tens of sources — ~50x fewer
+            // voxelizer inputs.
+            var rects = ValheimVillages.Villager.AI.Navigation
+                .RubberBandPrune.DecomposeToRectangles(outsideCells);
+            foreach (var r in rects) AddBlockerBox(sources, r, cell, yCenter, ySize);
+
+            Plugin.Log?.LogInfo(
                 $"[NavMeshBake] OutsideCellBlockers: {outsideCells.Count} cells -> " +
-                $"{rects.Count} ModifierBox rectangles");
+                $"{rects.Count} full-height ModifierBox rectangles");
             return rects.Count;
+        }
+
+        /// <summary>
+        ///     One NotWalkable ModifierBox over a rectangle of outside cells.
+        ///
+        ///     <para>ModifierBox (not Box) so the bake treats this as a pure area-override
+        ///     volume: it stamps area=1 across the covered XZ span without ALSO producing
+        ///     walkable surface on top of the box, which a regular Box source would do and which
+        ///     would defeat the carve at its own ceiling.</para>
+        /// </summary>
+        private static void AddBlockerBox(
+            List<NavMeshBuildSource> sources,
+            ValheimVillages.Villager.AI.Navigation.RubberBandPrune.CellRect r,
+            float cell, float yCenter, float ySize)
+        {
+            // Grow each rectangle slightly per XZ side so the carve overlaps the cell boundary
+            // instead of ending exactly on it — keeps a thin sliver of walkable navmesh from
+            // surviving along the seam between a blocker and an adjacent kept cell.
+            const float padXZ = 0.2f;
+
+            var w = (r.Gx1 - r.Gx0 + 1) * cell;
+            var d = (r.Gz1 - r.Gz0 + 1) * cell;
+            var cx = (r.Gx0 + r.Gx1 + 1) * 0.5f * cell;
+            var cz = (r.Gz0 + r.Gz1 + 1) * 0.5f * cell;
+
+            sources.Add(new NavMeshBuildSource
+            {
+                shape = NavMeshBuildSourceShape.ModifierBox,
+                size = new Vector3(w + 2f * padXZ, ySize, d + 2f * padXZ),
+                transform = Matrix4x4.TRS(
+                    new Vector3(cx, yCenter, cz), Quaternion.identity, Vector3.one),
+                area = 1, // NotWalkable
+            });
         }
 
         private static void AppendMesh(List<Vector3> verts, List<int> idx, List<int> triLayers, int layer,

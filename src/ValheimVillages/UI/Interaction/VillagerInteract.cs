@@ -186,11 +186,12 @@ namespace ValheimVillages.UI.Interaction
             // Activate the tab system
             VillagerTabManager.Activate(Bridge, hasCrafting);
 
-            // A villager wearing a "!" is telling the player about one specific blocked task.
-            // Land on that row rather than the generic first one: otherwise the badge says
-            // "something is wrong" and then the UI makes the player hunt through the list for
-            // which of several blocked orders it meant.
-            VillagerTabManager.FocusAlert();
+            // Deliberately NOT jumping to the alerted row any more. That existed because the
+            // badge said "something is wrong" and the list made the player hunt for which
+            // order it meant — but the top row is now a map pinning EVERY blocked order, each
+            // named and clickable. Landing there answers "which one" better than opening one
+            // row and hiding the rest, and it means interacting with a villager always starts
+            // from the same place.
 
             Plugin.Log?.LogInfo(
                 $"VillagerInteract: Opened UI for {GetHoverName()} " +

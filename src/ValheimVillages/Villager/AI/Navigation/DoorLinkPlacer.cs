@@ -39,10 +39,27 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     box the bake puts through the doorway, but close enough that both ends land on
         ///     the floor either side rather than out in the room.
         /// </summary>
-        private const float SideOffset = 1.1f;
+        /// <summary>
+        ///     How far either side of the door an endpoint is sought.
+        ///
+        ///     <para>Must clear the bake's door blocker — and that blocker is an AXIS-ALIGNED
+        ///     SQUARE, so the distance to beat is its CORNER (half-extent x sqrt 2 = 1.70m for
+        ///     a 1.2m square), not its half-extent. A door set at 45 degrees points its forward
+        ///     axis straight at that corner. Measured: a 1.6m offset against that square left
+        ///     doorways reporting <c>endpoint_missing</c> and unbridged — an endpoint inside the
+        ///     carve has no navmesh to snap to, which turns a blocked doorway into an impassable
+        ///     one.</para>
+        /// </summary>
+        /// <summary>
+        ///     The bake no longer carves the doorway itself — only the two poses the panel
+        ///     rests in when open — so an endpoint this far out clears the carve on either
+        ///     side while the corridor between them stays walkable.
+        /// </summary>
+        private const float SideOffset =
+            NavMeshBakeManager.DoorBlockerHalfExtent * 1.4143f + 0.25f;
 
         /// <summary>How far an endpoint may snap to find the mesh on its side.</summary>
-        private const float SnapRadius = 1.5f;
+        private const float SnapRadius = 1.6f;
 
         /// <summary>
         ///     Zero: a single line down the middle of the doorway. The bake drops the whole Door

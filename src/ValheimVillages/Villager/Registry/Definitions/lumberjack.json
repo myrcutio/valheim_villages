@@ -21,6 +21,7 @@
   "materialRequirements": "A Forester's Post outside the walls, and room for trees to fall",
   "scalingType": "VillagerVariety",
   "skinColor": "1.55,1.25,0.95",
+  "themeColor": "0.28,0.52,0.22",
   "stationName": "$vv_lumberjack",
   "stationIcon": "AxeBronze",
   "workStations": [

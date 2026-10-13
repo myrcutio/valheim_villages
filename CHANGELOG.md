@@ -5,6 +5,37 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-12
+
+### Added
+- **Villagers look the part.** Each carries the tool of their trade — a cultivator for the Farmer, an iron axe for the Carpenter, a tankard for the Tavern Keeper — and a lit lantern in the off hand, so a village reads as inhabited after dark.
+- **Villagers wear their village's colours.** Robes are dyed to the villager's theme colour with a matte, straw-like weave, and the Dvergr's cold blue skin is warmed to a human tone.
+- **The village map is interactive.** Orders, cots, stations, gates and ingredients are drawn with their own icons; hover for a tooltip, left-click to jump to that task, right-click an order to edit its quota without leaving the panel.
+- **Zoom and pan the village map.** The wheel zooms toward the cursor and dragging pans; the map is redrawn at the new scale rather than magnified, so zooming in shows more detail.
+- **A Status tab on every villager**, with station levels, quarters and comfort, and mood each on their own row, and the station's level shown on a badge.
+
+### Changed
+- **Waiting is no longer reported as a problem.** Crops growing, a hive filling and mead fermenting now show an hourglass; a warning is reserved for something you need to fix, such as missing ingredients.
+- **A growing crop says so.** A planting order now reads "They are growing. The villager will harvest them when they are ready." instead of the generic "this order is running".
+- **The village map is drawn like Valheim's own maps**, in parchment and ink with your walls and gates marked, and no longer drags in distant islands or zooms out to fit stray world pieces.
+- **Finished and in-progress orders are listed too**, so the task list matches the map instead of showing only orders with problems.
+- **Cooks fill a whole station at once.** A villager now carries enough for every free slot on a cooking station in one trip, instead of walking back to the chest for each single piece of food.
+
+### Fixed
+- **Work order quotas save again.** An order whose village no longer existed opened at 0–0 and silently discarded every change you made to it.
+- **"Could not find that work order's chest from here."** Opening an order from the map failed whenever the recipe's station name differed from the physical station it is worked at.
+- **A villager's station level matches the game's own display.** The native station icon showed level 1 while the panel showed 3.
+- **The villager panel no longer leaks memory while it is open.** Every redraw of the map allocated a new texture and never released the previous one.
+- **Cooking villagers no longer offer weapons and armour.** Deep North gear is converted at a station the game builds on its cooking mechanism, so a whole set of gold weapons, armour and a quest key turned up on the Tavern Keeper's order list.
+- **The Tavern Keeper cooks instead of asking for an impossible station.** Its recipes pointed at the internal station that only exists to hold them, so the villager demanded you build something that cannot be built; meat now goes to a cooking station and barley to a windmill.
+- **"Every order is stocked" is now checked rather than assumed.** The panel reported that whenever nothing had gone wrong recently, so an order sitting at 2 of 10 was called stocked. Orders below their minimum are reported as still to fill — which is not the same as needing your attention, and is not flagged as a problem.
+- **A fixed problem stops complaining.** Nothing ever cleared a villager's blocked note, so once something went wrong the warning stayed up forever, even while the villager worked happily.
+- **Cooked food is carried home.** It appeared in the chest the moment it finished cooking, rather than being collected from the station and walked back like everything else villagers haul.
+- **Villagers stop walking into solid doors.** The doorway was left as open ground when the village was mapped, so a villager would route through the space the door panel actually occupies and jam against it — most visibly on wider doors, where there was room for the path to form. Every position a door can swing through is now treated as solid, and villagers cross the threshold itself after opening it.
+- **Cooks clear the whole station in one visit, and stop losing food to it.** A villager filled every slot but collected a single item per round trip to the chest, so the rest sat on the fire and burned. The collection also asked the station for the wrong thing: the amount was passed as a slot number, which destroyed whatever was in the first slot and duplicated food from the third onwards.
+- **A village on the coast no longer claims the sea floor.** Open water deeper than wading depth blocked the boundary scan rather than being treated as the edge of the village, so the sea bed beyond the shore counted as village ground: villagers were given walkable footing out in open water, and a registry built on a platform over the water anchored itself to the bottom beneath it.
+- **Villagers free themselves from doors.** A door opened from one side leaves its panel blocking anyone coming the other way, which no amount of re-opening fixes; a villager stuck against one now closes it and opens it again so it swings clear.
+
 ## [0.3.7] - 2026-10-05
 
 ### Fixed

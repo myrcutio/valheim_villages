@@ -18,7 +18,7 @@ namespace ValheimVillages.UI.Tabs
     ///     Provides commands as list items with action buttons, plus panel-driven
     ///     items (e.g. Village Map for patrollers) via [RegisterListPanel].
     /// </summary>
-    [RegisterTab("debug", Order = 1)]
+    [RegisterTab("debug", Order = 2)]
     public class DebugTab : IVillagerTabUI
     {
         private readonly List<DebugCommand> m_commands = new();

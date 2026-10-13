@@ -130,7 +130,10 @@ namespace ValheimVillages.Villages
                 return LocationType.HotTub;
 
             if (obj.GetComponent<Chair>() != null) return LocationType.Chair;
-            if (obj.GetComponent<Fireplace>() != null) return LocationType.Fire;
+            // Shares VillageRoomCatalog's warming test rather than accepting any Fireplace:
+            // torches are Fireplaces too, so this used to send a villager to warm itself at a
+            // wall torch that gives no heat — and disagreed with what the level system counts.
+            if (VillageRoomCatalog.IsWarmingFire(obj)) return LocationType.Fire;
 
             var name = obj.name.ToLowerInvariant();
             if (name.Contains("table") || name.Contains("bench")) return LocationType.Table;

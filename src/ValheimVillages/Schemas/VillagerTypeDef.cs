@@ -45,6 +45,48 @@ namespace ValheimVillages.Schemas
         public List<string> equipment = new();
         public string skinColor = "";
 
+        /// <summary>
+        ///     Item prefab whose model is grafted into the villager's hand, replacing whatever
+        ///     the body prefab came holding. Cosmetic only.
+        ///
+        ///     <para>Deliberately not <see cref="equipment" />: that list is functional gear, and
+        ///     a Guard's entry there is a Club it must NOT appear to hold — it fights with the
+        ///     Dvergr's native crossbow.</para>
+        /// </summary>
+        public string heldTool = "";
+
+        /// <summary>
+        ///     Local euler rotation "x,y,z" for the held tool's mesh, or blank to keep the
+        ///     rotation the item prefab authored for a player's grip.
+        ///
+        ///     <para>Per-type, not global: each model runs along its own axis, so the angle that
+        ///     lines a cultivator up with the Dvergr's grip would twist an axe out of it. The
+        ///     graft wrapper and the body's own attach root both sit at identity under the same
+        ///     hand bone, so a value here means exactly what the replaced prop's own local
+        ///     rotation means — copying the staff's lines the tool up with the staff.</para>
+        /// </summary>
+        public string heldToolRotation = "";
+
+        /// <summary>
+        ///     Local position "x,y,z" for the held tool's mesh, or blank to keep the offset the
+        ///     item prefab authored. Expressed in the hand bone's frame, like
+        ///     <see cref="heldToolRotation" />.
+        /// </summary>
+        public string heldToolPosition = "";
+
+        /// <summary>
+        ///     Item carried in the off hand. Defaults to a lantern for every villager so a
+        ///     village reads as inhabited after dark; blank it to carry nothing.
+        /// </summary>
+        public string offHandItem = "Lantern";
+
+        /// <summary>
+        ///     The type's signature colour, "r,g,b" with each component 0..1. Drives the cot
+        ///     blanket today and is intended for the villager's clothing too, so it is a general
+        ///     identity colour rather than a furniture setting. Validated at registry load.
+        /// </summary>
+        public string themeColor = "";
+
         // Station configuration
         public string stationName = "";
         public string stationIcon = "";
@@ -87,6 +129,18 @@ namespace ValheimVillages.Schemas
         public int maxLevel = 99;
         public string description = "";
         public float effectMultiplier = 1.0f;
+
+        /// <summary>
+        ///     Room features the village must provide for this tier, by
+        ///     <c>VillageRoomCatalog.Feature</c> name (Fire, Seat, Table, Bed, WorkStation,
+        ///     Storage, Farm). All of them must be present for the tier to be reached.
+        ///
+        ///     <para>Replaces expressing tiers as raw comfort points. A villager's level is a
+        ///     property of the rooms its village has, so the requirement names the thing to go
+        ///     and build — "needs a bed" instead of "needs comfort 7", which told the player
+        ///     nothing about what to do. Empty means the tier has no room requirement.</para>
+        /// </summary>
+        public List<string> requires = new();
     }
 
     [Serializable]

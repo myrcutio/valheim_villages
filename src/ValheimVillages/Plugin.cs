@@ -26,8 +26,8 @@ using ValheimVillages.Villages.Entity;
 [assembly: AssemblyCompany("Myrcutio")]
 [assembly: AssemblyProduct("ValheimVillages")]
 [assembly: AssemblyCopyright("Copyright © Myrcutio 2026")]
-[assembly: AssemblyVersion("0.3.7")]
-[assembly: AssemblyFileVersion("0.3.7")]
+[assembly: AssemblyVersion("0.4.0")]
+[assembly: AssemblyFileVersion("0.4.0")]
 [assembly: InternalsVisibleTo("ValheimVillages.Tests")]
 
 namespace ValheimVillages
@@ -37,7 +37,7 @@ namespace ValheimVillages
     {
         public const string PluginGUID = "com.valheimvillages.mod";
         public const string PluginName = "Valheim Villages";
-        public const string PluginVersion = "0.3.7";
+        public const string PluginVersion = "0.4.0";
 
         private static bool _recipeRefreshEnqueued;
         private static bool _recordIndexEnqueued;
@@ -160,6 +160,7 @@ namespace ValheimVillages
                 // again instead of the vanilla CraftingStation's tab-less menu.
                 Log.LogInfo("Hot reload — fixing up placed registry stations");
                 HotReloadHelper.FixupExistingRegistries();
+                HotReloadHelper.FixupExistingCots();
 
                 // Hot-reload iteration QoL: arm the Update-loop's hna_partition
                 // auto-enqueue to fire again. The 5-second settling delay
@@ -304,6 +305,10 @@ namespace ValheimVillages
                 Time.realtimeSinceStartup - _lastBakeSweep > 2f)
             {
                 _lastBakeSweep = Time.realtimeSinceStartup;
+
+                // Before any bake decision: a woodlot whose post is gone must not extend this
+                // village's footprint (or anyone else's) on the strength of a stale anchor.
+                Behaviors.Forestry.ForesterAnchorJanitor.Tick();
 
                 // A structural change (piece placed/removed, terrain edited) invalidates the
                 // affected bake. Each change carries its own XZ footprint, so only villages

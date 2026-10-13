@@ -112,6 +112,14 @@ namespace ValheimVillages.UI.ContextMenus
 
             CleanupStaleInstances();
 
+            // Switching straight from one order to another: commit the one being left before
+            // rebinding. Closing the editor is what saves (see Hide), so rebinding without
+            // this would silently discard whatever the player had just typed into the first
+            // order — the edit would look accepted and then be gone.
+            if (s_instance != null && s_instance.m_visible &&
+                s_instance.m_currentItem != null && s_instance.m_currentItem != item)
+                s_instance.SaveToItem();
+
             if (s_instance == null)
             {
                 var go = new GameObject("WorkOrderMenu");
@@ -444,12 +452,36 @@ namespace ValheimVillages.UI.ContextMenus
                 var bound = Villages.Entity.VillageRegistry.FindById(stamped);
                 if (bound != null) return bound;
 
-                // Fail loud rather than re-bind to whichever village happens to be nearest —
-                // silently re-homing the order is the bug this method exists to prevent.
-                Plugin.Log?.LogError(
-                    $"[WorkOrderMenu] token is bound to village '{stamped}', which did not resolve " +
-                    "(deleted, or its ZDO is not loaded here). Refusing to re-bind.");
-                return null;
+                // The stamped village is gone. Recover — but ONLY to a village that actually
+                // CONTAINS this chest, never to the nearest one, which is the silent re-homing
+                // the original refusal existed to prevent. GetVillageCovering tests region
+                // containment, not proximity.
+                //
+                // Containment is also the rule WorkOrderAdoption claims tokens by ("a token is
+                // never broken by its village going away"), so this lands on whichever village
+                // has ALREADY adopted the order rather than inventing a new owner. Refusing
+                // outright left the order permanently unreadable and unsaveable — 0-0 forever —
+                // even though the order itself was alive and healthy in the adopting village.
+                var here = Player.m_localPlayer != null
+                    ? Player.m_localPlayer.transform.position
+                    : Vector3.zero;
+                var containing = Villages.Entity.VillageRegistry.GetVillageCovering(here);
+                if (containing == null)
+                {
+                    Plugin.Log?.LogError(
+                        $"[WorkOrderMenu] token is bound to village '{stamped}', which did not " +
+                        "resolve, and no village contains this chest — refusing to re-bind. " +
+                        "Stand inside the village that owns this order.");
+                    return null;
+                }
+
+                Plugin.Log?.LogWarning(
+                    $"[WorkOrderMenu] token's village '{stamped}' no longer exists; re-binding " +
+                    $"to '{containing.VillageId}', which contains this chest.");
+
+                if (item.m_customData == null) item.m_customData = new Dictionary<string, string>();
+                item.m_customData["wo_village"] = containing.VillageId;
+                return containing;
             }
 
             // Un-stamped legacy token: resolve from position ONCE, then stamp it so it can

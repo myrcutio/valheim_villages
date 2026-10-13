@@ -70,6 +70,28 @@ namespace ValheimVillages.Villager.AI.Work
         ///     Without it a Honey order would walk to the nearest nest, extract feathers, then
         ///     sit there waiting for honey drops that were never coming.</para>
         /// </summary>
+        /// <summary>
+        ///     Is there a hive for this yield AT ALL, ready or not?
+        ///
+        ///     <para><see cref="TryFindHarvestable" /> deliberately skips empty hives, which
+        ///     means "no hive here" and "the hive is still filling" are indistinguishable to
+        ///     its callers — and the work-order scan reported both as "There is no Beehive in
+        ///     the village. Build one", telling the player to build a second hive next to the
+        ///     one they already have. This separates the two so the blocked reason can be
+        ///     honest and so waiting on honey reads as waiting, not as a fault.</para>
+        /// </summary>
+        public static bool AnyHiveFor(Vector3 center, float radius, string expectedOutput)
+        {
+            foreach (var h in PhysicsHelper.GetAllInRadius<Beehive>(center, radius))
+            {
+                if (h == null) continue;
+                if (!string.IsNullOrEmpty(expectedOutput) && YieldOf(h) != expectedOutput) continue;
+                return true;
+            }
+
+            return false;
+        }
+
         public static bool TryFindHarvestable(
             Vector3 center, float radius, string expectedOutput,
             out Beehive hive, out Vector3 approach)

@@ -632,7 +632,8 @@ namespace ValheimVillages.Villager.AI.Navigation
                 // isPopulated keeps the anchor-snap on the ContainsKey fast path (no
                 // ground cast); surfacesAt supplies every walk surface in a column.
                 AnchorReachableFlood(
-                    gxMin, gzMin, gxMax, gzMax, anchors, outsideCells, cell, anchorSnapRingMax: 6,
+                    gxMin, gzMin, gxMax, gzMax, anchors, outsideCells, pass1Flood.OutsideCellY,
+                    cell, anchorSnapRingMax: 6,
                     isPopulated: ck => xzMaxYTerrain.ContainsKey(ck) || xzMaxYPiece.ContainsKey(ck),
                     surfacesAt: SurfacesAt,
                     wallBlocks: (ax, az, bx, bz, ya, yb) => WallBlocks(ax, az, bx, bz, ya, yb, cell, pieceMask),
@@ -705,7 +706,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             PieceReachableFlood(
                 xzToLookupKeysPiece, xzToLookupKeysTerrain, lookupGrid, centroids,
                 keySurfaceY,
-                anchorReachableCells, anchorReachableCellYs, outsideCells, cell, MaxClimb,
+                anchorReachableCells, anchorReachableCellYs, outsideCells, pass1Flood.OutsideCellY, cell, MaxClimb,
                 // The pass's one engine dependency, injected. A null oracle skips the pass,
                 // which is exactly what a null ZoneSystem used to do.
                 ZoneSystem.instance == null
@@ -1146,6 +1147,19 @@ namespace ValheimVillages.Villager.AI.Navigation
             public int PerimeterSeedCount;
 
             /// <summary>
+            ///     The TERRAIN height at which each outside cell was reached — the Y half of a
+            ///     Y-aware outside set.
+            ///
+            ///     <para>Pass 1 is deliberately terrain-only (pieces are walls, never stepping
+            ///     stones), so a column's "outside" verdict is a statement about its GROUND, not
+            ///     about everything stacked above it. Without the elevation, a consumer asking
+            ///     "is this outside?" about a deck six metres up gets the answer for the open
+            ///     ground beneath it — which is how a platform overhanging exterior terrain
+            ///     became permanently unmappable.</para>
+            /// </summary>
+            public Dictionary<long, float> OutsideCellY;
+
+            /// <summary>
             ///     The gate pivots this flood sealed, for callers that need to know where the
             ///     village's openings are RIGHT NOW. <c>RegionGraph.m_gates</c> cannot answer
             ///     that during a partition: it is cleared by <c>SetGraph</c> and only refilled
@@ -1176,6 +1190,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             FloodResult outResult)
         {
             var outsideCells = new HashSet<long>();
+            var outsideCellY = new Dictionary<long, float>();
             var queue = new Queue<long>();
             for (var gx = gxMin; gx <= gxMax; gx++)
             {
@@ -1190,7 +1205,41 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             outResult.OutsideCells = outsideCells;
+            outResult.OutsideCellY = outsideCellY;
             outResult.PerimeterSeedCount = outsideCells.Count;
+
+            // Deep water is a BARRIER to this flood, so it enters the sea exactly one cell
+            // and stops. Every cell beyond that was never REACHED — and a cell the flood
+            // never reaches is never marked outside, which means it defaults to INSIDE the
+            // village. Measured on the dedicated server: walkable villager navmesh baked on
+            // the sea floor 5.5m down, ~20m past the docks, and a registry whose anchor
+            // snapped onto that sea floor because the snap tests `outsideCells` on an XZ key
+            // and the sea bed was not in it.
+            //
+            // Being outside is a property of the CELL, not of whether a flood happened to
+            // arrive at it. Mark every impassable cell up front. The BFS below still refuses
+            // to travel THROUGH them, so a shoreline stays a real boundary and a wadeable
+            // beach still connects the village to the world.
+            //
+            // Costs one height probe per cell in the bounds. They are memoized by the
+            // caller's cellY, so cells the flood goes on to visit are free.
+            if (cellImpassable != null)
+            {
+                var scanned = 0;
+                for (var gx = gxMin; gx <= gxMax; gx++)
+                for (var gz = gzMin; gz <= gzMax; gz++)
+                {
+                    if (TaskQueue.PartitionRunner.ShouldYieldEvery(scanned++, 256))
+                        yield return null;
+
+                    var deepY = cellY(gx, gz);
+                    if (!cellImpassable(gx, gz, deepY)) continue;
+
+                    var deepKey = XzKey(gx, gz);
+                    outsideCells.Add(deepKey);
+                    outsideCellY[deepKey] = deepY;
+                }
+            }
 
             int[] dx = { 1, -1, 0, 0 };
             int[] dz = { 0, 0, 1, -1 };
@@ -1206,6 +1255,9 @@ namespace ValheimVillages.Villager.AI.Navigation
                 var curKey = queue.Dequeue();
                 UnpackXz(curKey, out var gx, out var gz);
                 var curY = cellY(gx, gz);
+                // Seeds are enqueued before their height is known, so record on dequeue — every
+                // outside cell passes through here exactly once.
+                outsideCellY[curKey] = curY;
 
                 // An impassable cell (deep water) stays MARKED outside — nothing walks there, so
                 // the bake should still carve it — but the flood may not travel THROUGH it. This
@@ -1222,6 +1274,7 @@ namespace ValheimVillages.Villager.AI.Navigation
                     var nY = cellY(ngx, ngz);
                     if (wallBlocks(gx, gz, ngx, ngz, curY, nY)) continue;
                     outsideCells.Add(nKey);
+                    outsideCellY[nKey] = nY;
                     queue.Enqueue(nKey);
                 }
             }
@@ -1233,7 +1286,9 @@ namespace ValheimVillages.Villager.AI.Navigation
         ///     <paramref name="anchorSnapRingMax" /> rings (the floor the villager
         ///     stands on, even when the anchor's own cell is carved out), then runs a
         ///     4-connected BFS that refuses to enter <paramref name="outsideCells" />
-        ///     and is gated by <paramref name="wallBlocks" />. Engine-free:
+        ///     AT THE ELEVATION those cells were found outside at
+        ///     (<paramref name="outsideCellY" />) and is gated by
+        ///     <paramref name="wallBlocks" />. Engine-free:
         ///     <paramref name="isPopulated" /> answers "does any region cover this
         ///     cell" (the anchor-snap fast path) and <paramref name="surfaceY" /> gives
         ///     each cell's walk-surface height. Beds that cannot snap are reported
@@ -1243,6 +1298,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             int gxMin, int gzMin, int gxMax, int gzMax,
             IReadOnlyList<Vector3> anchors,
             HashSet<long> outsideCells,
+            IReadOnlyDictionary<long, float> outsideCellY,
             float cell,
             int anchorSnapRingMax,
             Func<long, bool> isPopulated,
@@ -1372,11 +1428,16 @@ namespace ValheimVillages.Villager.AI.Navigation
                     int ngx = gx + dx[d], ngz = gz + dz[d];
                     if (ngx < gxMin || ngx > gxMax || ngz < gzMin || ngz > gzMax) continue;
                     var nKey = XzKey(ngx, ngz);
-                    if (outsideCells.Contains(nKey))
-                    {
-                        rejOutside++;
-                        continue;
-                    }
+
+                    // Outside-ness is a statement about a column's GROUND, not about every
+                    // surface stacked above it — Pass 1 floods terrain only. Judging the whole
+                    // column here is what made a platform overhanging exterior terrain
+                    // permanently unreachable: the open ground six metres below condemned the
+                    // deck. The test moves into the per-surface loop instead, where each
+                    // candidate is compared against the elevation this column was found
+                    // outside at. Stepping out past a wall is still refused — wallBlocks probes
+                    // the waist band at BOTH ends, so it seals at every storey on its own.
+                    var nOutside = OutsideGateEnabled && outsideCells.Contains(nKey);
 
                     // Every surface in the neighbouring column is a candidate, each judged on
                     // its own. wallBlocks probes the waist band at BOTH ends, so a step from an
@@ -1414,6 +1475,14 @@ namespace ValheimVillages.Villager.AI.Navigation
                     for (var i = 0; i < nSurfaces.Count; i++)
                     {
                         var nY = nSurfaces[i];
+                        if (nOutside && IsOutsideElevation(outsideCellY, nKey, nY))
+                        {
+                            rejOutside++;
+                            if (watched)
+                                Trace("pass2.reject", $"y={nY:F2} -> OUTSIDE at this elevation");
+                            continue;
+                        }
+
                         if (gateStacked && Mathf.Abs(nY - curY) > maxClimb)
                         {
                             rejClimb++;
@@ -1490,6 +1559,7 @@ namespace ValheimVillages.Villager.AI.Navigation
             HashSet<long> anchorReachableCells,
             Dictionary<long, List<float>> anchorReachableCellYs,
             HashSet<long> outsideCells,
+            IReadOnlyDictionary<long, float> outsideCellY,
             float cell,
             float maxClimb,
             Func<float, float, float> groundY,
@@ -1689,14 +1759,23 @@ namespace ValheimVillages.Villager.AI.Navigation
                         if (!centroids.TryGetValue(rid, out var c)) continue;
                         var stepY = CellSurfaceY(pKey, c.y);
                         if (Mathf.Abs(stepY - curY) > maxClimb) continue;
-                        // Don't chain into pieces in outsideCells. Pass 1's perimeter flood is
-                        // the authoritative "what is inside the village" signal; pieces whose
-                        // XZ Pass 1 reached are outside the wall ring (rogue floors, far-away
-                        // structures, decorations). Without this gate, piece chains hop over
-                        // walls into outside pieces via 4-neighbour adjacency. A wall-blocking
-                        // primitive cannot tell stair risers from walls reliably; this
-                        // perimeter-based check sidesteps that ambiguity entirely.
-                        if (outsideCells != null && outsideCells.Contains(nXz)) continue;
+                        // Don't chain into pieces standing on outside GROUND. Pass 1's
+                        // perimeter flood is the authoritative "what is inside the village"
+                        // signal; pieces whose XZ Pass 1 reached are outside the wall ring
+                        // (rogue floors, far-away structures, decorations). Without this gate,
+                        // piece chains hop over walls into outside pieces via 4-neighbour
+                        // adjacency. A wall-blocking primitive cannot tell stair risers from
+                        // walls reliably; this perimeter-based check sidesteps that ambiguity.
+                        //
+                        // ELEVATION-QUALIFIED, because Pass 1 walks TERRAIN: its verdict is
+                        // about this column's ground, not about a deck above it. A platform
+                        // extending out over exterior terrain is all piece surfaces, so the
+                        // column-wide form of this test rejected every one of them and the
+                        // whole extension stayed unmapped however reachable it was. stepY is
+                        // this piece's own surface, already resolved just above.
+                        if (OutsideGateEnabled && outsideCells != null &&
+                            outsideCells.Contains(nXz) &&
+                            IsOutsideElevation(outsideCellY, nXz, stepY)) continue;
                         reachable.Add(pKey);
                         pieceQueue.Enqueue((nXz, stepY, false, rid));
                         added++;
@@ -2120,6 +2199,42 @@ namespace ValheimVillages.Villager.AI.Navigation
             }
 
             return result;
+        }
+
+        /// <summary>
+        ///     How far from the outside GROUND a surface still counts as that same outside
+        ///     ground. Comfortably more than a doorstep or a porch, comfortably less than a
+        ///     storey (~2m in Valheim pieces), so a raised floor over exterior terrain is
+        ///     judged on its own merits while the ground beside it stays outside.
+        /// </summary>
+        private const float OutsideSurfaceBand = 2.0f;
+
+        /// <summary>
+        ///     Is <paramref name="y" /> at the elevation this column was found outside at?
+        ///
+        ///     <para>Symmetric: a cellar well below exterior ground is no more "the outside" than
+        ///     a deck above it, and both should be judged by walls rather than by the open ground
+        ///     they happen to share an XZ column with.</para>
+        ///
+        ///     <para>With no elevation map the answer is yes — that is the old column-wide
+        ///     behaviour, which is what callers that have not been migrated still expect.</para>
+        /// </summary>
+        /// <summary>
+        ///     Diagnostic kill switch for the outside gate (`vv_outsidegate`). Lets a partition
+        ///     run with the gate off, which answers "is the prune what is dropping this area?"
+        ///     in one repartition instead of by argument. Never shipped on — a village with no
+        ///     perimeter gate maps the whole world.
+        /// </summary>
+        internal static bool OutsideGateEnabled = true;
+
+        private static bool IsOutsideElevation(
+            IReadOnlyDictionary<long, float> outsideCellY, long xzKey, float y)
+        {
+            if (!OutsideGateEnabled) return false;
+            if (outsideCellY == null || !outsideCellY.TryGetValue(xzKey, out var groundY))
+                return true;
+
+            return Mathf.Abs(y - groundY) <= OutsideSurfaceBand;
         }
 
         private static void EnqueuePerimeterSeed(int gx, int gz,

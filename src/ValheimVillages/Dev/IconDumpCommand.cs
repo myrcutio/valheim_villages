@@ -15,21 +15,32 @@ namespace ValheimVillages.Dev
     /// </summary>
     public static class IconDumpCommand
     {
-        [DevCommand("Write the registry build-menu icon to a PNG: vv_icon_dump [path]",
+        [DevCommand("Write a piece's build-menu icon to a PNG: " +
+                    "vv_icon_dump [prefab=vv_village_registry] [size] [onlyNode] [std]",
             Name = "vv_icon_dump")]
         public static void Dump(Terminal.ConsoleEventArgs args)
         {
-            var prefab = ZNetScene.instance?.GetPrefab(PieceFactory.RegistryPrefabName);
-            var piece = prefab != null ? prefab.GetComponent<Piece>() : null;
-            if (piece == null)
+            // Any of our kitbashed pieces, not just the registry — the cot and the Forester's
+            // Post render their icons the same way and need the same check.
+            var prefabName = args != null && args.Length > 1 && args[1] != "*"
+                ? args[1]
+                : PieceFactory.RegistryPrefabName;
+
+            var prefab = ZNetScene.instance?.GetPrefab(prefabName);
+            if (prefab == null)
             {
-                Print("[vv_icon_dump] Registry prefab has no Piece");
+                Print($"[vv_icon_dump] No prefab named '{prefabName}'");
                 return;
             }
 
-            var path = args != null && args.Length > 1
-                ? args[1]
-                : Path.Combine(Application.persistentDataPath, "vv_registry_icon.png");
+            var piece = prefab.GetComponent<Piece>();
+            if (piece == null)
+            {
+                Print($"[vv_icon_dump] '{prefabName}' has no Piece");
+                return;
+            }
+
+            var path = Path.Combine(Application.persistentDataPath, $"vv_icon_{prefabName}.png");
 
             // An optional size re-shoots the SAME framing at higher resolution, purely so the
             // result is legible when reviewed outside the game. The icon on the piece is
@@ -47,7 +58,7 @@ namespace ValheimVillages.Dev
 
             if (sprite == null)
             {
-                Print("[vv_icon_dump] No icon on the registry piece");
+                Print($"[vv_icon_dump] No icon on '{prefabName}'");
                 return;
             }
 

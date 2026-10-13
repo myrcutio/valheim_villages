@@ -64,6 +64,27 @@ namespace ValheimVillages.Patches
                 zdos.RemoveRange(write, zdos.Count - write);
         }
 
+        private static readonly List<ZDO> s_creatableObjects = new();
+
+        /// <summary>
+        ///     Copy of <paramref name="zdos" /> without the not-yet-created ZDOs whose zone
+        ///     has no terrain yet. CreateLocalZones spawns one zone per call, so a phantom
+        ///     village's zones arrive over several frames, but its sector sweep collects their
+        ///     ZDOs immediately. Vanilla's only terrain gate (IsActiveAreaLoaded) checks the
+        ///     server's reference position, never the phantom zones, so without this a
+        ///     TerrainComp instantiates before its Heightmap exists, skips Initialize, and
+        ///     NREs in Load. Already-created ZDOs stay in so nothing about removal changes.
+        /// </summary>
+        private static List<ZDO> WithoutUnloadedZones(List<ZDO> zdos)
+        {
+            s_creatableObjects.Clear();
+            var zoneSystem = ZoneSystem.instance;
+            foreach (var zdo in zdos)
+                if (zdo.Created || zoneSystem.IsZoneLoaded(zdo.GetSector()))
+                    s_creatableObjects.Add(zdo);
+            return s_creatableObjects;
+        }
+
         /// <summary>
         ///     After vanilla creates zones for player peers, also create zones
         ///     around village anchor positions so terrain and vegetation load.
@@ -156,7 +177,9 @@ namespace ValheimVillages.Patches
                 // Restore vanilla's invariant by collapsing nearObjects to one entry per ZDO.
                 DedupeByUid(nearObjects);
 
-                tr.Method("CreateObjects", nearObjects, distantObjects).GetValue();
+                // Creation waits for each zone's terrain; removal still sees the full set so a
+                // live object in a not-yet-loaded zone is not torn down.
+                tr.Method("CreateObjects", WithoutUnloadedZones(nearObjects), distantObjects).GetValue();
                 tr.Method("RemoveObjects", nearObjects, distantObjects).GetValue();
 
                 return false;

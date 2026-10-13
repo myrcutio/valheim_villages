@@ -93,6 +93,10 @@
             <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.PhysicsModule.dll</HintPath>
             <Private>false</Private>
         </Reference>
+        <Reference Include="UnityEngine.ParticleSystemModule">
+            <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.ParticleSystemModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
         <Reference Include="UnityEngine.ClothModule">
             <HintPath>$(ValheimDir)/valheim_Data/Managed/UnityEngine.ClothModule.dll</HintPath>
             <Private>false</Private>

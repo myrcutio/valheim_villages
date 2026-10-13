@@ -646,6 +646,11 @@ namespace ValheimVillages.TaskQueue.Handlers
             // to diff against. Must run after SetGraph so HasClassification flips
             // only on a populated graph.
             graph.SetClassification(outsideCells, anchorReachableCells, prunedPieceKeys);
+
+            // Classify the ground for the village map here, with the rest of region building:
+            // it costs a raycast per piece cell and a heightmap read per terrain cell, and the
+            // alternative is paying that on whichever frame a player first opens a map.
+            UI.Panels.VillageSurfaceMap.Build(graph);
             PartitionProfile.Since("commit_graph", commitGraphMark);
             if (PartitionRunner.ShouldYield()) yield return null;
 
@@ -1187,7 +1192,7 @@ namespace ValheimVillages.TaskQueue.Handlers
             // it has to, or felled trees land on the walls — and it brings its own corridor of
             // stepping stones so the bake stays continuous. Those are this village's OWN named
             // anchors, read off its record, so including them cannot pull in a neighbour's.
-            AddForestryAnchors(anchorX, anchorZ, filtered);
+            AddForestryAnchors(ResolveVillage(task, allAnchors), filtered);
 
             Plugin.Log?.LogInfo(
                 $"[Region] Scoped anchors to village near ({anchorX:F0},{anchorZ:F0}): " +
@@ -1201,12 +1206,15 @@ namespace ValheimVillages.TaskQueue.Handlers
         /// <summary>
         ///     Add the village's Forester's Post anchor and its corridor stones to
         ///     <paramref name="filtered" /> if the radius filter missed them.
+        ///     <para>
+        ///     <paramref name="village" /> is the task's own village (by id), never a position
+        ///     lookup: GetVillageAt falls back to the nearest village WITH a graph, so a fresh
+        ///     village's first partition borrowed the old village's woodlot anchors 1.7km away,
+        ///     stretched its footprint across both, and wedged the server in the prune.
+        ///     </para>
         /// </summary>
-        private static void AddForestryAnchors(float anchorX, float anchorZ, List<Vector3> filtered)
+        private static void AddForestryAnchors(Village village, List<Vector3> filtered)
         {
-            var probe = new Vector3(anchorX, 0f, anchorZ);
-            var village = Villages.Entity.VillageRegistry.GetVillageAt(probe)
-                          ?? Villages.Entity.VillageRegistry.FindNearAnchor(probe);
             if (village == null) return;
 
             foreach (var anchor in village.Anchors)

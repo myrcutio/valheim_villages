@@ -92,7 +92,16 @@ namespace ValheimVillages.Behaviors.Forestry
         ///     and reading the prefab back off the ZDO. Using it beats tinting a white banner
         ///     with a hand-built unlit material, which ignored lighting and glowed at night.</para>
         /// </summary>
-        private const string BannerPrefab = "piece_banner05";
+        /// <summary>
+        ///     Banner donor. Deliberately the BLACK-ON-WHITE one of the eleven Valheim ships.
+        ///
+        ///     <para>None of them is green, so the Lumberjack's colour has to be multiplied in,
+        ///     and a multiply can only darken what is already there — on the orange/grey banner
+        ///     this post used to wear it produced olive. A WHITE field multiplies to exactly the
+        ///     target colour, and the black border stays black because black times anything is
+        ///     black, so the banner keeps its outline for free.</para>
+        /// </summary>
+        private const string BannerPrefab = "piece_banner01";
 
         /// <summary>
         ///     Where each grafted part sits above the woodpile's origin.
@@ -414,6 +423,38 @@ namespace ValheimVillages.Behaviors.Forestry
 
             MakeIndestructible(prefab);
             GraftMast(prefab);
+            TintBanner(prefab);
+
+            // After the mast AND the tint: the post is a woodpile until the bannered mast goes
+            // up, and the inherited woodpile icon is exactly what makes it indistinguishable in
+            // the menu. The shot can only show what already exists.
+            // 180: the banner is a FLAT, single-sided plane. Its own Custom/Vegetation material
+            // is two-sided (_Cull=0), but the icon rig re-shades it to Standard, which culls
+            // back faces and offers no way to turn that off — so from the camera's default side
+            // the cloth was invisible while the pole and woodpile rendered fine. Turning the
+            // model presents the banner's front instead.
+            Items.PieceFactory.ApplyRenderedIcon(prefab, "ForesterPost", modelYaw: 180f);
+        }
+
+        /// <summary>
+        ///     Fly the Lumberjack's colours over the woodlot, using the same
+        ///     <c>themeColor</c> that tints that villager's cot blanket — one post, one villager
+        ///     type, one colour.
+        /// </summary>
+        private static void TintBanner(GameObject prefab)
+        {
+            var cloth = prefab.transform.Find("vv_banner_cloth")?.GetComponent<MeshRenderer>();
+            if (cloth == null || cloth.sharedMaterial == null)
+            {
+                Plugin.Log?.LogWarning("[ForesterPost] No banner cloth to tint");
+                return;
+            }
+
+            // CLONE first. The donor material is shared by every piece_banner01 in the world,
+            // so writing _Color straight onto it would repaint all of them green.
+            var tinted = new Material(cloth.sharedMaterial) { name = "vv_forester_banner_mat" };
+            tinted.SetColor("_Color", Villager.Registry.VillagerTheme.ColorFor("Lumberjack"));
+            cloth.sharedMaterial = tinted;
         }
 
         /// <summary>
@@ -702,7 +743,7 @@ namespace ValheimVillages.Behaviors.Forestry
         ///     immediately rather than leaving the post inert until something else triggers a
         ///     rebuild.
         /// </summary>
-        private static void RequestRepartition(Village village)
+        internal static void RequestRepartition(Village village)
         {
             var id = village.VillageId;
             if (string.IsNullOrEmpty(id)) return;

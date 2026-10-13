@@ -36,9 +36,15 @@ namespace ValheimVillages.TaskQueue.Handlers
             Recipe recipe,
             List<IngredientSource> ingredients,
             int existingCount,
-            out string blockedReason)
+            out string blockedReason,
+            out bool blockedWaiting)
         {
             blockedReason = null;
+
+            // Default to "this needs the player". Only the cases that are genuinely just time
+            // passing set it false — getting that backwards would turn a real problem into a
+            // silent hourglass, which is the worse failure of the two.
+            blockedWaiting = false;
             var outputItem = match.ItemPrefabName;
             var anchorPos = ai.HomeAnchor;
 
@@ -141,6 +147,8 @@ namespace ValheimVillages.TaskQueue.Handlers
                     $"[FarmScan:{ai.NpcName}] No planting positions near farm");
                 blockedReason = $"The farm at ({farmPosition.x:F0},{farmPosition.z:F0}) has no free " +
                                 "space left to plant. Harvest what is growing, or till more ground.";
+                // The beds are full of crops that are still growing — nothing to do but wait.
+                blockedWaiting = true;
                 return null;
             }
 

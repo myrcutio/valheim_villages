@@ -91,6 +91,7 @@ namespace ValheimVillages.Villager
             npcObject.AddComponent<VillagerTalk>();
             npcObject.AddComponent<DoorHandler>();
             Dialog.ConfigureDialog(npcObject, villagerDef);
+            VillagerAppearance.Apply(npcObject, villagerDef);
 
             var npcZnetView = npcObject.GetComponent<ZNetView>();
             if (npcZnetView == null || npcZnetView.GetZDO() == null)

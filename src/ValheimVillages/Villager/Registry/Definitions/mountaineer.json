@@ -1,5 +1,6 @@
 {
   "type": "Mountaineer",
+  "themeColor": "0.64,0.66,0.70",
   "category": "Specialist",
   "displayName": "Mountaineer",
   "description": "Specialized in mountain terrain traversal and high-altitude navigation",
@@ -20,22 +21,31 @@
   "dependentOnNpcType": "",
   "tieredBenefits": [
     {
-      "minLevel": 4,
-      "maxLevel": 6,
+      "minLevel": 2,
+      "maxLevel": 2,
       "description": "Improved traction, reduced stamina drain when climbing",
-      "effectMultiplier": 1.0
+      "effectMultiplier": 1.0,
+      "requires": [
+        "Fire"
+      ]
     },
     {
-      "minLevel": 7,
-      "maxLevel": 9,
+      "minLevel": 3,
+      "maxLevel": 3,
       "description": "Better combat stability on slopes, enhanced mobility",
-      "effectMultiplier": 1.5
+      "effectMultiplier": 1.5,
+      "requires": [
+        "Bed"
+      ]
     },
     {
-      "minLevel": 10,
+      "minLevel": 4,
       "maxLevel": 99,
       "description": "Maximum terrain benefits, excellent Mistlands navigation",
-      "effectMultiplier": 2.0
+      "effectMultiplier": 2.0,
+      "requires": [
+        "WorkStation"
+      ]
     }
   ],
   "productions": [],
@@ -94,4 +104,3 @@
     "Off ye go then. I'll be here, might even dig a hole!"
   ]
 }
-

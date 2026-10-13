@@ -70,7 +70,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
         ///     warning triangle — "Stocked 20 of 20" is not an issue, and listing it beside
         ///     real blockers teaches the player to ignore the list.
         /// </param>
-        public void RecordBlocked(string villagerId, string taskName, string itemPrefab, string stationName, string reason, Vector3? workOrderPosition, bool satisfied = false)
+        public void RecordBlocked(string villagerId, string taskName, string itemPrefab, string stationName, string reason, Vector3? workOrderPosition, bool satisfied = false, bool waiting = false)
         {
             if (string.IsNullOrEmpty(villagerId)) return;
             var action = satisfied ? "satisfied" : "blocked";
@@ -114,11 +114,37 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                 WorkOrderPosX = workOrderPosition?.x,
                 WorkOrderPosY = workOrderPosition?.y,
                 WorkOrderPosZ = workOrderPosition?.z,
+                WaitingOnTime = waiting,
                 Committed = false,
             });
 
             Plugin.Log?.LogDebug(
                 $"[ActivityLog:{villagerId}] {taskName}/{action}: {description}");
+        }
+
+        /// <summary>
+        ///     Retract any "blocked" entry for an item, because the villager has just proved it
+        ///     can work that order after all.
+        ///
+        ///     <para>Nothing else ever removed one. A blocker was written when work failed and
+        ///     then outlived whatever caused it — fix the cause and the villager goes back to
+        ///     work while its panel keeps showing the old complaint, which is how a Tavern Keeper
+        ///     ended up cooking happily and still demanding a station that does not exist. Only
+        ///     blockers are retracted; a "satisfied" row is a statement about stock, not a
+        ///     problem, and is left alone.</para>
+        /// </summary>
+        public void ClearBlocked(string villagerId, string itemPrefab)
+        {
+            if (string.IsNullOrEmpty(villagerId) || string.IsNullOrEmpty(itemPrefab)) return;
+            if (!m_logs.TryGetValue(villagerId, out var entries)) return;
+
+            var removed = entries.RemoveAll(
+                e => e.Action == "blocked" && e.ItemPrefab == itemPrefab);
+
+            if (removed > 0)
+                Plugin.Log?.LogInfo(
+                    $"[ActivityLog:{villagerId}] retracted {removed} stale blocker(s) " +
+                    $"for {itemPrefab}");
         }
 
         /// <summary>
@@ -210,6 +236,12 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                 sb.Append(e.WorkOrderPosY.HasValue ? e.WorkOrderPosY.Value.ToString(CultureInfo.InvariantCulture) : "");
                 sb.Append(FieldSeparator);
                 sb.Append(e.WorkOrderPosZ.HasValue ? e.WorkOrderPosZ.Value.ToString(CultureInfo.InvariantCulture) : "");
+                sb.Append(FieldSeparator);
+                // Field 10. Appended, never inserted: the reader length-guards each group, so
+                // older records simply lack this field and read as "not waiting" — which is
+                // the safe default (an alert that should be an hourglass is better than a
+                // hidden problem).
+                sb.Append(e.WaitingOnTime ? "1" : "0");
             }
 
             zdo.Set(ZdoKey, sb.ToString());
@@ -249,6 +281,10 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                     if (float.TryParse(fields[9], NumberStyles.Float, CultureInfo.InvariantCulture, out var z)) posZ = z;
                 }
 
+                // Field 10 (added later than the rest): a record written before this existed
+                // has only 10 fields and reads as not-waiting.
+                var waiting = fields.Length >= 11 && fields[10] == "1";
+
                 entries.Add(new ActivityLogEntry
                 {
                     Timestamp = timestamp,
@@ -262,6 +298,7 @@ namespace ValheimVillages.TaskQueue.ActivityLog
                     WorkOrderPosX = posX,
                     WorkOrderPosY = posY,
                     WorkOrderPosZ = posZ,
+                    WaitingOnTime = waiting,
                     Committed = false,
                 });
             }
